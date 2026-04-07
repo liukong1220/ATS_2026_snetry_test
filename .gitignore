@@ -39,3 +39,4 @@ __pycache__/
 
 # Local workspace metadata
 .marscode/
+*.pcd
