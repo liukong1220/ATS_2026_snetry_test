@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="vision_override">
+    <Sequence>
+      <IsVisionTargetValid key_port="{@sp_vision_target}"
+                           timeout_s="{@decision_vision_timeout_s}"
+                           require_nav_hold="true"
+                           gimbal_yaw="{vision_gimbal_yaw}"
+                           gimbal_pitch="{vision_gimbal_pitch}"
+                           target_id="{vision_target_id}"
+                           suggested_goal_index="{vision_goal_index}"/>
+      <PublishGimbalAbsolute topic_name="{@decision_gimbal_topic}"
+                             duration="0.0"
+                             gimbal_yaw="{vision_gimbal_yaw}"
+                             gimbal_pitch="{vision_gimbal_pitch}"/>
+      <SelectVisionTargetPath suggested_goal_index="{vision_goal_index}"
+                              fallback_index="{@decision_anchor_target_index}"
+                              selected_index="{vision_selected_goal_index}"
+                              path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="vision_test">
+    <KeepRunningUntilFailure>
+      <ForceSuccess>
+        <ReactiveSequence>
+          <PublishSpinSpeed spin_speed="{@decision_default_spin_speed}"
+                            duration="0.0"
+                            topic_name="{@decision_spin_topic}"/>
+          <ReactiveFallback>
+            <SubTree ID="vision_override"/>
+
+            <Sequence>
+              <IsDecisionInputSource source="simulation"/>
+              <SubTree ID="decision_simulation"/>
+            </Sequence>
+
+            <Sequence>
+              <IsDecisionInputSource source="referee"/>
+              <SubTree ID="decision_referee"/>
+            </Sequence>
+          </ReactiveFallback>
+        </ReactiveSequence>
+      </ForceSuccess>
+    </KeepRunningUntilFailure>
+  </BehaviorTree>
+</root>

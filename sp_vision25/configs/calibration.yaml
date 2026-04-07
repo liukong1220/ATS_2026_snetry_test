@@ -1,0 +1,18 @@
+pattern_cols: 7
+pattern_rows: 7
+center_distance_mm: 12.5
+
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0,  0, 0, 1]
+
+camera_name: "hikrobot"
+exposure_ms: 5
+gain: 16.0
+vid_pid: "2bdf:0001"
+
+#####-----gimbal参数-----#####
+com_port: "/dev/ttyACM1"
+
+# 重投影误差: 0.0367px
+camera_matrix: [1838.8812343607708, 0, 707.29477215693669, 0, 1840.5431941820527, 527.68182138893576, 0, 0, 1]
+distort_coeffs: [-0.067767283454245653, 0.14316176737685324, -0.0053027669548837107, -0.0005192103575770489, 0]
+

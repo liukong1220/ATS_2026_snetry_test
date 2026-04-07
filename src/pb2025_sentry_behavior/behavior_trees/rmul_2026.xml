@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="check_game_start">
+    <Fallback>
+      <IsGameStatus name="IsGameStart"
+                    max_remain_time="{@decision_game_start_max_remain_time}"
+                    min_remain_time="{@decision_game_start_min_remain_time}"
+                    expected_game_progress="{@decision_game_start_expected_progress}"
+                    key_port="{@referee_gameStatus}"/>
+      <ForceFailure>
+        <Sequence>
+          <PublishSpinSpeed spin_speed="0.0"
+                            duration="0.0"
+                            topic_name="{@decision_spin_topic}"/>
+          <PublishTwist v_y="0.0"
+                        v_yaw="0.0"
+                        v_x="0.0"
+                        duration="0.0"
+                        topic_name="{@decision_cmd_vel_topic}"/>
+        </Sequence>
+      </ForceFailure>
+    </Fallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_safe_point">
+    <Sequence>
+      <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+      <SelectFixedPath target_index="{@decision_supply_safe_point_index}"
+                       path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_retreat">
+    <Sequence>
+      <SelectNearestRetreatPath current_pose="{@decision_current_pose}"
+                                selected_index="{@decision_low_hp_target_index}"
+                                path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+          <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_critical_time_target">
+    <Sequence>
+      <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+      <SelectFixedPath target_index="{@decision_critical_time_target_index}"
+                       path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_anchor_target">
+    <Sequence>
+      <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+      <SelectFixedPath target_index="{@decision_anchor_target_index}"
+                       path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_patrol">
+    <Sequence>
+      <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+      <SelectPatrolPath patrol_cursor="{decision_patrol_cursor}"
+                        patrol_direction="{decision_patrol_direction}"
+                        path="{decision_path}"
+                        next_cursor="{decision_next_patrol_cursor}"
+                        next_direction="{decision_next_patrol_direction}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+          <AdvancePatrolCursor next_cursor="{decision_next_patrol_cursor}"
+                               next_direction="{decision_next_patrol_direction}"
+                               patrol_cursor="{decision_patrol_cursor}"
+                               patrol_direction="{decision_patrol_direction}"
+                               goal_succeeded="{decision_nav_goal_succeeded}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_simulation">
+    <ReactiveFallback>
+      <Sequence>
+        <IsDecisionMode mode="safe"/>
+        <SubTree ID="decision_safe_point"/>
+      </Sequence>
+
+      <Sequence>
+        <IsDecisionMode mode="retreat"/>
+        <SubTree ID="decision_retreat"/>
+      </Sequence>
+
+      <Sequence>
+        <IsDecisionMode mode="anchor"/>
+        <SubTree ID="decision_anchor_target"/>
+      </Sequence>
+
+      <Sequence>
+        <IsDecisionMode mode="patrol"/>
+        <SubTree ID="decision_patrol"/>
+      </Sequence>
+
+      <SubTree ID="decision_patrol"/>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_referee">
+    <ReactiveSequence>
+      <SubTree ID="check_game_start"/>
+      <ReactiveFallback>
+        <Sequence>
+          <IsHpBand band="critical"/>
+          <SubTree ID="decision_safe_point"/>
+        </Sequence>
+
+        <Sequence>
+          <IsHpBand band="low"/>
+          <SubTree ID="decision_retreat"/>
+        </Sequence>
+
+        <Sequence>
+          <IsGameTimeStage stage="critical"/>
+          <IsHpBand band="normal"/>
+          <SubTree ID="decision_critical_time_target"/>
+        </Sequence>
+
+        <Sequence>
+          <IsHpBand band="normal"/>
+          <SubTree ID="decision_patrol"/>
+        </Sequence>
+      </ReactiveFallback>
+    </ReactiveSequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="rmul_2026">
+    <KeepRunningUntilFailure>
+      <ForceSuccess>
+        <ReactiveSequence>
+          <PublishSpinSpeed spin_speed="{@decision_default_spin_speed}"
+                            duration="0.0"
+                            topic_name="{@decision_spin_topic}"/>
+          <ReactiveFallback>
+            <Sequence>
+              <IsDecisionInputSource source="simulation"/>
+              <SubTree ID="decision_simulation"/>
+            </Sequence>
+
+            <Sequence>
+              <IsDecisionInputSource source="referee"/>
+              <SubTree ID="decision_referee"/>
+            </Sequence>
+          </ReactiveFallback>
+        </ReactiveSequence>
+      </ForceSuccess>
+    </KeepRunningUntilFailure>
+  </BehaviorTree>
+</root>

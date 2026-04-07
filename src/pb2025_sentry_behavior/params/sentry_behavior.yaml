@@ -1,0 +1,89 @@
+pb2025_sentry_behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    action_name: pb2025_sentry_behavior
+    tick_frequency: 5
+    groot2_port: 17777
+    ros_plugins_timeout: 1000
+    use_cout_logger: false
+
+    plugins:
+      - pb2025_sentry_behavior/bt_plugins
+
+    behavior_trees:
+      - pb2025_sentry_behavior/behavior_trees
+
+    decision:
+      input_source: referee
+
+      goal_points:
+        x: [0.2, 5.38, 3.6, 0.0]
+        y: [0.18, 2.2, 3.6, 0.0]
+        z: [0.0, 0.0, 0.0, 0.0]
+
+      point_roles:
+        supply_safe_point_index: 0
+        patrol_indices: [1, 2]
+        low_hp_candidate_indices: [1, 2]
+        critical_time_target_index: 1
+        anchor_target_index: 2
+
+      simulation:
+        default_mode: patrol
+        mode_topic: decision/sim_mode
+
+      referee:
+        start_gate:
+          expected_game_progress: 4
+          min_remain_time: 0
+          max_remain_time: 420
+
+      topics:
+        spin: cmd_spin
+        cmd_vel: cmd_vel
+        gimbal_cmd: cmd_gimbal
+
+      motion:
+        default_spin_speed: 7.0
+
+      vision:
+        topic: vision/target
+        timeout_s: 0.5
+
+      time_thresholds:
+        abundant: 300
+        normal: 240
+        tense: 120
+        critical: 40
+
+      hp_thresholds:
+        abundant:
+          high: 400
+          medium: 220
+          low: 120
+        normal:
+          high: 400
+          medium: 250
+          low: 150
+        tense:
+          high: 400
+          medium: 250
+          low: 150
+        critical:
+          high: 400
+          medium: 250
+          low: 150
+
+      decision_config:
+        path_tolerance: 0.2
+        nav2_action_server: "/navigate_through_poses"
+        decision_period_ms: 100
+        goal_position_tolerance: 0.2
+        waypoint_stop_duration_s: 0.0
+        patrol_preview_points: 2
+        action_server_wait_timeout_s: 0.5
+
+pb2025_sentry_behavior_client:
+  ros__parameters:
+    use_sim_time: true
+    target_tree: rmul_2026

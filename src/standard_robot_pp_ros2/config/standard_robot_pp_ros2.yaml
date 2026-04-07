@@ -1,0 +1,81 @@
+standard_robot_pp_ros2:
+  ros__parameters:
+    device_name: /dev/ttyACM0
+    baud_rate: 115200
+    flow_control: none
+    parity: none
+    stop_bits: "1"
+    set_detector_color: false
+    record_rosbag: true
+    debug: false
+
+
+robot_decision:
+  ros__parameters:
+    # 点位索引语义说明（以下索引与 goal_points.x / goal_points.y / goal_points.z 一一对应）
+    # 索引0：补给安全点。危急血量时固定回撤到这里。
+    # 索引1：巡逻点1。当前配置中也作为“时间严重紧张”时的强制目标点。
+    # 索引2：巡逻点2。正常血量巡逻使用，也可加入低血量候选列表。
+    # 索引3：巡逻点3。正常血量巡逻使用，也可加入低血量候选列表。
+    goal_points:  # 目标点坐标数组（对应代码中的 rmul_goal_point_）
+
+    # BLUE
+      x: [0.2, 5.38, 3.6, 0.0]   # 各索引点的 x 坐标
+      y: [0.18, 2.2, 3.6, 0.0]   # 各索引点的 y 坐标
+      z: [0.0, 0.0, 0.0, 0.0]    # 各索引点的 z 坐标，默认平面运动场景
+
+    # RED
+      # x: [21.8, 9.5, 5.0, 2.0, 5.5, 0.0]
+      # y: [6.0, 2.8, -3.5, -3.0, 6.1, 0.0]
+      # z: [0.0, 0.0, 0.0, 0.0, 0.4, 0.0]
+
+    point_roles:
+      supply_safe_point_index: 0          # 补给安全点索引：危急血量时回撤到这里
+      patrol_indices: [1, 2]           # 正常血量巡逻点索引列表：按 1->2->3->2->1 往返巡逻
+      low_hp_candidate_indices: [1, 2] # 低血量最近退防点候选索引列表：只在这些点中选最近点
+      critical_time_target_index: 1       # 时间严重紧张时的强制目标点索引
+
+    time_thresholds:  # 时间阶段阈值（单位：秒）
+      abundant: 300    # 时间充足阈值
+      normal: 240      # 时间正常阈值
+      tense: 120   # 时间紧张阈值
+      critical: 40     # 极度紧张阈值
+
+    hp_thresholds:    # 血量判断阈值
+      abundant:  # 时间充足阶段
+        high: 400      # 高血量阈值
+        medium: 220    # 中血量阈值
+        low: 120        # 低血量阈值
+      normal:    # 时间正常阶段
+        high: 400      # 高血量阈值
+        medium: 250     # 中血量阈值
+        low: 150        # 低血量阈值
+      tense:     # 时间紧张阶段
+        high: 400
+        medium: 250
+        low: 150
+      critical:  # 极度紧张阶段
+        high: 400
+        medium: 250
+        low: 150
+
+    decision_config:
+      path_tolerance: 0.2  # 路径执行容差（米）
+      nav2_action_server: "/navigate_to_pose"  # 导航动作服务名称
+      decision_period_ms: 100
+      goal_republish_interval_s: 1.5
+      goal_position_tolerance: 0.1
+      waypoint_stop_duration_s: 0.0
+
+joint_state_publisher:
+  ros__parameters:
+    use_sim_time: false
+    rate: 200
+    source_list: ["serial/gimbal_joint_state"]
+    offset_timestamp: 0.0
+
+robot_state_publisher:
+  ros__parameters:
+    use_sim_time: false
+    publish_frequency: 200.0
+    
