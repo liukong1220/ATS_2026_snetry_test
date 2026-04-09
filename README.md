@@ -8,7 +8,6 @@
 
 ```text
 .
-├── sp_vision25/                  # 视觉算法工程，普通 CMake 包，会被 colcon 当作 cmake package 构建
 ├── src/
 │   ├── dependencies/             # 第三方依赖与本队公共库
 │   ├── interfaces/               # 自定义 ROS 2 接口
@@ -16,6 +15,7 @@
 │   ├── pb2025_sentry_behavior/   # 哨兵行为树
 │   ├── pb2025_sentry_bringup/    # 总启动入口
 │   ├── pb2025_sentry_nav/        # 导航与定位相关功能包
+│   ├── sp_vision25/              # 视觉算法工程，现已整理为工作区内 ament 包
 │   ├── standard_robot_pp_ros2/   # 串口与裁判系统通信
 │   └── tools/                    # 辅助工具包
 ├── build/                        # colcon 构建产物
@@ -29,10 +29,10 @@
 └── ws_README.md                  # 工作区原始说明
 ```
 
-`sp_vision25/` 关键子目录:
+`src/sp_vision25/` 关键子目录:
 
 ```text
-sp_vision25/
+src/sp_vision25/
 ├── calibration/      # 标定程序
 ├── configs/          # 视觉配置文件
 ├── docs/             # 视觉模块文档
@@ -97,7 +97,7 @@ sudo cmake --install build
 1. 优先读取系统安装的 HikRobot SDK
 2. 其次读取环境变量 `HIKROBOT_SDK_ROOT`
 3. 再回退到工作区中的 `src/dependencies/hik_camera_ros2_driver/hikSDK`
-4. 最后回退到 `sp_vision25/io/hikrobot`
+4. 最后回退到 `src/sp_vision25/io/hikrobot`
 
 推荐显式设置:
 
@@ -172,18 +172,24 @@ colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release --paralle
 
 ### 5.2 单独编译 `sp_vision25`
 
-如果只调视觉模块:
+如果只调视觉模块，推荐优先直接走工作区内的 `colcon` 构建：
 
 ```bash
 source /opt/ros/humble/setup.bash
 export HIKROBOT_SDK_ROOT=/opt/MVS
-colcon build --packages-select sp_vision --cmake-args -DCMAKE_BUILD_TYPE=Release
+colcon build --packages-select sp_vision25 --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
-或者进入目录单独用 CMake:
+这样做的好处是：
+
+1. `sp_vision25` 会和 `sp_msgs`、行为树、bringup 保持同一套依赖解析
+2. 运行时资源统一走 `install/sp_vision25/share/sp_vision25`
+3. 后续直接 `ros2 run sp_vision25 ...` 或 launch，不容易再出现“自己单独 build 能跑，colcon 版路径错乱”的问题
+
+如果只是临时做纯视觉算法调试，也仍然保留进入目录单独用 CMake 的方式：
 
 ```bash
-cd sp_vision25
+cd src/sp_vision25
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j1
 ```
@@ -238,7 +244,7 @@ ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py \
 
 ### 6.3 `sp_vision25` 常用程序
 
-下面这些程序会在 `sp_vision` 包构建后生成:
+下面这些程序会在 `sp_vision25` 包构建后生成:
 
 - `standard`
 - `mt_standard`
@@ -247,7 +253,27 @@ ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py \
 - `camera_test`
 - `auto_aim_test`
 
-如果你用 `colcon` 构建，执行文件位于 `build/sp_vision25/` 对应构建目录中，或按你们现有脚本启动。
+如果你用 `colcon` 构建，执行文件会安装到 `install/sp_vision25/lib/sp_vision25/`，也可以直接用：
+
+```bash
+ros2 run sp_vision25 <executable_name>
+```
+
+例如：
+
+```bash
+ros2 run sp_vision25 sentry --help
+ros2 run sp_vision25 publish_test
+ros2 run sp_vision25 auto_aim_test assets/demo/demo
+```
+
+现在 `sp_vision25` 已经补了统一路径解析，因此：
+
+1. 默认 `configs/*.yaml`
+2. YAML 里的 `assets/*.xml / *.onnx`
+3. 离线测试里常用的 demo 录像
+
+都不再强依赖“当前目录必须正好在 `src/sp_vision25` 里”。
 
 ## 7. 常见问题
 
@@ -266,6 +292,24 @@ ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py \
 echo "$HIKROBOT_SDK_ROOT"
 find "$HIKROBOT_SDK_ROOT" -name 'MvCameraControl.h' -o -name 'libMvCameraControl.so'
 ```
+
+### 7.2 为什么现在更建议把 `sp_vision25` 放进 `src/`
+
+结论是：**是的，更好。**
+
+原因主要有 4 个：
+
+1. 视觉、自定义消息、行为树、bringup 都在同一个 ROS 2 工作区里，依赖关系最清晰
+2. `ros2 run`、launch、参数文件、接口包引用方式能统一，不需要维护两套启动习惯
+3. `colcon install` 后资源会进入 `share/sp_vision25`，比“手动切目录跑 build 下二进制”更稳定
+4. 后面你继续做导航融合、loopback 联调、真机替换 fake vision 时，不需要再额外写一层外部包装
+
+保留 `src/sp_vision25/build` 的独立 CMake 方式仍然有价值，但它更适合：
+
+1. 临时算法调试
+2. 不依赖 ROS 接口的纯视觉单体验证
+
+如果你现在目标是“完整哨兵融合系统”，那就应该以工作区内的 `src/sp_vision25` 包版本为主。
 
 ### 7.1.1 `cannot find -lMVSDK`
 
@@ -301,4 +345,4 @@ source /opt/ros/humble/setup.bash
 
 - [ws_README.md](./ws_README.md)
 - [nav_README.md](./nav_README.md)
-- [sp_vision25/readme.md](./sp_vision25/readme.md)
+- [sp_vision25/readme.md](./src/sp_vision25/readme.md)

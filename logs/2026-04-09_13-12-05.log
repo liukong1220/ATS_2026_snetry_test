@@ -1,0 +1,403 @@
+[2026-04-09 13:12:05.380] [info] [YOLOV5] OpenVINO available devices: CPU
+[2026-04-09 13:12:05.381] [info] [YOLOV5] CPU => 13th Gen Intel(R) Core(TM) i9-13900HX
+[2026-04-09 13:12:05.509] [info] [YOLOV5] OpenVINO requested=CPU, compiled=CPU, execution devices=CPU
+[2026-04-09 13:12:05.559] [info] [0] yolo: 39.3ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:05.572] [warning] [Tracker] Large dt: 25.072s
+[2026-04-09 13:12:05.572] [info] [1] yolo: 12.3ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:05.614] [info] [2] yolo: 9.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:05.660] [info] [3] yolo: 13.5ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:05.700] [info] [4] yolo: 9.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:05.745] [info] [5] yolo: 13.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:05.790] [info] [6] yolo: 13.7ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:05.834] [info] [7] yolo: 11.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:05.876] [info] [8] yolo: 10.2ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:05.917] [info] [9] yolo: 9.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:05.961] [info] [10] yolo: 11.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.006] [info] [11] yolo: 13.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.047] [info] [12] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.091] [info] [13] yolo: 13.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.134] [info] [14] yolo: 11.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.178] [warning] [Target] 装甲板半径过度收缩 r=0.172, 重置为0.25
+[2026-04-09 13:12:06.178] [info] [15] yolo: 11.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.220] [info] [16] yolo: 10.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.260] [info] [17] yolo: 9.1ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:06.302] [warning] [Target] 装甲板半径过度收缩 r=0.174, 重置为0.25
+[2026-04-09 13:12:06.302] [info] [18] yolo: 9.9ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:06.341] [info] [Target] 参数异常 r=0.142, l=0.000, h=0.000
+[2026-04-09 13:12:06.341] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:06.341] [info] [19] yolo: 8.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:06.383] [info] [20] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.425] [info] [21] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.466] [info] [22] yolo: 10.1ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:06.511] [info] [23] yolo: 12.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.552] [info] [24] yolo: 9.5ms, tracker: 0.7ms, aimer: 0.1ms
+[2026-04-09 13:12:06.595] [warning] [Target] 装甲板半径过度收缩 r=0.170, 重置为0.25
+[2026-04-09 13:12:06.595] [info] [25] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.639] [info] [26] yolo: 12.4ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:06.682] [info] [27] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.729] [info] [28] yolo: 15.0ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:06.770] [info] [29] yolo: 9.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.814] [info] [30] yolo: 12.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:06.856] [info] [31] yolo: 10.4ms, tracker: 0.5ms, aimer: 0.1ms
+[2026-04-09 13:12:06.899] [warning] [Target] 装甲板半径过度收缩 r=0.168, 重置为0.25
+[2026-04-09 13:12:06.899] [info] [Target] 参数异常 r=0.075, l=0.000, h=0.000
+[2026-04-09 13:12:06.899] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:06.899] [info] [32] yolo: 11.3ms, tracker: 0.7ms, aimer: 0.0ms
+[2026-04-09 13:12:06.943] [info] [33] yolo: 12.0ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:06.988] [info] [34] yolo: 12.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.033] [info] [35] yolo: 13.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:07.076] [info] [36] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.118] [warning] [Target] 装甲板半径过度收缩 r=0.174, 重置为0.25
+[2026-04-09 13:12:07.118] [info] [37] yolo: 11.2ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:07.161] [info] [38] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.203] [info] [39] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.245] [info] [40] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.291] [info] [41] yolo: 13.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.335] [info] [42] yolo: 12.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.377] [info] [43] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.420] [info] [44] yolo: 12.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.464] [info] [45] yolo: 12.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.505] [info] [46] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.549] [warning] [Target] 装甲板半径过度收缩 r=0.167, 重置为0.25
+[2026-04-09 13:12:07.549] [info] [47] yolo: 11.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.590] [info] [48] yolo: 8.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.630] [info] [49] yolo: 9.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.673] [info] [50] yolo: 12.0ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:07.716] [info] [51] yolo: 11.1ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:07.757] [info] [Target] 参数异常 r=0.146, l=0.000, h=0.000
+[2026-04-09 13:12:07.757] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:07.757] [info] [52] yolo: 9.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.800] [info] [53] yolo: 11.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.843] [info] [54] yolo: 11.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.884] [info] [55] yolo: 9.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.927] [info] [56] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:07.968] [info] [57] yolo: 9.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.010] [info] [58] yolo: 10.8ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:08.052] [info] [59] yolo: 11.6ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:08.095] [info] [60] yolo: 11.1ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:08.135] [info] [61] yolo: 8.8ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:08.177] [info] [62] yolo: 11.4ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:08.221] [info] [63] yolo: 12.0ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:08.262] [info] [64] yolo: 10.4ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:08.304] [info] [65] yolo: 10.2ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:08.348] [warning] [Target] 装甲板半径过度收缩 r=0.151, 重置为0.25
+[2026-04-09 13:12:08.348] [info] [66] yolo: 12.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.390] [info] [Target] 参数异常 r=0.352, l=0.000, h=0.000
+[2026-04-09 13:12:08.390] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:08.390] [info] [67] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.433] [info] [68] yolo: 10.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.475] [info] [69] yolo: 10.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.517] [info] [70] yolo: 11.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.560] [info] [71] yolo: 11.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.602] [info] [72] yolo: 10.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.646] [info] [Target] 参数异常 r=0.131, l=0.000, h=0.000
+[2026-04-09 13:12:08.646] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:08.646] [info] [73] yolo: 12.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.691] [info] [74] yolo: 13.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.734] [info] [75] yolo: 11.9ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:08.777] [info] [76] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.819] [info] [77] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.864] [info] [78] yolo: 13.9ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:08.905] [info] [Target] 参数异常 r=0.386, l=0.000, h=0.000
+[2026-04-09 13:12:08.905] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:08.905] [info] [79] yolo: 8.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.948] [info] [80] yolo: 12.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:08.988] [info] [Target] 参数异常 r=0.142, l=0.000, h=0.000
+[2026-04-09 13:12:08.988] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:08.988] [info] [81] yolo: 9.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.030] [info] [82] yolo: 11.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.073] [info] [83] yolo: 10.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.115] [info] [84] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.157] [info] [85] yolo: 11.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.200] [info] [86] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.244] [info] [87] yolo: 12.7ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:09.291] [info] [88] yolo: 14.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.334] [info] [89] yolo: 11.0ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:09.376] [info] [90] yolo: 10.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.417] [info] [91] yolo: 9.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.458] [info] [92] yolo: 10.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.502] [info] [93] yolo: 12.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.546] [info] [94] yolo: 11.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.587] [info] [95] yolo: 10.1ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:09.630] [info] [96] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.672] [info] [97] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.715] [info] [98] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.758] [info] [99] yolo: 11.7ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:09.803] [info] [100] yolo: 13.4ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:09.847] [info] [Target] 参数异常 r=0.356, l=0.000, h=0.000
+[2026-04-09 13:12:09.847] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:09.847] [info] [101] yolo: 12.9ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:09.892] [info] [102] yolo: 12.9ms, tracker: 0.3ms, aimer: 0.1ms
+[2026-04-09 13:12:09.934] [info] [103] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:09.976] [info] [104] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.017] [info] [105] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.060] [info] [106] yolo: 10.9ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:10.102] [info] [107] yolo: 9.7ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:10.143] [info] [108] yolo: 10.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.187] [info] [109] yolo: 12.0ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.230] [info] [110] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.273] [info] [111] yolo: 11.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.315] [info] [112] yolo: 10.3ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:10.357] [info] [113] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.399] [info] [114] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.441] [info] [115] yolo: 11.0ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.484] [info] [116] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.526] [info] [117] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.568] [info] [118] yolo: 10.6ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:10.611] [info] [119] yolo: 10.8ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.652] [info] [120] yolo: 9.9ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.696] [info] [121] yolo: 12.0ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.739] [info] [Target] 参数异常 r=0.357, l=0.000, h=0.000
+[2026-04-09 13:12:10.739] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:10.739] [info] [122] yolo: 11.9ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:10.782] [info] [123] yolo: 10.6ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:10.824] [info] [124] yolo: 10.5ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.865] [info] [125] yolo: 9.5ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.907] [info] [126] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:10.950] [info] [127] yolo: 11.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:10.991] [info] [128] yolo: 10.1ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:11.033] [info] [129] yolo: 9.9ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:11.074] [info] [130] yolo: 9.1ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:11.114] [info] [131] yolo: 8.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.156] [warning] [Target] 装甲板半径过度收缩 r=0.172, 重置为0.25
+[2026-04-09 13:12:11.156] [info] [132] yolo: 10.5ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:11.200] [info] [133] yolo: 11.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.242] [info] [134] yolo: 11.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.286] [info] [135] yolo: 12.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.331] [info] [Target] 参数异常 r=0.468, l=0.000, h=0.000
+[2026-04-09 13:12:11.331] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:11.331] [info] [136] yolo: 13.3ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:11.372] [info] [137] yolo: 9.8ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:11.414] [info] [138] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.455] [warning] [Tracker] Large dt: 0.167s
+[2026-04-09 13:12:11.455] [info] [139] yolo: 9.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.496] [info] [Target] 参数异常 r=0.084, l=0.000, h=0.000
+[2026-04-09 13:12:11.496] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:11.496] [info] [140] yolo: 10.1ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:11.540] [info] [141] yolo: 12.3ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:11.583] [info] [142] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.625] [info] [143] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.667] [info] [144] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.712] [info] [145] yolo: 13.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.754] [info] [146] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.797] [info] [147] yolo: 11.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.838] [info] [148] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.879] [info] [149] yolo: 8.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.922] [info] [150] yolo: 12.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:11.965] [info] [151] yolo: 11.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.007] [info] [152] yolo: 11.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.049] [warning] [Tracker] Large dt: 26.099s
+[2026-04-09 13:12:12.049] [info] [153] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.090] [info] [Target] 参数异常 r=0.149, l=0.000, h=0.000
+[2026-04-09 13:12:12.090] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:12.090] [info] [154] yolo: 9.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:12.131] [info] [155] yolo: 9.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:12.171] [info] [156] yolo: 9.1ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:12.216] [info] [157] yolo: 12.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.259] [info] [158] yolo: 11.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.303] [info] [159] yolo: 12.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.345] [info] [160] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.387] [info] [161] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.430] [info] [162] yolo: 11.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.471] [info] [163] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.514] [info] [164] yolo: 11.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.560] [info] [165] yolo: 14.2ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:12.602] [info] [166] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.644] [info] [167] yolo: 11.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.687] [info] [168] yolo: 11.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.732] [info] [169] yolo: 12.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.774] [info] [170] yolo: 10.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.816] [info] [171] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.858] [info] [172] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.901] [info] [173] yolo: 11.5ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:12.944] [info] [174] yolo: 11.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:12.988] [info] [175] yolo: 11.6ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:13.030] [info] [176] yolo: 10.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:13.072] [info] [177] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.115] [info] [178] yolo: 12.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.158] [info] [179] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.199] [info] [180] yolo: 9.4ms, tracker: 0.4ms, aimer: 0.1ms
+[2026-04-09 13:12:13.247] [info] [181] yolo: 15.9ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:13.287] [info] [182] yolo: 8.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:13.328] [info] [183] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.374] [info] [184] yolo: 14.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.419] [info] [Target] 参数异常 r=0.351, l=0.000, h=0.000
+[2026-04-09 13:12:13.419] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:13.419] [info] [185] yolo: 13.3ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:13.462] [info] [186] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.505] [info] [187] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.550] [info] [188] yolo: 13.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.592] [info] [189] yolo: 11.2ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:13.634] [info] [190] yolo: 9.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.676] [info] [191] yolo: 11.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.717] [info] [192] yolo: 9.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.757] [info] [193] yolo: 8.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.799] [info] [194] yolo: 10.3ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:13.843] [info] [195] yolo: 12.5ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:13.885] [info] [196] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.925] [info] [197] yolo: 8.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:13.966] [info] [198] yolo: 9.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.005] [info] [199] yolo: 7.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.049] [info] [200] yolo: 12.5ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:14.093] [info] [201] yolo: 11.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.136] [info] [202] yolo: 11.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.182] [info] [203] yolo: 14.8ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:14.224] [info] [204] yolo: 9.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.264] [info] [205] yolo: 9.4ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:14.306] [info] [206] yolo: 9.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.348] [info] [207] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.392] [info] [208] yolo: 11.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.435] [info] [209] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.477] [info] [210] yolo: 10.4ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:14.519] [info] [211] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.561] [info] [212] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.601] [info] [213] yolo: 9.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.645] [info] [214] yolo: 12.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.688] [info] [215] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.728] [info] [216] yolo: 8.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.771] [info] [Target] 参数异常 r=0.460, l=0.000, h=0.000
+[2026-04-09 13:12:14.771] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:14.771] [info] [217] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.812] [info] [218] yolo: 9.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.854] [info] [219] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.896] [info] [220] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.938] [info] [221] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:14.978] [info] [222] yolo: 9.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.020] [info] [223] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.062] [info] [224] yolo: 10.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.103] [info] [225] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.145] [info] [Target] 参数异常 r=0.357, l=0.000, h=0.000
+[2026-04-09 13:12:15.145] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:15.145] [info] [226] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.188] [info] [227] yolo: 11.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.228] [info] [228] yolo: 8.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.269] [info] [229] yolo: 9.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.308] [info] [230] yolo: 7.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.349] [info] [231] yolo: 9.5ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:15.390] [info] [232] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.433] [info] [233] yolo: 11.2ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:15.474] [info] [234] yolo: 9.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.521] [info] [Target] 参数异常 r=0.135, l=0.000, h=0.000
+[2026-04-09 13:12:15.521] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:15.521] [info] [235] yolo: 14.9ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:15.563] [info] [236] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.606] [info] [237] yolo: 11.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.647] [info] [238] yolo: 9.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.690] [info] [239] yolo: 11.7ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:15.730] [info] [240] yolo: 8.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.773] [info] [241] yolo: 11.2ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:15.815] [info] [242] yolo: 10.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.857] [info] [243] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.900] [info] [244] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.941] [info] [245] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:15.983] [info] [246] yolo: 9.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.027] [info] [247] yolo: 12.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.069] [info] [Target] 参数异常 r=0.358, l=0.000, h=0.000
+[2026-04-09 13:12:16.069] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:16.069] [info] [248] yolo: 11.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.112] [info] [249] yolo: 10.9ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:16.153] [info] [250] yolo: 9.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.193] [info] [251] yolo: 9.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.237] [info] [252] yolo: 12.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.280] [info] [253] yolo: 11.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.322] [info] [254] yolo: 9.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.366] [info] [255] yolo: 12.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.407] [info] [256] yolo: 9.8ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:16.449] [info] [257] yolo: 9.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.491] [info] [258] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.535] [info] [259] yolo: 12.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.579] [info] [260] yolo: 12.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.621] [info] [261] yolo: 10.3ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:16.664] [info] [262] yolo: 10.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:16.706] [info] [263] yolo: 10.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:16.746] [info] [Target] 参数异常 r=0.377, l=0.000, h=0.000
+[2026-04-09 13:12:16.746] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:16.746] [info] [264] yolo: 8.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.789] [info] [265] yolo: 11.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:16.828] [info] [266] yolo: 7.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.873] [info] [267] yolo: 13.8ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:16.915] [info] [268] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:16.960] [info] [269] yolo: 12.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.002] [warning] [Target] 装甲板半径过度收缩 r=0.169, 重置为0.25
+[2026-04-09 13:12:17.002] [info] [270] yolo: 10.8ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:17.045] [info] [271] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.088] [info] [272] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.130] [warning] [Target] 装甲板半径过度收缩 r=0.172, 重置为0.25
+[2026-04-09 13:12:17.131] [info] [273] yolo: 11.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.171] [info] [274] yolo: 9.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.218] [info] [Target] 参数异常 r=0.102, l=0.000, h=0.000
+[2026-04-09 13:12:17.218] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:17.218] [info] [275] yolo: 15.1ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:17.263] [info] [276] yolo: 12.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.305] [info] [277] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.350] [info] [278] yolo: 14.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.392] [info] [279] yolo: 9.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.434] [info] [280] yolo: 10.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.476] [info] [281] yolo: 10.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.518] [info] [282] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.559] [info] [Target] 参数异常 r=0.125, l=0.000, h=0.000
+[2026-04-09 13:12:17.560] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:17.560] [info] [283] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.603] [info] [284] yolo: 11.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.646] [info] [285] yolo: 12.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.689] [info] [286] yolo: 11.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.730] [info] [287] yolo: 9.5ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:17.771] [info] [288] yolo: 9.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.815] [info] [289] yolo: 12.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.855] [info] [290] yolo: 8.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.898] [info] [291] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:17.940] [info] [292] yolo: 10.6ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:17.984] [info] [293] yolo: 12.0ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:18.024] [info] [294] yolo: 9.3ms, tracker: 0.0ms, aimer: 0.0ms
+[2026-04-09 13:12:18.066] [info] [Target] 参数异常 r=0.433, l=0.000, h=0.000
+[2026-04-09 13:12:18.066] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:18.066] [info] [295] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.106] [info] [296] yolo: 8.4ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:18.148] [info] [Target] 参数异常 r=0.137, l=0.000, h=0.000
+[2026-04-09 13:12:18.148] [debug] [Tracker] Target diverged!
+[2026-04-09 13:12:18.148] [info] [297] yolo: 10.1ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:18.190] [info] [298] yolo: 10.7ms, tracker: 0.3ms, aimer: 0.1ms
+[2026-04-09 13:12:18.233] [info] [299] yolo: 10.6ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:18.277] [info] [300] yolo: 12.7ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.319] [info] [301] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.360] [info] [302] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.401] [info] [303] yolo: 9.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.443] [info] [304] yolo: 10.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.485] [info] [305] yolo: 10.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.531] [info] [306] yolo: 14.2ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:18.574] [info] [307] yolo: 11.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.614] [info] [308] yolo: 8.4ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:18.656] [info] [309] yolo: 10.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:18.697] [info] [310] yolo: 9.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.737] [info] [311] yolo: 8.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.779] [info] [312] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.821] [info] [313] yolo: 11.0ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:18.863] [info] [314] yolo: 9.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.902] [info] [315] yolo: 8.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.943] [info] [316] yolo: 9.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:18.984] [warning] [Target] 装甲板半径过度收缩 r=0.166, 重置为0.25
+[2026-04-09 13:12:18.984] [info] [317] yolo: 9.1ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.025] [info] [318] yolo: 9.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.070] [info] [319] yolo: 13.6ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:19.111] [warning] [Target] 装甲板半径过度收缩 r=0.177, 重置为0.25
+[2026-04-09 13:12:19.111] [info] [320] yolo: 10.6ms, tracker: 0.4ms, aimer: 0.0ms
+[2026-04-09 13:12:19.152] [info] [321] yolo: 9.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.194] [info] [322] yolo: 11.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.238] [info] [323] yolo: 11.5ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:19.280] [info] [324] yolo: 9.6ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.320] [info] [325] yolo: 9.3ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.362] [info] [326] yolo: 11.0ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.406] [warning] [Target] 装甲板半径过度收缩 r=0.178, 重置为0.25
+[2026-04-09 13:12:19.406] [info] [327] yolo: 11.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.447] [info] [328] yolo: 9.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.488] [info] [329] yolo: 9.4ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.530] [info] [330] yolo: 10.3ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:19.572] [info] [331] yolo: 10.2ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.613] [info] [332] yolo: 9.9ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.657] [info] [333] yolo: 12.5ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:19.699] [info] [334] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.744] [info] [335] yolo: 13.5ms, tracker: 0.6ms, aimer: 0.0ms
+[2026-04-09 13:12:19.786] [info] [336] yolo: 10.1ms, tracker: 0.5ms, aimer: 0.0ms
+[2026-04-09 13:12:19.827] [info] [337] yolo: 9.8ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.866] [info] [338] yolo: 8.5ms, tracker: 0.3ms, aimer: 0.0ms
+[2026-04-09 13:12:19.909] [info] [339] yolo: 10.4ms, tracker: 0.3ms, aimer: 0.0ms

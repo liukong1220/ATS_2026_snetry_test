@@ -785,6 +785,12 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
   vision_suggested_goal_index:=1
 ```
 
+如果你后面要把这个 fake 视觉入口替换成真视觉入口，也建议直接使用已经整理进工作区的：
+
+- [/home/ats/ats_sentry_ws/src/sp_vision25](/home/ats/ats_sentry_ws/src/sp_vision25)
+
+原因是现在这份包已经能通过 `colcon` 安装后直接 `ros2 run sp_vision25 ...`，比继续依赖它自己目录里的独立 `build/` 更适合和 loopback / 行为树联调。
+
 ### 16.3.1 运行中如何改假视觉参数
 
 如果 launch 已经跑起来了，最直接的做法是动态改：
@@ -928,3 +934,21 @@ ros2 topic echo /vision/target
 ```
 
 重点看 `suggested_goal_index` 是否随目标方位自动变化。
+
+### 17.6 如何确认你现在用的是 colcon 版 `sp_vision25`
+
+如果你已经把 `sp_vision25` 并进工作区，推荐先做下面这组确认：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 pkg prefix sp_vision25
+ros2 run sp_vision25 sentry --help
+```
+
+预期应该看到：
+
+1. `ros2 pkg prefix sp_vision25` 指向当前工作区的 `install/sp_vision25`
+2. `ros2 run sp_vision25 sentry --help` 能正常输出帮助，而不是报包找不到或配置找不到
+
+这一步的意义是先确认“你现在调用的是工作区内安装版视觉包”，再去做 loopback 或真机联调，这样最不容易和旧的独立 build 产物串线。
