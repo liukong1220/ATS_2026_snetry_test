@@ -2,6 +2,7 @@
 build/
 install/
 log/
+logs/
 
 # Compiled files
 *.so
@@ -40,4 +41,4 @@ __pycache__/
 # Local workspace metadata
 .marscode/
 *.pcd
-src/sp_vision25
+src/sp_vision25/
