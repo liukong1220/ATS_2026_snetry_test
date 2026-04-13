@@ -26,6 +26,7 @@ include_directories(include)
 # create rmoss_tool lib
 aux_source_directory(${PROJECT_SOURCE_DIR}/src DIR_SRCS)
 add_library(${PROJECT_NAME} SHARED ${DIR_SRCS})
+target_link_options(${PROJECT_NAME} PRIVATE -Wl,--no-as-needed)
 ament_target_dependencies(${PROJECT_NAME}
   rclcpp
   ament_index_cpp
@@ -34,6 +35,9 @@ ament_target_dependencies(${PROJECT_NAME}
   rmoss_interfaces
   cv_bridge
   OpenCV
+)
+target_link_libraries(${PROJECT_NAME}
+  rmoss_interfaces::rmoss_interfaces__rosidl_typesupport_cpp
 )
 
 # Install include directories

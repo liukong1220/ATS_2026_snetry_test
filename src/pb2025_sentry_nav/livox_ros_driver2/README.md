@@ -16,7 +16,19 @@ Livox ROS Driver 2 is the 2nd-generation driver package used to connect LiDAR pr
  /livox/lidar/pointcloud | sensor_msgs/msg/PointCloud2     | ROS2 点云消息格式
  /livox/imu               | sensor_msgs/msg/Imu             | mid360 机内 imu
 
-本功能包已内置预编译的 Livox SDK2，无需再次克隆编译安装。
+本仓库默认保留与驱动匹配的 Livox SDK2 头文件，并在构建时按以下顺序查找 SDK:
+
+1. 环境变量 `LIVOX_SDK2_ROOT`
+2. 包内目录 `livox_ros_driver2/Livox-SDK2`
+3. 系统安装目录 `/usr/local` 与 `/usr`
+
+如果你在一台全新的电脑上部署，推荐先执行:
+
+```shell
+./scripts/setup_livox_sdk2.sh
+```
+
+该脚本会把官方 Livox-SDK2 安装到当前包的 `Livox-SDK2/` 目录下，不需要 `sudo`，之后即可直接执行 `colcon build`。
 
 ## 1. Preparation
 
@@ -54,9 +66,24 @@ git clone https://github.com/SMBU-PolarBear-Robotics-Team/livox_ros_driver2.git
 
 ### 2.2 Build & install the Livox-SDK2
 
-  **Note :**
+推荐直接在包目录执行仓库内脚本:
 
-  Please follow the guidance of installation in the [Livox-SDK2/README.md](https://github.com/Livox-SDK/Livox-SDK2/blob/master/README.md)
+```shell
+./scripts/setup_livox_sdk2.sh
+```
+
+如果你已经把 Livox-SDK2 安装到别的位置，也可以在构建前显式指定:
+
+```shell
+export LIVOX_SDK2_ROOT=/path/to/Livox-SDK2
+```
+
+目录下至少应包含:
+
+```text
+include/livox_lidar_api.h
+lib/liblivox_lidar_sdk_shared.so
+```
 
 ### 2.3 Build the Livox ROS Driver 2
 

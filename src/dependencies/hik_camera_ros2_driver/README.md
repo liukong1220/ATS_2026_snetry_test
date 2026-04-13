@@ -59,7 +59,24 @@ None.
 
 #### Installation
 
-To use this package, build it from source or include it in your ROS 2 workspace. Ensure that all dependencies are installed. You **don't** need to install the Hikvision camera SDK and include its libraries in your environment.
+To use this package, build it from source or include it in your ROS 2 workspace. Ensure that all dependencies are installed and that the HikRobot MVS SDK can be discovered in one of these locations:
+
+1. The path exported by `HIKROBOT_SDK_ROOT`
+2. The package-local directory `src/dependencies/hik_camera_ros2_driver/hikSDK`
+3. Common system locations such as `/opt/MVS` or `/usr/local/MVS`
+
+The SDK root should contain at least:
+
+```text
+include/MvCameraControl.h
+lib/64/libMvCameraControl.so
+```
+
+Recommended on a fresh machine:
+
+```bash
+export HIKROBOT_SDK_ROOT=/opt/MVS
+```
 
 ```bash
 mkdir -p ~/ros_ws/src

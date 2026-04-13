@@ -39,6 +39,11 @@ find_package(PCL REQUIRED QUIET)
 find_package(std_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+set(LIVOX_SDK2_ROOT "" CACHE PATH "Root directory of a Livox-SDK2 installation")
+set(LivoxSDK2_BUNDLED_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/Livox-SDK2")
+find_package(LivoxSDK2 REQUIRED)
+message(STATUS "Using Livox SDK2 include dir: ${LivoxSDK2_INCLUDE_DIR}")
+message(STATUS "Using Livox SDK2 library: ${LivoxSDK2_LIBRARY}")
 
 # check apr
 find_package(PkgConfig)
@@ -78,8 +83,6 @@ ament_auto_add_library(${PROJECT_NAME} SHARED
   src/call_back/livox_lidar_callback.cpp
 )
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${livox_sdk_INCLUDE_DIRS})
-
 # get include directories of custom msg headers
 if($ENV{ROS_DISTRO} STREQUAL "foxy")
   set(LIVOX_INTERFACE_TARGET "${LIVOX_INTERFACES}__rosidl_typesupport_cpp")
@@ -96,25 +99,15 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   ${PCL_INCLUDE_DIRS}
   ${APR_INCLUDE_DIRS}
   ${LIVOX_INTERFACES_INCLUDE_DIRECTORIES}   # for custom msgs
-  Livox-SDK2/include
+  ${LivoxSDK2_INCLUDE_DIR}
   3rdparty
   src
 )
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-  set(LIVOX_LIDAR_SDK_LIBRARY ${PROJECT_SOURCE_DIR}/Livox-SDK2/lib/amd64/liblivox_lidar_sdk_shared.so)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  set(LIVOX_LIDAR_SDK_LIBRARY ${PROJECT_SOURCE_DIR}/Livox-SDK2/lib/arm64/liblivox_lidar_sdk_shared.so)
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
-    set(LIVOX_LIDAR_SDK_LIBRARY ${PROJECT_SOURCE_DIR}/Livox-SDK2/lib/riscv64/liblivox_lidar_sdk_shared.so)
-else()
-  message(FATAL_ERROR "Unsupport host system architecture: ${CMAKE_HOST_SYSTEM_PROCESSOR}!")
-endif()
-
 # link libraries
 target_link_libraries(${PROJECT_NAME}
-  ${LIVOX_LIDAR_SDK_LIBRARY}
-  ${LIVOX_INTERFACE_TARGET}   # for custom msgs
+  LivoxSDK2::sdk
+  ${LIVOX_INTERFACE_TARGET}
   ${PPT_LIBRARY}
   ${Boost_LIBRARY}
   ${PCL_LIBRARIES}
@@ -141,3 +134,5 @@ ament_auto_package(INSTALL_TO_SHARE
   config
   launch
 )
+
+install(FILES ${LivoxSDK2_LIBRARY} DESTINATION lib)

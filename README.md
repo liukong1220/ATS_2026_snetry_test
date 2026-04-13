@@ -127,6 +127,31 @@ export MINDVISION_SDK_ROOT=/path/to/MindVisionSDK
 - `include/CameraApi.h`
 - `lib/amd64/libMVSDK.so` 或 `lib/arm64/libMVSDK.so`
 
+## 3.2 Livox SDK2 说明
+
+`src/pb2025_sentry_nav/livox_ros_driver2` 现在会按下面顺序查找 Livox SDK2:
+
+1. 环境变量 `LIVOX_SDK2_ROOT`
+2. 包内目录 `src/pb2025_sentry_nav/livox_ros_driver2/Livox-SDK2`
+3. 系统目录 `/usr/local` 与 `/usr`
+
+推荐在新电脑上先执行仓库内脚本，把 SDK 安装到包目录里，这样不依赖全局 `/usr/local`:
+
+```bash
+./src/pb2025_sentry_nav/livox_ros_driver2/scripts/setup_livox_sdk2.sh
+```
+
+如果你已经自行安装到别的路径，则显式导出:
+
+```bash
+export LIVOX_SDK2_ROOT=/path/to/Livox-SDK2
+```
+
+目录下至少应包含:
+
+- `include/livox_lidar_api.h`
+- `lib/liblivox_lidar_sdk_shared.so`
+
 ## 4. 获取代码
 
 ```bash
@@ -148,6 +173,12 @@ source /opt/ros/humble/setup.bash
 
 ```bash
 rosdep install -r --from-paths src --ignore-src --rosdistro humble -y
+```
+
+如果你需要编译 Livox 驱动，建议在 `colcon build` 前先准备 SDK:
+
+```bash
+./src/pb2025_sentry_nav/livox_ros_driver2/scripts/setup_livox_sdk2.sh
 ```
 
 ### 5.1 推荐的 WSL 构建方式
@@ -292,6 +323,15 @@ ros2 run sp_vision25 auto_aim_test assets/demo/demo
 echo "$HIKROBOT_SDK_ROOT"
 find "$HIKROBOT_SDK_ROOT" -name 'MvCameraControl.h' -o -name 'libMvCameraControl.so'
 ```
+
+### 7.1.2 `liblivox_lidar_sdk_shared.so` 缺失或 `livox_ros_driver2` 链接失败
+
+这说明 `livox_ros_driver2` 没找到 Livox SDK2 动态库。排查顺序:
+
+1. 确认是否已执行 `./src/pb2025_sentry_nav/livox_ros_driver2/scripts/setup_livox_sdk2.sh`
+2. 确认 `LIVOX_SDK2_ROOT` 是否指向正确 SDK 根目录
+3. 确认目录下存在 `include/livox_lidar_api.h` 和 `lib/liblivox_lidar_sdk_shared.so`
+4. 重新执行 `source /opt/ros/humble/setup.bash`，避免旧 overlay 污染
 
 ### 7.2 为什么现在更建议把 `sp_vision25` 放进 `src/`
 
