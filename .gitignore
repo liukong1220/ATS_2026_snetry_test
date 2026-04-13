@@ -40,3 +40,4 @@ __pycache__/
 # Local workspace metadata
 .marscode/
 *.pcd
+src/sp_vision25
