@@ -40,10 +40,9 @@ if not hasattr(np, 'maximum_sctype'):
 
     np.maximum_sctype = _maximum_sctype  # type: ignore[attr-defined]
 
-import tf_transformations
-
 from .utils import (addYawToQuat, getMapOccupancy, matrixToTransform, transformStampedToMatrix,
                     worldToMap)
+from .tf_compat import tf_transformations
 
 """
 This is a loopback simulator that replaces a physics simulator to create a
@@ -123,9 +122,11 @@ class LoopbackSimulator(Node):
         self.t_map_to_odom = TransformStamped()
         self.t_map_to_odom.header.frame_id = self.map_frame_id
         self.t_map_to_odom.child_frame_id = self.odom_frame_id
+        self.t_map_to_odom.transform.rotation.w = 1.0
         self.t_odom_to_base_link = TransformStamped()
         self.t_odom_to_base_link.header.frame_id = self.odom_frame_id
         self.t_odom_to_base_link.child_frame_id = self.base_frame_id
+        self.t_odom_to_base_link.transform.rotation.w = 1.0
 
         self.tf_broadcaster = TransformBroadcaster(self)
 
@@ -213,6 +214,7 @@ class LoopbackSimulator(Node):
             self.t_map_to_odom.transform.rotation = self.initial_pose.orientation
             self.t_odom_to_base_link.transform.translation = Vector3()
             self.t_odom_to_base_link.transform.rotation = Quaternion()
+            self.t_odom_to_base_link.transform.rotation.w = 1.0
             self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link)
 
             # Start republication timer and velocity processing
