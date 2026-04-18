@@ -20,6 +20,8 @@
 #include <thread>
 #endif
 
+#include <exception>
+
 // auto-generated header, created by generate_parameter_library
 #include "behaviortree_ros2/bt_executor_parameters.hpp"
 #include "behaviortree_ros2/tree_execution_server.hpp"
@@ -189,8 +191,18 @@ void TreeExecutionServer::execute(
     // call user defined function after the tree has been created
     onTreeCreated(p_->tree);
     p_->groot_publisher.reset();
-    p_->groot_publisher =
-        std::make_shared<BT::Groot2Publisher>(p_->tree, p_->params.groot2_port);
+    try
+    {
+      p_->groot_publisher =
+          std::make_shared<BT::Groot2Publisher>(p_->tree, p_->params.groot2_port);
+    }
+    catch(const std::exception& ex)
+    {
+      RCLCPP_WARN(
+          kLogger,
+          "Failed to start Groot2 publisher on port %ld, continue without Groot2 monitoring: %s",
+          static_cast<long>(p_->params.groot2_port), ex.what());
+    }
 
     // Loop until the tree is done or a cancel is requested
     const auto period =

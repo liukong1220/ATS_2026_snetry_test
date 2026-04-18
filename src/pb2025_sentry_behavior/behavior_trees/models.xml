@@ -84,5 +84,14 @@
             <output_port name="selected_index" type="int" default="{vision_selected_goal_index}">Final selected vision goal index</output_port>
             <output_port name="path" type="nav_msgs::msg::Path_&lt;std::allocator&lt;void&gt; &gt;" default="{decision_path}">Vision support path</output_port>
         </Action>
+        <Action ID="SelectVisionFollowPath">
+            <input_port name="key_port" type="sp_msgs::msg::VisionTargetMsg" default="{@sp_vision_target}">Vision fusion message on blackboard</input_port>
+            <input_port name="current_pose" type="geometry_msgs::msg::PoseStamped_&lt;std::allocator&lt;void&gt; &gt;" default="{@decision_current_pose}">Current navigation pose</input_port>
+            <input_port name="current_costmap" type="nav_msgs::msg::OccupancyGrid_&lt;std::allocator&lt;void&gt; &gt;" default="{@nav_globalCostmap}">Global costmap used for point screening</input_port>
+            <input_port name="attack_radius" type="double" default="2.0">Desired follow radius around the vision target</input_port>
+            <input_port name="occupied_threshold" type="int" default="50">Costmap cells at or above this value are treated as blocked</input_port>
+            <input_port name="sample_count" type="int" default="16">Number of angular samples for the follow ring</input_port>
+            <output_port name="path" type="nav_msgs::msg::Path_&lt;std::allocator&lt;void&gt; &gt;" default="{decision_path}">Vision follow path</output_port>
+        </Action>
     </TreeNodesModel>
 </root>

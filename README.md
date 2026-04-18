@@ -306,6 +306,49 @@ ros2 run sp_vision25 auto_aim_test assets/demo/demo
 
 都不再强依赖“当前目录必须正好在 `src/sp_vision25` 里”。
 
+### 6.4 最新视觉跟随仿真调试
+
+当前最新版 loopback 视觉调试已经不再依赖 `vision_suggested_goal_index` 做路径规划，而是直接使用 `sp_vision` 提供的 `target_position_map` 生成跟随点。
+
+推荐入口：
+
+- 详细调试手册见 [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
+- 架构与接口说明见 [docs/融合.md](./docs/融合.md)
+
+最常用启动命令：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06 \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0
+```
+
+运行中动态切换视觉目标位置：
+
+```bash
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_x 2.5
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_y 4.2
+```
+
+调跟随半径：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.attack_radius 2.5
+```
+
+关闭视觉接管，验证是否回退到普通导航：
+
+```bash
+ros2 param set /fake_decision_sim_inputs vision_tracking false
+```
+
 ## 7. 常见问题
 
 ### 7.1 `cannot find -lMvCameraControl`
@@ -383,6 +426,8 @@ source /opt/ros/humble/setup.bash
 
 ## 8. 参考文档
 
+- [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
+- [docs/融合.md](./docs/融合.md)
 - [ws_README.md](./ws_README.md)
 - [nav_README.md](./nav_README.md)
 - [sp_vision25/readme.md](./src/sp_vision25/readme.md)

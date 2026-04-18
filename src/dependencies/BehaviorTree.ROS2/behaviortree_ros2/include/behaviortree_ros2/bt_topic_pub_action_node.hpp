@@ -209,7 +209,7 @@ inline NodeStatus RosTopicPubStatefulActionNode<T>::onStart()
 
   // Record start time
   start_time_ = node_->now();
-  return NodeStatus::RUNNING;
+  return (duration_.count() <= 0) ? NodeStatus::SUCCESS : NodeStatus::RUNNING;
 }
 
 template <class T>

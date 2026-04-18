@@ -193,6 +193,9 @@ void SentryBehaviorServer::declareDecisionParameters()
   // 方便后续继续扩展超时、目标选择策略和启停开关。
   declare_parameter("decision.vision.topic", std::string("vision/target"));
   declare_parameter("decision.vision.timeout_s", 0.5);
+  declare_parameter("decision.vision.attack_radius", 2.0);
+  declare_parameter("decision.vision.follow_occupied_threshold", 50);
+  declare_parameter("decision.vision.follow_sample_count", 16);
 
   declare_parameter("decision.time_thresholds.abundant", 300);
   declare_parameter("decision.time_thresholds.normal", 240);

@@ -11,6 +11,11 @@
 
 基于 [BehaviorTree.CPP](https://github.com/BehaviorTree/BehaviorTree.CPP) 和 [BehaviorTree.ROS2](https://github.com/BehaviorTree/BehaviorTree.ROS2) 的行为树框架与插件，用于 [RoboMaster](https://www.robomaster.com) 2025 赛季哨兵机器人。
 
+最新版视觉跟随 loopback 仿真调试文档见：
+
+- [`/docs/视觉跟随仿真调试.md`](/home/ats/ats_sentry_ws/docs/视觉跟随仿真调试.md)
+- [`/docs/融合.md`](/home/ats/ats_sentry_ws/docs/融合.md)
+
 ## 2. Quick Start
 
 ### 2.1 Setup Environment

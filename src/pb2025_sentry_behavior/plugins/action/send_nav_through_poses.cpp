@@ -91,6 +91,13 @@ BT::NodeStatus SendNavThroughPosesAction::tick()
   }
   setOutput("goal_succeeded", false);
 
+  const auto & first_pose = goal.poses.front().pose.position;
+  const auto & last_pose = goal.poses.back().pose.position;
+  RCLCPP_INFO(
+    logger_,
+    "Send NavigateThroughPoses goal with %zu poses: first=(%.2f, %.2f) last=(%.2f, %.2f)",
+    goal.poses.size(), first_pose.x, first_pose.y, last_pose.x, last_pose.y);
+
   auto send_goal_options =
     rclcpp_action::Client<NavigateThroughPoses>::SendGoalOptions();
   send_goal_options.goal_response_callback = [this, request_id](const GoalHandle::SharedPtr handle) {

@@ -49,6 +49,9 @@ pb2025_sentry_behavior_server:
       vision:
         topic: vision/target
         timeout_s: 0.5
+        attack_radius: 2.0
+        follow_occupied_threshold: 50
+        follow_sample_count: 16
 
       time_thresholds:
         abundant: 300

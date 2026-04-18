@@ -103,6 +103,11 @@ ament_auto_add_library(
   plugins/action/select_vision_target_path.cpp)
 list(APPEND plugin_libs select_vision_target_path)
 
+ament_auto_add_library(
+  select_vision_follow_path SHARED
+  plugins/action/select_vision_follow_path.cpp)
+list(APPEND plugin_libs select_vision_follow_path)
+
 ament_auto_add_library(advance_patrol_cursor SHARED plugins/action/advance_patrol_cursor.cpp)
 list(APPEND plugin_libs advance_patrol_cursor)
 

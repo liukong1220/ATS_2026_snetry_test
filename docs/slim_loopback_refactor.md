@@ -716,7 +716,12 @@ ros2 topic echo /clock
 
 ## 16. 视觉融合接入后的 loopback 拓扑补充
 
-在当前 slim loopback 结构上，我又加了一条专门给视觉融合测试使用的支路，但它没有破坏默认闭环。
+在当前 slim loopback 结构上，又新增了一条专门给视觉融合测试使用的支路，但它没有破坏默认闭环。
+
+如果你现在主要想调“视觉跟随仿真”，建议同时参考：
+
+- [/home/ats/ats_sentry_ws/docs/视觉跟随仿真调试.md](/home/ats/ats_sentry_ws/docs/视觉跟随仿真调试.md)
+- [/home/ats/ats_sentry_ws/docs/融合.md](/home/ats/ats_sentry_ws/docs/融合.md)
 
 ### 16.1 默认 loopback 链仍然不变
 
@@ -741,17 +746,23 @@ ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py
 
 - [/home/ats/ats_sentry_ws/src/pb2025_sentry_bringup/scripts/fake_decision_sim_inputs.py](/home/ats/ats_sentry_ws/src/pb2025_sentry_bringup/scripts/fake_decision_sim_inputs.py)
 
-除了能发 `decision/sim_mode` 和可选裁判话题，还能按参数发布：
+除了能发 `decision/sim_mode` 和可选裁判话题，还能按参数发布 `/vision/target`，包括：
 
-1. `/vision/target`
-2. `tracking`
-3. `nav_hold`
-4. `target_id`
-5. `suggested_goal_index`
-6. `target_yaw`
-7. `target_pitch`
+1. `tracking`
+2. `nav_hold`
+3. `target_id`
+4. `suggested_goal_index`
+5. `target_yaw`
+6. `target_pitch`
+7. `target_position_map`
 
-这意味着在没有真视觉程序时，loopback 也能先验证“视觉接管行为树”的链路。
+这里需要特别说明：
+
+1. `suggested_goal_index` 仍然保留在消息里，便于兼容旧链路和调试观测
+2. 但当前 `vision_test.xml` 已经不再依赖它做路径规划
+3. 现在真正驱动视觉导航接管的是 `target_position_map`
+
+这意味着在没有真视觉程序时，loopback 已经可以先验证“视觉接管行为树 + 基于地图目标位置做跟随规划”的链路。
 
 ### 16.3 新增了专用快捷入口
 
@@ -763,7 +774,15 @@ ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06 \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0
 ```
 
 这个入口会自动：
@@ -771,19 +790,7 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py
 1. 切到 `sentry_behavior_vision_test.yaml`
 2. 让行为树执行 `vision_test`
 3. 开启假视觉目标发布
-
-现在这个快捷入口也已经把常用视觉仿真参数透传出来了，因此你可以在启动时直接写：
-
-```bash
-source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
-  use_rviz:=True \
-  vision_tracking:=True \
-  vision_nav_hold:=True \
-  vision_target_yaw:=0.30 \
-  vision_target_pitch:=-0.06 \
-  vision_suggested_goal_index:=1
-```
+4. 让视觉分支优先尝试接管导航
 
 如果你后面要把这个 fake 视觉入口替换成真视觉入口，也建议直接使用已经整理进工作区的：
 
@@ -800,7 +807,9 @@ ros2 param set /fake_decision_sim_inputs vision_tracking true
 ros2 param set /fake_decision_sim_inputs vision_nav_hold true
 ros2 param set /fake_decision_sim_inputs vision_target_yaw 0.25
 ros2 param set /fake_decision_sim_inputs vision_target_pitch -0.08
-ros2 param set /fake_decision_sim_inputs vision_suggested_goal_index 2
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_x 2.5
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_y 4.2
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_z 0.0
 ```
 
 常用用途：
@@ -811,10 +820,18 @@ ros2 param set /fake_decision_sim_inputs vision_suggested_goal_index 2
    用来验证“看到目标但不建议接管”时是否会回退。
 3. `vision_target_yaw / vision_target_pitch`
    用来观察 `/cmd_gimbal` 是否跟着变化。
-4. `vision_suggested_goal_index`
-   用来观察导航是不是切到指定点。
+4. `vision_target_position_map_x/y/z`
+   用来观察导航是否围绕新的敌方位置重建跟随点。
 5. `publish_vision_target=false`
    用来模拟视觉话题中断。
+6. `vision_suggested_goal_index`
+   当前主要用于兼容旧链路和消息观测，不再是主路径规划入口。
+
+当前视觉跟随的主调参项则是：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.attack_radius 2.5
+```
 
 ### 16.4 视觉融合测试时的闭环关系
 
@@ -826,7 +843,7 @@ fake_decision_sim_inputs
   -> pb2025_sentry_behavior_server
   -> 黑板 {@sp_vision_target}
   -> vision_test.xml
-  -> cmd_gimbal + NavigateThroughPoses
+  -> PublishGimbalAbsolute + SelectVisionFollowPath + SendNavThroughPoses
   -> Nav2
   -> loopback_simulator
 ```
@@ -842,14 +859,30 @@ fake_decision_sim_inputs
 
 1. 视觉消息字段是否接对
 2. 行为树是否会进入视觉分支
-3. `suggested_goal_index` 是否会转换成路径
+3. `target_position_map` 是否会被转换成跟随路径
 4. 云台绝对角话题是否会被发布
+5. 视觉失效后是否会回退到普通导航分支
 
 它还不等价于真视觉算法联调，因为：
 
-1. 假输入不会提供真实 `target_position_map`
-2. 建议点索引仍然是第一代规则验证
-3. 真实图像、跟踪抖动、时延和置信度波动还需要真机再看
+1. fake 输入里的 `target_position_map` 是**直接注入**
+2. 它验证的是“行为树是否正确消费视觉地图目标”
+3. 它**不验证** 真实视觉的地图坐标转换和 TF 链路
+4. 当前代码默认假设 `target_position_map` 已与 global costmap 处于同一全局坐标系
+5. 真实图像、跟踪抖动、时延和置信度波动还需要真机再看
+
+### 16.6 当前已经验证通过的视觉 loopback 现象
+
+目前 loopback 已经确认：
+
+1. 视觉分支可以真正到达 `SelectVisionFollowPath -> SendNavThroughPoses`
+2. 运行中动态修改 `vision_target_position_map_x/y` 会触发新的视觉跟随目标
+3. 关闭 `vision_tracking` 后，行为树会回退到普通 `decision_simulation` 分支
+
+同时还定位并修复了两个关键卡点：
+
+1. `duration=0` 的 BT 发布节点以前会先返回 `RUNNING`，导致后续规划节点被饿死；现在已改为立即返回 `SUCCESS`
+2. `IsPathGoalReached` 以前会被旧路径残留的 `goal_succeeded` 短路，导致新视觉目标来了也被误判成“已经到达”；现在已改成按当前 pose 与当前路径终点距离判断
 
 ## 17. 推荐的全面测试顺序
 
@@ -861,16 +894,26 @@ fake_decision_sim_inputs
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0
 ```
 
 再看：
 
 ```bash
-ros2 topic echo /vision/target
+ros2 topic echo --once /vision/target
 ```
 
-先确认视觉消息在稳定发布。
+先确认视觉消息在稳定发布，重点看：
+
+1. `tracking`
+2. `nav_hold`
+3. `target_yaw / target_pitch`
+4. `target_position_map`
 
 ### 17.2 再确认云台接管链
 
@@ -891,18 +934,44 @@ ros2 param set /fake_decision_sim_inputs vision_target_pitch -0.10
 
 ### 17.3 再确认导航接管链
 
-开 RViz，依次执行：
+推荐开 RViz，并同时观察行为树日志。依次执行：
 
 ```bash
-ros2 param set /fake_decision_sim_inputs vision_suggested_goal_index 1
-ros2 param set /fake_decision_sim_inputs vision_suggested_goal_index 2
-ros2 param set /fake_decision_sim_inputs vision_suggested_goal_index -1
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_x 2.5
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_y 4.2
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_x -2.0
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_y -2.0
 ```
 
 预期应该是：
 
-1. 1 号点和 2 号点之间可以切换
-2. `-1` 时回退到锚点逻辑
+1. `/vision/target` 里的 `target_position_map` 会改变
+2. 日志里会出现新的 `Vision follow target=(...) selected_goal=(...)`
+3. 如果当前未到达新跟随点，会再次出现 `Send NavigateThroughPoses goal with 1 poses`
+
+你也可以同时确认 action 服务：
+
+```bash
+ros2 action info /navigate_through_poses
+```
+
+预期应该看到：
+
+1. client 包含 `/pb2025_sentry_behavior_server`
+2. server 包含 `/bt_navigator`
+
+### 17.3.1 再确认半径调参链
+
+执行：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.attack_radius 2.5
+```
+
+预期应该是：
+
+1. 日志里的 `attack_radius` 跟着变化
+2. `selected_goal` 会在目标周围更远或更近的位置重新选取
 
 ### 17.4 再确认回退链
 
@@ -920,20 +989,32 @@ ros2 param set /fake_decision_sim_inputs publish_vision_target false
 
 看机器人是否重新受 `decision/sim_mode` 控制。
 
+比较明确的现象通常是：
+
+1. `IsVisionTargetValid` 失败
+2. 日志里重新出现普通 patrol 路径，例如 `Send NavigateThroughPoses goal with 2 poses`
+
 ### 17.5 最后把“假消息验证”和“真视觉验证”区分开
 
 这里一定要分清：
 
-1. fake 节点里的 `vision_suggested_goal_index` 是直接注入，测的是行为树消费链
-2. `sp_vision25` 里的 `vision_fusion.*` 才是在测真实的第一代建议点策略
+1. fake 节点里的 `target_position_map` 是直接注入，测的是行为树消费链
+2. 当前 loopback 更适合验证“视觉消息接入后，行为树和 Nav2 会不会做出正确动作”
+3. 真视觉程序联调时，重点要验证的是 `sp_vision25 -> /vision/target -> target_position_map`
 
-所以如果你要测真视觉自动给点，还需要启动真视觉程序，再去观察：
+所以如果你要测真视觉地图级目标输出，还需要启动真视觉程序，再去观察：
 
 ```bash
 ros2 topic echo /vision/target
 ```
 
-重点看 `suggested_goal_index` 是否随目标方位自动变化。
+重点看：
+
+1. `target_position_map`
+2. `target_position_gimbal`
+3. `target_distance`
+
+是不是随着真实目标和机器人位姿变化而自动变化。
 
 ### 17.6 如何确认你现在用的是 colcon 版 `sp_vision25`
 

@@ -126,6 +126,15 @@
             <output_port name="selected_index" default="{vision_selected_goal_index}" type="int">Final selected vision goal index</output_port>
             <output_port name="path" default="{decision_path}" type="nav_msgs::msg::Path_&lt;std::allocator&lt;void&gt; &gt;">Vision support path</output_port>
         </Action>
+        <Action ID="SelectVisionFollowPath">
+            <input_port name="key_port" default="{@sp_vision_target}" type="sp_msgs::msg::VisionTargetMsg">Vision fusion message on blackboard</input_port>
+            <input_port name="current_pose" default="{@decision_current_pose}" type="geometry_msgs::msg::PoseStamped_&lt;std::allocator&lt;void&gt; &gt;">Current navigation pose</input_port>
+            <input_port name="current_costmap" default="{@nav_globalCostmap}" type="nav_msgs::msg::OccupancyGrid_&lt;std::allocator&lt;void&gt; &gt;">Global costmap used for point screening</input_port>
+            <input_port name="attack_radius" default="2.0" type="double">Desired follow radius around the vision target</input_port>
+            <input_port name="occupied_threshold" default="50" type="int">Costmap cells at or above this value are treated as blocked</input_port>
+            <input_port name="sample_count" default="16" type="int">Number of angular samples for the follow ring</input_port>
+            <output_port name="path" default="{decision_path}" type="nav_msgs::msg::Path_&lt;std::allocator&lt;void&gt; &gt;">Vision follow path</output_port>
+        </Action>
         <Action ID="SendNav2Goal">
             <input_port name="goal" default="0;0;0" type="geometry_msgs::msg::PoseStamped_&lt;std::allocator&lt;void&gt; &gt;">Expected goal pose that send to nav2. Fill with format `x;y;yaw`</input_port>
             <input_port name="action_name" type="std::string">Action server name</input_port>

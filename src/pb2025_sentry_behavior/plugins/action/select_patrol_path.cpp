@@ -78,6 +78,15 @@ BT::NodeStatus SelectPatrolPathAction::tick()
   nav_msgs::msg::Path path =
     decision::buildPathFromIndices(goal_points_, route_indices);
 
+  if (!path.poses.empty()) {
+    const auto & first_pose = path.poses.front().pose.position;
+    const auto & last_pose = path.poses.back().pose.position;
+    RCLCPP_INFO_THROTTLE(
+      logger_, *node_->get_clock(), 2000,
+      "Patrol path built with %zu poses: first=(%.2f, %.2f) last=(%.2f, %.2f)",
+      path.poses.size(), first_pose.x, first_pose.y, last_pose.x, last_pose.y);
+  }
+
   setOutput("path", path);
   setOutput("next_cursor", preview_cursor);
   setOutput("next_direction", preview_direction);

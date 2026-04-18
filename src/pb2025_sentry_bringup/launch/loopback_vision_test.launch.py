@@ -37,6 +37,9 @@ def generate_launch_description():
     vision_target_position_gimbal_z = LaunchConfiguration(
         "vision_target_position_gimbal_z"
     )
+    vision_target_position_map_x = LaunchConfiguration("vision_target_position_map_x")
+    vision_target_position_map_y = LaunchConfiguration("vision_target_position_map_y")
+    vision_target_position_map_z = LaunchConfiguration("vision_target_position_map_z")
 
     # 这是给视觉融合链专门准备的快捷入口：
     # 1. 默认加载 vision_test 行为树；
@@ -67,6 +70,9 @@ def generate_launch_description():
             "vision_target_position_gimbal_x": vision_target_position_gimbal_x,
             "vision_target_position_gimbal_y": vision_target_position_gimbal_y,
             "vision_target_position_gimbal_z": vision_target_position_gimbal_z,
+            "vision_target_position_map_x": vision_target_position_map_x,
+            "vision_target_position_map_y": vision_target_position_map_y,
+            "vision_target_position_map_z": vision_target_position_map_z,
         }.items(),
     )
 
@@ -133,7 +139,7 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "vision_tracking",
-            default_value="True",
+            default_value="False",
             description="假视觉是否认为当前已经稳定追踪到目标。",
         )
     )
@@ -212,6 +218,27 @@ def generate_launch_description():
             "vision_target_position_gimbal_z",
             default_value="0.0",
             description="假视觉目标在云台坐标系下的 z 坐标。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "vision_target_position_map_x",
+            default_value="0.0",
+            description="假视觉目标在地图坐标系下的 x 坐标。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "vision_target_position_map_y",
+            default_value="0.0",
+            description="假视觉目标在地图坐标系下的 y 坐标。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "vision_target_position_map_z",
+            default_value="0.0",
+            description="假视觉目标在地图坐标系下的 z 坐标。",
         )
     )
     ld.add_action(loopback_vision_test)

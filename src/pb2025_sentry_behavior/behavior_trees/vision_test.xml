@@ -13,9 +13,9 @@
                              duration="0.0"
                              gimbal_yaw="{vision_gimbal_yaw}"
                              gimbal_pitch="{vision_gimbal_pitch}"/>
-      <SelectVisionTargetPath suggested_goal_index="{vision_goal_index}"
-                              fallback_index="{@decision_anchor_target_index}"
-                              selected_index="{vision_selected_goal_index}"
+      <SelectVisionFollowPath key_port="{@sp_vision_target}"
+                              current_pose="{@decision_current_pose}"
+                              current_costmap="{@nav_globalCostmap}"
                               path="{decision_path}"/>
       <Fallback>
         <Sequence>
