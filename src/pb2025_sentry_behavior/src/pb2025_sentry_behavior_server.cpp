@@ -196,6 +196,14 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.vision.attack_radius", 2.0);
   declare_parameter("decision.vision.follow_occupied_threshold", 50);
   declare_parameter("decision.vision.follow_sample_count", 16);
+  declare_parameter("decision.vision.follow_arc_half_angle_deg", 90.0);
+  declare_parameter("decision.vision.min_replan_interval_s", 0.4);
+  declare_parameter("decision.vision.min_goal_shift_m", 0.35);
+  declare_parameter("decision.vision.visualization_enabled", true);
+  declare_parameter(
+    "decision.vision.visualization_topic", std::string("decision/vision_follow_markers"));
+  declare_parameter("decision.pose.expected_frame", std::string("map"));
+  declare_parameter("decision.pose.timeout_s", 0.5);
 
   declare_parameter("decision.time_thresholds.abundant", 300);
   declare_parameter("decision.time_thresholds.normal", 240);

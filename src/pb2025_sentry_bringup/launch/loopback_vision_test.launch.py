@@ -23,7 +23,6 @@ def generate_launch_description():
     vision_nav_hold = LaunchConfiguration("vision_nav_hold")
     vision_fire_permitted = LaunchConfiguration("vision_fire_permitted")
     vision_target_id = LaunchConfiguration("vision_target_id")
-    vision_suggested_goal_index = LaunchConfiguration("vision_suggested_goal_index")
     vision_confidence = LaunchConfiguration("vision_confidence")
     vision_target_distance = LaunchConfiguration("vision_target_distance")
     vision_target_yaw = LaunchConfiguration("vision_target_yaw")
@@ -40,6 +39,10 @@ def generate_launch_description():
     vision_target_position_map_x = LaunchConfiguration("vision_target_position_map_x")
     vision_target_position_map_y = LaunchConfiguration("vision_target_position_map_y")
     vision_target_position_map_z = LaunchConfiguration("vision_target_position_map_z")
+    vision_has_target_position_map = LaunchConfiguration("vision_has_target_position_map")
+    vision_target_position_map_frame = LaunchConfiguration(
+        "vision_target_position_map_frame"
+    )
 
     # 这是给视觉融合链专门准备的快捷入口：
     # 1. 默认加载 vision_test 行为树；
@@ -62,7 +65,6 @@ def generate_launch_description():
             "vision_nav_hold": vision_nav_hold,
             "vision_fire_permitted": vision_fire_permitted,
             "vision_target_id": vision_target_id,
-            "vision_suggested_goal_index": vision_suggested_goal_index,
             "vision_confidence": vision_confidence,
             "vision_target_distance": vision_target_distance,
             "vision_target_yaw": vision_target_yaw,
@@ -73,6 +75,8 @@ def generate_launch_description():
             "vision_target_position_map_x": vision_target_position_map_x,
             "vision_target_position_map_y": vision_target_position_map_y,
             "vision_target_position_map_z": vision_target_position_map_z,
+            "vision_has_target_position_map": vision_has_target_position_map,
+            "vision_target_position_map_frame": vision_target_position_map_frame,
         }.items(),
     )
 
@@ -166,13 +170,6 @@ def generate_launch_description():
     )
     ld.add_action(
         DeclareLaunchArgument(
-            "vision_suggested_goal_index",
-            default_value="-1",
-            description="假视觉直接指定的建议导航点编号，-1 表示回退到锚点。",
-        )
-    )
-    ld.add_action(
-        DeclareLaunchArgument(
             "vision_confidence",
             default_value="1.0",
             description="假视觉置信度。",
@@ -239,6 +236,20 @@ def generate_launch_description():
             "vision_target_position_map_z",
             default_value="0.0",
             description="假视觉目标在地图坐标系下的 z 坐标。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "vision_has_target_position_map",
+            default_value="True",
+            description="假视觉是否显式声明 target_position_map 有效。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "vision_target_position_map_frame",
+            default_value="map",
+            description="假视觉 target_position_map 所属 frame。",
         )
     )
     ld.add_action(loopback_vision_test)

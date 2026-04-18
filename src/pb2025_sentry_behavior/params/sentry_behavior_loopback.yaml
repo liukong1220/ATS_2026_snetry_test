@@ -52,6 +52,15 @@ pb2025_sentry_behavior_server:
         attack_radius: 2.0
         follow_occupied_threshold: 50
         follow_sample_count: 16
+        follow_arc_half_angle_deg: 90.0
+        min_replan_interval_s: 0.4
+        min_goal_shift_m: 0.35
+        visualization_enabled: true
+        visualization_topic: decision/vision_follow_markers
+
+      pose:
+        expected_frame: map
+        timeout_s: 0.5
 
       time_thresholds:
         abundant: 300

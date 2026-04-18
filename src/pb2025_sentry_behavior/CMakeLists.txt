@@ -99,11 +99,6 @@ ament_auto_add_library(select_fixed_path SHARED plugins/action/select_fixed_path
 list(APPEND plugin_libs select_fixed_path)
 
 ament_auto_add_library(
-  select_vision_target_path SHARED
-  plugins/action/select_vision_target_path.cpp)
-list(APPEND plugin_libs select_vision_target_path)
-
-ament_auto_add_library(
   select_vision_follow_path SHARED
   plugins/action/select_vision_follow_path.cpp)
 list(APPEND plugin_libs select_vision_follow_path)

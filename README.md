@@ -308,12 +308,13 @@ ros2 run sp_vision25 auto_aim_test assets/demo/demo
 
 ### 6.4 最新视觉跟随仿真调试
 
-当前最新版 loopback 视觉调试已经不再依赖 `vision_suggested_goal_index` 做路径规划，而是直接使用 `sp_vision` 提供的 `target_position_map` 生成跟随点。
+当前最新版 loopback 视觉调试已经完成第二轮瘦身：`vision_suggested_goal_index` 冗余链路已删除，路径规划直接使用 `sp_vision` 提供的 `target_position_map` 生成跟随点。
 
 推荐入口：
 
 - 详细调试手册见 [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
 - 架构与接口说明见 [docs/融合.md](./docs/融合.md)
+- 实机落地方案见 [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
 
 最常用启动命令：
 

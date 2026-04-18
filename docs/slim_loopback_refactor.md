@@ -751,15 +751,14 @@ ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py
 1. `tracking`
 2. `nav_hold`
 3. `target_id`
-4. `suggested_goal_index`
-5. `target_yaw`
-6. `target_pitch`
-7. `target_position_map`
+4. `target_yaw`
+5. `target_pitch`
+6. `target_position_map`
 
 这里需要特别说明：
 
-1. `suggested_goal_index` 仍然保留在消息里，便于兼容旧链路和调试观测
-2. 但当前 `vision_test.xml` 已经不再依赖它做路径规划
+1. 第二轮瘦身后，`suggested_goal_index` 已经从消息和 fake 输入中移除
+2. 当前 `vision_test.xml` 直接依赖 `target_position_map`
 3. 现在真正驱动视觉导航接管的是 `target_position_map`
 
 这意味着在没有真视觉程序时，loopback 已经可以先验证“视觉接管行为树 + 基于地图目标位置做跟随规划”的链路。
@@ -824,8 +823,6 @@ ros2 param set /fake_decision_sim_inputs vision_target_position_map_z 0.0
    用来观察导航是否围绕新的敌方位置重建跟随点。
 5. `publish_vision_target=false`
    用来模拟视觉话题中断。
-6. `vision_suggested_goal_index`
-   当前主要用于兼容旧链路和消息观测，不再是主路径规划入口。
 
 当前视觉跟随的主调参项则是：
 

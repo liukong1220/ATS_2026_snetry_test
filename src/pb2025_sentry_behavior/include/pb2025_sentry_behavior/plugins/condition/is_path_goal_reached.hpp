@@ -1,12 +1,15 @@
 #ifndef PB2025_SENTRY_BEHAVIOR__PLUGINS__CONDITION__IS_PATH_GOAL_REACHED_HPP_
 #define PB2025_SENTRY_BEHAVIOR__PLUGINS__CONDITION__IS_PATH_GOAL_REACHED_HPP_
 
+#include <memory>
 #include <string>
 
 #include "behaviortree_cpp/condition_node.h"
 #include "nav_msgs/msg/path.hpp"
 #include "pb2025_sentry_behavior/decision_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 namespace pb2025_sentry_behavior
 {
@@ -21,7 +24,10 @@ public:
 private:
   BT::NodeStatus tickCondition();
 
+  rclcpp::Node::SharedPtr node_;
   rclcpp::Logger logger_ = rclcpp::get_logger("IsPathGoalReachedCondition");
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   double path_tolerance_ = 0.2;
 };
 

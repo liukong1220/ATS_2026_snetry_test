@@ -15,6 +15,7 @@
 
 - [`/docs/视觉跟随仿真调试.md`](/home/ats/ats_sentry_ws/docs/视觉跟随仿真调试.md)
 - [`/docs/融合.md`](/home/ats/ats_sentry_ws/docs/融合.md)
+- [`/docs/实机视觉跟随优化方案.md`](/home/ats/ats_sentry_ws/docs/实机视觉跟随优化方案.md)
 
 ## 2. Quick Start
 

@@ -59,11 +59,8 @@ BT::NodeStatus IsVisionTargetValidCondition::tickCondition()
 
   setOutput("gimbal_yaw", vision_target->target_yaw);
   setOutput("gimbal_pitch", vision_target->target_pitch);
-  // 把目标编号和建议支援点也抛到黑板，
-  // 后续可以继续扩展成目标优先级、地图点选择等逻辑。
+  // 把目标编号抛到黑板，方便后续扩展目标优先级或开火策略。
   setOutput("target_id", static_cast<int>(vision_target->target_id));
-  setOutput(
-    "suggested_goal_index", static_cast<int>(vision_target->suggested_goal_index));
   return BT::NodeStatus::SUCCESS;
 }
 
@@ -78,9 +75,7 @@ BT::PortsList IsVisionTargetValidCondition::providedPorts()
       "require_nav_hold", true, "Require nav_hold=true before considering the target valid"),
     BT::OutputPort<float>("gimbal_yaw", "{vision_gimbal_yaw}", "Vision gimbal yaw command"),
     BT::OutputPort<float>("gimbal_pitch", "{vision_gimbal_pitch}", "Vision gimbal pitch command"),
-    BT::OutputPort<int>("target_id", "{vision_target_id}", "Current vision target id"),
-    BT::OutputPort<int>(
-      "suggested_goal_index", "{vision_goal_index}", "Suggested support goal index")};
+    BT::OutputPort<int>("target_id", "{vision_target_id}", "Current vision target id")};
 }
 
 }  // namespace pb2025_sentry_behavior

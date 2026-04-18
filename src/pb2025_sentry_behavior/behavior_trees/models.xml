@@ -76,14 +76,7 @@
             <output_port name="gimbal_yaw" type="float" default="{vision_gimbal_yaw}">Vision gimbal yaw command</output_port>
             <output_port name="gimbal_pitch" type="float" default="{vision_gimbal_pitch}">Vision gimbal pitch command</output_port>
             <output_port name="target_id" type="int" default="{vision_target_id}">Current vision target id</output_port>
-            <output_port name="suggested_goal_index" type="int" default="{vision_goal_index}">Suggested support goal index</output_port>
         </Condition>
-        <Action ID="SelectVisionTargetPath">
-            <input_port name="suggested_goal_index" type="int" default="{vision_goal_index}">Goal index suggested by vision</input_port>
-            <input_port name="fallback_index" type="int" default="{@decision_anchor_target_index}">Fallback goal index when vision does not provide a valid goal</input_port>
-            <output_port name="selected_index" type="int" default="{vision_selected_goal_index}">Final selected vision goal index</output_port>
-            <output_port name="path" type="nav_msgs::msg::Path_&lt;std::allocator&lt;void&gt; &gt;" default="{decision_path}">Vision support path</output_port>
-        </Action>
         <Action ID="SelectVisionFollowPath">
             <input_port name="key_port" type="sp_msgs::msg::VisionTargetMsg" default="{@sp_vision_target}">Vision fusion message on blackboard</input_port>
             <input_port name="current_pose" type="geometry_msgs::msg::PoseStamped_&lt;std::allocator&lt;void&gt; &gt;" default="{@decision_current_pose}">Current navigation pose</input_port>

@@ -7,8 +7,7 @@
                            require_nav_hold="true"
                            gimbal_yaw="{vision_gimbal_yaw}"
                            gimbal_pitch="{vision_gimbal_pitch}"
-                           target_id="{vision_target_id}"
-                           suggested_goal_index="{vision_goal_index}"/>
+                           target_id="{vision_target_id}"/>
       <PublishGimbalAbsolute topic_name="{@decision_gimbal_topic}"
                              duration="0.0"
                              gimbal_yaw="{vision_gimbal_yaw}"

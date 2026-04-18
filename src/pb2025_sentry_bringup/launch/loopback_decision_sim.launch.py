@@ -40,12 +40,15 @@ def generate_launch_description():
     vision_tracking = LaunchConfiguration("vision_tracking")
     vision_nav_hold = LaunchConfiguration("vision_nav_hold")
     vision_target_id = LaunchConfiguration("vision_target_id")
-    vision_suggested_goal_index = LaunchConfiguration("vision_suggested_goal_index")
     vision_target_yaw = LaunchConfiguration("vision_target_yaw")
     vision_target_pitch = LaunchConfiguration("vision_target_pitch")
     vision_target_position_map_x = LaunchConfiguration("vision_target_position_map_x")
     vision_target_position_map_y = LaunchConfiguration("vision_target_position_map_y")
     vision_target_position_map_z = LaunchConfiguration("vision_target_position_map_z")
+    vision_has_target_position_map = LaunchConfiguration("vision_has_target_position_map")
+    vision_target_position_map_frame = LaunchConfiguration(
+        "vision_target_position_map_frame"
+    )
 
     stdout_linebuf_envvar = SetEnvironmentVariable(
         "RCUTILS_LOGGING_BUFFERED_STREAM", "1"
@@ -168,12 +171,6 @@ def generate_launch_description():
         description="Fake vision target id.",
     )
 
-    declare_vision_suggested_goal_index_cmd = DeclareLaunchArgument(
-        "vision_suggested_goal_index",
-        default_value="-1",
-        description="Suggested navigation goal index from fake vision target.",
-    )
-
     declare_vision_target_yaw_cmd = DeclareLaunchArgument(
         "vision_target_yaw",
         default_value="0.0",
@@ -202,6 +199,16 @@ def generate_launch_description():
         "vision_target_position_map_z",
         default_value="0.0",
         description="Fake vision target map z position in meters.",
+    )
+    declare_vision_has_target_position_map_cmd = DeclareLaunchArgument(
+        "vision_has_target_position_map",
+        default_value="False",
+        description="Whether fake vision publishes a valid target_position_map.",
+    )
+    declare_vision_target_position_map_frame_cmd = DeclareLaunchArgument(
+        "vision_target_position_map_frame",
+        default_value="map",
+        description="Frame id used by fake vision target_position_map.",
     )
 
     static_tf_base_link_cmd = Node(
@@ -282,12 +289,13 @@ def generate_launch_description():
                 "vision_tracking": vision_tracking,
                 "vision_nav_hold": vision_nav_hold,
                 "vision_target_id": vision_target_id,
-                "vision_suggested_goal_index": vision_suggested_goal_index,
                 "vision_target_yaw": vision_target_yaw,
                 "vision_target_pitch": vision_target_pitch,
                 "vision_target_position_map_x": vision_target_position_map_x,
                 "vision_target_position_map_y": vision_target_position_map_y,
                 "vision_target_position_map_z": vision_target_position_map_z,
+                "vision_has_target_position_map": vision_has_target_position_map,
+                "vision_target_position_map_frame": vision_target_position_map_frame,
             }
         ],
         arguments=["--ros-args", "--log-level", log_level],
@@ -350,12 +358,13 @@ def generate_launch_description():
     ld.add_action(declare_vision_tracking_cmd)
     ld.add_action(declare_vision_nav_hold_cmd)
     ld.add_action(declare_vision_target_id_cmd)
-    ld.add_action(declare_vision_suggested_goal_index_cmd)
     ld.add_action(declare_vision_target_yaw_cmd)
     ld.add_action(declare_vision_target_pitch_cmd)
     ld.add_action(declare_vision_target_position_map_x_cmd)
     ld.add_action(declare_vision_target_position_map_y_cmd)
     ld.add_action(declare_vision_target_position_map_z_cmd)
+    ld.add_action(declare_vision_has_target_position_map_cmd)
+    ld.add_action(declare_vision_target_position_map_frame_cmd)
 
     ld.add_action(static_tf_base_link_cmd)
     ld.add_action(static_tf_base_scan_cmd)

@@ -50,7 +50,6 @@ class FakeDecisionSimInputs(Node):
         self.declare_parameter("vision_nav_hold", True)
         self.declare_parameter("vision_fire_permitted", False)
         self.declare_parameter("vision_target_id", 7)
-        self.declare_parameter("vision_suggested_goal_index", -1)
         self.declare_parameter("vision_confidence", 1.0)
         self.declare_parameter("vision_target_distance", 3.0)
         self.declare_parameter("vision_target_yaw", 0.0)
@@ -61,6 +60,8 @@ class FakeDecisionSimInputs(Node):
         self.declare_parameter("vision_target_position_map_x", 0.0)
         self.declare_parameter("vision_target_position_map_y", 0.0)
         self.declare_parameter("vision_target_position_map_z", 0.0)
+        self.declare_parameter("vision_has_target_position_map", False)
+        self.declare_parameter("vision_target_position_map_frame", "map")
 
         self.declare_parameter("robot_id", 7)
         self.declare_parameter("current_hp", 400)
@@ -296,9 +297,6 @@ class FakeDecisionSimInputs(Node):
         msg.nav_hold = bool(self.get_parameter("vision_nav_hold").value)
         msg.fire_permitted = bool(self.get_parameter("vision_fire_permitted").value)
         msg.target_id = int(self.get_parameter("vision_target_id").value)
-        msg.suggested_goal_index = int(
-            self.get_parameter("vision_suggested_goal_index").value
-        )
         msg.confidence = float(self.get_parameter("vision_confidence").value)
         msg.target_distance = float(
             self.get_parameter("vision_target_distance").value
@@ -322,6 +320,12 @@ class FakeDecisionSimInputs(Node):
         )
         msg.target_position_map.z = float(
             self.get_parameter("vision_target_position_map_z").value
+        )
+        msg.has_target_position_map = bool(
+            self.get_parameter("vision_has_target_position_map").value
+        )
+        msg.target_position_map_frame = str(
+            self.get_parameter("vision_target_position_map_frame").value
         )
         self.vision_target_pub.publish(msg)
 

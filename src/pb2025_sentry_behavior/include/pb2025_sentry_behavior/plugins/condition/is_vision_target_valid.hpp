@@ -12,7 +12,7 @@ namespace pb2025_sentry_behavior
 {
 
 // 判断视觉融合消息是否足够新鲜、是否允许接管导航，
-// 同时把云台 yaw/pitch 和建议导航点提取出来交给行为树后续节点使用。
+// 同时把云台 yaw/pitch 和目标编号提取出来交给行为树后续节点使用。
 class IsVisionTargetValidCondition : public BT::SimpleConditionNode
 {
 public:
