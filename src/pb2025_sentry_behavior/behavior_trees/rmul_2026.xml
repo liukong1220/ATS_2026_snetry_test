@@ -1,5 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <root BTCPP_format="4">
+  <BehaviorTree ID="vision_override_realtime">
+    <Sequence>
+      <IsVisionTargetValid key_port="{@sp_vision_target}"
+                           timeout_s="{@decision_vision_timeout_s}"
+                           require_nav_hold="true"
+                           gimbal_yaw="{vision_gimbal_yaw}"
+                           gimbal_pitch="{vision_gimbal_pitch}"
+                           target_id="{vision_target_id}"/>
+      <PublishGimbalAbsolute topic_name="{@decision_gimbal_topic}"
+                             duration="0.0"
+                             gimbal_yaw="{vision_gimbal_yaw}"
+                             gimbal_pitch="{vision_gimbal_pitch}"/>
+      <SelectVisionFollowPath key_port="{@sp_vision_target}"
+                              current_pose="{@decision_current_pose}"
+                              current_costmap="{@nav_globalCostmap}"
+                              path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
   <BehaviorTree ID="check_game_start">
     <Fallback>
       <IsGameStatus name="IsGameStart"
@@ -183,6 +212,8 @@
                             duration="0.0"
                             topic_name="{@decision_spin_topic}"/>
           <ReactiveFallback>
+            <SubTree ID="vision_override_realtime"/>
+
             <Sequence>
               <IsDecisionInputSource source="simulation"/>
               <SubTree ID="decision_simulation"/>

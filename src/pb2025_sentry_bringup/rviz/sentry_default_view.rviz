@@ -317,6 +317,33 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: waypoints
       Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 255; 48; 48
+      Enabled: true
+      History Length: 1
+      Name: VisionTargetPoint
+      Radius: 0.18000000715255737
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: vision/target_point_map
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: VisionFollowMarkers
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: decision/vision_follow_markers
+      Value: true
     - Class: rviz_default_plugins/Camera
       Enabled: false
       Far Plane Distance: 100
@@ -352,6 +379,8 @@ Visualization Manager:
         TerrainMap: true
         TrackerMarker: true
         Value: true
+        VisionFollowMarkers: true
+        VisionTargetPoint: true
         WayPoints: true
       Zoom Factor: 1
     - Class: rviz_default_plugins/Marker
