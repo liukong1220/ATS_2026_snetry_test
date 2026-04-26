@@ -15,6 +15,24 @@
 
 但建议先在 loopback 中把现象调顺，再同步到正式仿真和实车。
 
+## 官方参考
+
+本文关于参数定义、默认值和调参原则，优先参考 Nav2 官方 MPPI 文档：
+
+- Nav2 MPPI Controller 配置总览：
+  - https://docs.nav2.org/configuration/packages/configuring-mppic.html
+
+根据官方文档，下面几条尤其值得优先记住：
+
+1. `model_dt` 一般应与控制周期一致，通常不要大于控制周期。
+2. `iteration_count` 官方通常建议保持为 `1`，优先增加 `batch_size`。
+3. `batch_size` 的官方经验值大致是：
+   - 50Hz 时约 `1000`
+   - 30Hz 时约 `2000`
+4. `visualize` 很适合调试，但官方明确提醒它会增加控制器计算开销。
+5. `ObstaclesCritic.inflation_radius` 与 `cost_scaling_factor` 在 Humble 下应与 costmap inflation layer 保持一致。
+6. 官方特别提醒：很多实际问题，最先该检查的是运动模型、速度边界和 obstacle critic 与 inflation layer 的匹配关系，而不是先猛调 critic 权重。
+
 ## 为什么 MPPI 调参容易痛苦
 
 MPPI 不是单一 PID 参数，而是：
@@ -70,6 +88,13 @@ MPPI 不是单一 PID 参数，而是：
 
 ## 参数分组说明
 
+说明：
+
+- 每个参数先尽量按“官方定义/官方建议”理解
+- 再结合本项目中出现的现象做调参解释
+
+这样可以避免把项目经验误当成通用规律。
+
 ### 1. Goal Checker
 
 #### `xy_goal_tolerance`
@@ -77,6 +102,10 @@ MPPI 不是单一 PID 参数，而是：
 作用：
 
 - 终点位置容差，决定 Nav2 什么时候判定“到点”
+
+官方建议：
+
+- 官方文档没有给固定推荐值，应根据任务是否强调最终贴点精度决定。
 
 调大后的现象：
 
@@ -101,6 +130,10 @@ MPPI 不是单一 PID 参数，而是：
 
 - 预测步数
 - 与 `model_dt` 相乘后得到总预测时域
+
+官方定义：
+
+- `time_steps * model_dt` 就是 prediction horizon。
 
 公式：
 
@@ -141,6 +174,10 @@ prediction_horizon = time_steps * model_dt
 - 与控制频率一致
 - 如果 `controller_frequency = 20Hz`，则 `model_dt = 0.05`
 
+官方建议：
+
+- 一般不要比控制周期更大。
+
 一般不优先动它，除非整套控制频率都要重构。
 
 #### `batch_size`
@@ -148,6 +185,14 @@ prediction_horizon = time_steps * model_dt
 作用：
 
 - 每周期采样多少条候选轨迹
+
+官方建议：
+
+- `iteration_count` 保持 `1`
+- 优先通过增大 `batch_size` 改善效果
+- 经验值：
+  - `1000 @ 50Hz`
+  - `2000 @ 30Hz`
 
 调大后的现象：
 
@@ -171,6 +216,11 @@ prediction_horizon = time_steps * model_dt
 
 - 决定对“最优样本”的偏执程度
 
+官方定义：
+
+- 越接近 `0` 越偏向最低代价控制
+- 很大时会逐渐接近对所有轨迹取平均
+
 调小后的现象：
 
 - 更激进
@@ -192,6 +242,10 @@ prediction_horizon = time_steps * model_dt
 作用：
 
 - 对控制变化和控制能量的平滑正则
+
+官方建议：
+
+- 这是一个较复杂的参数，官方认为通常不需要偏离默认值太多。
 
 调小后的现象：
 
@@ -216,6 +270,10 @@ prediction_horizon = time_steps * model_dt
 作用：
 
 - MPPI 采样空间的硬边界
+
+官方建议：
+
+- 这组参数经常应作为最优先检查对象之一。
 
 重要提醒：
 
@@ -243,6 +301,10 @@ prediction_horizon = time_steps * model_dt
 作用：
 
 - 每周期在当前控制序列附近的采样扰动大小
+
+官方定义：
+
+- 对应 Vx / Vy / Wz 的高斯采样标准差。
 
 调大后的现象：
 
@@ -275,6 +337,10 @@ prediction_horizon = time_steps * model_dt
 - `threshold_to_consider`
 - `offset_from_furthest`
 
+官方定义：
+
+- 这是“路径对齐” critic，不是“路径跟随” critic。
+
 `cost_weight` 调大：
 
 - 更贴着局部路径走
@@ -300,6 +366,10 @@ prediction_horizon = time_steps * model_dt
 - 鼓励沿路径整体向前推进
 - 比 PathAlign 更柔和，不是死贴中心线
 
+官方定义：
+
+- 这是“路径跟随” critic，PathAlign 则偏向“路径对齐”。
+
 调大后的现象：
 
 - 走得更果断
@@ -316,6 +386,10 @@ prediction_horizon = time_steps * model_dt
 作用：
 
 - 惩罚轨迹朝向与路径前进方向严重不一致
+
+官方定义：
+
+- 用于极端失配或转向情形下的路径朝向一致性约束。
 
 关键参数：
 
@@ -344,6 +418,10 @@ prediction_horizon = time_steps * model_dt
 
 - 惩罚轨迹末端距离目标点太远
 
+官方定义：
+
+- 这是“朝目标位置收敛”的核心 critic。
+
 这项是终点收敛的核心参数。
 
 调大后的现象：
@@ -370,6 +448,10 @@ prediction_horizon = time_steps * model_dt
 
 - 惩罚终点附近朝向误差
 
+官方定义：
+
+- 用于在接近目标时鼓励达到目标姿态。
+
 如果任务不关心最终朝向：
 
 - 权重可适中
@@ -386,6 +468,11 @@ prediction_horizon = time_steps * model_dt
 作用：
 
 - 让 MPPI 躲开代价地图中的高代价区域
+
+官方建议：
+
+- `repulsion_weight` 的调节应结合 inflation layer 半径一起考虑。
+- `inflation_radius` 与 `cost_scaling_factor` 在 Humble 下应与 inflation layer 保持一致。
 
 常看参数：
 
@@ -414,6 +501,10 @@ prediction_horizon = time_steps * model_dt
 
 - 惩罚超出运动学约束、加速度约束的轨迹
 
+官方定义：
+
+- 用于惩罚超出动态或运动学约束的轨迹。
+
 通常：
 
 - 保持中等权重即可
@@ -425,6 +516,10 @@ prediction_horizon = time_steps * model_dt
 
 - 抑制原地乱转
 
+官方定义：
+
+- 用于惩罚不必要的旋转行为。
+
 现象：
 
 - 终点附近打圈明显时，可以适当增大
@@ -435,9 +530,24 @@ prediction_horizon = time_steps * model_dt
 
 - 惩罚特别小但不为零的控制量
 
+官方定义：
+
+- 用于惩罚速度死区附近的小幅控制输出。
+
 现象：
 
 - 它很适合解决“明明快停了还在轻微抽搐”
+
+## 官方建议优先级
+
+结合 Nav2 官方文档，建议优先检查顺序可以总结为：
+
+1. `motion_model` 是否与底盘一致
+2. `vx_max / vy_max / wz_max / vx_min` 等速度边界是否合理
+3. `model_dt` 是否与控制频率匹配
+4. `time_steps * model_dt` 的预测时域是否过长
+5. `ObstaclesCritic` 是否与 inflation layer 参数一致
+6. 在以上合理后，再细调路径类和目标类 critic
 
 ## 现象到参数的快速映射
 

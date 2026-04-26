@@ -95,11 +95,12 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      # xy_goal_tolerance:
+      # Parameter `xy_goal_tolerance`
       # 位置到点容差。增大后更容易判定“到点”，能减少终点附近来回试探；
       # 过大则会出现“还没真正贴近目标就提前结束”。
       xy_goal_tolerance: 0.35
-      # 这里哨兵巡逻不强调终点朝向，因此保持 2*pi，相当于不约束最终 yaw。
+      # Parameter `yaw_goal_tolerance`
+      # 当前巡逻任务不强调终点朝向，因此保持 2*pi，相当于不约束最终 yaw。
       yaw_goal_tolerance: 6.28
     # MPPI controller parameters (loopback simulation)
     # 这套参数是 loopback 决策仿真默认读取的 MPPI 配置，用于观察：
@@ -110,38 +111,48 @@ controller_server:
       plugin: "nav2_mppi_controller::MPPIController"
 
       # --- Motion model ---
-      # Omni: 全向底盘模型，可同时采样 vx / vy / wz。
+      # Parameter `motion_model`
+      # 官方 MPPI 支持 `DiffDrive`、`Omni`、`Ackermann` 等模型。
+      # 这里使用全向底盘模型，可同时采样 vx / vy / wz。
       motion_model: "Omni"
 
       # --- Optimizer settings ---
-      # time_steps * model_dt = 预测时域长度。
+      # Parameter `time_steps`
+      # 官方定义：`time_steps * model_dt` = prediction horizon。
       # 预测太长：容易在窄弯、终点附近“想太远”，可视化 rollout 发散。
       # 预测太短：局部最优，拐弯可能来不及提前收敛。
       time_steps: 35
-      # 控制离散步长。一般与 controller_frequency 对齐，这里 0.05 = 20Hz。
+      # Parameter `model_dt`
+      # 官方建议：一般与控制周期一致，通常不要大于控制周期。
       model_dt: 0.13
-      # batch_size: 每周期采样多少条轨迹。
+      # Parameter `batch_size`
+      # 每周期采样多少条轨迹。官方经验值大致为：
+      # 50Hz 时约 1000，30Hz 时约 2000；本项目需结合算力和频率折中。
       # 更大通常更稳，但更吃算力；过小会让最佳轨迹抖动明显。
       batch_size: 600
-      # temperature: softmax 温度。
+      # Parameter `temperature`
+      # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
       # 小：更激进，只盯最优样本，容易抖。
       # 大：更平滑，但也可能变钝。
       temperature: 0.25
-      # gamma: 控制序列平滑/能量正则项。
+      # Parameter `gamma`
+      # 官方说明：这是控制能量/平滑正则项，通常不需要偏离默认值太多。
       # 小：更愿意急打急停；大：更平滑，但可能转角收得慢。
       gamma: 0.035
-      # iteration_count:
-      # 一般 1 就够，增大能提高优化深度，但实时性会下降。
+      # Parameter `iteration_count`
+      # 官方建议通常保持为 1，优先通过增加 `batch_size` 而不是增加迭代次数来提效果。
       iteration_count: 1
-      # shift_control_sequence:
+      # Parameter `shift_control_sequence`
       # 用上周期最优控制序列平移后做 warm-start，可显著减少抖动。
       shift_control_sequence: true
-      # retry_attempt_limit:
+      # Parameter `retry_attempt_limit`
       # 若当前采样几乎全碰撞时，允许再尝试几次。loopback 中保持 1 足够。
       retry_attempt_limit: 1
 
       # --- Velocity constraints (loopback sim - TurtleBot3-like) ---
+      # Parameters `vx_max / vx_min / vy_max / vy_min / wz_max / wz_min`
       # 这些是 MPPI 采样空间的硬约束，不只是“实际最大速度”。
+      # 官方调参建议里，这组参数通常是最优先检查的对象之一。
       # 设得过大时，即使真实机器人跑不到，采样也会过分发散，导致 trajectories 乱飘。
       vx_max: 1.6
       vx_min: -1.6
@@ -151,6 +162,7 @@ controller_server:
       wz_min: -2.2
 
       # --- Sampling standard deviations ---
+      # Parameters `vx_std / vy_std / wz_std`
       # std 决定每周期围绕当前控制序列“抖多大”。
       # 过大：rollout 像扇形散开，中途和终点附近都容易左右试探。
       # 过小：会变得保守，局部最优卡住时不容易跳出来。
@@ -176,107 +188,133 @@ controller_server:
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        # PathAlignCritic:
+        # Parameter `PathAlignCritic.cost_weight`
         # 惩罚轨迹偏离路径中心线。
         # 大了会更“贴线”，但转角和障碍附近容易僵硬、来回修正。
         cost_weight: 10.0
-        # threshold_to_consider:
-        # 离终点较近时逐步弱化该 critic，避免终点还在死命贴路径导致蛇形。
+        # Parameter `PathAlignCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
+        # 在本项目中可将它理解为：路径贴合项在终段还要不要继续强势介入。
         threshold_to_consider: 0.7
-        # offset_from_furthest:
+        # Parameter `PathAlignCritic.offset_from_furthest`
         # 用路径前方多远的位置做贴线参考。大了看得更远，容易切弯；小了更保守。
         offset_from_furthest: 12
-        # trajectory_point_step:
+        # Parameter `PathAlignCritic.trajectory_point_step`
         # rollout 取样步长，越大越粗略但更省计算。
         trajectory_point_step: 4
+        # Parameter `PathAlignCritic.max_path_occupancy_ratio`
         # 当局部路径大量落在高占用区域时，不再强行贴线，避免“为贴线去撞障”。
         max_path_occupancy_ratio: 0.05
+        # Parameter `PathAlignCritic.use_path_orientations`
         # loopback 巡逻更关注位置，不强依赖路径姿态。
         use_path_orientations: false
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        # PathFollowCritic:
+        # Parameter `PathFollowCritic.cost_weight`
         # 鼓励沿路径整体往前推进，而不是只盯着贴中心线。
         # 它比 PathAlign 更“宽松”，更像“顺着大方向走”。
         cost_weight: 5.0
-        # 适当提高后，终点更早由 GoalCritic 接管，不会一直被路径项拽着跑。
+        # Parameter `PathFollowCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
+        # 在本项目中可理解为：终段时 PathFollow 还要不要继续主导推进。
         threshold_to_consider: 1.8
+        # Parameter `PathFollowCritic.offset_from_furthest`
         # 越大越倾向追逐更远的 follow 点，速度会快，但转角更容易 shortcut。
         offset_from_furthest: 4
       PathAngleCritic:
         enabled: true
         cost_power: 1
-        # PathAngleCritic:
+        # Parameter `PathAngleCritic.cost_weight`
         # 处理“轨迹朝向与路径前进方向严重不一致”的情况。
         # 它通常是抑制反向试探、横着切弯的重要项。
         cost_weight: 3.0
+        # Parameter `PathAngleCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 0.7
+        # Parameter `PathAngleCritic.offset_from_furthest`
         offset_from_furthest: 4
+        # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 允许的最大夹角，越小越严格。
         # 太小可能导致拐弯发僵；太大则反向/横漂更容易出现。
         max_angle_to_furthest: 0.75
+        # Parameter `PathAngleCritic.forward_preference`
         # 全向底盘不强行前向偏置，否则侧移优势会被压掉。
         forward_preference: false
       GoalCritic:
         enabled: true
         cost_power: 1
-        # GoalCritic:
+        # Parameter `GoalCritic.cost_weight`
         # 惩罚轨迹末端离目标点的距离，是“终点收敛”的第一核心参数。
         # 如果接近目标时还在左右晃，优先考虑提高它或提高它的生效距离。
         cost_weight: 8.0
-        # 值越大，越早进入“以目标点为主”的阶段，而不是继续死跟路径。
+        # Parameter `GoalCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
+        # 在本项目中可理解为：从多早开始让“贴终点”优先于“贴路径”。
         threshold_to_consider: 1.8
       GoalAngleCritic:
         enabled: true
         cost_power: 1
+        # Parameter `GoalAngleCritic.cost_weight`
         # 这里虽然不严格要求终点朝向，但保留适度角度约束能减少末端乱摆。
         cost_weight: 3.0
+        # Parameter `GoalAngleCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 0.7
+        # Parameter `GoalAngleCritic.symmetric_yaw_tolerance`
         # true 表示朝向误差按对称方式处理，适合这里“不关心最终面朝哪边”的场景。
         symmetric_yaw_tolerance: true
       ObstaclesCritic:
         enabled: true
         consider_footprint: true
         cost_power: 1
-        # repulsion_weight:
+        # Parameter `ObstaclesCritic.repulsion_weight`
+        # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
         # 越大越早躲障，但也更容易把可视化 trajectories 顶得离路径很远。
         repulsion_weight: 1.5
-        # critical_weight:
+        # Parameter `ObstaclesCritic.critical_weight`
         # 近碰撞区域的重惩罚，通常保持远大于一般路径 critic。
         critical_weight: 20.0
-        # collision_margin_distance:
+        # Parameter `ObstaclesCritic.collision_margin_distance`
         # 在真实碰撞边界外再加一层“心理安全距离”。
         collision_margin_distance: 0.1
-        # near_goal_distance:
+        # Parameter `ObstaclesCritic.near_goal_distance`
         # 终点附近降低障碍回避敏感度，避免“最后贴点时被微小代价场推开”。
         near_goal_distance: 0.5
-        # 这里要与 local_costmap inflation 参数大致一致，否则 critic 语义会错位。
+        # Parameter `ObstaclesCritic.inflation_radius`
+        # 官方文档明确要求：这里要与 costmap inflation layer 一致，否则 critic 语义会错位。
         inflation_radius: 0.55
         cost_scaling_factor: 3.0
       ConstraintCritic:
         enabled: true
         cost_power: 1
+        # Parameter `ConstraintCritic.cost_weight`
         # 惩罚违反速度/加速度等运动学约束的轨迹，通常保持中等权重即可。
         cost_weight: 4.0
       TwirlingCritic:
         enabled: true
         cost_power: 1
+        # Parameter `TwirlingCritic.cost_weight`
         # 抑制原地乱转。若看到临近终点疯狂转圈，可以适当增大。
         cost_weight: 10.0
       VelocityDeadbandCritic:
         enabled: true
         cost_power: 1
+        # Parameter `VelocityDeadbandCritic.cost_weight`
         # 惩罚“很小但非零”的速度，防止控制输出在死区附近来回抖。
         # 终点附近轻微抽搐时，这项通常很有用。
         cost_weight: 35.0
+        # Parameter `VelocityDeadbandCritic.deadband_velocities`
         deadband_velocities: [0.05, 0.05, 0.05]
 
       # --- Visualization ---
+      # Parameter `visualize`
       # 开启后 RViz 可查看 rollout 采样轨迹，是 MPPI 调参最重要的诊断窗口之一。
+      # 官方文档同时提醒：部署时保持 true 会增加算力开销，应谨慎使用。
       visualize: true
       TrajectoryVisualizer:
-        # trajectory_step / time_step 越大，显示越稀疏；便于看趋势，不影响控制本身。
+        # Parameters `TrajectoryVisualizer.trajectory_step / TrajectoryVisualizer.time_step`
+        # 越大，显示越稀疏；便于看趋势，不影响控制本身。
         trajectory_step: 5
         time_step: 3
 
@@ -289,6 +327,7 @@ local_costmap:
       robot_base_frame: base_link
       use_sim_time: True
       rolling_window: true
+      # Parameters `local_costmap.width / local_costmap.height`
       # local_costmap 的窗口至少要能覆盖 MPPI 的主要预测范围。
       # 如果局部地图比 rollout 还短，就会出现“预测总顶到边界”的假性发散。
       width: 5

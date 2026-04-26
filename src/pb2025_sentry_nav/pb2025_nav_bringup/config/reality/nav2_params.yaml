@@ -350,8 +350,10 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
+      # Parameter `xy_goal_tolerance`
       # 终点位置容差。实车上太小会导致贴点时反复修正，太大则会提前判定到点。
       xy_goal_tolerance: 0.15
+      # Parameter `yaw_goal_tolerance`
       # 当前巡逻/导航任务默认不强约束最终朝向，因此保持 2*pi。
       yaw_goal_tolerance: 6.28
     FollowPath:
@@ -360,28 +362,39 @@ controller_server:
       # 推荐先结合 docs/mppi_parameter_tuning_guide.md 阅读，再在这份文件上微调。
 
       # --- Motion model ---
-      # 全向底盘模型，可同时优化 vx / vy / wz。
+      # Parameter `motion_model`
+      # 官方 MPPI 支持 `DiffDrive`、`Omni`、`Ackermann` 等模型。
+      # 这里使用全向底盘模型，可同时优化 vx / vy / wz。
       motion_model: "Omni"
 
       # --- Optimizer settings ---
-      # time_steps * model_dt = MPPI 预测总时域。
+      # Parameter `time_steps`
+      # 官方定义：`time_steps * model_dt` = prediction horizon。
       # 实车上时域过长时，转角和终点附近容易“想太远”；过短则提前量不足。
       time_steps: 30                     # Horizon T = 30 steps (1.5s at 20Hz)
-      # 与 20Hz 控制频率对齐，通常不单独修改。
+      # Parameter `model_dt`
+      # 官方建议：一般与控制周期一致，通常不要大于控制周期。
       model_dt: 0.05                     # 1/20 Hz
-      # 每周期采样轨迹数。大一些通常更稳，但会提高算力开销。
+      # Parameter `batch_size`
+      # 每周期采样轨迹数。官方经验值大致为：
+      # 50Hz 时约 1000，30Hz 时约 2000；本项目需结合板载算力取折中。
       batch_size: 750                    # K = 750 samples (real robot)
-      # temperature 越小越激进，越大越平滑。
+      # Parameter `temperature`
+      # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
       temperature: 0.15                  # Softmax temperature
-      # gamma 是控制平滑正则项。增大更顺滑，减小更敢猛打控制。
+      # Parameter `gamma`
+      # 官方说明：这是控制能量/平滑正则项，通常不需要偏离默认值太多。
       gamma: 0.015                       # Discount factor
       iteration_count: 1                 # Single MPPI iteration per control cycle
+      # Parameter `shift_control_sequence`
       # 使用上周期最优控制序列平移后做 warm-start，可明显减少控制抖动。
       shift_control_sequence: true       # Warm-start with shifted prior sequence
       retry_attempt_limit: 1             # Single fallback on all-collision
 
       # --- Velocity constraints (reality) ---
+      # Parameters `vx_max / vx_min / vy_max / vy_min / wz_max / wz_min`
       # 这是 MPPI 的采样边界，不只是“车能跑多快”。
+      # 官方调参建议里，这组参数通常是最优先检查的对象之一。
       # 如果这里设得远大于当前地形/底盘实际可控范围，rollout 会明显发散。
       vx_max: 4.5
       vx_min: -4.5
@@ -391,6 +404,7 @@ controller_server:
       wz_min: -3.0
 
       # --- Sampling standard deviations ---
+      # Parameters `vx_std / vy_std / wz_std`
       # std 越大，探索越强，但 trajectories 更容易扇形散开；
       # std 越小，更稳但更保守。
       vx_std: 0.5
@@ -415,10 +429,13 @@ controller_server:
       PathAlignCritic:
         enabled: true
         cost_power: 1
+        # Parameter `PathAlignCritic.cost_weight`
         # 惩罚偏离路径中心线。大了更贴线，但转角更僵、更容易来回修正。
         cost_weight: 14.0
-        # 离终点较近时逐步弱化路径贴合要求，避免最后还被路径项死拽着跑。
+        # Parameter `PathAlignCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 0.5
+        # Parameter `PathAlignCritic.offset_from_furthest`
         # 看向路径前方多远的位置做对齐参考。大了会更想切弯、更激进。
         offset_from_furthest: 20
         trajectory_point_step: 4
@@ -427,69 +444,92 @@ controller_server:
       PathFollowCritic:
         enabled: true
         cost_power: 1
+        # Parameter `PathFollowCritic.cost_weight`
         # 鼓励整体沿路径前进，比 PathAlign 更柔和。
         cost_weight: 6.0
-        # 值更大时，GoalCritic 会更早接管终点收敛。
+        # Parameter `PathFollowCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 1.4
         offset_from_furthest: 5
       PathAngleCritic:
         enabled: true
         cost_power: 1
+        # Parameter `PathAngleCritic.cost_weight`
         # 处理轨迹朝向与路径方向严重不一致的问题，是抑制反向试探的重要项。
         cost_weight: 2.0
+        # Parameter `PathAngleCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 0.5
         offset_from_furthest: 4
+        # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 越小越严格。太小会拐角发僵，太大则更容易横漂或反向抽动。
         max_angle_to_furthest: 1.0
         forward_preference: false
       GoalCritic:
         enabled: true
         cost_power: 1
+        # Parameter `GoalCritic.cost_weight`
         # 终点位置收敛的核心参数。终点前左右摆动时优先看它。
         cost_weight: 5.0
-        # 增大后更早进入“以终点为主”的阶段，而不是继续死跟路径。
+        # Parameter `GoalCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 1.4
       GoalAngleCritic:
         enabled: true
         cost_power: 1
+        # Parameter `GoalAngleCritic.cost_weight`
         # 虽然不强约束最终朝向，但保留适中角度代价能减少末端乱摆。
         cost_weight: 3.0
+        # Parameter `GoalAngleCritic.threshold_to_consider`
+        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 0.5
         symmetric_yaw_tolerance: true
       ObstaclesCritic:
         enabled: true
         consider_footprint: true
         cost_power: 1
-        # repulsion_weight 越大越早躲障，但也更容易被障碍代价场推离路径。
+        # Parameter `ObstaclesCritic.repulsion_weight`
+        # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
+        # 数值越大越早躲障，但也更容易被障碍代价场推离路径。
         repulsion_weight: 1.5
+        # Parameter `ObstaclesCritic.critical_weight`
         # 近碰撞的强惩罚，通常应明显大于其他路径 critic。
         critical_weight: 20.0
+        # Parameter `ObstaclesCritic.collision_margin_distance`
         # 在真实碰撞边界外再留一层安全距离。
         collision_margin_distance: 0.1
+        # Parameter `ObstaclesCritic.near_goal_distance`
         # 终点附近适度降低障碍回避敏感度，避免贴点时被代价场轻微推开。
         near_goal_distance: 0.5
-        # 这里建议与 local_costmap inflation 近似一致，否则 critic 语义会错位。
+        # Parameter `ObstaclesCritic.inflation_radius`
+        # 官方文档明确要求：这里应与 costmap inflation layer 保持一致。
         inflation_radius: 0.4
         cost_scaling_factor: 4.0
       ConstraintCritic:
         enabled: true
         cost_power: 1
+        # Parameter `ConstraintCritic.cost_weight`
         # 惩罚违反速度/加速度等约束的轨迹，通常保持中等权重即可。
         cost_weight: 4.0
       TwirlingCritic:
         enabled: true
         cost_power: 1
+        # Parameter `TwirlingCritic.cost_weight`
         # 抑制原地转圈。终点附近疯狂打圈时可适度增大。
         cost_weight: 10.0
       VelocityDeadbandCritic:
         enabled: true
         cost_power: 1
+        # Parameter `VelocityDeadbandCritic.cost_weight`
         # 抑制死区附近的小幅抖动，特别适合解决“快停下时还在抽搐”。
         cost_weight: 35.0
+        # Parameter `VelocityDeadbandCritic.deadband_velocities`
         deadband_velocities: [0.05, 0.05, 0.05]
 
       # --- Visualization ---
+      # Parameter `visualize`
       # 实车联调时建议保留，可配合 RViz 查看 rollout 是否发散。
+      # 官方文档同时提醒：部署时保持 true 会增加算力开销，应谨慎使用。
       visualize: true
       TrajectoryVisualizer:
         trajectory_step: 5
