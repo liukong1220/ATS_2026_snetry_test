@@ -18,6 +18,11 @@ IsPathGoalReachedCondition::IsPathGoalReachedCondition(
 
 BT::NodeStatus IsPathGoalReachedCondition::tickCondition()
 {
+  auto goal_succeeded = getInput<bool>("goal_succeeded");
+  if (goal_succeeded) {
+    return *goal_succeeded ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+  }
+
   auto path = getInput<nav_msgs::msg::Path>("path");
   auto current_pose = getInput<geometry_msgs::msg::PoseStamped>("current_pose");
   if (!path || !current_pose || path->poses.empty()) {

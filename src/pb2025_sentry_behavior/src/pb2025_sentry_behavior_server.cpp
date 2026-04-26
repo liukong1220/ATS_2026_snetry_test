@@ -232,7 +232,7 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.decision_config.decision_period_ms", 100);
   declare_parameter("decision.decision_config.goal_position_tolerance", 0.1);
   declare_parameter("decision.decision_config.waypoint_stop_duration_s", 0.0);
-  declare_parameter("decision.decision_config.patrol_preview_points", 2);
+  declare_parameter("decision.decision_config.patrol_preview_points", 1);
   declare_parameter("decision.decision_config.action_server_wait_timeout_s", 0.5);
 }
 

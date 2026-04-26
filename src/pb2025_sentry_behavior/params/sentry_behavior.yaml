@@ -91,8 +91,8 @@ pb2025_sentry_behavior_server:
         nav2_action_server: "/navigate_through_poses"
         decision_period_ms: 100
         goal_position_tolerance: 0.2
-        waypoint_stop_duration_s: 0.0
-        patrol_preview_points: 2
+        waypoint_stop_duration_s: 0.3
+        patrol_preview_points: 1
         action_server_wait_timeout_s: 0.5
 
 pb2025_sentry_behavior_client:

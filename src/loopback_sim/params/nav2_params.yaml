@@ -71,14 +71,14 @@ bt_navigator_navigate_to_pose_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: True
+    odom_topic: /odom
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.5
+    min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
-    progress_checker_plugin: "progress_checker"
+    progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"] # "precise_goal_checker"
-    current_goal_checker: "general_goal_checker"
     controller_plugins: ["FollowPath"]
 
     # Progress checker parameters
@@ -95,50 +95,190 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
-    # DWB parameters
+      # xy_goal_tolerance:
+      # 位置到点容差。增大后更容易判定“到点”，能减少终点附近来回试探；
+      # 过大则会出现“还没真正贴近目标就提前结束”。
+      xy_goal_tolerance: 0.35
+      # 这里哨兵巡逻不强调终点朝向，因此保持 2*pi，相当于不约束最终 yaw。
+      yaw_goal_tolerance: 6.28
+    # MPPI controller parameters (loopback simulation)
+    # 这套参数是 loopback 决策仿真默认读取的 MPPI 配置，用于观察：
+    # 1. trajectories 是否稳定贴近 transformed_global_plan
+    # 2. 转角处是否左右试探 / 反向抽动
+    # 3. 终点附近是否蛇形摆动或 overshoot
     FollowPath:
-      plugin: "dwb_core::DWBLocalPlanner"
-      debug_trajectory_details: True
-      min_vel_x: 0.0
-      min_vel_y: 0.0
-      max_vel_x: 0.26
-      max_vel_y: 0.0
-      max_vel_theta: 1.0
-      min_speed_xy: 0.0
-      max_speed_xy: 0.26
-      min_speed_theta: 0.0
-      # Add high threshold velocity for turtlebot 3 issue.
-      # https://github.com/ROBOTIS-GIT/turtlebot3_simulations/issues/75
-      acc_lim_x: 2.5
-      acc_lim_y: 0.0
-      acc_lim_theta: 3.2
-      decel_lim_x: -2.5
-      decel_lim_y: 0.0
-      decel_lim_theta: -3.2
-      vx_samples: 20
-      vy_samples: 5
-      vtheta_samples: 20
-      sim_time: 1.7
-      linear_granularity: 0.05
-      angular_granularity: 0.025
-      transform_tolerance: 0.2
-      xy_goal_tolerance: 0.25
-      trans_stopped_velocity: 0.25
-      short_circuit_trajectory_evaluation: True
-      stateful: True
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
-      PathAlign.scale: 32.0
-      PathAlign.forward_point_distance: 0.1
-      GoalAlign.scale: 24.0
-      GoalAlign.forward_point_distance: 0.1
-      PathDist.scale: 32.0
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 32.0
-      RotateToGoal.slowing_factor: 5.0
-      RotateToGoal.lookahead_time: -1.0
+      plugin: "nav2_mppi_controller::MPPIController"
+
+      # --- Motion model ---
+      # Omni: 全向底盘模型，可同时采样 vx / vy / wz。
+      motion_model: "Omni"
+
+      # --- Optimizer settings ---
+      # time_steps * model_dt = 预测时域长度。
+      # 预测太长：容易在窄弯、终点附近“想太远”，可视化 rollout 发散。
+      # 预测太短：局部最优，拐弯可能来不及提前收敛。
+      time_steps: 35
+      # 控制离散步长。一般与 controller_frequency 对齐，这里 0.05 = 20Hz。
+      model_dt: 0.13
+      # batch_size: 每周期采样多少条轨迹。
+      # 更大通常更稳，但更吃算力；过小会让最佳轨迹抖动明显。
+      batch_size: 600
+      # temperature: softmax 温度。
+      # 小：更激进，只盯最优样本，容易抖。
+      # 大：更平滑，但也可能变钝。
+      temperature: 0.25
+      # gamma: 控制序列平滑/能量正则项。
+      # 小：更愿意急打急停；大：更平滑，但可能转角收得慢。
+      gamma: 0.035
+      # iteration_count:
+      # 一般 1 就够，增大能提高优化深度，但实时性会下降。
+      iteration_count: 1
+      # shift_control_sequence:
+      # 用上周期最优控制序列平移后做 warm-start，可显著减少抖动。
+      shift_control_sequence: true
+      # retry_attempt_limit:
+      # 若当前采样几乎全碰撞时，允许再尝试几次。loopback 中保持 1 足够。
+      retry_attempt_limit: 1
+
+      # --- Velocity constraints (loopback sim - TurtleBot3-like) ---
+      # 这些是 MPPI 采样空间的硬约束，不只是“实际最大速度”。
+      # 设得过大时，即使真实机器人跑不到，采样也会过分发散，导致 trajectories 乱飘。
+      vx_max: 1.6
+      vx_min: -1.6
+      vy_max: 1.6
+      vy_min: -1.6
+      wz_max: 2.2
+      wz_min: -2.2
+
+      # --- Sampling standard deviations ---
+      # std 决定每周期围绕当前控制序列“抖多大”。
+      # 过大：rollout 像扇形散开，中途和终点附近都容易左右试探。
+      # 过小：会变得保守，局部最优卡住时不容易跳出来。
+      vx_std: 0.25
+      vy_std: 0.25
+      wz_std: 0.40
+
+      # --- Critics ---
+      # critics 是代价项列表。MPPI 会综合这些 critic 给每条采样轨迹打分。
+      # 一般不要一口气同时改很多 critic，建议一次只改 1~2 个核心项。
+      critics: [
+        "PathAlignCritic",
+        "PathFollowCritic",
+        "PathAngleCritic",
+        "GoalCritic",
+        "GoalAngleCritic",
+        "ObstaclesCritic",
+        "ConstraintCritic",
+        "TwirlingCritic",
+        "VelocityDeadbandCritic"
+      ]
+
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        # PathAlignCritic:
+        # 惩罚轨迹偏离路径中心线。
+        # 大了会更“贴线”，但转角和障碍附近容易僵硬、来回修正。
+        cost_weight: 10.0
+        # threshold_to_consider:
+        # 离终点较近时逐步弱化该 critic，避免终点还在死命贴路径导致蛇形。
+        threshold_to_consider: 0.7
+        # offset_from_furthest:
+        # 用路径前方多远的位置做贴线参考。大了看得更远，容易切弯；小了更保守。
+        offset_from_furthest: 12
+        # trajectory_point_step:
+        # rollout 取样步长，越大越粗略但更省计算。
+        trajectory_point_step: 4
+        # 当局部路径大量落在高占用区域时，不再强行贴线，避免“为贴线去撞障”。
+        max_path_occupancy_ratio: 0.05
+        # loopback 巡逻更关注位置，不强依赖路径姿态。
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        # PathFollowCritic:
+        # 鼓励沿路径整体往前推进，而不是只盯着贴中心线。
+        # 它比 PathAlign 更“宽松”，更像“顺着大方向走”。
+        cost_weight: 5.0
+        # 适当提高后，终点更早由 GoalCritic 接管，不会一直被路径项拽着跑。
+        threshold_to_consider: 1.8
+        # 越大越倾向追逐更远的 follow 点，速度会快，但转角更容易 shortcut。
+        offset_from_furthest: 4
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        # PathAngleCritic:
+        # 处理“轨迹朝向与路径前进方向严重不一致”的情况。
+        # 它通常是抑制反向试探、横着切弯的重要项。
+        cost_weight: 3.0
+        threshold_to_consider: 0.7
+        offset_from_furthest: 4
+        # 允许的最大夹角，越小越严格。
+        # 太小可能导致拐弯发僵；太大则反向/横漂更容易出现。
+        max_angle_to_furthest: 0.75
+        # 全向底盘不强行前向偏置，否则侧移优势会被压掉。
+        forward_preference: false
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        # GoalCritic:
+        # 惩罚轨迹末端离目标点的距离，是“终点收敛”的第一核心参数。
+        # 如果接近目标时还在左右晃，优先考虑提高它或提高它的生效距离。
+        cost_weight: 8.0
+        # 值越大，越早进入“以目标点为主”的阶段，而不是继续死跟路径。
+        threshold_to_consider: 1.8
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        # 这里虽然不严格要求终点朝向，但保留适度角度约束能减少末端乱摆。
+        cost_weight: 3.0
+        threshold_to_consider: 0.7
+        # true 表示朝向误差按对称方式处理，适合这里“不关心最终面朝哪边”的场景。
+        symmetric_yaw_tolerance: true
+      ObstaclesCritic:
+        enabled: true
+        consider_footprint: true
+        cost_power: 1
+        # repulsion_weight:
+        # 越大越早躲障，但也更容易把可视化 trajectories 顶得离路径很远。
+        repulsion_weight: 1.5
+        # critical_weight:
+        # 近碰撞区域的重惩罚，通常保持远大于一般路径 critic。
+        critical_weight: 20.0
+        # collision_margin_distance:
+        # 在真实碰撞边界外再加一层“心理安全距离”。
+        collision_margin_distance: 0.1
+        # near_goal_distance:
+        # 终点附近降低障碍回避敏感度，避免“最后贴点时被微小代价场推开”。
+        near_goal_distance: 0.5
+        # 这里要与 local_costmap inflation 参数大致一致，否则 critic 语义会错位。
+        inflation_radius: 0.55
+        cost_scaling_factor: 3.0
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        # 惩罚违反速度/加速度等运动学约束的轨迹，通常保持中等权重即可。
+        cost_weight: 4.0
+      TwirlingCritic:
+        enabled: true
+        cost_power: 1
+        # 抑制原地乱转。若看到临近终点疯狂转圈，可以适当增大。
+        cost_weight: 10.0
+      VelocityDeadbandCritic:
+        enabled: true
+        cost_power: 1
+        # 惩罚“很小但非零”的速度，防止控制输出在死区附近来回抖。
+        # 终点附近轻微抽搐时，这项通常很有用。
+        cost_weight: 35.0
+        deadband_velocities: [0.05, 0.05, 0.05]
+
+      # --- Visualization ---
+      # 开启后 RViz 可查看 rollout 采样轨迹，是 MPPI 调参最重要的诊断窗口之一。
+      visualize: true
+      TrajectoryVisualizer:
+        # trajectory_step / time_step 越大，显示越稀疏；便于看趋势，不影响控制本身。
+        trajectory_step: 5
+        time_step: 3
 
 local_costmap:
   local_costmap:
@@ -149,8 +289,10 @@ local_costmap:
       robot_base_frame: base_link
       use_sim_time: True
       rolling_window: true
-      width: 3
-      height: 3
+      # local_costmap 的窗口至少要能覆盖 MPPI 的主要预测范围。
+      # 如果局部地图比 rollout 还短，就会出现“预测总顶到边界”的假性发散。
+      width: 5
+      height: 5
       resolution: 0.05
       robot_radius: 0.22
       plugins: ["voxel_layer", "inflation_layer"]
@@ -300,8 +442,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.26, 0.0, 1.0]
-    min_velocity: [-0.26, 0.0, -1.0]
+    max_velocity: [2.0, 0.0, 1.0]
+    min_velocity: [-2.0, 0.0, -1.0]
     max_accel: [2.5, 0.0, 3.2]
     max_decel: [-2.5, 0.0, -3.2]
     odom_topic: "odom"

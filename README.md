@@ -350,7 +350,157 @@ ros2 param set /pb2025_sentry_behavior_server decision.vision.attack_radius 2.5
 ros2 param set /fake_decision_sim_inputs vision_tracking false
 ```
 
-## 7. 常见问题
+## 7. 局部控制器：MPPI 配置与调优
+
+本项目已从 PID 纯追踪控制器迁移到 MPPI 模型预测路径积分控制器 (`nav2_mppi_controller::MPPIController`)。当前默认工作流仅保留 MPPI 这一条局部控制链路，用于后续统一迭代与调参。
+
+### 7.1 MPPI 概述
+
+```
+MPPI 工作流程:
+  1. 在当前速度周围采样 K 条控制序列（vx, vy, omega）
+  2. 用运动模型将每条序列前向推演 T 步
+  3. 对每条轨迹评估代价（路径偏离 + 障碍物 + 目标 + 平滑性）
+  4. 通过 softmax 加权平均得到最优控制
+  5. 将最优序列平移一步，作为下一周期的初始猜测（warm-start）
+```
+
+相比 PID 纯追踪的主要优势：
+
+| 特性 | PID 纯追踪 | MPPI |
+|------|-----------|------|
+| 预测能力 | 仅看一个前瞻点 | 前向推演 T 步（1.5s） |
+| 转弯处理 | 曲率限速（被动减速） | 采样优化（主动选择最优轨迹） |
+| 全向运动 | 解耦控制 v/ω | 联合优化 vx, vy, ω |
+| 超调 | 高速急转易超调 | 预测性减速，大幅减少超调 |
+| 多目标优化 | 单一误差最小化 | 多代价函数加权（路径 + 障碍物 + 目标 + 平滑） |
+| 调参 | PID 三参数 × 2 | 代价权重（直观可解释） |
+
+### 7.2 在新电脑上部署
+
+MPPI 控制器是 ROS 2 Humble 官方包，无需额外编译：
+
+```bash
+# 确认已安装
+sudo apt install ros-humble-nav2-mppi-controller
+
+# 验证插件可用
+ls /opt/ros/humble/lib/libmppi_controller.so
+ls /opt/ros/humble/lib/libmppi_critics.so
+```
+
+如果你的系统已经完整安装了 ROS 2 Humble 导航栈（`ros-humble-navigation2`），MPPI 包已经包含在内。构建工作区时不需要额外步骤——只有 YAML 配置文件被修改，会随 `colcon build --symlink-install` 自动生效。
+
+如果在 `controller_server` 启动时遇到找不到 MPPI 插件的错误：
+
+```bash
+# 确认插件注册
+cat /opt/ros/humble/share/nav2_mppi_controller/mppic.xml
+
+# 如果缺失，手动安装
+sudo apt install -y ros-humble-nav2-mppi-controller
+```
+
+### 7.3 配置文件位置
+
+- **仿真环境**: `src/pb2025_sentry_nav/pb2025_nav_bringup/config/simulation/nav2_params.yaml`
+- **实车环境**: `src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`
+- **Loopback 仿真**: `src/loopback_sim/params/nav2_params.yaml`
+
+关键配置段落（以实车为例）：
+
+```yaml
+FollowPath:
+  plugin: "nav2_mppi_controller::MPPIController"
+  motion_model: "Omni"              # 全向底盘
+  time_steps: 30                    # 前向推演步数 (1.5s @ 20Hz)
+  batch_size: 750                   # 采样轨迹数（实车）
+  temperature: 0.15                 # softmax 温度：越小越倾向于低成本轨迹
+  vx_std: 0.5 / vy_std: 0.5 / wz_std: 0.8   # 采样噪声标准差
+  critics: ["PathAlignCritic", ...] # 启用的代价函数列表
+```
+
+### 7.4 调参指南
+
+#### 7.4.1 调参顺序
+
+按以下顺序逐步调优，每步验证后再进入下一步：
+
+1. **先跑通基本路径跟踪** — 只启用 `PathAlignCritic` + `GoalCritic` + `ObstaclesCritic`，确认机器人能跟踪路径并避开障碍物
+2. **调路径对齐** — 增大 `PathAlignCritic.weight` 如果机器人偏离路径；减小如果路径跟踪过于僵硬
+3. **调转弯平滑性** — 增大 `wz_std` 如果在转弯处不够灵活；减小如果转弯时抖动
+4. **调全向行为** — 启用 `TwirlingCritic`（weight: 10-20）抑制不必要的原地旋转
+5. **调终点收敛** — 调 `GoalCritic.weight` 和 `GoalAngleCritic.weight` 控制最终停靠精度
+6. **调计算性能** — 如果 controller_server 掉频，减小 `batch_size` 或 `time_steps`
+
+#### 7.4.2 核心参数说明
+
+| 参数 | 效果 | 调大 | 调小 |
+|------|------|------|------|
+| `temperature` | Softmax 选择锐度 | 更激进，接近最优轨迹 | 更保守，融合更多采样 |
+| `batch_size` | 采样数量 | 更平滑的控制 | 更快的计算 |
+| `time_steps` | 前向视野 | 更早规划转弯 | 响应更快 |
+| `vx_std / vy_std / wz_std` | 探索范围 | 更多样化的轨迹 | 更稳定的控制 |
+| `gamma` | 远视折扣 | 更多关注远期目标 | 更多关注近期路径 |
+
+#### 7.4.3 代价权重调优
+
+权重越大，该代价项的优先级越高：
+
+- `PathAlignCritic.weight: 15` — 如果机器人走偏，增大此值
+- `GoalCritic.weight: 10` — 如果不及时停靠，增大此值
+- `ObstaclesCritic.weight: 50` — 安全第一！不应大幅下调
+- `TwirlingCritic.weight: 15` — 如果机器人原地打转，增大此值
+- `ConstraintCritic.weight: 5` — 如果速度指令超限频繁，增大此值
+
+#### 7.4.4 运行时动态调参
+
+无需重启即可调整大部分参数：
+
+```bash
+# 调整采样数量
+ros2 param set /controller_server FollowPath.batch_size 500
+
+# 调整温度
+ros2 param set /controller_server FollowPath.temperature 0.2
+
+# 调整路径跟踪权重
+ros2 param set /controller_server FollowPath.PathAlignCritic.weight 20.0
+
+# 查看当前参数
+ros2 param dump /controller_server | grep FollowPath
+```
+
+#### 7.4.5 实车部署建议
+
+1. **首次部署降低速度上限**：将 `vx_max/vy_max` 临时设为 2.0，验证无误后再恢复到 4.5
+2. **逐步增加 batch_size**：从 500 开始，确认 controller_server 能稳定 20Hz 后再提升到 750
+3. **保持单轨配置**：不要在当前工作流里再混用 PID 旧参数，后续调参统一围绕 MPPI 展开
+
+### 7.5 单轨维护建议
+
+当前仓库的默认启动、默认依赖和默认构建流程都已收敛到 MPPI。后续维护建议保持：
+
+- 仅维护 `nav2_mppi_controller::MPPIController` 的参数链路
+- 仅观察 `transformed_global_plan` 与 `trajectories` 两类 MPPI 可视化输出
+- 不再把 PID 配置片段作为运行时回退方案保留在主工作流中
+
+### 7.6 Loopback 仿真中的 MPPI 对比
+
+若要在 loopback 中对比 MPPI 和 DWB 控制器的表现：
+
+```bash
+# 默认 loopback 使用 MPPI
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py
+
+# 观察 MPPI 输出的 cmd_vel
+ros2 topic echo /cmd_vel
+
+# 查看采样的轨迹可视化（如启用 visualize: true）
+# 在 RViz 中添加 MarkerArray 话题
+```
+
+## 8. 常见问题
 
 ### 7.1 `cannot find -lMvCameraControl`
 
@@ -425,7 +575,7 @@ source ~/old_ws/install/setup.bash
 source /opt/ros/humble/setup.bash
 ```
 
-## 8. 参考文档
+## 9. 参考文档
 
 - [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
 - [docs/融合.md](./docs/融合.md)

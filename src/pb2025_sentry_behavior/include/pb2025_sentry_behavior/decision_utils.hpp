@@ -91,6 +91,13 @@ inline geometry_msgs::msg::PoseStamped makePoseStamped(
   return pose;
 }
 
+inline geometry_msgs::msg::Quaternion makeYawQuaternion(double yaw)
+{
+  tf2::Quaternion quaternion;
+  quaternion.setRPY(0.0, 0.0, yaw);
+  return tf2::toMsg(quaternion);
+}
+
 inline std::vector<geometry_msgs::msg::Point> buildGoalPoints(
   const std::vector<double> & xs, const std::vector<double> & ys, const std::vector<double> & zs)
 {
@@ -126,9 +133,34 @@ inline nav_msgs::msg::Path buildPathFromIndices(
   path.header.frame_id = frame_id;
   path.poses.reserve(indices.size());
 
-  for (const auto index : indices) {
+  for (std::size_t i = 0; i < indices.size(); ++i) {
+    const auto index = indices[i];
     validateIndex(index, goal_points.size(), "goal_points");
-    path.poses.push_back(makePoseStamped(goal_points[index], frame_id));
+    auto pose = makePoseStamped(goal_points[index], frame_id);
+
+    if (indices.size() >= 2) {
+      const geometry_msgs::msg::Point * from = nullptr;
+      const geometry_msgs::msg::Point * to = nullptr;
+      if (i + 1 < indices.size()) {
+        validateIndex(indices[i + 1], goal_points.size(), "goal_points");
+        from = &goal_points[index];
+        to = &goal_points[indices[i + 1]];
+      } else if (i > 0) {
+        validateIndex(indices[i - 1], goal_points.size(), "goal_points");
+        from = &goal_points[indices[i - 1]];
+        to = &goal_points[index];
+      }
+
+      if (from != nullptr && to != nullptr) {
+        const double dx = to->x - from->x;
+        const double dy = to->y - from->y;
+        if (std::hypot(dx, dy) > 1e-6) {
+          pose.pose.orientation = makeYawQuaternion(std::atan2(dy, dx));
+        }
+      }
+    }
+
+    path.poses.push_back(pose);
   }
   return path;
 }

@@ -59,24 +59,17 @@ BT::NodeStatus SelectPatrolPathAction::tick()
     return BT::NodeStatus::SUCCESS;
   }
 
-  const int preview_points = std::max(2, patrol_preview_points_);
-  std::vector<std::size_t> route_indices;
-  route_indices.reserve(static_cast<std::size_t>(preview_points));
-  route_indices.push_back(patrol_indices_[static_cast<std::size_t>(patrol_cursor)]);
-
-  auto preview_cursor = patrol_cursor;
-  auto preview_direction = patrol_direction;
-  for (int step = 1; step < preview_points; ++step) {
-    const auto [next_cursor, next_direction] =
-      decision::computeNextPatrolState(
-        preview_cursor, preview_direction, patrol_indices_.size());
-    route_indices.push_back(patrol_indices_[static_cast<std::size_t>(next_cursor)]);
-    preview_cursor = next_cursor;
-    preview_direction = next_direction;
+  if (patrol_preview_points_ > 1) {
+    RCLCPP_WARN_THROTTLE(
+      logger_, *node_->get_clock(), 5000,
+      "Patrol preview path is clamped to a single target to avoid waypoint preemption churn");
   }
 
-  nav_msgs::msg::Path path =
-    decision::buildPathFromIndices(goal_points_, route_indices);
+  const auto current_index = patrol_indices_[static_cast<std::size_t>(patrol_cursor)];
+  nav_msgs::msg::Path path = decision::buildPathFromIndices(goal_points_, {current_index});
+
+  const auto [next_cursor, next_direction] =
+    decision::computeNextPatrolState(patrol_cursor, patrol_direction, patrol_indices_.size());
 
   if (!path.poses.empty()) {
     const auto & first_pose = path.poses.front().pose.position;
@@ -88,8 +81,8 @@ BT::NodeStatus SelectPatrolPathAction::tick()
   }
 
   setOutput("path", path);
-  setOutput("next_cursor", preview_cursor);
-  setOutput("next_direction", preview_direction);
+  setOutput("next_cursor", next_cursor);
+  setOutput("next_direction", next_direction);
 
   return BT::NodeStatus::SUCCESS;
 }

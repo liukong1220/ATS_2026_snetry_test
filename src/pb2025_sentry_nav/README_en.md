@@ -28,7 +28,7 @@ This project is based on the [NAV2 Navigation Framework](https://github.com/ros-
 
 - Path Planning：
 
-    The NAV2 default Global Planner is used as the global path planner, with the [pb_omni_pid_pursuit_controller](https://github.com/SMBU-PolarBear-Robotics-Team/pb_omni_pid_pursuit_controller) as the path follower.
+    The NAV2 default Global Planner is used as the global path planner, with `nav2_mppi_controller::MPPIController` as the local controller.
 
 - Namespace:
 
@@ -51,7 +51,6 @@ This project is based on the [NAV2 Navigation Framework](https://github.com/ros-
     ├── pb_teleop_twist_joy                 # Gamepad control
     ├── pb2025_nav_bringup                  # Launch files
     ├── pb2025_sentry_nav                   # This repository's package description
-    ├── pb_omni_pid_pursuit_controller      # Path tracking controller
     ├── point_lio                           # Odometry
     ├── pointcloud_to_laserscan             # Convert terrain_map to LaserScan type to represent obstacles (only launched in SLAM mode)
     ├── sensor_scan_generation              # Point cloud related coordinate transformation

@@ -4,22 +4,34 @@
 #include <string>
 
 #include "behaviortree_cpp/action_node.h"
+#include "rclcpp/rclcpp.hpp"
 
 namespace pb2025_sentry_behavior
 {
 
-class AdvancePatrolCursorAction : public BT::SyncActionNode
+class AdvancePatrolCursorAction : public BT::StatefulActionNode
 {
 public:
   AdvancePatrolCursorAction(const std::string & name, const BT::NodeConfig & config)
-  : BT::SyncActionNode(name, config)
+  : BT::StatefulActionNode(name, config)
   {
   }
 
   static BT::PortsList providedPorts();
 
 private:
-  BT::NodeStatus tick() override;
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override {}
+  BT::NodeStatus commitAdvance();
+
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Logger logger_ = rclcpp::get_logger("AdvancePatrolCursorAction");
+  rclcpp::Time release_time_{0, 0, RCL_ROS_TIME};
+  double hold_duration_s_ = 0.0;
+  int pending_cursor_ = 0;
+  int pending_direction_ = 1;
+  bool waiting_ = false;
 };
 
 }  // namespace pb2025_sentry_behavior

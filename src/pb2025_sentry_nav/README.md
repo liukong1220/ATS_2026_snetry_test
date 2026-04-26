@@ -28,7 +28,7 @@ https://github.com/user-attachments/assets/ae4c19a0-4c73-46a0-95bd-909734da2a42
 
 - 关于路径规划：
 
-    使用 NAV2 默认的 Global Planner 作为全局路径规划器，pb_omni_pid_pursuit_controller 作为路径跟踪器。
+    使用 NAV2 默认的 Global Planner 作为全局路径规划器，`nav2_mppi_controller::MPPIController` 作为局部控制器。
 
 - namespace：
 
@@ -51,7 +51,6 @@ https://github.com/user-attachments/assets/ae4c19a0-4c73-46a0-95bd-909734da2a42
     ├── pb_teleop_twist_joy                 # 手柄控制
     ├── pb2025_nav_bringup                  # 启动文件
     ├── pb2025_sentry_nav                   # 本仓库功能包描述文件
-    ├── pb_omni_pid_pursuit_controller      # 路径跟踪控制器
     ├── point_lio                           # 里程计
     ├── pointcloud_to_laserscan             # 将 terrain_map 转换为 laserScan 类型以表示障碍物（仅 SLAM 模式启动）
     ├── sensor_scan_generation              # 点云相关坐标变换

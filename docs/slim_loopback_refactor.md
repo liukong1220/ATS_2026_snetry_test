@@ -165,6 +165,8 @@ map -> odom -> base_footprint -> base_link -> base_scan
 
 - `src/loopback_sim/params/nav2_params.yaml`
 
+这份 loopback 专用的参数文件使用 `nav2_mppi_controller::MPPIController` 作为局部控制器（`DiffDrive` 运动模型），与实车和仿真环境的 `Omni` 全向运动模型区分开。
+
 这说明当前 slim loopback 的思路是：
 
 - 保留 Nav2 核心能力
@@ -1029,4 +1031,249 @@ ros2 run sp_vision25 sentry --help
 1. `ros2 pkg prefix sp_vision25` 指向当前工作区的 `install/sp_vision25`
 2. `ros2 run sp_vision25 sentry --help` 能正常输出帮助，而不是报包找不到或配置找不到
 
-这一步的意义是先确认“你现在调用的是工作区内安装版视觉包”，再去做 loopback 或真机联调，这样最不容易和旧的独立 build 产物串线。
+这一步的意义是先确认”你现在调用的是工作区内安装版视觉包”，再去做 loopback 或真机联调，这样最不容易和旧的独立 build 产物串线。
+
+## 18. 局部控制器迁移：PID → MPPI
+
+### 18.1 迁移背景
+
+原有的局部控制器 `pb_omni_pid_pursuit_controller::OmniPidPursuitController` 采用纯追踪（Pure Pursuit）+ 双 PID 的架构：
+
+```
+前瞻点 → PID(xy距离) → v_linear
+       → PID(角度差) → omega
+       → 曲率限速（三点圆拟合减速）
+```
+
+这套方案在低速和简单路径上表现稳定，但在以下场景存在固有限制：
+
+- **高速急转弯**：PID 只能”看到”一个前瞻点，无法预判前方弯道，导致入弯减速不及时、出弯超调
+- **全向运动耦合**：vx/vy 与 omega 分别由两个独立的 PID 控制，缺乏联合优化
+- **多目标权衡**：路径跟踪、障碍物避让、运动平滑性之间无法灵活平衡
+
+MPPI（Model Predictive Path Integral Control）通过**采样 + 前向推演 + 软最大化加权**的方式天然解决这些问题。
+
+### 18.2 MPPI 原理简述
+
+```
+每个控制周期 (50ms @ 20Hz):
+
+1. 在当前最优控制序列附近，用高斯噪声生成 K 条候选控制序列
+     每条序列长度 T 步，覆盖 1.5s 的前向时域
+     采样空间: vx, vy, omega（全向三自由度联合采样）
+
+2. 对每条序列，用运动模型前向推演 T 步，得到一条候选轨迹
+
+3. 对每条轨迹计算加权代价:
+     cost = w1 * 路径偏离 + w2 * 路径角度偏差
+          + w3 * 目标距离 + w4 * 目标角度偏差
+          + w5 * 障碍物碰撞 + w6 * 速度约束违反
+          + w7 * 原地旋转 + w8 * 低速死区
+
+4. 用 softmax 将代价转换为权重:
+     weight_i = exp(-cost_i / temperature)
+
+5. 加权平均得到最优控制:
+     u* = sum(weight_i * u_i) / sum(weight_i)
+
+6. 将最优序列平移一步，作为下一周期的初始猜测 (warm-start)
+```
+
+关键公式：
+
+```
+u* = ∫ u · exp(-S(u)/λ) du  /  ∫ exp(-S(u)/λ) du
+
+其中 S(u) 是控制序列 u 对应的轨迹总代价，λ 是温度参数
+```
+
+### 18.3 修改的文件
+
+| 文件 | 变更 | 说明 |
+|------|------|------|
+| `pb2025_nav_bringup/config/simulation/nav2_params.yaml` | `FollowPath` 段替换为 MPPI 配置 | 仿真环境，Omni 运动模型，batch_size=500 |
+| `pb2025_nav_bringup/config/reality/nav2_params.yaml` | `FollowPath` 段替换为 MPPI 配置 | 实车环境，Omni 运动模型，batch_size=750 |
+| `loopback_sim/params/nav2_params.yaml` | `FollowPath` 段从 DWB 替换为 MPPI 配置 | Slim loopback，DiffDrive 运动模型，batch_size=400 |
+| `nav_README.md` | 更新控制器描述 | 将 pb_omni_pid_pursuit_controller 改为 nav2_mppi_controller |
+| `README.md` | 新增第 7 章 MPPI 配置与调优 | 完整的部署指南和调参手册 |
+
+以下文件**未做任何修改**：
+- `pb_omni_pid_pursuit_controller` 包已从仓库中删除，不再作为回退控制器保留
+- 所有 launch 文件
+- 行为树 XML
+- planner_server、smoother_server、behavior_server、velocity_smoother 配置
+- 代价地图层配置
+
+### 18.4 三种环境的 MPPI 配置差异
+
+| 参数 | 仿真 (Omni) | 实车 (Omni) | Loopback (DiffDrive) |
+|------|------------|------------|---------------------|
+| `motion_model` | Omni | Omni | DiffDrive |
+| `batch_size` | 500 | 750 | 400 |
+| `vx_max/min` | ±2.5 | ±4.5 | ±0.5 |
+| `vy_max/min` | ±2.5 | ±4.5 | 0 |
+| `wz_max/min` | ±3.0 | ±3.0 | ±1.5 |
+| `vx_std` | 0.5 | 0.5 | 0.1 |
+| `vy_std` | 0.5 | 0.5 | 0 |
+| `wz_std` | 0.8 | 0.8 | 0.3 |
+| `critics` | 8 个（含 TwirlingCritic） | 8 个（含 TwirlingCritic） | 8 个（含 PreferForwardCritic） |
+| `visualize` | true | true | false |
+
+### 18.5 MPPI 调参方法
+
+#### 18.5.1 调参顺序
+
+按以下顺序逐步调优，每步验证后再进入下一步：
+
+1. **先跑通基本路径跟踪**
+   - 只启用 `PathAlignCritic` + `GoalCritic` + `ObstaclesCritic`
+   - 确认机器人能跟踪 A* 规划的全局路径并避开障碍物
+   - 在 RViz 中开启 `visualize: true` 观察采样轨迹
+
+2. **调路径对齐**
+   - 机器人偏离路径：增大 `PathAlignCritic.weight`（当前 15.0）
+   - 路径跟踪过于僵硬、频繁修正：减小 weight
+   - 机器人横着走（侧移过多）：增大 `PathAngleCritic.weight`（当前 8.0）
+
+3. **调转弯平滑性**
+   - 转弯处切角严重：增大 `wz_std`，让采样探索更大的角速度范围
+   - 转弯时抖动：减小 `wz_std` 或增大 `ConstraintCritic.weight`
+   - 入弯减速不足：增大 `time_steps` 让 MPPI 看到更远的弯道
+
+4. **调全向行为**
+   - 机器人原地打转：增大 `TwirlingCritic.weight`（当前 15.0）
+   - 需要侧移但不够灵活：减小 `TwirlingCritic.weight`，增大 `vy_std`
+
+5. **调终点收敛**
+   - 停不到目标点：增大 `GoalCritic.weight`
+   - 停靠角度不对：增大 `GoalAngleCritic.weight`
+   - 终点附近震荡：增大 `VelocityDeadbandCritic.weight`
+
+6. **调计算性能**
+   - 如果 `controller_server` 掉频（低于 20Hz）：
+     - 首先减小 `batch_size`（500 → 400 → 300）
+     - 其次减小 `time_steps`（30 → 25 → 20）
+     - 关闭可视化 `visualize: false`
+   - 如果 CPU 有余量但控制不够平滑，增大 `batch_size`
+
+#### 18.5.2 核心参数速查表
+
+| 参数 | 作用 | 上调效果 | 下调效果 |
+|------|------|---------|---------|
+| `temperature` (0.05-0.3) | Softmax 锐度 | 更激进，接近单一最优轨迹 | 更保守，融合更多采样，控制更平滑 |
+| `batch_size` (300-1000) | 每周期采样数 | 控制更平滑，更好的统计覆盖 | 计算更快 |
+| `time_steps` (20-50) | 前向视野 | 更早预判弯道和障碍物 | 响应更快，延迟更低 |
+| `vx_std / vy_std` (0.1-1.0) | 线速度探索 | 更多样的速度选择 | 更稳定，减小速度抖动 |
+| `wz_std` (0.2-1.5) | 角速度探索 | 转弯更灵活 | 减小方向抖动 |
+| `gamma` (0.005-0.05) | 远期折扣 | 更关注远期目标 | 更关注近期路径精度 |
+
+#### 18.5.3 代价权重调优参考
+
+| 代价函数 | 默认权重 | 何时调大 | 何时调小 |
+|---------|---------|---------|---------|
+| `PathAlignCritic` | 15 | 偏离路径 | 跟踪僵硬 |
+| `PathAngleCritic` | 8 | 横着走/航向不对 | 需要侧移灵活性 |
+| `GoalCritic` | 10 | 不停靠/停靠慢 | 终点附近震荡 |
+| `GoalAngleCritic` | 5 | 终点朝向不对 | 不关心终点朝向 |
+| `ObstaclesCritic` | 50 | — | **不应大幅下调** (安全) |
+| `ConstraintCritic` | 5 | 速度超限频繁 | 需要更快的加减速 |
+| `TwirlingCritic` | 15 | 原地打转 | 需要原地旋转 |
+| `VelocityDeadbandCritic` | 3 | 停止时抖动 | 低速指令被过度抑制 |
+
+#### 18.5.4 运行时动态调参
+
+MPPI 支持运行时通过 `ros2 param set` 实时调整所有参数，无需重启：
+
+```bash
+# 调温度（最常用的快速调节）
+ros2 param set /controller_server FollowPath.temperature 0.1   # 更激进
+ros2 param set /controller_server FollowPath.temperature 0.25  # 更保守
+
+# 调采样数
+ros2 param set /controller_server FollowPath.batch_size 500
+
+# 调路径跟踪
+ros2 param set /controller_server FollowPath.PathAlignCritic.weight 20.0
+
+# 调转弯
+ros2 param set /controller_server FollowPath.wz_std 1.2
+
+# 调全向行为
+ros2 param set /controller_server FollowPath.TwirlingCritic.weight 25.0
+
+# 快速查看当前所有 MPPI 参数
+ros2 param dump /controller_server | grep FollowPath
+```
+
+推荐调参工作流：
+
+```bash
+# 1. 启动仿真
+source install/setup.sh
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+
+# 2. 在 RViz 中发布 Nav2 Goal
+
+# 3. 观察机器人跟踪表现，实时调参
+ros2 param set /controller_server FollowPath.PathAlignCritic.weight 20.0
+
+# 4. 把满意的参数写回 YAML 文件固化
+```
+
+### 18.6 MPPI vs PID 性能对比预期
+
+| 指标 | PID 纯追踪 | MPPI | 改善 |
+|------|-----------|------|------|
+| 直线跟踪误差 | < 0.1m | < 0.05m | 路径更贴近 |
+| 急转弯超调 | 0.3-0.5m | < 0.1m | 大幅减少 |
+| 入弯减速 | 曲率限速（被动） | 预测性减速（主动） | 更自然 |
+| 全向侧移 | vx/vy 解耦 | vx/vy/ω 联合优化 | 更协调 |
+| 障碍物绕行 | 碰撞检测→抛异常 | 代价函数软约束 | 更安全 |
+| 终点停靠 | 速度缩放 | GoalCritic + 预测 | 更精确 |
+| CPU 开销 | ~1ms | ~10-15ms (batch_size=750) | 可接受 |
+
+### 18.7 回退方案
+
+如需回退到 PID 控制器，只需修改 YAML 中的 `FollowPath.plugin`：
+
+```yaml
+# 实车/仿真回退到 PID：
+FollowPath:
+  plugin: “pb_omni_pid_pursuit_controller::OmniPidPursuitController”  # 旧配置示例，仅作迁移历史说明
+  # ... 恢复原 PID 参数
+
+# Loopback 回退到 DWB：
+FollowPath:
+  plugin: “dwb_core::DWBLocalPlanner”
+  # ... 恢复原 DWB 参数
+```
+
+PID 控制器包 (`pb_omni_pid_pursuit_controller`) 已从仓库、默认启动、依赖声明和工作区默认构建流程中删除，后续迭代以 MPPI 为唯一局部控制器。
+
+### 18.8 常见 MPPI 问题排查
+
+**Q: 机器人完全不动？**
+- 检查 `controller_server` 是否成功加载 MPPI 插件：`ros2 component list`
+- 查看 `controller_server` 日志：`ros2 run rqt_console rqt_console`
+- 确认 `nav2_mppi_controller` 包已安装：`ros2 pkg list | grep mppi`
+
+**Q: 路径跟踪抖动严重？**
+- 减小 `vx_std / vy_std / wz_std`（采样噪声太大）
+- 增大 `ConstraintCritic.weight`（抑制大幅速度变化）
+- 增大 `temperature`（让控制更保守）
+
+**Q: 转弯时切角严重？**
+- 增大 `time_steps`（让 MPPI 看到更远的弯道）
+- 增大 `PathAlignCritic.weight`
+- 增大 `wz_std`（探索更大的角速度范围）
+
+**Q: controller_server 掉频？**
+- 减小 `batch_size`（500 → 400 → 300）
+- 减小 `time_steps`（30 → 25 → 20）
+- 关闭可视化：`visualize: false`
+- 检查是否有其他高 CPU 进程
+
+**Q: 在实车上行为与仿真差异大？**
+- 确认 `motion_model` 是否正确（实车用 `Omni`，非全向用 `DiffDrive`）
+- 确认速度限制 (`vx_max/min`, `wz_max/min`) 与实际底盘能力匹配
+- 实车首次部署建议降低速度上限到 2.0 m/s 验证无误后再恢复

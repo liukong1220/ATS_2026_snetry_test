@@ -1,27 +1,57 @@
 #include "pb2025_sentry_behavior/plugins/action/advance_patrol_cursor.hpp"
 
+#include "pb2025_sentry_behavior/decision_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace pb2025_sentry_behavior
 {
 
-BT::NodeStatus AdvancePatrolCursorAction::tick()
+BT::NodeStatus AdvancePatrolCursorAction::onStart()
 {
-  int next_cursor = 0;
-  int next_direction = 1;
-  if (!getInput("next_cursor", next_cursor) || !getInput("next_direction", next_direction)) {
-    RCLCPP_WARN(
-      rclcpp::get_logger("AdvancePatrolCursorAction"),
-      "AdvancePatrolCursor did not receive next_cursor / next_direction");
+  if (!node_) {
+    node_ = decision::getNodeFromBlackboard(*this);
+    node_->get_parameter("decision.decision_config.waypoint_stop_duration_s", hold_duration_s_);
+  }
+
+  if (
+    !getInput("next_cursor", pending_cursor_) ||
+    !getInput("next_direction", pending_direction_))
+  {
+    RCLCPP_WARN(logger_, "AdvancePatrolCursor did not receive next_cursor / next_direction");
     return BT::NodeStatus::FAILURE;
   }
 
-  setOutput("patrol_cursor", next_cursor);
-  setOutput("patrol_direction", next_direction);
+  if (hold_duration_s_ <= 0.0) {
+    return commitAdvance();
+  }
+
+  waiting_ = true;
+  release_time_ = node_->now() + rclcpp::Duration::from_seconds(hold_duration_s_);
+  return BT::NodeStatus::RUNNING;
+}
+
+BT::NodeStatus AdvancePatrolCursorAction::onRunning()
+{
+  if (!waiting_ || hold_duration_s_ <= 0.0) {
+    return commitAdvance();
+  }
+
+  if (node_->now() < release_time_) {
+    return BT::NodeStatus::RUNNING;
+  }
+
+  waiting_ = false;
+  return commitAdvance();
+}
+
+BT::NodeStatus AdvancePatrolCursorAction::commitAdvance()
+{
+  setOutput("patrol_cursor", pending_cursor_);
+  setOutput("patrol_direction", pending_direction_);
   setOutput("goal_succeeded", false);
   RCLCPP_INFO(
-    rclcpp::get_logger("AdvancePatrolCursorAction"),
-    "Advance patrol state to cursor=%d direction=%d", next_cursor, next_direction);
+    logger_, "Advance patrol state to cursor=%d direction=%d",
+    pending_cursor_, pending_direction_);
   return BT::NodeStatus::SUCCESS;
 }
 
