@@ -64,7 +64,7 @@ rosdep update
 ## 2. 获取代码
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
+git clone -b develop https://github.com/liukong1220/ATS_2026_snetry_test.git
 cd ATS_2026_snetry_test
 ```
 
