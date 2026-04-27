@@ -1,61 +1,159 @@
-# RobotDecision `NavigateThroughPoses` 迁移清单
+# `NavigateThroughPoses` 迁移说明
 
-## 1. 迁移收益（相对 `NavigateToPose`）
+## 1. 这份文档现在的定位
 
-- 多点连续执行：一次 action 可包含多个 waypoint，避免“到点 success 后再发下一点”的停顿窗口。
-- 降低切点时延：减少决策节点与 BT Navigator 之间的 action 建连/结束抖动。
-- 更贴合巡逻场景：巡逻本质是路径段执行，不是离散单点任务。
+这份文档不再表示“当前主线系统的实时状态”，而是用于说明两件事：
 
-## 2. 与原方案最大区别
+1. 当前主线为什么已经选择 `NavigateThroughPoses`
+2. 仓库里保留的旧 `standard_robot_pp_ros2::robot_decision` 节点，和主线之间是什么关系
 
-- 原方案：每次只发 1 个 `Pose`，到达后再发下一个点。
-- 新方案：巡逻时发送“当前点 + 下一点”的 `NavigateThroughPoses` 段式目标；低血/危急血仍可单点发送（但也通过 ThroughPoses 接口，保持接口统一）。
+如果你要看当前真正在线运行的主线，请优先看：
 
-## 3. 本项目实际改动点
+- [`./sentry_bt_decision_checklist.md`](./sentry_bt_decision_checklist.md)
+- [`./移植.md`](./移植.md)
 
-- 决策节点 action 类型切换：
-  - `src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/2025_robot_decision.hpp`
-  - `src/standard_robot_pp_ros2/src/2025_robot_decision.cpp`
-- 动作服务参数默认值切换为 `"/navigate_through_poses"` 且修复参数命名：
-  - `src/standard_robot_pp_ros2/src/2025_robot_decision.cpp`
-  - `src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml`
-- 新增巡逻段逻辑：
-  - `sendPatrolSegmentGoal(start_index, end_index)`
-  - `computeNextPatrolIndex(...)`
-  - `isSamePatrolSegmentGoal(...)`
+---
 
-## 4. 全项目兼容性检查结论
+## 2. 当前主线的真实情况
 
-- Nav2 BT Navigator 已具备 ThroughPoses 支持：
-  - `src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`
-  - `src/pb2025_sentry_nav/pb2025_nav_bringup/config/simulation/nav2_params.yaml`
-  - 两处均包含：
-    - `default_nav_through_poses_bt_xml`
-    - `nav2_navigate_through_poses_action_bt_node`
-- `pb2025_sentry_bringup` 的参数中同样具备 ThroughPoses 节点插件配置。
+当前默认主线不是 `standard_robot_pp_ros2::robot_decision`，而是：
 
-## 5. RViz 全局/局部路径可视化是否受影响
+```text
+pb2025_sentry_bringup/bringup.launch.py
+  -> pb2025_sentry_behavior
+  -> SendNavThroughPoses
+  -> /navigate_through_poses
+  -> Nav2 + MPPI
+```
 
-- 结论：不受影响，仍可看到全局与局部路径。
-- 原因：`NavigateToPose` 与 `NavigateThroughPoses` 都走 planner/controller 管线，`planner_server` 与 `controller_server` 未改。
-- 现有 RViz 配置已包含 `Path` / `local_plan` 显示：
-  - `src/pb2025_sentry_bringup/rviz/sentry_default_view.rviz`
-  - `src/pb2025_sentry_nav/pb2025_nav_bringup/rviz/nav2_default_view.rviz`
+关键事实：
 
-## 6. 上线前验证清单
+1. 默认总入口是 [`../src/pb2025_sentry_bringup/launch/bringup.launch.py`](../src/pb2025_sentry_bringup/launch/bringup.launch.py)
+2. 它调用 `standard_robot_pp_ros2.launch.py` 时显式传入：
+   - `launch_robot_decision := False`
+3. 当前主决策树在 [`../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml`](../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml)
+4. 当前真正负责给 Nav2 发 action 的是：
+   - [`../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp`](../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp)
 
-1. 编译：
-   - `colcon build --packages-select standard_robot_pp_ros2`
-2. 动作服务确认：
-   - `ros2 action list | grep navigate_through_poses`
-3. 节点参数确认：
-   - `ros2 param get /robot_decision decision_config.nav2_action_server`
-4. 巡逻实测：
-   - 观察日志是否连续出现 `巡逻段目标已接受 [i -> j]` 与 `巡逻段导航完成 [i -> j]`
-5. RViz 检查：
-   - `Path`（全局）和 `local_plan`（局部）均持续刷新。
+所以如果你在排查当前哨兵主线，请不要先去改 `standard_robot_pp_ros2::robot_decision`。
 
-## 7. 故障回退点
+---
 
-- 仅回退 `decision_config.nav2_action_server` 到 `"/navigate_to_pose"` 不足以恢复旧行为，因为决策代码 action 类型已切换。
-- 若需完整回退到旧单点方案，需同时回退 `2025_robot_decision.hpp/.cpp` 的 action 类型与巡逻发送逻辑。
+## 3. 为什么主线选择 `NavigateThroughPoses`
+
+相对旧的单点 `NavigateToPose` 思路，主线选择 `NavigateThroughPoses` 的原因是：
+
+1. 行为树可以统一输出 `nav_msgs/Path`
+2. 固定点、退防点、巡逻点、视觉跟随点都能走同一接口
+3. 行为树可以继续保留“是否重发、何时 cancel、何时切分支”的控制权
+4. Nav2 仍然复用同一条 planner/controller/MPPI 执行链
+
+但需要强调的是：
+
+> 当前主线虽然走 `NavigateThroughPoses` 接口，巡逻并不等于一次性预发整串 waypoint。
+
+当前巡逻策略是：
+
+1. 行为树每次只选当前巡逻目标点
+2. `SelectPatrolPath` 实际生成单点 path
+3. 到点后由 `AdvancePatrolCursor` 推进游标
+
+这和早期“当前点 + 下一点”的段式预发送思路已经不一样了。
+
+---
+
+## 4. 仓库里保留的旧 `robot_decision` 节点是什么状态
+
+旧节点代码仍在仓库里：
+
+- [`../src/standard_robot_pp_ros2/src/2025_robot_decision.cpp`](../src/standard_robot_pp_ros2/src/2025_robot_decision.cpp)
+- [`../src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml`](../src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml)
+
+但它当前有三个重要事实：
+
+1. 默认不参与总入口运行
+2. 代码里当前 action client 仍然是 `NavigateToPose`
+3. 参数默认值当前仍然是：
+   - `decision_config.nav2_action_server = "/navigate_to_pose"`
+
+因此：
+
+- 它是保留在仓库中的 legacy 节点
+- 它不是当前主线 ThroughPoses 决策链的一部分
+
+---
+
+## 5. 当前哪些地方确实具备 `NavigateThroughPoses` 能力
+
+### 5.1 行为树主线
+
+已经具备，并且正在使用：
+
+- [`../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp`](../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp)
+- [`../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml`](../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml)
+- [`../src/pb2025_sentry_behavior/behavior_trees/vision_test.xml`](../src/pb2025_sentry_behavior/behavior_trees/vision_test.xml)
+
+### 5.2 Nav2 配置侧
+
+当前 Nav2 配置已经包含 ThroughPoses 相关能力，主线可以直接调用：
+
+- [`../src/loopback_sim/params/nav2_params.yaml`](../src/loopback_sim/params/nav2_params.yaml)
+- [`../src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`](../src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)
+- [`../src/pb2025_sentry_bringup/params/node_params.yaml`](../src/pb2025_sentry_bringup/params/node_params.yaml)
+
+### 5.3 RViz 观察
+
+无论是 `NavigateToPose` 还是 `NavigateThroughPoses`，只要走的是同一条 Nav2 planner/controller 链：
+
+1. 全局路径可视化仍然可看
+2. 局部轨迹 / trajectories 仍然可看
+3. 问题重点不在 RViz 能不能显示，而在“谁在发 goal、goal 是否稳定、局部控制是否合理”
+
+---
+
+## 6. 如果你要维护 legacy `robot_decision`，应该怎么理解这份文档
+
+这时它可以被当作“迁移待办清单”，而不是“已完成事实”。
+
+也就是说，如果后续你真的想把旧 `standard_robot_pp_ros2::robot_decision` 继续迁到 ThroughPoses，需要至少完成下面这些工作：
+
+1. 把 action client 从 `NavigateToPose` 改成 `NavigateThroughPoses`
+2. 把参数默认值从 `"/navigate_to_pose"` 改成 `"/navigate_through_poses"`
+3. 重新定义旧节点中的巡逻发送逻辑
+4. 明确它与当前行为树主线谁是主入口，避免双重决策
+
+但在当前项目里，更推荐的方向不是继续强化这个 legacy 节点，而是直接维护行为树主线。
+
+---
+
+## 7. 当前最推荐的判断方法
+
+如果你想确认自己现在调的是哪条链，可以直接看下面两个点：
+
+### 7.1 看总入口是否启用了旧节点
+
+当前默认总入口里：
+
+- `launch_robot_decision := False`
+
+这表示：
+
+- 旧 `robot_decision` 节点默认不开
+
+### 7.2 看日志里是谁在发导航 goal
+
+如果你看到类似：
+
+- `Send NavigateThroughPoses goal with ...`
+
+那基本说明你正在走当前行为树主线。
+
+如果你看到的是旧 `RobotDecisionNode` 自己的决策日志，那说明你是单独启用了 legacy 节点。
+
+---
+
+## 8. 一句话结论
+
+这份文档现在最重要的结论是：
+
+> `NavigateThroughPoses` 在当前项目里已经是行为树主线正在使用的接口，但仓库中保留的 `standard_robot_pp_ros2::robot_decision` 仍是 legacy 节点，默认不参与主线运行，也不应再被误认为当前主决策入口。

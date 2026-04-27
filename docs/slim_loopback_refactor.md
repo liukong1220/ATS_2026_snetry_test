@@ -1,5 +1,45 @@
 # 轻量 Loopback 仿真说明
 
+> 说明  
+> 本文保留了较多阶段性调试记录与历史命令。若文中某些绝对路径、旧命名或阶段性结论与当前代码不一致，请以这几份现状文档为准：[`./移植.md`](./移植.md)、[`./sentry_bt_decision_checklist.md`](./sentry_bt_decision_checklist.md)、[`./融合.md`](./融合.md)。
+
+## 0. 现状速览
+
+如果你现在只是想按当前代码启动和调试，请先记住这几个现状入口：
+
+1. 通用 loopback 入口  
+   [`../src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py`](../src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
+2. 视觉跟随快捷入口  
+   [`../src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py`](../src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py)
+3. 通用 loopback 行为树参数  
+   [`../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml`](../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
+4. 视觉测试行为树参数  
+   [`../src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml`](../src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
+5. loopback Nav2 与 MPPI 参数  
+   [`../src/loopback_sim/params/nav2_params.yaml`](../src/loopback_sim/params/nav2_params.yaml)
+
+当前建议直接使用：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+```
+
+如果要测视觉接管，则使用：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True
+```
+
+本文后续如果出现：
+
+1. `/home/ats/...` 旧绝对路径
+2. 阶段性临时参数文件名
+3. 已被后续文档细化或纠正的中间结论
+
+请把它们视为开发存档，而不是当前唯一标准。
+
 ## 1. 文档目标
 
 这份文档解释的是当前项目里的“轻量 loopback 仿真”到底是怎么打通的。
