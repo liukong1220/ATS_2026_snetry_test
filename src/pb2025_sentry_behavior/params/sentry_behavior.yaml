@@ -48,9 +48,9 @@ pb2025_sentry_behavior_server:
 
       motion:
         default_spin_speed: 7.0
-        # 检测到有效装甲受击后的自旋角速度。
+        # 检测到新的掉血后的自旋角速度。
         hit_spin_speed: 7.0
-        # 最近一次有效掉血后，若在该时长内没有新的掉血，则停止自旋。
+        # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
       mode_thresholds:

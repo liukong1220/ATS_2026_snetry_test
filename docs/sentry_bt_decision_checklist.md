@@ -181,7 +181,7 @@ launch 文件
 `rmul_2026` 的主干可以读成：
 
 1. 先对“是否受击”做一次高优先级判断。
-2. 如果是有效装甲受击，则发布 `decision.motion.hit_spin_speed`；如果在 `decision.motion.hit_spin_stop_after_no_hp_drop_s` 这段时间内没有新的掉血，则回到 `0.0`。
+2. 如果检测到新的掉血，则发布 `decision.motion.hit_spin_speed`；如果在 `decision.motion.hit_spin_stop_after_no_hp_drop_s` 这段时间内没有新的掉血，则回到 `0.0`。
 3. 再在三个总分支里做优先级仲裁：
    - `vision_override_realtime`
    - `decision_simulation`

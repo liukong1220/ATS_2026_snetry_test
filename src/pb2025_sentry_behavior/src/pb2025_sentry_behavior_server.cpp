@@ -282,7 +282,7 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   node()->get_parameter("decision.motion.default_spin_speed", default_spin_speed);
   // 受击时的自旋速度。
   node()->get_parameter("decision.motion.hit_spin_speed", hit_spin_speed);
-  // 最近一次有效掉血后，若在该时长内没有新的掉血，则停止自旋。
+  // 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
   node()->get_parameter(
     "decision.motion.hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
   // 低于该血量阈值后，行为树可切入 defend 相关分支。

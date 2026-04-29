@@ -113,7 +113,7 @@ ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py
 
 当前版本额外约束为：
 
-- 仅 `is_hp_deduced == true` 且扣血原因是 `ARMOR_HIT` 时视为有效受击
+- 只要 `is_hp_deduced == true` 就视为本次应触发受击自旋
 - 连续未发生新掉血超过 `decision.motion.hit_spin_stop_after_no_hp_drop_s` 后，受击自旋停止
 
 行为树中通常与 `PublishSpinSpeed` 配合使用，受击时发布 `decision.motion.hit_spin_speed`，其余时间发布 `0.0`。

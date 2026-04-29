@@ -23,7 +23,7 @@
 1. `姿态模式链路`
    行为树分支决定想要的姿态，`PublishRobotMode` 统一裁决后发布给下位机。
 2. `受击自旋链路`
-   `IsAttacked` 负责识别是否发生了有效受击，行为树再决定是否发布自旋角速度。
+   `IsAttacked` 负责识别是否发生了新的掉血，行为树再决定是否发布自旋角速度。
 
 ## 2. 总体数据流
 
@@ -45,7 +45,7 @@
 ```text
 裁判系统 RobotStatus
   -> IsAttacked
-  -> 判断是否是 ARMOR_HIT 且本次确实掉血
+  -> 判断本次是否发生掉血
   -> 若命中则刷新最近一次受击时间
   -> 在一段可配置的持续时间内返回 SUCCESS
   -> 行为树发布 decision.motion.hit_spin_speed
@@ -359,7 +359,7 @@ const std::array<uint8_t, 5> candidates = {
 “进入防御姿态”与“是否自旋”不是一个概念。
 
 - 防御姿态看的是血量是否低于阈值。
-- 受击自旋看的是最近是否发生过有效装甲受击。
+- 受击自旋看的是最近是否发生过新的掉血。
 
 因此当前实现中：
 
@@ -370,26 +370,30 @@ const std::array<uint8_t, 5> candidates = {
 这样更符合你的需求：
 
 - 不是低血量就一直转
-- 也不是所有扣血原因都触发自旋
+- 但一旦检测到本次掉血，就优先尽快触发自旋保护
 
 ### 7.2 触发条件
 
-只有同时满足以下两个条件，才认定为有效受击：
+当前实现里，只要满足以下条件，就认定本次应触发自旋：
 
 1. `is_hp_deduced == true`
-2. `hp_deduction_reason == ARMOR_HIT`
 
 对应代码：
 
 ```cpp
-const bool is_attacked = msg->is_hp_deduced && msg->hp_deduction_reason == msg->ARMOR_HIT;
+const bool is_attacked = msg->is_hp_deduced;
 ```
 
 这意味着下列情况都不会触发自旋：
 
 - 并未实际掉血
-- 掉血原因不是装甲板受击
 - 当前没有新的裁判系统受击信息
+
+这样调整的原因是：
+
+1. 当裁判系统掉血原因字段存在延迟、抖动或和实际受击不同步时，自旋不应该被拦住。
+2. 当短时间内血量下降较快时，优先保证机器人尽快进入保护性自旋状态。
+3. 当前策略更偏向“宁可更早触发自旋，也不要因为原因字段过滤而漏触发”。
 
 ### 7.3 受击方向怎么得到
 
@@ -416,7 +420,7 @@ const bool is_attacked = msg->is_hp_deduced && msg->hp_deduction_reason == msg->
 
 逻辑是：
 
-1. 一旦收到一次有效受击，先记住“最近被打过”。
+1. 一旦收到一次新的掉血，先记住“最近被打过”。
 2. 后续即使下一帧没有新的受击消息，只要没超过超时时间，仍然返回 `SUCCESS`。
 3. 一旦超过超时时间还没有新掉血，就清掉锁存，返回 `FAILURE`。
 
@@ -436,7 +440,7 @@ const bool is_attacked = msg->is_hp_deduced && msg->hp_deduction_reason == msg->
 含义：
 
 - 不是固定自旋 2 秒
-- 而是“最近一次有效掉血之后，若连续 2 秒没有再次掉血，则停止自旋”
+- 而是“最近一次掉血之后，若连续 2 秒没有再次掉血，则停止自旋”
 
 这和“固定定时器”相比更合理，因为：
 
@@ -446,9 +450,9 @@ const bool is_attacked = msg->is_hp_deduced && msg->hp_deduction_reason == msg->
 一个更直观的例子：
 
 ```text
-t = 10.0s  第一次有效装甲掉血，开始自旋
-t = 10.8s  再次有效掉血，刷新最近受击时间
-t = 11.6s  再次有效掉血，继续刷新
+t = 10.0s  第一次掉血，开始自旋
+t = 10.8s  再次掉血，刷新最近受击时间
+t = 11.6s  再次掉血，继续刷新
 t = 13.4s  仍未超过 stop_after_s，自旋继续
 t = 13.7s  距离最近一次掉血已超过 stop_after_s，停止自旋
 ```
@@ -588,7 +592,7 @@ globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s)
 
 职责：
 
-- 判断是否是有效装甲受击
+- 判断是否检测到了新的掉血
 - 锁存最近一次受击信息
 - 在可配置的超时时间内维持 `SUCCESS`
 
