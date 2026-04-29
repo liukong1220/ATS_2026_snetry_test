@@ -474,6 +474,49 @@ t = 13.7s  距离最近一次掉血已超过 stop_after_s，停止自旋
 该参数只在 `IsAttacked` 返回 `SUCCESS` 的那段时间内被发布。  
 其余情况行为树会发送 `0.0`。
 
+### 7.7 自旋速度最终是不是通过 `wz` 发给下位机
+
+是的，当前实现里受击自旋速度最终就是通过底盘速度指令里的 `angular.z`，也就是下位机串口结构体中的 `speed_vector.wz` 发下去的。
+
+完整链路如下：
+
+```text
+IsAttacked 返回 SUCCESS
+  -> PublishSpinSpeed 发布 Float32 到 cmd_spin
+  -> fake_vel_transform 订阅 cmd_spin，保存 spin_speed_
+  -> fake_vel_transform 在速度变换时执行：
+     aft_tf_vel.angular.z = twist->angular.z + spin_speed_
+  -> 输出新的 cmd_vel
+  -> standard_robot_pp_ros2 订阅 /cmd_vel
+  -> send_robot_cmd_data_.data.speed_vector.wz = msg->angular.z
+  -> 串口发送给下位机
+```
+
+也就是说，`decision.motion.hit_spin_speed` 并不是单独通过一个“姿态字段”或者“专用自旋字段”发下去，而是叠加到底盘角速度命令中。
+
+对应代码位置如下：
+
+- `PublishSpinSpeed` 将自旋速度发布到 `cmd_spin`
+  - `src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp`
+- `fake_vel_transform` 将 `cmd_spin` 叠加到 `cmd_vel.angular.z`
+  - `src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp`
+- `standard_robot_pp_ros2` 将 `cmd_vel.angular.z` 写入 `speed_vector.wz`
+  - `src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp`
+
+其中最关键的一行是：
+
+```cpp
+aft_tf_vel.angular.z = twist->angular.z + spin_speed_;
+```
+
+它表示：
+
+1. 导航或上层原本给出的角速度是 `twist->angular.z`
+2. 受击自旋附加角速度是 `spin_speed_`
+3. 最终发给下位机的 `wz` 是两者叠加后的结果
+
+所以如果后续你发现“机器人在移动时受击会边走边转”，这是当前设计的正常结果，因为自旋速度本来就是作为额外 `wz` 叠加进去的。
+
 ## 8. 参数总表
 
 | 参数名 | 默认值 | 作用 | 影响模块 |
