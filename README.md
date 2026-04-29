@@ -160,6 +160,18 @@ export LIVOX_SDK2_ROOT=<YOUR_LIVOX_SDK2_PATH>
 3. 视觉测试参数  
    [`src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml`](./src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
 
+当前哨兵姿态与受击自旋逻辑也已经接入这三份参数文件，推荐同步阅读：
+
+- [`docs/sentry_posture_switch_logic.md`](./docs/sentry_posture_switch_logic.md)
+
+最常需要调的相关参数有：
+
+- `decision.mode_thresholds.defend_hp`
+- `decision.mode_limits.switch_cooldown_s`
+- `decision.mode_limits.max_cumulative_s`
+- `decision.motion.hit_spin_speed`
+- `decision.motion.hit_spin_stop_after_no_hp_drop_s`
+
 ### 4.4 再确认导航参数文件
 
 这里最容易改错，建议直接记住：
@@ -273,6 +285,8 @@ src/
    先建立“哪些包负责什么、哪些参数文件会生效”的整体概念
 2. [`docs/sentry_bt_decision_checklist.md`](./docs/sentry_bt_decision_checklist.md)  
    再理解当前行为树主线、黑板、分支优先级
+3. [`docs/sentry_posture_switch_logic.md`](./docs/sentry_posture_switch_logic.md)  
+   再确认姿态切换、血量阈值、受击自旋和下位机模式发送规则
 
 ### 7.2 只想快速跑通仿真
 
@@ -298,8 +312,9 @@ src/
 
 1. [`docs/移植.md`](./docs/移植.md)
 2. [`docs/sentry_bt_decision_checklist.md`](./docs/sentry_bt_decision_checklist.md)
-3. [`docs/融合.md`](./docs/融合.md)
-4. [`docs/视觉跟随仿真调试.md`](./docs/视觉跟随仿真调试.md)
+3. [`docs/sentry_posture_switch_logic.md`](./docs/sentry_posture_switch_logic.md)
+4. [`docs/融合.md`](./docs/融合.md)
+5. [`docs/视觉跟随仿真调试.md`](./docs/视觉跟随仿真调试.md)
 
 历史长文和阶段性记录仍然保留，但应作为补充材料看，不要替代上面几份现状文档。
 

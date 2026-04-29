@@ -54,6 +54,9 @@ list(APPEND plugin_libs is_game_time_stage)
 ament_auto_add_library(is_hp_band SHARED plugins/condition/is_hp_band.cpp)
 list(APPEND plugin_libs is_hp_band)
 
+ament_auto_add_library(is_robot_hp_below SHARED plugins/condition/is_robot_hp_below.cpp)
+list(APPEND plugin_libs is_robot_hp_below)
+
 ament_auto_add_library(is_path_goal_reached SHARED plugins/condition/is_path_goal_reached.cpp)
 list(APPEND plugin_libs is_path_goal_reached)
 
@@ -79,6 +82,9 @@ list(APPEND plugin_libs pub_nav2_goal)
 
 ament_auto_add_library(pub_spin_speed SHARED plugins/action/pub_spin_speed.cpp)
 list(APPEND plugin_libs pub_spin_speed)
+
+ament_auto_add_library(pub_robot_mode SHARED plugins/action/pub_robot_mode.cpp)
+list(APPEND plugin_libs pub_robot_mode)
 
 ament_auto_add_library(pub_twist SHARED plugins/action/pub_twist.cpp)
 list(APPEND plugin_libs pub_twist)

@@ -11,11 +11,13 @@
 
 基于 [BehaviorTree.CPP](https://github.com/BehaviorTree/BehaviorTree.CPP) 和 [BehaviorTree.ROS2](https://github.com/BehaviorTree/BehaviorTree.ROS2) 的行为树框架与插件，用于 [RoboMaster](https://www.robomaster.com) 2025 赛季哨兵机器人。
 
-最新版视觉跟随 loopback 仿真调试文档见：
+当前仓库内和“现状”最相关的文档入口见：
 
-- [`/docs/视觉跟随仿真调试.md`](/home/ats/ats_sentry_ws/docs/视觉跟随仿真调试.md)
-- [`/docs/融合.md`](/home/ats/ats_sentry_ws/docs/融合.md)
-- [`/docs/实机视觉跟随优化方案.md`](/home/ats/ats_sentry_ws/docs/实机视觉跟随优化方案.md)
+- [`../../docs/sentry_bt_decision_checklist.md`](../../docs/sentry_bt_decision_checklist.md)
+- [`../../docs/sentry_posture_switch_logic.md`](../../docs/sentry_posture_switch_logic.md)
+- [`../../docs/视觉跟随仿真调试.md`](../../docs/视觉跟随仿真调试.md)
+- [`../../docs/融合.md`](../../docs/融合.md)
+- [`../../docs/实机视觉跟随优化方案.md`](../../docs/实机视觉跟随优化方案.md)
 
 ## 2. Quick Start
 
@@ -81,6 +83,22 @@ ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py
 
 以 `geometry_msgs/msg/pose_stamped` 的形式发布 Navigation2 目标点。
 
+#### PublishRobotMode
+
+发布哨兵当前姿态模式到 `decision/robot_mode`，供串口节点继续下发给下位机。
+
+当前模式约定：
+
+- `move = 0`
+- `attack = 1`
+- `defend = 2`
+
+该节点内部会统一处理：
+
+- 姿态切换冷却时间 `decision.mode_limits.switch_cooldown_s`
+- 单局累计时长限制 `decision.mode_limits.max_cumulative_s`
+- 姿态受限时的回退与保持策略
+
 ### 3.2 Condition
 
 #### IsAttacked
@@ -92,6 +110,21 @@ ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py
 - `gimbal_yaw`：输出敌方可能的角度位置
 
 如果检测到装甲板被击中，则返回 `SUCCESS`，并输出相应的云台角度；否则返回 `FAILURE`。
+
+当前版本额外约束为：
+
+- 仅 `is_hp_deduced == true` 且扣血原因是 `ARMOR_HIT` 时视为有效受击
+- 连续未发生新掉血超过 `decision.motion.hit_spin_stop_after_no_hp_drop_s` 后，受击自旋停止
+
+行为树中通常与 `PublishSpinSpeed` 配合使用，受击时发布 `decision.motion.hit_spin_speed`，其余时间发布 `0.0`。
+
+#### IsRobotHpBelow
+
+通过 GlobalBlackboard 获取实时的 `pb_rm_interfaces::msg::RobotStatus`，判断当前血量是否低于阈值。
+
+当前主树中用于防御姿态切换，默认阈值参数为：
+
+- `decision.mode_thresholds.defend_hp`
 
 #### IsGameStatus
 

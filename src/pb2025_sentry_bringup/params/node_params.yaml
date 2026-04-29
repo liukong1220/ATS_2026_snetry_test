@@ -8,6 +8,7 @@ standard_robot_pp_ros2:
     set_detector_color: false
     record_rosbag: true
     debug: false
+    robot_mode_topic: decision/robot_mode
 
 joint_state_publisher:
   ros__parameters:

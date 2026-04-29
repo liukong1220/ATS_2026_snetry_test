@@ -17,6 +17,7 @@
             <output_port name="gimbal_yaw" default="{gimbal_yaw}" type="float">Move gimbal_yaw to the direction of the hit armor plate</output_port>
             <output_port name="gimbal_pitch" default="{gimbal_pitch}" type="float">Move gimbal_pitch (const 0.0) to the direction of the hit armor plate</output_port>
             <input_port name="key_port" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+            <input_port name="stop_after_s" default="{@decision_hit_spin_stop_after_no_hp_drop_s}" type="double">Stop spinning when no new armor-hit HP deduction arrives within this duration</input_port>
         </Condition>
         <Action ID="IsDecisionInputSource" editable="true">
             <input_port name="source"/>
@@ -36,6 +37,10 @@
         <Action ID="IsHpBand" editable="true">
             <input_port name="band"/>
         </Action>
+        <Condition ID="IsRobotHpBelow">
+            <input_port name="robot_status" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+            <input_port name="threshold" default="{@decision_defend_mode_hp}" type="int">HP threshold for defend posture</input_port>
+        </Condition>
         <Action ID="IsPathGoalReached" editable="true">
             <input_port name="path"/>
             <input_port name="goal_succeeded"/>
@@ -81,6 +86,14 @@
             <input_port name="gimbal_vel_yaw" default="0.000000" type="float">Yaw velocity (rad/s)</input_port>
             <input_port name="topic_name" default="__default__placeholder__" type="std::string">Topic name</input_port>
             <input_port name="gimbal_vel_pitch" default="0.000000" type="float">Pitch velocity (rad/s)</input_port>
+        </Action>
+        <Action ID="PublishRobotMode">
+            <input_port name="mode" default="move" type="std::string">Robot mode: move / attack / defend</input_port>
+            <input_port name="game_status" default="{@referee_gameStatus}" type="pb_rm_interfaces::msg::GameStatus_&lt;std::allocator&lt;void&gt; &gt;">Game status used to reset per-match posture timers</input_port>
+            <input_port name="cooldown_s" default="{@decision_mode_switch_cooldown_s}" type="double">Minimum interval between posture switches</input_port>
+            <input_port name="max_cumulative_s" default="{@decision_mode_max_cumulative_s}" type="double">Maximum cumulative posture duration within one match</input_port>
+            <input_port name="topic_name" default="__default__placeholder__" type="std::string">Topic name</input_port>
+            <input_port name="duration" type="std::chrono::milliseconds">Publish duration</input_port>
         </Action>
         <Action ID="PublishSpinSpeed">
             <input_port name="spin_speed" default="0.000000" type="double">Angular Z velocity (rad/s)</input_port>

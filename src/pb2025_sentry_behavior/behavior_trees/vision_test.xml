@@ -8,6 +8,9 @@
                            gimbal_yaw="{vision_gimbal_yaw}"
                            gimbal_pitch="{vision_gimbal_pitch}"
                            target_id="{vision_target_id}"/>
+      <PublishRobotMode mode="attack"
+                        duration="0.0"
+                        topic_name="{@decision_robot_mode_topic}"/>
       <PublishGimbalAbsolute topic_name="{@decision_gimbal_topic}"
                              duration="0.0"
                              gimbal_yaw="{vision_gimbal_yaw}"
@@ -33,9 +36,17 @@
     <KeepRunningUntilFailure>
       <ForceSuccess>
         <ReactiveSequence>
-          <PublishSpinSpeed spin_speed="{@decision_default_spin_speed}"
-                            duration="0.0"
-                            topic_name="{@decision_spin_topic}"/>
+          <ReactiveFallback>
+            <Sequence>
+              <IsAttacked key_port="{@referee_robotStatus}"/>
+              <PublishSpinSpeed spin_speed="{@decision_hit_spin_speed}"
+                                duration="0.0"
+                                topic_name="{@decision_spin_topic}"/>
+            </Sequence>
+            <PublishSpinSpeed spin_speed="0.0"
+                              duration="0.0"
+                              topic_name="{@decision_spin_topic}"/>
+          </ReactiveFallback>
           <ReactiveFallback>
             <SubTree ID="vision_override"/>
 

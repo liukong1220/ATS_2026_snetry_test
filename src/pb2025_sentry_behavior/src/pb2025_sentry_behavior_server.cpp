@@ -101,8 +101,10 @@ SentryBehaviorServer::SentryBehaviorServer(const rclcpp::NodeOptions & options)
   node()->get_parameter("decision.simulation.default_mode", decision_sim_mode_);
   node()->get_parameter("decision.simulation.mode_topic", decision_sim_mode_topic_);
   node()->get_parameter("decision.topics.gimbal_cmd", decision_gimbal_topic_);
+  node()->get_parameter("decision.topics.robot_mode", decision_robot_mode_topic_);
   node()->get_parameter("decision.vision.topic", decision_vision_topic_);
   node()->get_parameter("decision.vision.timeout_s", decision_vision_timeout_s_);
+  node()->get_parameter("decision.motion.hit_spin_speed", decision_hit_spin_speed_);
   decision_input_source_ = sanitizeInputSource(decision_input_source_, node()->get_logger());
   decision_sim_mode_ = sanitizeSimulationMode(
     decision_sim_mode_, "patrol", node()->get_logger(),
@@ -188,7 +190,13 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.topics.spin", std::string("cmd_spin"));
   declare_parameter("decision.topics.cmd_vel", std::string("cmd_vel"));
   declare_parameter("decision.topics.gimbal_cmd", std::string("cmd_gimbal"));
+  declare_parameter("decision.topics.robot_mode", std::string("decision/robot_mode"));
   declare_parameter("decision.motion.default_spin_speed", 7.0);
+  declare_parameter("decision.motion.hit_spin_speed", 7.0);
+  declare_parameter("decision.motion.hit_spin_stop_after_no_hp_drop_s", 2.0);
+  declare_parameter("decision.mode_thresholds.defend_hp", 300);
+  declare_parameter("decision.mode_limits.switch_cooldown_s", 5.0);
+  declare_parameter("decision.mode_limits.max_cumulative_s", 180.0);
   // 视觉侧接入参数单独放到 `decision.vision.*` 下，
   // 方便后续继续扩展超时、目标选择策略和启停开关。
   declare_parameter("decision.vision.topic", std::string("vision/target"));
@@ -247,7 +255,13 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   std::string spin_topic = "cmd_spin";
   std::string cmd_vel_topic = "cmd_vel";
   std::string gimbal_topic = "cmd_gimbal";
+  std::string robot_mode_topic = "decision/robot_mode";
   double default_spin_speed = 7.0;
+  double hit_spin_speed = 7.0;
+  double hit_spin_stop_after_no_hp_drop_s = 2.0;
+  int defend_mode_hp = 300;
+  double mode_switch_cooldown_s = 5.0;
+  double mode_max_cumulative_s = 180.0;
   node()->get_parameter(
     "decision.point_roles.supply_safe_point_index", supply_safe_point_index);
   node()->get_parameter(
@@ -263,7 +277,19 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   node()->get_parameter("decision.topics.spin", spin_topic);
   node()->get_parameter("decision.topics.cmd_vel", cmd_vel_topic);
   node()->get_parameter("decision.topics.gimbal_cmd", gimbal_topic);
+  // 姿态模式话题：行为树发布，standard_robot_pp_ros2 订阅后再下发给下位机。
+  node()->get_parameter("decision.topics.robot_mode", robot_mode_topic);
   node()->get_parameter("decision.motion.default_spin_speed", default_spin_speed);
+  // 受击时的自旋速度。
+  node()->get_parameter("decision.motion.hit_spin_speed", hit_spin_speed);
+  // 最近一次有效掉血后，若在该时长内没有新的掉血，则停止自旋。
+  node()->get_parameter(
+    "decision.motion.hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
+  // 低于该血量阈值后，行为树可切入 defend 相关分支。
+  node()->get_parameter("decision.mode_thresholds.defend_hp", defend_mode_hp);
+  // 姿态切换冷却和单局累计时长上限，由 PublishRobotMode 统一执行。
+  node()->get_parameter("decision.mode_limits.switch_cooldown_s", mode_switch_cooldown_s);
+  node()->get_parameter("decision.mode_limits.max_cumulative_s", mode_max_cumulative_s);
   node()->get_parameter("decision.vision.timeout_s", decision_vision_timeout_s_);
 
   globalBlackboard()->set("node", node());
@@ -280,10 +306,18 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
     "decision_game_start_max_remain_time", game_start_max_remain_time);
   globalBlackboard()->set("decision_spin_topic", spin_topic);
   globalBlackboard()->set("decision_cmd_vel_topic", cmd_vel_topic);
-  // 把视觉相关参数也放到黑板，
-  // 这样 XML 就可以直接通过 `{@decision_gimbal_topic}` / `{@decision_vision_timeout_s}` 引用。
+  // 把行为树运行时会直接引用的参数注入黑板，
+  // 这样 XML 可以通过 {@...} 形式直接取值，避免把常量写死在树文件中。
   globalBlackboard()->set("decision_gimbal_topic", gimbal_topic);
+  // 姿态模式相关黑板参数，供 PublishRobotMode / XML 直接引用。
+  globalBlackboard()->set("decision_robot_mode_topic", robot_mode_topic);
   globalBlackboard()->set("decision_default_spin_speed", default_spin_speed);
+  globalBlackboard()->set("decision_hit_spin_speed", hit_spin_speed);
+  globalBlackboard()->set(
+    "decision_hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
+  globalBlackboard()->set("decision_defend_mode_hp", defend_mode_hp);
+  globalBlackboard()->set("decision_mode_switch_cooldown_s", mode_switch_cooldown_s);
+  globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
   globalBlackboard()->set("decision_vision_timeout_s", decision_vision_timeout_s_);
   globalBlackboard()->set("decision_patrol_cursor", 0);
   globalBlackboard()->set("decision_patrol_direction", 1);

@@ -3,6 +3,8 @@
 > 说明  
 > 本文保留了较多阶段性调试记录与历史命令。若文中某些绝对路径、旧命名或阶段性结论与当前代码不一致，请以这几份现状文档为准：[`./移植.md`](./移植.md)、[`./sentry_bt_decision_checklist.md`](./sentry_bt_decision_checklist.md)、[`./融合.md`](./融合.md)。
 
+如果你当前在看哨兵姿态切换、防御阈值、受击自旋或下位机模式发送，请额外以 [`./sentry_posture_switch_logic.md`](./sentry_posture_switch_logic.md) 为准。
+
 ## 0. 现状速览
 
 如果你现在只是想按当前代码启动和调试，请先记住这几个现状入口：

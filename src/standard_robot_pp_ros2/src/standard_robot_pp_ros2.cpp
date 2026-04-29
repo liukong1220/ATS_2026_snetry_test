@@ -113,6 +113,10 @@ void StandardRobotPpRos2Node::createSubscription()
   cmd_shoot_sub_ = this->create_subscription<example_interfaces::msg::UInt8>(
     "cmd_shoot", 10,
     std::bind(&StandardRobotPpRos2Node::cmdShootCallback, this, std::placeholders::_1));
+
+  robot_mode_sub_ = this->create_subscription<example_interfaces::msg::UInt8>(
+    robot_mode_topic_, 10,
+    std::bind(&StandardRobotPpRos2Node::cmdRobotModeCallback, this, std::placeholders::_1));
 }
 
 void StandardRobotPpRos2Node::getParams()
@@ -198,6 +202,8 @@ void StandardRobotPpRos2Node::getParams()
   record_rosbag_ = declare_parameter("record_rosbag", false);
   set_detector_color_ = declare_parameter("set_detector_color", false);
   debug_ = declare_parameter("debug", false);
+  // 上层行为树通过该话题下发姿态模式，默认值与 pb2025_sentry_behavior 保持一致。
+  robot_mode_topic_ = declare_parameter("robot_mode_topic", std::string("decision/robot_mode"));
 }
 
 /********************************************************/
@@ -635,9 +641,7 @@ void StandardRobotPpRos2Node::publishRobotStatus(ReceiveRobotStatus & robot_stat
   RCLCPP_INFO(get_logger(), "current maximum hp: %d", msg.maximum_hp);
   RCLCPP_INFO(get_logger(), "projectile allowance 17mm: %d", msg.projectile_allowance_17mm);
 
-  if (last_hp_ - msg.current_hp > 0) {
-    msg.is_hp_deduced = true;
-  }
+  msg.is_hp_deduced = last_hp_ >= 0.0F && (last_hp_ - static_cast<float>(msg.current_hp) > 0.0F);
   last_hp_ = robot_status.data.current_hp;
 
   robot_status_pub_->publish(msg);
@@ -694,6 +698,8 @@ void StandardRobotPpRos2Node::sendData()
     send_robot_cmd_data_.data.speed_vector.vx = 0;
     send_robot_cmd_data_.data.speed_vector.vy = 0;
     send_robot_cmd_data_.data.speed_vector.wz = 0;
+    send_robot_cmd_data_.data.speed_vector.mode =
+      static_cast<decltype(send_robot_cmd_data_.data.speed_vector.mode)>(0);
     // 添加帧头crc8校验
     crc8::append_CRC8_check_sum(
       reinterpret_cast<uint8_t *>(&send_robot_cmd_data_), sizeof(HeaderFrame));
@@ -764,6 +770,29 @@ void StandardRobotPpRos2Node::cmdShootCallback(const example_interfaces::msg::UI
   std::lock_guard<std::mutex> lock(send_cmd_mutex_);
   send_robot_cmd_data_.data.shoot.fric_on = true;
   send_robot_cmd_data_.data.shoot.fire = msg->data;
+}
+
+void StandardRobotPpRos2Node::cmdRobotModeCallback(
+  const example_interfaces::msg::UInt8::SharedPtr msg)
+{
+  constexpr uint8_t kMoveMode = 0;
+  constexpr uint8_t kDefendMode = 2;
+  // 协议当前约定：
+  // 0=move，1=attack，2=defend。
+  // 这里不重新做业务判断，只做最终的合法值保护和串口结构体写入。
+
+  // 当前协议只支持 0/1/2 三种姿态，收到非法值时自动回退到 move。
+  const uint8_t mode = msg->data <= kDefendMode ? msg->data : kMoveMode;
+  if (mode != msg->data) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 1000,
+      "Received unsupported robot mode %u, fallback to move mode", msg->data);
+  }
+
+  std::lock_guard<std::mutex> lock(send_cmd_mutex_);
+  // 将行为树姿态模式写入串口发送结构体，后续由发送线程发给下位机。
+  send_robot_cmd_data_.data.speed_vector.mode =
+    static_cast<decltype(send_robot_cmd_data_.data.speed_vector.mode)>(mode);
 }
 
 void StandardRobotPpRos2Node::setParam(const rclcpp::Parameter & param)

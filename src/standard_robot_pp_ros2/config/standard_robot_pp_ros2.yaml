@@ -8,6 +8,9 @@ standard_robot_pp_ros2:
     set_detector_color: false
     record_rosbag: true
     debug: false
+    # 订阅上层行为树发布的姿态模式话题，
+    # 并将值写入 SendRobotCmdData.data.speed_vector.mode。
+    robot_mode_topic: decision/robot_mode
 
 
 robot_decision:

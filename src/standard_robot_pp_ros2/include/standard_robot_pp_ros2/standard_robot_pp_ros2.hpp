@@ -46,6 +46,8 @@ private:
   std::unique_ptr<drivers::serial_driver::SerialDriver> serial_driver_;
   bool record_rosbag_;
   bool set_detector_color_;
+  // 姿态模式订阅话题，默认来自行为树发布的 decision/robot_mode。
+  std::string robot_mode_topic_;
 
   std::thread receive_thread_;
   std::thread send_thread_;
@@ -70,6 +72,8 @@ private:
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_flag_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr cmd_gimbal_joint_sub_;
   rclcpp::Subscription<example_interfaces::msg::UInt8>::SharedPtr cmd_shoot_sub_;
+  // 订阅上层姿态模式，并写入串口发送结构体中的 speed_vector.mode。
+  rclcpp::Subscription<example_interfaces::msg::UInt8>::SharedPtr robot_mode_sub_;
   RobotModels robot_models_;
   std::unordered_map<std::string, rclcpp::Publisher<example_interfaces::msg::Float64>::SharedPtr>
     debug_pub_map_;
@@ -101,6 +105,8 @@ private:
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
   void cmdGimbalJointCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
   void cmdShootCallback(const example_interfaces::msg::UInt8::SharedPtr msg);
+  // 把行为树发来的 move/attack/defend 模式映射到下位机协议字段。
+  void cmdRobotModeCallback(const example_interfaces::msg::UInt8::SharedPtr msg);
   void setParam(const rclcpp::Parameter & param);
   bool getDetectColor(uint8_t robot_id, uint8_t & color);
   bool callTriggerService(const std::string & service_name);
@@ -115,7 +121,7 @@ private:
 
   uint8_t previous_game_progress_ = 0;
 
-  float last_hp_;
+  float last_hp_ = -1.0F;
   float last_gimbal_pitch_odom_joint_, last_gimbal_yaw_odom_joint_;
   // rclcpp::Time stop_start_time_;
 };

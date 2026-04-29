@@ -16,6 +16,10 @@
 
 - [`../src/pb2025_sentry_behavior/src/pb2025_sentry_behavior_server.cpp`](../src/pb2025_sentry_behavior/src/pb2025_sentry_behavior_server.cpp)
 
+当前姿态切换、模式冷却、单局累计时长限制，以及受击自旋的最新规则请同时参考：
+
+- [`./sentry_posture_switch_logic.md`](./sentry_posture_switch_logic.md)
+
 如果你只想先抓住主线，可以先记住下面这一张链路图。
 
 ```text
@@ -176,11 +180,24 @@ launch 文件
 
 `rmul_2026` 的主干可以读成：
 
-1. 先持续发布默认转速 `cmd_spin`。
-2. 再在三个总分支里做优先级仲裁：
+1. 先对“是否受击”做一次高优先级判断。
+2. 如果是有效装甲受击，则发布 `decision.motion.hit_spin_speed`；如果在 `decision.motion.hit_spin_stop_after_no_hp_drop_s` 这段时间内没有新的掉血，则回到 `0.0`。
+3. 再在三个总分支里做优先级仲裁：
    - `vision_override_realtime`
    - `decision_simulation`
    - `decision_referee`
+
+姿态模式不是单独在根节点统一发，而是跟随具体分支发送：
+
+- 视觉接管分支发送 `attack`
+- 巡逻 / 锚点 / 关键时间移动分支发送 `move`
+- 低血量退防 / 安全点分支发送 `defend`
+
+这些姿态发布都经过 `PublishRobotMode` 统一裁决，包含：
+
+- `5s` 姿态切换冷却
+- 每局单姿态累计 `180s` 上限
+- 姿态超限后的保持或回退策略
 
 这层结构写在：
 

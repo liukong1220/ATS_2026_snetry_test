@@ -86,6 +86,30 @@ colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 | `use_respawn` | 如果节点崩溃，是否重新启动。本参数仅 `use_composition:=False` 时有效 | bool | False |
 | `log_level` | 日志级别 | string | "info" |
 
+### 2.6 Robot Mode 对接
+
+当前哨兵上层决策会通过 `decision/robot_mode` 发送姿态模式，本包订阅该话题后，将模式写入串口下发结构中的 `SendRobotCmdData.data.speed_vector.mode`。
+
+默认参数位于：
+
+- [`./config/standard_robot_pp_ros2.yaml`](./config/standard_robot_pp_ros2.yaml)
+
+关键参数：
+
+- `robot_mode_topic`，默认值为 `decision/robot_mode`
+
+当前模式约定：
+
+- `move = 0`
+- `attack = 1`
+- `defend = 2`
+
+具体姿态切换规则、冷却时间、血量阈值与受击自旋逻辑请以：
+
+- [`../../docs/sentry_posture_switch_logic.md`](../../docs/sentry_posture_switch_logic.md)
+
+为准。
+
 ## 3. 协议结构
 
 ### 3.1 数据帧构成

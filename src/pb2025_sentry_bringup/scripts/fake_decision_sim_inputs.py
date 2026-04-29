@@ -71,6 +71,9 @@ class FakeDecisionSimInputs(Node):
         self.declare_parameter("shooter_17mm_1_barrel_heat", 0)
         self.declare_parameter("projectile_allowance_17mm", 200)
         self.declare_parameter("remaining_gold_coin", 0)
+        self.declare_parameter("armor_id", 0)
+        self.declare_parameter("hp_deduction_reason", int(RobotStatus.ARMOR_HIT))
+        self.declare_parameter("is_hp_deduced", False)
 
         self.declare_parameter("friendly_fortress_gain_point", False)
         self.declare_parameter("friendly_supply_zone_non_exchange", False)
@@ -264,6 +267,13 @@ class FakeDecisionSimInputs(Node):
         )
         robot_status.remaining_gold_coin = int(
             self.get_parameter("remaining_gold_coin").value
+        )
+        robot_status.armor_id = int(self.get_parameter("armor_id").value)
+        robot_status.hp_deduction_reason = int(
+            self.get_parameter("hp_deduction_reason").value
+        )
+        robot_status.is_hp_deduced = bool(
+            self.get_parameter("is_hp_deduced").value
         )
         robot_status.robot_pos.orientation.w = 1.0
         self.robot_status_pub.publish(robot_status)

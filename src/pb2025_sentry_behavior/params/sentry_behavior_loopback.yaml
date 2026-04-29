@@ -42,9 +42,26 @@ pb2025_sentry_behavior_server:
         spin: cmd_spin
         cmd_vel: cmd_vel
         gimbal_cmd: cmd_gimbal
+        # 哨兵姿态模式话题：
+        # 0=move，1=attack，2=defend。
+        robot_mode: decision/robot_mode
 
       motion:
         default_spin_speed: 7.0
+        # 检测到有效装甲受击后的自旋角速度。
+        hit_spin_speed: 7.0
+        # 最近一次有效掉血后，若在该时长内没有新的掉血，则停止自旋。
+        hit_spin_stop_after_no_hp_drop_s: 2.0
+
+      mode_thresholds:
+        # current_hp <= defend_hp 时，主树可切入 defend 相关分支。
+        defend_hp: 300
+
+      mode_limits:
+        # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
+        switch_cooldown_s: 5.0
+        # 每局比赛内单一姿态允许累计存在的最大时长。
+        max_cumulative_s: 180.0
 
       vision:
         topic: vision/target
@@ -71,19 +88,19 @@ pb2025_sentry_behavior_server:
       hp_thresholds:
         abundant:
           high: 400
-          medium: 220
+          medium: 300
           low: 120
         normal:
           high: 400
-          medium: 250
+          medium: 300
           low: 150
         tense:
           high: 400
-          medium: 250
+          medium: 300
           low: 150
         critical:
           high: 400
-          medium: 250
+          medium: 300
           low: 150
 
       decision_config:

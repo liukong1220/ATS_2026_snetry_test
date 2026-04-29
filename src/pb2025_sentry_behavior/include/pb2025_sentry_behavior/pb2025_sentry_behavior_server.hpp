@@ -75,8 +75,10 @@ private:
   std::string decision_sim_mode_;
   std::string decision_sim_mode_topic_;
   std::string decision_gimbal_topic_;
+  std::string decision_robot_mode_topic_;
   std::string decision_vision_topic_;
   double decision_vision_timeout_s_ = 0.5;
+  double decision_hit_spin_speed_ = 7.0;
 };
 
 }  // namespace pb2025_sentry_behavior
