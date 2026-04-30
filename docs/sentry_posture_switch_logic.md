@@ -89,12 +89,13 @@ send_robot_cmd_data_.data.speed_vector.mode
 
 ### 4.3 `defend`
 
-当前低资源与保命分支会发布 `defend`：
+当前 `defend` 更像“当前任务结果对应的姿态发布”：
 
-1. 回安全点
-2. 最近退防点
+1. 回补给安全点时会发布 `defend`
+2. 视觉失效、资源不健康、不适合继续追击时也可能发布 `defend`
 
-当前是否进入 `defend`，统一由资源状态机决定，而不是由分支自己单独判断血量。
+当前姿态不再反向决定目标点，目标点先由血量 / 弹量 / 视觉 / 巡航条件决定，
+随后由具体子树发布 `move / attack / defend` 给下位机。
 
 ## 5. 当前姿态裁决算法
 
@@ -155,20 +156,17 @@ send_robot_cmd_data_.data.speed_vector.mode
 - `RobotStatus.current_hp`
 - `RobotStatus.projectile_allowance_17mm`
 
-当前算法是迟滞锁存状态机：
+当前算法仍是迟滞锁存状态机，但当前主树对“目标点”的实际使用方式已经调整为：
 
 1. 当前处于 `engage` 时
-   - 若血量低于 `defend_enter_hp`，进入 `defend`
-   - 否则若血量或弹量低于补给进入阈值，进入 `resupply`
-   - 否则保持 `engage`
+   - 若血量低于补给进入阈值，主树优先回补给安全点
+   - 若弹量不足，也优先回补给安全点
+   - 否则保持 `engage`，允许视觉接管或普通巡逻决定目标点
 2. 当前处于 `resupply` 时
-   - 若血量继续掉到 `defend_enter_hp` 以下，升级为 `defend`
    - 若血量与弹量都恢复到退出阈值以上，回到 `engage`
    - 否则保持 `resupply`
-3. 当前处于 `defend` 时
-   - 若血量仍低于 `defend_exit_hp`，保持 `defend`
-   - 若血量恢复但资源仍不健康，降到 `resupply`
-   - 若资源完全恢复，回到 `engage`
+3. 当前 `defend` 资源状态仍保留给运行时观测与姿态发布，
+   但当前主树不再让它单独决定“去最近退防点还是安全区”
 
 当前参数：
 
@@ -178,6 +176,12 @@ send_robot_cmd_data_.data.speed_vector.mode
 - `decision.resource_policy.resupply_exit_hp`
 - `decision.resource_policy.resupply_enter_ammo`
 - `decision.resource_policy.resupply_exit_ammo`
+
+当前推荐理解：
+
+1. `resupply_enter_hp / resupply_exit_hp` 控制“血量低到要不要回安全区”
+2. `resupply_enter_ammo / resupply_exit_ammo` 控制“弹量低到要不要回安全区”
+3. `defend_*` 现在更偏向资源状态观测与姿态语义，不再单独主导目标点选择
 
 ## 7. 当前受击自旋检测算法
 

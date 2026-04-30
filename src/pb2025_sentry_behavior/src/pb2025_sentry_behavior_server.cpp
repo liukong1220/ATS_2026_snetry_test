@@ -245,10 +245,10 @@ void SentryBehaviorServer::declareDecisionParameters()
   // 3. engage   : 血量/弹量都健康，允许巡逻与视觉接管。
   //
   // enter/exit 成对出现是为了形成迟滞，避免数值卡在阈值附近来回横跳。
-  declare_parameter("decision.resource_policy.defend_enter_hp", 250);
-  declare_parameter("decision.resource_policy.defend_exit_hp", 300);
-  declare_parameter("decision.resource_policy.resupply_enter_hp", 100);
-  declare_parameter("decision.resource_policy.resupply_exit_hp", 400);
+  declare_parameter("decision.resource_policy.defend_enter_hp", 100);
+  declare_parameter("decision.resource_policy.defend_exit_hp", 150);
+  declare_parameter("decision.resource_policy.resupply_enter_hp", 250);
+  declare_parameter("decision.resource_policy.resupply_exit_hp", 300);
   declare_parameter("decision.resource_policy.resupply_enter_ammo", 50);
   declare_parameter("decision.resource_policy.resupply_exit_ammo", 100);
   declare_parameter("decision.pose.expected_frame", std::string("map"));
@@ -319,6 +319,7 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   double hit_spin_stop_after_no_hp_drop_s = 2.0;
   double mode_switch_cooldown_s = 5.0;
   double mode_max_cumulative_s = 180.0;
+  int resupply_enter_hp = 250;
   node()->get_parameter(
     "decision.point_roles.supply_safe_point_index", supply_safe_point_index);
   node()->get_parameter(
@@ -346,6 +347,7 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   node()->get_parameter("decision.mode_limits.switch_cooldown_s", mode_switch_cooldown_s);
   node()->get_parameter("decision.mode_limits.max_cumulative_s", mode_max_cumulative_s);
   node()->get_parameter("decision.vision.timeout_s", decision_vision_timeout_s_);
+  node()->get_parameter("decision.resource_policy.resupply_enter_hp", resupply_enter_hp);
 
   globalBlackboard()->set("node", node());
   globalBlackboard()->set("decision_input_source", decision_input_source_);
@@ -373,6 +375,7 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   globalBlackboard()->set("decision_mode_switch_cooldown_s", mode_switch_cooldown_s);
   globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
   globalBlackboard()->set("decision_vision_timeout_s", decision_vision_timeout_s_);
+  globalBlackboard()->set("decision_resupply_enter_hp", resupply_enter_hp);
   // 资源策略节点会在运行时持续覆写该值，这里先给一个明确的初值，方便调试观测。
   globalBlackboard()->set("decision_resource_mode", std::string("unknown"));
   globalBlackboard()->set("decision_patrol_cursor", 0);

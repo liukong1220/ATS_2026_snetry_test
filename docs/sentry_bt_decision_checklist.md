@@ -202,9 +202,9 @@
 
 ### 5.2 referee 分支
 
-当前通过资源模式和比赛时间做分流：
+当前通过血量、资源模式和比赛时间做分流：
 
-1. `defend -> decision_retreat`
+1. `current_hp <= resupply_enter_hp -> decision_safe_point`
 2. `resupply -> decision_safe_point`
 3. `engage + critical time -> decision_critical_time_target`
 4. `engage -> decision_patrol`
@@ -226,11 +226,11 @@
 - `resupply`
 - `defend`
 
-当前算法是迟滞锁存状态机：
+当前算法仍保留迟滞锁存状态机，但主树对目标点的使用方式已经调整为：
 
-1. 若当前已在 `defend`，只有血量恢复到退出阈值以上才允许离开
-2. 若当前已在 `resupply`，只有血量和弹量都恢复到退出阈值以上才允许回到 `engage`
-3. 若当前是 `engage`，则按进入阈值判断是否降级到 `resupply` 或 `defend`
+1. 若当前血量低于 `resupply_enter_hp`，直接回补给安全点
+2. 若当前已在 `resupply`，继续回补给安全点，直到血量和弹量恢复
+3. 若当前是 `engage`，才允许关键时间点、视觉接管和普通巡逻决定目标点
 
 相关参数：
 
@@ -258,9 +258,11 @@
 由：
 
 - `decision_safe_point`
-- `decision_retreat`
 
 发布。
+
+当前 `defend` 更像“当前目标点决策结果对应的姿态发布”，
+不再反向决定目标点必须去退防点。
 
 ### 7.3 `move`
 

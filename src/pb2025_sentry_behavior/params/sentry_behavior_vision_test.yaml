@@ -14,7 +14,7 @@ pb2025_sentry_behavior_server:
       - pb2025_sentry_behavior/behavior_trees
 
     decision:
-      input_source: simulation
+      input_source: referee
 
       goal_points:
         x: [0.2, 5.38, 3.6, 0.0]
@@ -96,8 +96,8 @@ pb2025_sentry_behavior_server:
         visualization_topic: decision/vision_follow_markers
 
       resource_policy:
-        # vision_test 不是“无条件视觉优先”测试树。
-        # 它仍然遵守和主树一致的资源门控，这样仿真结果才更接近实车。
+        # loopback_vision_test 默认也走与实车一致的 rmul_2026 主树。
+        # 视觉接管仍然受资源门控约束，这样仿真结果才更接近实车。
         defend_enter_hp: 250
         defend_exit_hp: 300
         resupply_enter_hp: 100
@@ -158,4 +158,4 @@ pb2025_sentry_behavior_server:
 pb2025_sentry_behavior_client:
   ros__parameters:
     use_sim_time: true
-    target_tree: vision_test
+    target_tree: rmul_2026

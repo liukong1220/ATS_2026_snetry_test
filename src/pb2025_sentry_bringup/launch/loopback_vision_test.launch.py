@@ -48,7 +48,7 @@ def generate_launch_description():
     )
 
     # 这是给视觉融合链专门准备的快捷入口：
-    # 1. 默认加载 vision_test 行为树；
+    # 1. 默认仍走与实车一致的 rmul_2026 主树；
     # 2. 默认开启假视觉目标；
     # 3. 同时把常用视觉仿真参数透传出来，便于直接在 launch 命令里改。
     loopback_vision_test = IncludeLaunchDescription(

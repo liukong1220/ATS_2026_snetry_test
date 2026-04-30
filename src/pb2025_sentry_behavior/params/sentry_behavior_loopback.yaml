@@ -14,7 +14,7 @@ pb2025_sentry_behavior_server:
       - pb2025_sentry_behavior/behavior_trees
 
     decision:
-      input_source: simulation
+      input_source: referee
 
       goal_points:
         x: [0.2, 5.38, 3.6, 0.0]

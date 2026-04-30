@@ -7,8 +7,8 @@
 ```text
 订阅 裁判 / 视觉 / 当前位姿 / costmap
   -> 写入行为树黑板
-  -> 每个 tick 重新评估 rmul_2026 或 vision_test
-  -> 生成 decision_path / 姿态模式 / 自旋速度 / 云台指令
+  -> 每个 tick 重新评估 rmul_2026
+  -> 先决定当前目标点，再发布姿态模式 / 自旋速度 / 云台指令
   -> 通过 /navigate_through_poses 和 topic 输出给下游
 ```
 
@@ -22,8 +22,9 @@
 
 - 主树：
   [behavior_trees/rmul_2026.xml](./behavior_trees/rmul_2026.xml)
-- 视觉专测树：
+- 视觉专测树文件仍保留：
   [behavior_trees/vision_test.xml](./behavior_trees/vision_test.xml)
+  但当前 loopback / vision_test 启动入口默认也走 `rmul_2026`
 
 当前参数文件：
 
@@ -47,6 +48,12 @@
 - `/navigate_through_poses`
 
 当前已经不再把 `NavigateToPose` 当作主线执行接口。
+
+当前目标点决策语义：
+
+1. 先根据血量、弹量、视觉接管条件、巡航状态决定“应该去哪里”
+2. 再根据这个目标点所在分支发布姿态模式
+3. 姿态模式是结果，不反向决定导航目标点
 
 ### 2. 姿态切换
 
@@ -124,6 +131,14 @@
 - `defend`
 
 当前视觉接管和主树资源分支都走这套统一判定。
+
+不过当前主树已经不再把 `defend / resupply` 直接当作“目标点枚举”来使用。
+当前实际规则是：
+
+1. 若 `current_hp <= resupply_enter_hp`，优先回补给安全点
+2. 若弹量或资源状态进入 `resupply`，也回补给安全点
+3. 只有资源健康时，才允许视觉接管、关键时间点或普通巡逻决定目标点
+4. `move / attack / defend` 姿态只在具体子树里按结果发布给下位机
 
 ## 当前最常改的参数
 

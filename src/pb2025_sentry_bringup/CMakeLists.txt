@@ -11,6 +11,9 @@ find_package(ament_lint_auto REQUIRED)
   )
   ament_lint_auto_find_test_dependencies()
 endif()
+
+ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/ros_domain_id.dsv.in")
+
 ament_auto_package(
   INSTALL_TO_SHARE
   launch

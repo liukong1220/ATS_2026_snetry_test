@@ -130,7 +130,6 @@ loopback 并不自己决定攻击点，仍然完全复用：
 ### 6.1 通用决策仿真
 
 ```bash
-export ROS_DOMAIN_ID=90
 source install/setup.bash
 ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ```
@@ -138,7 +137,6 @@ ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ### 6.2 视觉接管与攻击圆周跟随
 
 ```bash
-export ROS_DOMAIN_ID=90
 source install/setup.bash
 ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
   use_rviz:=True \
@@ -156,6 +154,9 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
   vision_target_yaw:=0.30 \
   vision_target_pitch:=-0.06
 ```
+
+当前 workspace 已默认设置 `ROS_DOMAIN_ID=90`，
+因此 loopback 常规启动时只需要 `source install/setup.bash`。
 
 ## 7. 当前视觉测试参数的详细含义
 

@@ -173,6 +173,18 @@
   <BehaviorTree ID="decision_simulation">
     <ReactiveFallback>
       <Sequence>
+        <IsRobotHpBelow robot_status="{@referee_robotStatus}"
+                        threshold="{@decision_resupply_enter_hp}"/>
+        <SubTree ID="decision_safe_point"/>
+      </Sequence>
+
+      <Sequence>
+        <IsRobotResourceMode state="resupply"
+                             robot_status="{@referee_robotStatus}"/>
+        <SubTree ID="decision_safe_point"/>
+      </Sequence>
+
+      <Sequence>
         <IsDecisionMode mode="safe"/>
         <SubTree ID="decision_safe_point"/>
       </Sequence>
@@ -201,9 +213,9 @@
       <SubTree ID="check_game_start"/>
       <ReactiveFallback>
         <Sequence>
-          <IsRobotResourceMode state="defend"
-                               robot_status="{@referee_robotStatus}"/>
-          <SubTree ID="decision_retreat"/>
+          <IsRobotHpBelow robot_status="{@referee_robotStatus}"
+                          threshold="{@decision_resupply_enter_hp}"/>
+          <SubTree ID="decision_safe_point"/>
         </Sequence>
 
         <Sequence>

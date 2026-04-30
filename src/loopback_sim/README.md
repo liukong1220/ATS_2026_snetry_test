@@ -95,15 +95,16 @@ map -> odom -> base_footprint -> base_link -> base_scan
 因此推荐：
 
 ```bash
-export ROS_DOMAIN_ID=90
 source install/setup.bash
 ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ```
 
+当前 workspace 已通过环境 hook 默认设置 `ROS_DOMAIN_ID=90`，
+因此日常只需要 `source install/setup.bash` 即可。
+
 ### 2. 当前视觉专测推荐命令
 
 ```bash
-export ROS_DOMAIN_ID=90
 source install/setup.bash
 ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
   use_rviz:=True \
@@ -125,10 +126,31 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
 ### 3. 当前重定位测试命令
 
 ```bash
-export ROS_DOMAIN_ID=90
 source install/setup.bash
 ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
   "{header: {frame_id: map}, pose: {pose: {position: {x: 1.5, y: 4.5, z: 0.0}, orientation: {z: 0.70710678, w: 0.70710678}}}}"
+```
+
+### 4. 运行时修改假输入参数
+
+如果 `ros2 param set` 长时间没有返回 `Set parameter successful`，优先绕过
+`ros2 daemon`：
+
+```bash
+source install/setup.bash
+ros2 param set --no-daemon /fake_decision_sim_inputs current_hp 50
+ros2 param set --no-daemon /fake_decision_sim_inputs decision_mode retreat
+ros2 param get --no-daemon /fake_decision_sim_inputs current_hp
+ros2 topic echo --no-daemon /referee/robot_status --once
+```
+
+普通 `ros2 param set` 会依赖本机 `ros2 daemon` 的图缓存。若 daemon 是在旧的
+`ROS_DOMAIN_ID`、旧 overlay，或异常状态下启动的，CLI 可能卡住，但节点本身仍然正常。
+这种情况下也可以重启 daemon：
+
+```bash
+ros2 daemon stop
+ros2 daemon start
 ```
 
 ## 当前维护建议

@@ -7,6 +7,7 @@ import rclpy
 from geometry_msgs.msg import PointStamped
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from pb_rm_interfaces.msg import GameStatus, RfidStatus, RobotStatus
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from sp_msgs.msg import VisionTargetMsg
 from std_msgs.msg import String
@@ -23,7 +24,10 @@ def normalize_mode(mode: str) -> str:
 
 class FakeDecisionSimInputs(Node):
     def __init__(self):
-        super().__init__("fake_decision_sim_inputs")
+        super().__init__(
+            "fake_decision_sim_inputs",
+            start_parameter_services=True,
+        )
 
         self.declare_parameter("publish_rate", 5.0)
         # use_sim_time 由 launch 统一注入。
@@ -123,6 +127,7 @@ class FakeDecisionSimInputs(Node):
         self.last_mode: Optional[str] = None
         self.mode_script_cache_key: Optional[Tuple[str, ...]] = None
         self.mode_script_cache: List[Tuple[float, str]] = []
+        self.add_on_set_parameters_callback(self.on_parameters_set)
 
         self.create_timer(1.0 / publish_rate, self.publish_loop)
         self.initial_pose_timer = self.create_timer(
@@ -137,6 +142,48 @@ class FakeDecisionSimInputs(Node):
                 str(self.get_parameter("publish_referee_inputs").value),
             )
         )
+        self.get_logger().info(
+            "Runtime parameter service is ready on /fake_decision_sim_inputs."
+        )
+
+    def on_parameters_set(self, parameters):
+        updates = []
+        for parameter in parameters:
+            if parameter.name == "decision_mode":
+                mode = normalize_mode(str(parameter.value))
+                if mode not in ("patrol", "anchor", "retreat", "safe"):
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            "decision_mode must be one of "
+                            "patrol/anchor/retreat/safe"
+                        ),
+                    )
+
+            if parameter.name == "mode_script":
+                self.mode_script_cache_key = None
+                self.mode_script_cache = []
+
+            if parameter.name in (
+                "current_hp",
+                "projectile_allowance_17mm",
+                "decision_mode",
+                "publish_decision_mode",
+                "publish_referee_inputs",
+                "decision_mode_topic",
+                "vision_topic",
+                "publish_vision_target",
+                "vision_tracking",
+                "vision_nav_hold",
+            ):
+                updates.append(f"{parameter.name}={parameter.value}")
+
+        if updates:
+            self.get_logger().info(
+                "Accepted parameter update: %s" % ", ".join(updates)
+            )
+
+        return SetParametersResult(successful=True)
 
     def parse_mode_script(self) -> List[Tuple[float, str]]:
         raw_script = tuple(str(item) for item in self.get_parameter("mode_script").value)
