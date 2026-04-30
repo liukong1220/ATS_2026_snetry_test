@@ -18,6 +18,7 @@
 #include "pb_rm_interfaces/msg/robot_status.hpp"
 #include "sp_msgs/msg/vision_target_msg.hpp"
 #include "std_msgs/msg/string.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 namespace pb2025_sentry_behavior
 {
@@ -86,7 +87,9 @@ void SentryBehaviorServer::subscribe(
 }
 
 SentryBehaviorServer::SentryBehaviorServer(const rclcpp::NodeOptions & options)
-: TreeExecutionServer(options)
+: TreeExecutionServer(options),
+  tf_buffer_(std::make_shared<tf2_ros::Buffer>(node()->get_clock())),
+  tf_listener_(std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node(), false))
 {
   node()->declare_parameter("use_cout_logger", false);
   node()->declare_parameter("export_tree_models_on_shutdown", false);
@@ -105,6 +108,9 @@ SentryBehaviorServer::SentryBehaviorServer(const rclcpp::NodeOptions & options)
   node()->get_parameter("decision.vision.topic", decision_vision_topic_);
   node()->get_parameter("decision.vision.timeout_s", decision_vision_timeout_s_);
   node()->get_parameter("decision.motion.hit_spin_speed", decision_hit_spin_speed_);
+  node()->get_parameter("decision.pose.expected_frame", pose_expected_frame_);
+  node()->get_parameter("decision.pose.timeout_s", pose_timeout_s_);
+  node()->get_parameter("decision.pose.tf_fallback_enabled", pose_tf_fallback_enabled_);
   decision_input_source_ = sanitizeInputSource(decision_input_source_, node()->get_logger());
   decision_sim_mode_ = sanitizeSimulationMode(
     decision_sim_mode_, "patrol", node()->get_logger(),
@@ -132,6 +138,7 @@ SentryBehaviorServer::SentryBehaviorServer(const rclcpp::NodeOptions & options)
       geometry_msgs::msg::PoseStamped pose;
       pose.header = msg->header;
       pose.pose = msg->pose.pose;
+      // 优先沿用 odom 订阅位姿，保证正常行驶时规划用的是导航反馈主链路。
       globalBlackboard()->set("decision_current_pose", pose);
     };
   subscriptions_.push_back(
@@ -194,7 +201,6 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.motion.default_spin_speed", 7.0);
   declare_parameter("decision.motion.hit_spin_speed", 7.0);
   declare_parameter("decision.motion.hit_spin_stop_after_no_hp_drop_s", 2.0);
-  declare_parameter("decision.mode_thresholds.defend_hp", 300);
   declare_parameter("decision.mode_limits.switch_cooldown_s", 5.0);
   declare_parameter("decision.mode_limits.max_cumulative_s", 180.0);
   declare_parameter("decision.mode_visualization.enabled", true);
@@ -210,11 +216,44 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.vision.follow_arc_half_angle_deg", 90.0);
   declare_parameter("decision.vision.min_replan_interval_s", 0.4);
   declare_parameter("decision.vision.min_goal_shift_m", 0.35);
+  // 跟随点选侧稳定参数：
+  // 1. prefer_previous_goal_side：若上一帧已经有稳定可用的跟随点，优先保持在同一侧，
+  //    减少在转角、终点附近或目标轻微抖动时左右突然翻边。
+  // 2. max_target_shift_for_side_hold_m：仅当敌方地图点变化较小时才保持旧侧，
+  //    若敌方已经明显移动，则允许重新选更合适的一侧。
+  // 3. max_goal_angle_step_deg：即使本帧重新选出的圆周目标发生了较大角度跃迁，
+  //    也只允许每个决策周期沿圆周前进有限角度，避免目标点瞬间跳到另一侧。
+  // 4. pose_jump_reset_distance_m：若当前车位相对上一拍参考位姿出现明显突变，
+  //    直接清空旧的视觉平滑缓存，保证重定位后立即重新按“当前车位最近圆周点”选目标。
+  declare_parameter("decision.vision.prefer_previous_goal_side", true);
+  declare_parameter("decision.vision.max_target_shift_for_side_hold_m", 0.8);
+  declare_parameter("decision.vision.max_goal_angle_step_deg", 18.0);
+  declare_parameter("decision.vision.pose_jump_reset_distance_m", 0.8);
+  // 视觉跟随平滑接管参数：
+  // 1. activation_hold_s：首次看到目标后，先稳定保持一小段时间再接管。
+  // 2. switch_target_hold_s：切换敌方目标前，要求新目标持续稳定一段时间。
+  // 3. override_hold_s：短时丢帧/遮挡时，继续保持当前视觉接管，避免立刻掉回巡逻。
+  declare_parameter("decision.vision.activation_hold_s", 0.25);
+  declare_parameter("decision.vision.switch_target_hold_s", 0.45);
+  declare_parameter("decision.vision.override_hold_s", 0.6);
   declare_parameter("decision.vision.visualization_enabled", true);
   declare_parameter(
     "decision.vision.visualization_topic", std::string("decision/vision_follow_markers"));
+  // 资源策略统一决定当前是否允许视觉接管：
+  // 1. defend   : 血量已经低到必须保命，优先退防。
+  // 2. resupply : 血量/弹量不健康，退出追击并回补给安全点。
+  // 3. engage   : 血量/弹量都健康，允许巡逻与视觉接管。
+  //
+  // enter/exit 成对出现是为了形成迟滞，避免数值卡在阈值附近来回横跳。
+  declare_parameter("decision.resource_policy.defend_enter_hp", 250);
+  declare_parameter("decision.resource_policy.defend_exit_hp", 300);
+  declare_parameter("decision.resource_policy.resupply_enter_hp", 100);
+  declare_parameter("decision.resource_policy.resupply_exit_hp", 400);
+  declare_parameter("decision.resource_policy.resupply_enter_ammo", 50);
+  declare_parameter("decision.resource_policy.resupply_exit_ammo", 100);
   declare_parameter("decision.pose.expected_frame", std::string("map"));
   declare_parameter("decision.pose.timeout_s", 0.5);
+  declare_parameter("decision.pose.tf_fallback_enabled", true);
 
   declare_parameter("decision.time_thresholds.abundant", 300);
   declare_parameter("decision.time_thresholds.normal", 240);
@@ -242,6 +281,22 @@ void SentryBehaviorServer::declareDecisionParameters()
     "decision.decision_config.nav2_action_server", std::string("/navigate_through_poses"));
   declare_parameter("decision.decision_config.decision_period_ms", 100);
   declare_parameter("decision.decision_config.goal_position_tolerance", 0.1);
+  // 行为层“是否已到达路径终点”的判定容差。
+  // 这个值应尽量与 Nav2 的 general_goal_checker.xy_goal_tolerance 对齐，
+  // 否则会出现 Nav2 已经报 Goal succeeded，但行为层仍继续重发同一路径。
+  declare_parameter("decision.decision_config.path_goal_reached_tolerance", 0.1);
+  // 导航目标重发节流参数：
+  // 1. active_goal_hold_tolerance：若新路径与当前已发给 Nav2 的路径仅有小范围偏差，
+  //    则先认为它们属于“同一个意图”，不要立刻 cancel + 重发。
+  // 2. active_goal_min_resend_interval_s：即使目标有轻微变化，也要求与上一次发目标
+  //    至少间隔这么久才允许再次 preempt，减少视觉抖动放大成 MPPI 左右试探。
+  declare_parameter("decision.decision_config.active_goal_hold_tolerance", 0.45);
+  declare_parameter("decision.decision_config.active_goal_min_resend_interval_s", 0.8);
+  // 视觉实时追随专用节流参数：
+  // 视觉分支会持续围绕敌方目标圆周刷新“距离当前车位最近的点”，
+  // 因此不能完全复用普通巡逻的宽容差，否则新圆周点会被误判成旧目标附近的小抖动。
+  declare_parameter("decision.decision_config.vision_active_goal_hold_tolerance", 0.18);
+  declare_parameter("decision.decision_config.vision_active_goal_min_resend_interval_s", 0.25);
   declare_parameter("decision.decision_config.waypoint_stop_duration_s", 0.0);
   declare_parameter("decision.decision_config.patrol_preview_points", 1);
   declare_parameter("decision.decision_config.action_server_wait_timeout_s", 0.5);
@@ -262,7 +317,6 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   double default_spin_speed = 7.0;
   double hit_spin_speed = 7.0;
   double hit_spin_stop_after_no_hp_drop_s = 2.0;
-  int defend_mode_hp = 300;
   double mode_switch_cooldown_s = 5.0;
   double mode_max_cumulative_s = 180.0;
   node()->get_parameter(
@@ -288,8 +342,6 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   // 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
   node()->get_parameter(
     "decision.motion.hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
-  // 低于该血量阈值后，行为树可切入 defend 相关分支。
-  node()->get_parameter("decision.mode_thresholds.defend_hp", defend_mode_hp);
   // 姿态切换冷却和单局累计时长上限，由 PublishRobotMode 统一执行。
   node()->get_parameter("decision.mode_limits.switch_cooldown_s", mode_switch_cooldown_s);
   node()->get_parameter("decision.mode_limits.max_cumulative_s", mode_max_cumulative_s);
@@ -318,10 +370,11 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   globalBlackboard()->set("decision_hit_spin_speed", hit_spin_speed);
   globalBlackboard()->set(
     "decision_hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
-  globalBlackboard()->set("decision_defend_mode_hp", defend_mode_hp);
   globalBlackboard()->set("decision_mode_switch_cooldown_s", mode_switch_cooldown_s);
   globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
   globalBlackboard()->set("decision_vision_timeout_s", decision_vision_timeout_s_);
+  // 资源策略节点会在运行时持续覆写该值，这里先给一个明确的初值，方便调试观测。
+  globalBlackboard()->set("decision_resource_mode", std::string("unknown"));
   globalBlackboard()->set("decision_patrol_cursor", 0);
   globalBlackboard()->set("decision_patrol_direction", 1);
   globalBlackboard()->set("decision_next_patrol_cursor", 0);
@@ -351,6 +404,51 @@ void SentryBehaviorServer::onTreeCreated(BT::Tree & tree)
 std::optional<BT::NodeStatus> SentryBehaviorServer::onLoopAfterTick(BT::NodeStatus /*status*/)
 {
   ++tick_count_;
+
+  if (!pose_tf_fallback_enabled_) {
+    return std::nullopt;
+  }
+
+  geometry_msgs::msg::PoseStamped current_pose;
+  bool has_pose = globalBlackboard()->get("decision_current_pose", current_pose);
+  bool pose_stale = !has_pose;
+  if (has_pose && pose_timeout_s_ > 0.0) {
+    const rclcpp::Time pose_stamp(current_pose.header.stamp);
+    if (pose_stamp.nanoseconds() > 0) {
+      pose_stale = (node()->now() - pose_stamp).seconds() > pose_timeout_s_;
+    }
+  }
+
+  if (!pose_stale) {
+    return std::nullopt;
+  }
+
+  for (const auto & base_frame : pose_base_frame_candidates_) {
+    try {
+      // loopback 手动改 initialpose、机器人短暂停车或 odom 发布停滞时，
+      // TF 往往比 odom 更及时；这里用 TF 刷新黑板位姿，避免视觉跟随和到点判断卡死。
+      const auto transform =
+        tf_buffer_->lookupTransform(pose_expected_frame_, base_frame, tf2::TimePointZero);
+      geometry_msgs::msg::PoseStamped fallback_pose;
+      fallback_pose.header = transform.header;
+      fallback_pose.pose.position.x = transform.transform.translation.x;
+      fallback_pose.pose.position.y = transform.transform.translation.y;
+      fallback_pose.pose.position.z = transform.transform.translation.z;
+      fallback_pose.pose.orientation = transform.transform.rotation;
+      globalBlackboard()->set("decision_current_pose", fallback_pose);
+      RCLCPP_DEBUG_THROTTLE(
+        node()->get_logger(), *node()->get_clock(), 2000,
+        "Refresh decision_current_pose from TF: %s -> %s",
+        pose_expected_frame_.c_str(), base_frame.c_str());
+      return std::nullopt;
+    } catch (const tf2::TransformException &) {
+    }
+  }
+
+  RCLCPP_WARN_THROTTLE(
+    node()->get_logger(), *node()->get_clock(), 2000,
+    "decision_current_pose is stale and TF fallback failed for frame '%s'",
+    pose_expected_frame_.c_str());
   return std::nullopt;
 }
 

@@ -18,6 +18,9 @@ def generate_launch_description():
     initial_yaw = LaunchConfiguration("initial_yaw")
     publish_decision_mode = LaunchConfiguration("publish_decision_mode")
     decision_mode = LaunchConfiguration("decision_mode")
+    publish_referee_inputs = LaunchConfiguration("publish_referee_inputs")
+    current_hp = LaunchConfiguration("current_hp")
+    projectile_allowance_17mm = LaunchConfiguration("projectile_allowance_17mm")
     publish_vision_target = LaunchConfiguration("publish_vision_target")
     vision_tracking = LaunchConfiguration("vision_tracking")
     vision_nav_hold = LaunchConfiguration("vision_nav_hold")
@@ -60,6 +63,9 @@ def generate_launch_description():
             "initial_yaw": initial_yaw,
             "publish_decision_mode": publish_decision_mode,
             "decision_mode": decision_mode,
+            "publish_referee_inputs": publish_referee_inputs,
+            "current_hp": current_hp,
+            "projectile_allowance_17mm": projectile_allowance_17mm,
             "publish_vision_target": publish_vision_target,
             "vision_tracking": vision_tracking,
             "vision_nav_hold": vision_nav_hold,
@@ -131,6 +137,27 @@ def generate_launch_description():
             "decision_mode",
             default_value="patrol",
             description="视觉分支失效时，底层仿真决策模式默认值。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "publish_referee_inputs",
+            default_value="True",
+            description="是否同时发布假裁判数据。当前视觉接管也依赖资源门控，通常应保持 True。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "current_hp",
+            default_value="400",
+            description="假裁判当前血量。需要高于 defend / resupply 阈值时，资源模式才会进入 engage。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "projectile_allowance_17mm",
+            default_value="200",
+            description="假裁判 17mm 剩余弹量。需要高于补给阈值时，资源模式才会保持 engage。",
         )
     )
     ld.add_action(

@@ -36,6 +36,38 @@ source install/setup.bash
 ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True
 ```
 
+如果你现在要直接联调“视觉目标发布、attack 姿态切换、圆周跟随点可视化”，建议改用下面这条完整命令：
+
+```bash
+export ROS_DOMAIN_ID=90
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_vision_target:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_frame:=map \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0 \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06
+```
+
+这一轮实测后，强烈建议每次 loopback 单独测试时都显式设置 `ROS_DOMAIN_ID`。  
+原因是同一 DDS 域里如果同时存在两套 loopback、另一套仿真节点、或者额外发 `/clock` / TF / `/initialpose` 的节点，很容易造成串线，表现成：
+
+- `Detected jump back in time`
+- `Message Filter dropping message`
+- `Vision override rejected`
+- `decision_current_pose is stale`
+
+这些很多时候不是姿态逻辑错了，而是同域多源冲突。
+
 本文后续如果出现：
 
 1. `/home/ats/...` 旧绝对路径
@@ -67,6 +99,9 @@ ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 1. 你在 loopback 里看到的 MPPI 现象，首先要去看 `src/loopback_sim/params/nav2_params.yaml`。
 2. 你在实车里看到的 MPPI 现象，首先要去看 `src/pb2025_sentry_bringup/params/node_params.yaml`。
 3. 如果两边参数不同，出现“仿真调好了，实车还是不对”是正常现象，不一定是代码坏了。
+4. 视觉跟随“如何选攻击圆周点”的核心逻辑不在 loopback 仿真器里，而在行为层
+   [`../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp`](../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp)，
+   仿真和实车共用这套算法。
 
 本轮已经专门把 loopback 的 MPPI 调参方向重新收敛到和实车主参数一致，但它们仍然是两份文件，各自服务不同入口。
 
@@ -466,7 +501,7 @@ ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py
 - `decision.input_source=simulation`
 - `decision_mode=patrol`
 - `publish_decision_mode=True`
-- `publish_referee_inputs=False`
+- `publish_referee_inputs=True`
 
 运行中切模式：
 
@@ -615,8 +650,8 @@ decision:
   受击后发送给下位机的自旋角速度，当前逻辑最终体现在 `cmd_vel.angular.z`，也就是常说的 `wz`。
 - `decision.motion.hit_spin_stop_after_no_hp_drop_s`
   最近一次掉血后，如果连续这么久没有新的掉血事件，就停止自旋。
-- `decision.mode_thresholds.defend_hp`
-  当 `current_hp <= defend_hp` 时，行为树允许进入 `defend` 相关分支。
+- `decision.resource_policy.defend_enter_hp`
+  当 `current_hp <= defend_enter_hp` 时，资源策略会把当前模式裁决为 `defend`。
 - `decision.mode_limits.switch_cooldown_s`
   两次成功姿态切换之间的最短间隔，用来防止 `move / attack / defend` 高频抖动。
 - `decision.mode_limits.max_cumulative_s`
@@ -627,11 +662,18 @@ decision:
 如果你只是临时调试，不一定要改 yaml，也可以在节点启动后直接动态改参数，例如：
 
 ```bash
-ros2 param set /pb2025_sentry_behavior_server decision.mode_thresholds.defend_hp 260
+ros2 param set /pb2025_sentry_behavior_server decision.resource_policy.defend_enter_hp 260
+ros2 param set /pb2025_sentry_behavior_server decision.resource_policy.defend_exit_hp 300
 ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.switch_cooldown_s 3.0
 ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.max_cumulative_s 120.0
 ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_speed 5.5
 ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_stop_after_no_hp_drop_s 1.5
+ros2 param set /pb2025_sentry_behavior_server decision.vision.attack_radius 1.8
+ros2 param set /pb2025_sentry_behavior_server decision.vision.min_replan_interval_s 0.15
+ros2 param set /pb2025_sentry_behavior_server decision.vision.min_goal_shift_m 0.10
+ros2 param set /pb2025_sentry_behavior_server decision.vision.max_goal_angle_step_deg 25.0
+ros2 param set /pb2025_sentry_behavior_server decision.vision.pose_jump_reset_distance_m 0.8
+ros2 param set /pb2025_sentry_behavior_server decision.vision.pose_jump_reset_angle_deg 55.0
 ```
 
 这样做的好处是：
@@ -639,6 +681,21 @@ ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_stop_afte
 - 不用重编译
 - 不用改正式参数文件
 - 便于快速比较不同阈值的切换手感
+
+和当前视觉跟随最直接相关的参数，可以这样理解：
+
+- `decision.vision.attack_radius`
+  敌方目标外侧的理想攻击半径，导航目标会优先落在这个圆周附近。
+- `decision.vision.min_replan_interval_s`
+  视觉跟随连续重发目标的最短时间间隔。
+- `decision.vision.min_goal_shift_m`
+  新旧圆周点距离小于这个阈值时，会倾向于继续沿用旧目标，减少抖动。
+- `decision.vision.max_goal_angle_step_deg`
+  每次只允许圆周点沿目标圆周转过有限角度，用于平滑。
+- `decision.vision.pose_jump_reset_distance_m`
+  当前车位相对上一规划锚点的位移超过这个距离后，允许判定为“可能发生重定位/定位跳变”。
+- `decision.vision.pose_jump_reset_angle_deg`
+  只有“大位移”同时伴随“相对敌方方位也明显跳变”时，才真正清掉旧缓存，避免正常追踪过程中误判。
 
 ### 6.2 loopback 里到底能测哪些姿态
 
@@ -720,8 +777,17 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
 2. `pb2025_sentry_behavior_server` 终端是否打印切到 `attack`
 3. `/decision/robot_mode` 是否变成 `1`
 4. RViz 头顶 Marker 是否变成红色 `MODE: attack`
+5. `/decision/vision_follow_markers` 是否出现视觉目标点、攻击圆弧、最近圆周点和最终选中的跟随点
 
 如果视觉目标失效，行为树会回退到普通仿真分支，此时姿态也会回到 `move` 或 `defend`。
+
+当前版本下，视觉跟随不是“固定跟一个点”，而是每个决策周期都会重新按下面逻辑计算：
+
+1. 根据当前车位和敌方地图点，先求攻击圆周上离自己最近的原始圆周点
+2. 再结合 costmap、边界余量、线段可通行性，对候选点做筛选
+3. 最后再做角度限幅平滑，避免圆周点突跳
+
+这套逻辑在 loopback 和实车共用。
 
 #### 6.2.3 低血量防御与受击自旋需要 referee 输入链路
 
@@ -781,6 +847,705 @@ ros2 param set /fake_decision_sim_inputs is_hp_deduced true
 - `referee` 最适合单独验证血量与受击逻辑
 
 把三部分拆开测，定位问题会比“一次把所有输入都打开”清楚很多。
+
+### 6.4 为什么 `loopback_vision_test.launch.py` 运行后看不到视觉目标坐标与 attack 可视化
+
+如果你当前使用的是类似下面这条命令：
+
+```bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06 \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0
+```
+
+但现象是：
+
+1. RViz 里看不到视觉目标点或视觉跟随可视化
+2. 看不到 `attack` 姿态 Marker
+3. 运行后再 `ros2 param set` 修改视觉参数，效果也不明显
+
+那么当前代码版本下，最常见原因不是“loopback 发得太快导致持续识别参数失效”，而是下面这几个门槛没有同时满足。
+
+当前建议直接用这条完整命令排查，避免漏参数：
+
+```bash
+export ROS_DOMAIN_ID=90
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_vision_target:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_frame:=map \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0 \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06
+```
+
+启动后如果要改目标位置，当前最方便的方式是直接动态改假输入节点参数：
+
+```bash
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_x 4.2
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_y 1.6
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_z 0.0
+ros2 param set /fake_decision_sim_inputs vision_target_yaw 0.10
+ros2 param set /fake_decision_sim_inputs vision_target_pitch -0.03
+```
+
+如果你要验证“机器人重定位后，攻击圆周点是否重新选最近点”，可以在运行中额外执行：
+
+```bash
+export ROS_DOMAIN_ID=90
+source install/setup.bash
+ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
+  "{header: {frame_id: map}, pose: {pose: {position: {x: 1.5, y: 4.5, z: 0.0}, orientation: {z: 0.70710678, w: 0.70710678}}}}"
+```
+
+当前预期现象：
+
+1. `loopback_simulator` 终端打印 `Received initial pose!`
+2. 行为层打印 `Reset cached vision-follow state after pose jump ...`
+3. `Vision follow target=(...) nearest_ring_goal=(...) selected_goal=(...)` 中的圆周点切换到新的最近一侧
+4. `attack` 姿态保持有效，不会因为重定位丢失整条姿态链
+
+#### 原因 0：假输入节点如果启动失败，整条视觉与姿态链会直接断掉
+
+当前 `loopback_vision_test.launch.py` 的假输入节点是：
+
+- [`../src/pb2025_sentry_bringup/scripts/fake_decision_sim_inputs.py`](../src/pb2025_sentry_bringup/scripts/fake_decision_sim_inputs.py)
+
+它同时负责发布：
+
+1. `/vision/target`
+2. `/vision/target_point_map`
+3. `/referee/game_status`
+4. `/referee/robot_status`
+5. `/referee/rfid_status`
+
+如果这个节点启动时崩溃，那么表面现象通常就是：
+
+1. 看不到 `/vision/target`
+2. 看不到 `/vision/target_point_map`
+3. `attack` 不会出现
+4. `/decision/robot_mode_markers` 一直停留在普通姿态
+5. 行为树日志里会提示资源模式无法解析，或者视觉消息不可用
+
+这一轮已经修复过一个真实存在的启动崩溃点：
+
+- `use_sim_time` 在 launch 已经注入的前提下，又在 Python 节点内部重复 `declare_parameter`
+
+这个问题会导致节点直接抛出 `ParameterAlreadyDeclaredException`，从而让你后面看到的所有“视觉参数改了没反应”都只是连锁现象。
+
+#### 原因 1：现在视觉跟随已经不再只靠 `target_position_gimbal`
+
+你现在的假视觉消息里虽然还在发布：
+
+```python
+"vision_target_position_gimbal_x": vision_target_position_gimbal_x,
+"vision_target_position_gimbal_y": vision_target_position_gimbal_y,
+"vision_target_position_gimbal_z": vision_target_position_gimbal_z,
+```
+
+但这组字段主要是给云台/观测语义使用。  
+当前真正负责生成视觉跟随导航点的节点是：
+
+- `SelectVisionFollowPath`
+
+它现在优先依赖的是：
+
+- `target_position_map`
+- `has_target_position_map`
+- `target_position_map_frame`
+
+也就是说，当前版本里“只有云台坐标，没有地图坐标”已经不足以完成视觉跟随路径规划。
+
+代码里这一点非常明确：
+
+- [`../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp`](../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp)
+
+其中这段逻辑决定了：
+
+```cpp
+if (!vision_target.has_target_position_map || !isFinitePoint(vision_target.target_position_map) ||
+    vision_target.target_position_map_frame.empty())
+{
+  return std::nullopt;
+}
+```
+
+只要 `has_target_position_map=false`，或者地图点无效，视觉跟随路径选择就会失败。  
+路径选择失败后，行为树会很快回退到普通分支，所以你就会感觉：
+
+- 看不到稳定的视觉目标坐标效果
+- 看不到 attack 模式稳定出现
+- 改参数也像“没反应”
+
+#### 原因 2：现在视觉接管前面又加了一层资源模式门控
+
+你最近改完后，`vision_override` 和主树里的实时视觉接管分支最前面都新增了：
+
+```xml
+<IsRobotResourceMode state="engage"
+                     robot_status="{@referee_robotStatus}"/>
+```
+
+也就是说，现在视觉接管不是“只要有目标就进”，而是还要求当前资源状态必须是：
+
+- `engage`
+
+资源状态来自：
+
+- `referee/robot_status`
+
+并且由下面这个条件节点统一裁决：
+
+- [`../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp`](../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp)
+
+当前默认策略是：
+
+- `hp <= 250` 进入 `defend`
+- `hp <= 100` 或 `ammo <= 50` 进入 `resupply`
+- 只有血量和弹量都健康时，才是 `engage`
+
+所以如果：
+
+1. 没有发布 `referee/robot_status`
+2. `current_hp` 太低
+3. `projectile_allowance_17mm` 太低
+
+那么就算 `vision_tracking=true`、`vision_nav_hold=true`，视觉接管也会在最前面被资源门控拦掉。
+
+#### 原因 3：视觉目标有效不等于视觉跟随路径一定能成功
+
+当前链路其实分成两层：
+
+1. `IsVisionTargetValid`
+   负责判断视觉消息是否“时效正确、tracking 正常、nav_hold 满足”
+2. `SelectVisionFollowPath`
+   负责把视觉目标地图点转换为真正可跟随的导航路径
+
+所以有一种很容易混淆的情况是：
+
+- 视觉消息本身是有效的
+- 但是路径规划点生成失败了
+
+此时你可能会看到云台相关话题有输出，但：
+
+- 视觉目标 Marker 不稳定
+- `attack` 很快又退回
+- Nav2 没有真正跟到视觉路径
+
+#### 原因 4：你的启动命令虽然给了地图坐标，但缺少“显式声明地图点有效”
+
+虽然你传了：
+
+```bash
+vision_target_position_map_x:=5.0
+vision_target_position_map_y:=2.0
+```
+
+但如果没有把：
+
+```bash
+vision_has_target_position_map:=True
+```
+
+一起明确带上，在你后续频繁改动代码、launch 默认值可能变化的情况下，就很容易出现“数值有了，但行为树仍然把它当无效地图点”的问题。
+
+为了减少歧义，当前建议在命令里显式写全。
+
+#### 原因 5：你在 launch 命令里写的参数，必须真的被透传到假输入节点
+
+这一点非常关键。  
+`loopback_vision_test.launch.py` 只是视觉测试的快捷入口，它会继续 include：
+
+- [`../src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py`](../src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
+
+如果中间这层 launch 没有把参数继续传给 `fake_decision_sim_inputs.py`，那么你虽然在命令行里写了：
+
+```bash
+vision_fire_permitted:=True
+vision_confidence:=0.8
+vision_target_distance:=4.0
+vision_target_position_gimbal_x:=1.5
+vision_target_position_gimbal_y:=0.2
+vision_target_position_gimbal_z:=0.1
+```
+
+节点实际仍可能使用默认值。  
+这也是“命令里改了参数，但运行表现完全没变”的典型原因。
+
+当前代码已经把这几类视觉参数补齐透传：
+
+1. `vision_fire_permitted`
+2. `vision_confidence`
+3. `vision_target_distance`
+4. `vision_target_position_gimbal_x/y/z`
+
+因此后续如果你再改这些参数，假输入节点会真正收到并发布到 `/vision/target`。
+
+### 6.5 当前代码版本下，视觉接管的完整推荐启动命令
+
+如果你现在要完整测试“视觉消息有效 -> 进入 attack -> 发布视觉跟随可视化 -> RViz 中看到姿态变化”，建议直接使用下面这条更完整的命令：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_vision_target:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_frame:=map \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0 \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06
+```
+
+这条命令相当于把当前代码需要的几个关键条件一次性补齐：
+
+1. 有假裁判输入
+2. 血量足够高，资源模式允许 `engage`
+3. 弹量足够高，不会误进 `resupply`
+4. 有视觉目标
+5. `tracking=true`
+6. `nav_hold=true`
+7. `target_position_map` 显式有效
+8. 目标地图坐标 frame 明确是 `map`
+
+如果你现在还想顺手把更多视觉字段也一起带上，推荐直接使用下面这条“全量可调”的版本：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_vision_target:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_fire_permitted:=False \
+  vision_target_id:=7 \
+  vision_confidence:=1.0 \
+  vision_target_distance:=3.0 \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06 \
+  vision_target_position_gimbal_x:=1.0 \
+  vision_target_position_gimbal_y:=0.0 \
+  vision_target_position_gimbal_z:=0.0 \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_frame:=map \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0
+```
+
+这条命令的意义是：
+
+1. 你后续如果改的是云台坐标参数，改动会生效
+2. 你后续如果改的是地图坐标参数，改动会生效
+3. 你后续如果改的是置信度、距离、是否允许发弹，改动也会生效
+4. 更适合做“整条视觉消息字段是否接通”的一次性联调
+
+### 6.6 当前整体决策链路最常用的完整启动指令
+
+为了避免后续联调时反复切上下文，这里把当前最常用的三套完整启动命令集中整理如下。
+
+#### 6.6.1 普通 loopback 巡逻 / 防御姿态测试
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_decision_mode:=True \
+  decision_mode:=patrol
+```
+
+运行中切换：
+
+```bash
+ros2 param set /fake_decision_sim_inputs decision_mode patrol
+ros2 param set /fake_decision_sim_inputs decision_mode anchor
+ros2 param set /fake_decision_sim_inputs decision_mode retreat
+ros2 param set /fake_decision_sim_inputs decision_mode safe
+```
+
+#### 6.6.2 视觉接管 / attack 姿态测试
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_vision_target:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_frame:=map \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0 \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06
+```
+
+启动后建议不要只看 RViz，而是同时检查下面这些话题和日志：
+
+```bash
+ros2 topic echo --once /vision/target
+ros2 topic echo --once /vision/target_point_map
+ros2 topic echo --once /decision/robot_mode
+ros2 topic echo --once /decision/robot_mode_markers
+ros2 topic echo --once /decision/vision_follow_markers
+```
+
+你应该分别看到：
+
+1. `/vision/target`
+   里面存在 `tracking=true`、`nav_hold=true`、`has_target_position_map=true`
+2. `/vision/target_point_map`
+   frame 应为 `map`，点坐标应与你传入的 `x/y/z` 一致
+3. `/decision/robot_mode`
+   数值切到 `1`，表示 `attack`
+4. `/decision/robot_mode_markers`
+   RViz 机器人头顶 Marker 变为红色攻击姿态
+5. `/decision/vision_follow_markers`
+   会出现视觉跟随的候选点、目标点或选中目标点可视化
+
+如果 `/vision/target_point_map` 已经能看到，但 `/decision/robot_mode` 仍然始终不是 `1`，优先检查：
+
+1. `/referee/robot_status` 是否存在
+2. `current_hp` 和 `projectile_allowance_17mm` 是否让资源模式进入了 `engage`
+3. 行为树终端里 `IsVisionTargetValid` 是否在报 `tracking=false`、`nav_hold=false` 或时间戳过期
+4. 行为树终端里 `SelectVisionFollowPath` 是否在报 TF 或规划 frame 不可用
+
+#### 6.6.3 低血量防御与受击自旋测试
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  publish_decision_mode:=False \
+  behavior_params_file:=/home/aw/ATS_2026_snetry_test/src/pb2025_sentry_behavior/params/sentry_behavior.yaml
+```
+
+然后运行时改裁判仿真参数：
+
+```bash
+ros2 param set /fake_decision_sim_inputs current_hp 280
+ros2 param set /fake_decision_sim_inputs is_hp_deduced true
+ros2 param set /fake_decision_sim_inputs projectile_allowance_17mm 200
+```
+
+### 6.7 当前代码版本下推荐的修改参数方法
+
+现在调试时，建议优先使用下面两类方法。
+
+#### 方法 1：launch 启动时直接传参数
+
+适合：
+
+- 视觉目标初始位置
+- 是否发布视觉目标
+- 血量、弹量
+- 是否发布裁判输入
+
+例如：
+
+```bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  vision_target_position_map_x:=4.5 \
+  vision_target_position_map_y:=1.8 \
+  vision_target_yaw:=0.20 \
+  vision_target_pitch:=-0.04
+```
+
+#### 方法 2：运行中用 `ros2 param set` 动态修改
+
+适合：
+
+- 切换仿真决策模式
+- 调整假视觉目标位置
+- 改 tracking/nav_hold
+- 改血量和弹量
+- 改行为树阈值类参数
+
+例如先改假视觉目标：
+
+```bash
+ros2 param set /fake_decision_sim_inputs vision_tracking true
+ros2 param set /fake_decision_sim_inputs vision_nav_hold true
+ros2 param set /fake_decision_sim_inputs vision_has_target_position_map true
+ros2 param set /fake_decision_sim_inputs vision_fire_permitted false
+ros2 param set /fake_decision_sim_inputs vision_confidence 1.0
+ros2 param set /fake_decision_sim_inputs vision_target_distance 3.0
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_x 3.0
+ros2 param set /fake_decision_sim_inputs vision_target_position_map_y 4.2
+ros2 param set /fake_decision_sim_inputs vision_target_position_gimbal_x 1.0
+ros2 param set /fake_decision_sim_inputs vision_target_position_gimbal_y 0.0
+ros2 param set /fake_decision_sim_inputs vision_target_position_gimbal_z 0.0
+ros2 param set /fake_decision_sim_inputs vision_target_yaw 0.25
+ros2 param set /fake_decision_sim_inputs vision_target_pitch -0.08
+```
+
+再改资源门控输入：
+
+```bash
+ros2 param set /fake_decision_sim_inputs current_hp 400
+ros2 param set /fake_decision_sim_inputs projectile_allowance_17mm 200
+```
+
+再改行为树视觉参数：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.attack_radius 2.5
+ros2 param set /pb2025_sentry_behavior_server decision.vision.activation_hold_s 0.15
+ros2 param set /pb2025_sentry_behavior_server decision.vision.override_hold_s 0.8
+```
+
+### 6.8 现在应该重点观察哪些话题和现象
+
+若要确认“视觉接管真正生效”，不要只看一个现象，建议至少同时看下面几项：
+
+```bash
+ros2 topic echo /vision/target
+ros2 topic echo /decision/robot_mode
+ros2 topic echo /decision/robot_mode_markers
+ros2 topic echo /decision/vision_follow_markers
+```
+
+同时观察：
+
+1. `pb2025_sentry_behavior_server` 终端是否打印资源模式切换日志
+2. 终端是否打印姿态切换到 `attack`
+3. RViz 中是否看到 `RobotModeMarkers`
+4. RViz 中是否看到 `VisionFollowMarkers`
+
+如果 `/vision/target` 在发，但 `/decision/vision_follow_markers` 一直没有，那优先怀疑：
+
+1. `target_position_map` 无效
+2. `has_target_position_map=false`
+3. `target_position_map_frame` 不对
+4. 资源模式没有进入 `engage`
+5. 当前位姿或 TF 不可用于视觉路径规划
+
+### 6.9 现在的视觉跟随为什么更接近“真正实时追敌”
+
+你这次提出的核心问题其实很关键：
+
+- 真正的视觉跟随，不应该只是“敌人变化很大时才重新规划一次”
+- 而应该在每个决策周期里，都重新根据当前敌方位置和当前机器人位置计算更合理的跟随点
+- 只是这个“实时”不能做得太硬，否则 Nav2 / MPPI 会被高频改目标打乱，出现左右抽动、转角试探和终点抖动
+
+因此当前优化后的逻辑，不再是“长期复用旧路径，等阈值触发再换”，而是下面这套思路：
+
+1. 敌方目标地图点作为圆心
+2. `decision.vision.attack_radius` 作为期望包夹半径
+3. 每个决策周期都重新读取机器人当前位姿
+4. 用“当前机器人相对敌方处在哪一侧”决定圆周上的优先跟随方向
+5. 在该方向附近结合 costmap 持续重新挑选候选点
+6. 最后再通过平滑参数限制“单拍目标跳变太猛”
+
+也就是说，现在是：
+
+- 每拍重新算
+- 但每拍只允许平滑地改
+
+这两件事必须同时成立，才是“既实时，又能上实车”的视觉跟随。
+
+当前对应的关键参数可以理解成下面三组：
+
+1. `decision.vision.attack_radius`
+   决定你想围着敌人保持多大的攻击半径
+2. `decision.vision.prefer_previous_goal_side`
+   `decision.vision.max_target_shift_for_side_hold_m`
+   控制“敌人只是小范围抖动时，要不要尽量守住当前这侧，不轻易翻边”
+3. `decision.vision.max_goal_angle_step_deg`
+   控制“即使本帧重新算出的圆周目标变化很大，每个决策周期最多沿圆周跳多少角度”
+
+其中第三组是这次专门补上的平滑参数。  
+它的意义非常直接：
+
+- 调大：目标会更积极地跟着敌人变化，看起来更“灵”
+- 调小：目标变化更顺，更稳，但快速横移目标时会稍微有一点滞后
+
+因此在理想情况下，你拖动机器人位置、改变初始位姿，或者敌方地图点持续变化时，
+`selected_goal` 应该连续变化，而不是永远钉在一个旧点上。
+
+### 6.10 为什么以前会出现“到点后再改机器人位姿，也不再路径规划”
+
+这个现象不是单一原因，而是旧逻辑里有两层“抑制更新”叠在一起：
+
+#### 原因 1：视觉圆周跟随点本身复用得过强
+
+旧逻辑中：
+
+1. 如果敌方目标点变化不大
+2. 或者新圆周点和旧圆周点差得不多
+3. 再加上最小重规划时间还没到
+
+就会直接复用上一帧路径。  
+这样虽然能抑制抖动，但也容易把跟随点“冻住”。
+
+#### 原因 2：Nav2 发送节点会把“同一路径且上次已成功”直接判成完成
+
+旧的 `SendNavThroughPoses` 逻辑里，如果：
+
+1. 新路径和旧路径被判断为同一路径
+2. 上一次这个路径已经成功到点
+3. 当前没有新的 active goal
+
+它就会直接返回 `SUCCESS`，而不是重新下发目标。
+
+这就带来一个典型问题：
+
+1. 机器人先到达圆周上的某个目标点
+2. 行为节点认为“这个路径已经完成”
+3. 你在 loopback 里又手动拖动了机器人位姿
+4. 但如果新的路径终点还被算成“和上次差不多”
+5. 动作节点就会误以为“这个目标已经完成过，不用再发了”
+
+于是你看到的现象就是：
+
+- 敌方目标还在
+- 机器人位置其实已经变了
+- 但终端像是没反应，路径也不再刷新
+
+#### 这次怎么修
+
+这次改动把这两个问题都拆开处理了：
+
+1. `SelectVisionFollowPath`
+   不再长期冻结旧路径，而是每个决策周期都重新计算圆周跟随点
+2. `min_replan_interval_s` / `min_goal_shift_m`
+   现在只负责“极小抖动时先保持上一拍输出”，不再负责长期锁死整条路径
+3. `SendNavThroughPoses`
+   现在会优先读取行为树黑板里的 `decision_current_pose`
+4. 即使“路径名字还是同一路径”，也会重新判断机器人是不是真的还在终点附近
+5. 如果你已经把机器人拖离终点，它就会重新允许下发目标，而不是继续沿用“上次已经成功”的旧结论
+
+所以你现在看到的行为应该更符合预期：
+
+- 敌方不动，但机器人自己换了位置，圆周点也会刷新
+- 机器人刚到点后，你再手动改位姿，也不会再被“旧成功状态”卡住
+- 敌方持续横移时，跟随点会实时变化，但不会每拍瞬移到对侧
+
+### 6.11 如何专门测试“机器人移动后圆周跟随点刷新”
+
+推荐使用这条完整启动命令：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_vision_target:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_frame:=map \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0 \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06
+```
+
+测试步骤建议如下：
+
+1. 启动后先确认已经进入 `attack`
+2. 在 RViz 中同时看 `RobotModeMarkers`、`VisionFollowMarkers`、`vision/target_point_map`
+3. 用 `2D Pose Estimate` 改机器人位置，或者修改 loopback 位姿来源
+4. 观察绿色选中点和黄色连接线是否开始沿圆周连续变化，而不是死盯旧点
+5. 观察终端日志中的
+   `Vision follow target=(...) selected_goal=(...)`
+   是否持续跟着变化
+6. 当机器人已经到达某个视觉跟随点后，再次手动把机器人拖到另一侧
+7. 继续观察是否会重新发出新的圆周跟随目标
+
+为了让现象更明显，可以动态调小这个阈值：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.min_pose_shift_m_for_replan 0.10
+```
+
+如果你想让目标点变化更积极、更像“紧追移动敌人”，还可以临时这样试：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.max_goal_angle_step_deg 28.0
+```
+
+如果你想让它更稳、更少左右抽动，可以反向调小：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.max_goal_angle_step_deg 10.0
+```
+
+如果你想临时验证是否是“旧侧保持太强”，还可以继续这样试：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.vision.prefer_previous_goal_side false
+```
+
+如果这样以后，跟随点会明显更积极地换到机器人最近侧，就说明之前问题确实是缓存/侧向保持过于保守，而不是视觉目标没有发布。
+
+### 6.12 这类问题会不会同步影响实车
+
+会，理论上会。
+
+原因很简单：
+
+- loopback 和实车共用同一个 `SelectVisionFollowPath` 行为树插件
+
+所以旧问题本质上不是“RViz 专属问题”，而是共享行为层问题：
+
+- 只要敌方目标地图点比较稳定
+- 机器人自己位置已经明显变化
+- 但路径缓存还在被复用
+
+实车同样可能出现“追旧圆周点、不够实时贴边跟随”的表现。
+
+不过我对你当前实车链路做了同步检查，结论是：
+
+1. `pb2025_sentry_behavior_server` 仍会维护 `decision_current_pose`
+2. 如果黑板位姿过期，还会尝试用 TF fallback 刷新
+3. `decision/robot_mode` 仍由行为树统一发布
+4. `standard_robot_pp_ros2` 仍会把 `decision/robot_mode` 写入 `SendRobotCmdData.data.speed_vector.mode`
+5. 自旋角速度仍通过 `cmd_vel.angular.z` 写入 `SendRobotCmdData.data.speed_vector.wz`
+
+所以你担心的“姿态可视化整条链会不会断、半径会不会也不更新到下位机”里：
+
+- “半径圆周点不随机器人实时变化”这个漏洞，旧逻辑确实可能同时影响实车
+- “到点后重新定位或车体位置变化后，视觉目标不再重新下发”这个漏洞，旧逻辑也可能同时影响实车
+- “模式字段没下发到下位机”这条链路，目前代码上没有看到缺口
+- “姿态可视化整条链都断”更像是上层输入、位姿、视觉地图点或资源门控的问题，不是串口模式桥接的问题
 
 ## 7. 手动裁判仿真
 

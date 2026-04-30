@@ -39,7 +39,11 @@
         </Action>
         <Condition ID="IsRobotHpBelow">
             <input_port name="robot_status" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
-            <input_port name="threshold" default="{@decision_defend_mode_hp}" type="int">HP threshold for defend posture</input_port>
+            <input_port name="threshold" default="300" type="int">HP threshold for defend posture</input_port>
+        </Condition>
+        <Condition ID="IsRobotResourceMode">
+            <input_port name="robot_status" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+            <input_port name="state" default="engage" type="std::string">Expected resource mode: engage / resupply / defend</input_port>
         </Condition>
         <Action ID="IsPathGoalReached" editable="true">
             <input_port name="path"/>

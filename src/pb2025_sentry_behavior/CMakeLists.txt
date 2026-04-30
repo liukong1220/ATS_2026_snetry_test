@@ -57,6 +57,11 @@ list(APPEND plugin_libs is_hp_band)
 ament_auto_add_library(is_robot_hp_below SHARED plugins/condition/is_robot_hp_below.cpp)
 list(APPEND plugin_libs is_robot_hp_below)
 
+ament_auto_add_library(
+  is_robot_resource_mode SHARED
+  plugins/condition/is_robot_resource_mode.cpp)
+list(APPEND plugin_libs is_robot_resource_mode)
+
 ament_auto_add_library(is_path_goal_reached SHARED plugins/condition/is_path_goal_reached.cpp)
 list(APPEND plugin_libs is_path_goal_reached)
 
@@ -167,9 +172,14 @@ install(
   RUNTIME DESTINATION share/${PROJECT_NAME}/bt_plugins
 )
 
-ament_auto_package(
-  INSTALL_TO_SHARE
-  behavior_trees
-  params
-  launch
+# 显式安装行为树 XML、参数和 launch 资源，避免运行时 share 目录缺失导致
+# "Can't find a tree with name: rmul_2026" 这类启动错误。
+install(
+  DIRECTORY
+    behavior_trees
+    params
+    launch
+  DESTINATION share/${PROJECT_NAME}
 )
+
+ament_auto_package()

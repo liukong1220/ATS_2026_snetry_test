@@ -122,9 +122,93 @@ ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py
 
 通过 GlobalBlackboard 获取实时的 `pb_rm_interfaces::msg::RobotStatus`，判断当前血量是否低于阈值。
 
-当前主树中用于防御姿态切换，默认阈值参数为：
+当前主树已不再把它作为统一资源决策入口，更多适合保留给局部阈值判断或临时实验使用。
 
-- `decision.mode_thresholds.defend_hp`
+#### IsRobotResourceMode
+
+统一根据 `RobotStatus` 中的血量和弹量判断当前资源状态。
+
+当前资源状态分为：
+
+- `engage`
+- `resupply`
+- `defend`
+
+当前主树中，这个节点已经取代“视觉节点自己读低血量阈值”与“根树分散判断血量”的旧写法，用于统一控制：
+
+- 健康状态时是否允许视觉接管
+- 中低资源时是否回补给安全点
+- 极低血量时是否立即退防
+
+它内部直接读取以下参数，并且自带迟滞锁存，避免在阈值边缘来回抖动：
+
+- `decision.resource_policy.defend_enter_hp`
+- `decision.resource_policy.defend_exit_hp`
+- `decision.resource_policy.resupply_enter_hp`
+- `decision.resource_policy.resupply_exit_hp`
+- `decision.resource_policy.resupply_enter_ammo`
+- `decision.resource_policy.resupply_exit_ammo`
+
+#### IsVisionTargetValid
+
+统一判断视觉目标是否“可以接管行为树”。
+
+它当前不仅检查：
+
+- `tracking`
+- `nav_hold`
+- 时间戳是否过期
+- yaw / pitch 是否为有限值
+
+还会做三层平滑：
+
+- `activation_hold_s`
+  初次看到目标后，先稳定持续一小段时间再真正接管
+- `switch_target_hold_s`
+  已经锁定目标 A 时，新目标 B 必须持续稳定满足该时长才允许切换
+- `override_hold_s`
+  短时掉帧、遮挡或单帧异常时，继续保持旧目标，避免立刻掉回巡逻
+
+因此它的职责不是“只要看见就追”，而是“给行为树一个平滑、可继承的视觉接管判定”。
+
+#### SelectVisionFollowPath
+
+根据视觉提供的敌方地图点，在目标周围生成一个供 Nav2 / MPPI 跟随的局部跟随点。
+
+当前实现重点有三类稳定化逻辑：
+
+- 跟随环采样
+  在 `attack_radius` 半径附近采样候选点，并结合全局 costmap 过滤不可通行位置
+- 同侧保持
+  通过 `prefer_previous_goal_side` 与 `max_target_shift_for_side_hold_m`
+  尽量保持机器人继续待在目标的同一侧，减少转角和近终点时突然翻边
+- 实时重规划 + 角度平滑
+  每个决策周期都会重新基于“当前机器人位置 + 当前敌方地图点”选圆周跟随点，
+  再通过 `max_goal_angle_step_deg` 限制单拍角度跃迁，避免目标点瞬间跳边
+- 位姿跳变重置
+  通过 `pose_jump_reset_distance_m` 在重定位、手动改 `/initialpose` 或实车定位突变时
+  直接清空旧缓存，保证尽快切到当前车位对应的最近圆周点
+- 微抖死区
+  通过 `min_replan_interval_s` 与 `min_goal_shift_m`
+  只对极小幅度抖动保留一个短暂输出死区，但不会长期冻结整条视觉跟随路径
+
+#### SendNavThroughPoses
+
+向 Nav2 发送 `NavigateThroughPoses` 目标路径。
+
+当前除了基础的“同路径不重复发送”外，还新增了“近似同目标不急着抢占”的稳定器：
+
+- `decision.decision_config.active_goal_hold_tolerance`
+  若新路径和当前已经发给 Nav2 的路径只在很小范围内偏移，则先保持当前目标
+- `decision.decision_config.active_goal_min_resend_interval_s`
+  即使检测到近似新目标，也要求与上次发目标至少隔一段时间才允许再次重发
+
+这一层很重要，因为视觉和上层行为即便已经做了节流，如果 Nav2 入口仍然每次都
+`cancel + resend`，在转角、近终点和贴墙跟随时仍然容易放大成 MPPI 左右试探。
+
+另外当前实现会优先读取行为树黑板里的 `decision_current_pose` 来判断“是否真的还在终点”。
+因此 loopback 手动拖动车体、重定位，或者实车定位链更新了当前车位后，即使路径名字没变，
+也不会再被“上一次已经成功到点”这个旧状态卡死。
 
 #### IsGameStatus
 

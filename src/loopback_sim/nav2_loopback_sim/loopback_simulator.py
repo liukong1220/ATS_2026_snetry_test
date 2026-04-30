@@ -65,12 +65,24 @@ class LoopbackSimulator(Node):
         self.setupTimer = None
         self.map = None
         self.mat_base_to_laser: Optional[np.ndarray[np.float64, np.dtype[np.float64]]] = None
+        self.last_tf_stamp = None
+        self.last_step_stamp = None
+        self.tf_warmup_publish_count = 0
 
         self.declare_parameter('update_duration', 0.01)
         self.update_dur = self.get_parameter('update_duration').get_parameter_value().double_value
 
         self.declare_parameter('base_frame_id', 'base_footprint')
         self.base_frame_id = self.get_parameter('base_frame_id').get_parameter_value().string_value
+
+        # loopback 导航主底盘坐标默认使用 base_footprint，但上层仍有一部分节点、
+        # 可视化与调试工具会继续查询 base_link / base_scan。
+        # 因此这里额外维护一条同拍、同时间戳的辅助 TF 链：
+        # base_footprint -> base_link -> base_scan
+        # 这样能避免外部静态 TF 在 sim_time 下被晚收到或未连通时，
+        # Nav2 / RViz 出现“TF 断树”“scan 时间早于缓存”的假故障。
+        self.declare_parameter('body_frame_id', 'base_link')
+        self.body_frame_id = self.get_parameter('body_frame_id').get_parameter_value().string_value
 
         self.declare_parameter('map_frame_id', 'map')
         self.map_frame_id = self.get_parameter('map_frame_id').get_parameter_value().string_value
@@ -87,6 +99,10 @@ class LoopbackSimulator(Node):
         self.declare_parameter('scan_publish_dur', 0.1)
         self.scan_publish_dur = self.get_parameter(
             'scan_publish_dur').get_parameter_value().double_value
+
+        self.declare_parameter('scan_tf_warmup_cycles', 3)
+        self.scan_tf_warmup_cycles = self.get_parameter(
+            'scan_tf_warmup_cycles').get_parameter_value().integer_value
 
         self.declare_parameter('publish_map_odom_tf', True)
         self.publish_map_odom_tf = self.get_parameter(
@@ -128,6 +144,22 @@ class LoopbackSimulator(Node):
         self.t_odom_to_base_link.child_frame_id = self.base_frame_id
         self.t_odom_to_base_link.transform.rotation.w = 1.0
 
+        self.t_base_to_body = None
+        if self.body_frame_id != self.base_frame_id:
+            self.t_base_to_body = TransformStamped()
+            self.t_base_to_body.header.frame_id = self.base_frame_id
+            self.t_base_to_body.child_frame_id = self.body_frame_id
+            self.t_base_to_body.transform.rotation.w = 1.0
+
+        self.scan_parent_frame_id = self.body_frame_id \
+            if self.t_base_to_body is not None else self.base_frame_id
+        self.t_body_to_scan = None
+        if self.scan_frame_id != self.scan_parent_frame_id:
+            self.t_body_to_scan = TransformStamped()
+            self.t_body_to_scan.header.frame_id = self.scan_parent_frame_id
+            self.t_body_to_scan.child_frame_id = self.scan_frame_id
+            self.t_body_to_scan.transform.rotation.w = 1.0
+
         self.tf_broadcaster = TransformBroadcaster(self)
 
         self.initial_pose_sub = self.create_subscription(
@@ -150,7 +182,6 @@ class LoopbackSimulator(Node):
         self.scan_pub = self.create_publisher(LaserScan, 'scan', sensor_qos)
 
         if self.publish_clock:
-            self.clock_timer = self.create_timer(0.1, self.clockTimerCallback)
             self.clock_pub = self.create_publisher(Clock, '/clock', 10)
 
         self.setupTimer = self.create_timer(0.1, self.setupTimerCallback)
@@ -177,14 +208,26 @@ class LoopbackSimulator(Node):
             self.debug(f'Waiting for startup transform: {str(ex)}')
 
     def setupTimerCallback(self) -> None:
-        # Publish initial identity odom transform & laser scan to warm up system
-        self.tf_broadcaster.sendTransform(self.t_odom_to_base_link)
+        # 在 initialpose 之前也持续发布一套完整的动态 TF/odom，
+        # 让 Nav2 / RViz / message filter 提前建立稳定缓存，避免
+        # 首次收到 initialpose 或 scan 时出现“frame 不连通 / 时间早于缓存”的抖动。
+        stamp = self.makeStepStamp()
+        self.publishClock(stamp)
+        self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link, stamp)
+        self.publishOdometry(self.t_odom_to_base_link, stamp)
         if self.mat_base_to_laser is None:
             self.getBaseToLaserTf()
 
-    def clockTimerCallback(self) -> None:
+    def makeStepStamp(self):
+        stamp = self.get_clock().now().to_msg()
+        self.last_step_stamp = stamp
+        return stamp
+
+    def publishClock(self, stamp=None) -> None:
         msg = Clock()
-        msg.clock = self.get_clock().now().to_msg()
+        if stamp is None:
+            stamp = self.makeStepStamp()
+        msg.clock = stamp
         self.clock_pub.publish(msg)
 
     def cmdVelCallback(self, msg: Twist) -> None:
@@ -215,7 +258,10 @@ class LoopbackSimulator(Node):
             self.t_odom_to_base_link.transform.translation = Vector3()
             self.t_odom_to_base_link.transform.rotation = Quaternion()
             self.t_odom_to_base_link.transform.rotation.w = 1.0
-            self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link)
+            stamp = self.makeStepStamp()
+            self.publishClock(stamp)
+            self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link, stamp)
+            self.publishOdometry(self.t_odom_to_base_link, stamp)
 
             # Start republication timer and velocity processing
             if self.setupTimer is not None:
@@ -242,12 +288,23 @@ class LoopbackSimulator(Node):
         mat_map_to_odom = \
             tf_transformations.concatenate_matrices(mat_map_to_base_link, mat_base_link_to_odom)
         self.t_map_to_odom.transform = matrixToTransform(mat_map_to_odom)
+        stamp = self.makeStepStamp()
+        self.publishClock(stamp)
+        self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link, stamp)
+        self.publishOdometry(self.t_odom_to_base_link, stamp)
 
     def timerCallback(self) -> None:
         # If no data, just republish existing transforms without change
         one_sec = Duration(seconds=1)
-        if self.curr_cmd_vel is None or self.get_clock().now() - self.curr_cmd_vel_time > one_sec:
-            self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link)
+        now = self.get_clock().now()
+        stamp = self.makeStepStamp()
+        self.publishClock(stamp)
+        if self.curr_cmd_vel is None or now - self.curr_cmd_vel_time > one_sec:
+            self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link, stamp)
+            # 静止时也持续重发 odom。
+            # 否则上层只订阅 odom 的节点会把位姿当成“停更”，
+            # 在 loopback 中放大出“视觉最近圆周点不再刷新 / 到点后不再重规划”的假象。
+            self.publishOdometry(self.t_odom_to_base_link, stamp)
             self.curr_cmd_vel = None
             return
 
@@ -265,13 +322,26 @@ class LoopbackSimulator(Node):
         self.t_odom_to_base_link.transform.rotation = \
             addYawToQuat(self.t_odom_to_base_link.transform.rotation, dth)
 
-        self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link)
-        self.publishOdometry(self.t_odom_to_base_link)
+        self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link, stamp)
+        self.publishOdometry(self.t_odom_to_base_link, stamp)
 
-    def publishLaserScan(self) -> None:
+    def publishLaserScan(self, stamp=None) -> None:
+        if self.tf_warmup_publish_count < self.scan_tf_warmup_cycles:
+            self.debug(
+                'Skipping scan publish until TF cache is warmed up: '
+                f'{self.tf_warmup_publish_count}/{self.scan_tf_warmup_cycles}'
+            )
+            return
         # Publish a bogus laser scan for collision monitor
         self.scan_msg = LaserScan()
-        self.scan_msg.header.stamp = (self.get_clock().now()).to_msg()
+        if stamp is None:
+            stamp = self.last_step_stamp if self.last_step_stamp is not None else self.makeStepStamp()
+        # scan 这一拍若没有先发布过 TF，就先补一拍同时间戳 TF/odom，
+        # 让 message filter 总能在缓存里找到不晚于 scan 的坐标树。
+        if self.last_tf_stamp != stamp:
+            self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link, stamp)
+            self.publishOdometry(self.t_odom_to_base_link, stamp)
+        self.scan_msg.header.stamp = stamp
         self.scan_msg.header.frame_id = self.scan_frame_id
         self.scan_msg.angle_min = self.scan_angle_min
         self.scan_msg.angle_max = self.scan_angle_max
@@ -289,23 +359,40 @@ class LoopbackSimulator(Node):
         self.scan_pub.publish(self.scan_msg)
 
     def publishTransforms(self, map_to_odom: TransformStamped,
-                          odom_to_base_link: TransformStamped) -> None:
-        map_to_odom.header.stamp = \
-            (self.get_clock().now() + Duration(seconds=self.update_dur)).to_msg()
-        odom_to_base_link.header.stamp = self.get_clock().now().to_msg()
+                          odom_to_base_link: TransformStamped, stamp=None) -> None:
+        if stamp is None:
+            stamp = self.get_clock().now().to_msg()
+        map_to_odom.header.stamp = stamp
+        odom_to_base_link.header.stamp = stamp
         if self.publish_map_odom_tf:
             self.tf_broadcaster.sendTransform(map_to_odom)
         self.tf_broadcaster.sendTransform(odom_to_base_link)
+        if self.t_base_to_body is not None:
+            self.t_base_to_body.header.stamp = stamp
+            self.tf_broadcaster.sendTransform(self.t_base_to_body)
+        if self.t_body_to_scan is not None:
+            self.t_body_to_scan.header.stamp = stamp
+            self.tf_broadcaster.sendTransform(self.t_body_to_scan)
+        self.last_tf_stamp = stamp
+        self.tf_warmup_publish_count += 1
 
-    def publishOdometry(self, odom_to_base_link: TransformStamped) -> None:
+    def publishOdometry(self, odom_to_base_link: TransformStamped, stamp=None) -> None:
         odom = Odometry()
-        odom.header.stamp = self.get_clock().now().to_msg()
+        if stamp is None:
+            stamp = self.last_tf_stamp if self.last_tf_stamp is not None \
+                else self.get_clock().now().to_msg()
+        odom.header.stamp = stamp
         odom.header.frame_id = self.odom_frame_id
         odom.child_frame_id = self.base_frame_id
         odom.pose.pose.position.x = odom_to_base_link.transform.translation.x
         odom.pose.pose.position.y = odom_to_base_link.transform.translation.y
         odom.pose.pose.orientation = odom_to_base_link.transform.rotation
-        odom.twist.twist = self.curr_cmd_vel
+        # 静止重发 odom 时，curr_cmd_vel 可能已经被清空。
+        # 这里统一回填一个零速度，避免把 None 赋给 Twist 子消息导致仿真节点崩溃。
+        if self.curr_cmd_vel is None:
+            odom.twist.twist = Twist()
+        else:
+            odom.twist.twist = self.curr_cmd_vel
         self.odom_pub.publish(odom)
 
     def info(self, msg: str) -> None:

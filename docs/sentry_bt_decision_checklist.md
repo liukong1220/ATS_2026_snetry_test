@@ -165,7 +165,16 @@ launch 文件
 - simulation 分支排第二。
 - referee 分支排第三。
 
-这意味着只要视觉目标合法，视觉就会优先接管导航。
+但这里要特别注意：
+
+- 现在“排在最前面”不再等于“视觉无条件最高优先级”。
+- 真正决定视觉是否能成功接管的，是 `IsVisionTargetValid` 条件节点内部的门控逻辑。
+- 它已经把“目标是否稳定”“目标是否正在切换”“消息是否只是短时丢失”“当前血量是否已经该回防”都纳入判断。
+
+所以更准确的理解是：
+
+- 视觉分支拥有第一抢占权。
+- 但只有在战术上允许、目标也足够稳定时，它才真的会抢占导航。
 
 #### `KeepRunningUntilFailure`
 
@@ -207,6 +216,12 @@ launch 文件
    - `decision_simulation`
    - `decision_referee`
 
+当前版本新增的关键变化是：
+
+1. 视觉分支仍然放在最前面，保证允许接管时响应足够快。
+2. 低血量时不会因为“视觉排第一”就继续攻击跟随，因为 `IsVisionTargetValid` 会直接阻止该分支成功。
+3. 也就是说，现在不是靠“把视觉分支挪到后面”实现保命优先，而是靠“视觉分支自己在不该抢占时失败”实现平滑让权。
+
 姿态模式不是单独在根节点统一发，而是跟随具体分支发送：
 
 - 视觉接管分支发送 `attack`
@@ -227,17 +242,24 @@ launch 文件
 
 因为它是顶层 `ReactiveFallback` 的第一个子树：
 
-1. 只要视觉目标有效。
-2. 只要视觉消息没超时。
-3. 只要 `tracking == true`。
-4. 只要 `nav_hold == true`。
+1. 视觉消息存在且时间戳未超时。
+2. `tracking == true`。
+3. 如果 XML 要求，则 `nav_hold == true`。
+4. `target_yaw / target_pitch` 是有限值。
+5. 初次进入视觉接管前，目标已连续稳定满足 `decision.vision.activation_hold_s`。
+6. 若当前锁定目标 A，新目标 B 只有连续稳定满足 `decision.vision.switch_target_hold_s` 才允许切换。
+7. 若只是短时掉帧或短时遮挡，则在 `decision.vision.override_hold_s` 内仍允许保持原目标。
+8. 视觉分支前先经过 `IsRobotResourceMode state="engage"`，只有资源状态是 `engage` 时才允许视觉接管。
+9. 若血量/弹量触发 `resupply` 或 `defend`，视觉分支会主动失败，主树回到补给或退防分支。
+10. 资源模式内部通过 `decision.resource_policy.*` 的 enter / exit 阈值做迟滞，避免在边界附近来回横跳。
 
-它就会成功吃掉本 tick，后面的 simulation/referee 不会再参与。
+只有这些条件都满足后，它才会成功吃掉本 tick，后面的 simulation/referee 不会再参与。
 
 这代表当前设计哲学是：
 
 - 视觉接管属于高优先级实时 override。
-- 不是“给普通巡逻一个建议”，而是“在满足条件时直接插队”。
+- 但它不再是“只要看到目标就绝对压制”的硬抢占。
+- 现在的语义更接近“满足战术约束和稳定性约束后，才允许插队”。
 
 ### 4.3 simulation 分支是什么意思
 
@@ -271,10 +293,10 @@ referee 分支面向实机正式比赛输入。
 它的优先级从高到低是：
 
 1. 比赛未开始：停转、停车
-2. `HP = critical`：去安全点
-3. `HP = low`：去最近退防点
-4. `比赛时间 = critical 且 HP = normal`：去关键时刻目标点
-5. `HP = normal`：巡逻
+2. `resource_mode = defend`：去最近退防点
+3. `resource_mode = resupply`：去补给安全点
+4. `resource_mode = engage` 且比赛时间 `critical`：去关键时刻目标点
+5. `resource_mode = engage`：巡逻
 
 这里的“血量区间”不是写死的常量，而是和比赛时间阶段一起判定：
 

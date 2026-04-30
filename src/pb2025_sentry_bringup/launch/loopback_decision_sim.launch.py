@@ -36,12 +36,26 @@ def generate_launch_description():
     decision_mode = LaunchConfiguration("decision_mode")
     decision_mode_topic = LaunchConfiguration("decision_mode_topic")
     publish_referee_inputs = LaunchConfiguration("publish_referee_inputs")
+    current_hp = LaunchConfiguration("current_hp")
+    projectile_allowance_17mm = LaunchConfiguration("projectile_allowance_17mm")
     publish_vision_target = LaunchConfiguration("publish_vision_target")
     vision_tracking = LaunchConfiguration("vision_tracking")
     vision_nav_hold = LaunchConfiguration("vision_nav_hold")
+    vision_fire_permitted = LaunchConfiguration("vision_fire_permitted")
     vision_target_id = LaunchConfiguration("vision_target_id")
+    vision_confidence = LaunchConfiguration("vision_confidence")
+    vision_target_distance = LaunchConfiguration("vision_target_distance")
     vision_target_yaw = LaunchConfiguration("vision_target_yaw")
     vision_target_pitch = LaunchConfiguration("vision_target_pitch")
+    vision_target_position_gimbal_x = LaunchConfiguration(
+        "vision_target_position_gimbal_x"
+    )
+    vision_target_position_gimbal_y = LaunchConfiguration(
+        "vision_target_position_gimbal_y"
+    )
+    vision_target_position_gimbal_z = LaunchConfiguration(
+        "vision_target_position_gimbal_z"
+    )
     vision_target_position_map_x = LaunchConfiguration("vision_target_position_map_x")
     vision_target_position_map_y = LaunchConfiguration("vision_target_position_map_y")
     vision_target_position_map_z = LaunchConfiguration("vision_target_position_map_z")
@@ -143,8 +157,20 @@ def generate_launch_description():
 
     declare_publish_referee_inputs_cmd = DeclareLaunchArgument(
         "publish_referee_inputs",
-        default_value="False",
-        description="Whether the fake loopback node publishes referee topics.",
+        default_value="True",
+        description="Whether the fake loopback node publishes referee topics. Keep true to test the same resource policy used on the real robot.",
+    )
+
+    declare_current_hp_cmd = DeclareLaunchArgument(
+        "current_hp",
+        default_value="400",
+        description="Fake referee current_hp used by the unified resource decision policy.",
+    )
+
+    declare_projectile_allowance_17mm_cmd = DeclareLaunchArgument(
+        "projectile_allowance_17mm",
+        default_value="200",
+        description="Fake referee 17mm ammo used by the unified resource decision policy.",
     )
 
     declare_publish_vision_target_cmd = DeclareLaunchArgument(
@@ -165,10 +191,28 @@ def generate_launch_description():
         description="Whether the fake vision target asks navigation to enter hold/override mode.",
     )
 
+    declare_vision_fire_permitted_cmd = DeclareLaunchArgument(
+        "vision_fire_permitted",
+        default_value="False",
+        description="Whether the fake vision target allows firing.",
+    )
+
     declare_vision_target_id_cmd = DeclareLaunchArgument(
         "vision_target_id",
         default_value="7",
         description="Fake vision target id.",
+    )
+
+    declare_vision_confidence_cmd = DeclareLaunchArgument(
+        "vision_confidence",
+        default_value="1.0",
+        description="Fake vision confidence.",
+    )
+
+    declare_vision_target_distance_cmd = DeclareLaunchArgument(
+        "vision_target_distance",
+        default_value="3.0",
+        description="Fake vision target distance in meters.",
     )
 
     declare_vision_target_yaw_cmd = DeclareLaunchArgument(
@@ -181,6 +225,24 @@ def generate_launch_description():
         "vision_target_pitch",
         default_value="0.0",
         description="Fake vision pitch command in rad.",
+    )
+
+    declare_vision_target_position_gimbal_x_cmd = DeclareLaunchArgument(
+        "vision_target_position_gimbal_x",
+        default_value="1.0",
+        description="Fake vision target gimbal-frame x position in meters.",
+    )
+
+    declare_vision_target_position_gimbal_y_cmd = DeclareLaunchArgument(
+        "vision_target_position_gimbal_y",
+        default_value="0.0",
+        description="Fake vision target gimbal-frame y position in meters.",
+    )
+
+    declare_vision_target_position_gimbal_z_cmd = DeclareLaunchArgument(
+        "vision_target_position_gimbal_z",
+        default_value="0.0",
+        description="Fake vision target gimbal-frame z position in meters.",
     )
 
     declare_vision_target_position_map_x_cmd = DeclareLaunchArgument(
@@ -209,22 +271,6 @@ def generate_launch_description():
         "vision_target_position_map_frame",
         default_value="map",
         description="Frame id used by fake vision target_position_map.",
-    )
-
-    static_tf_base_link_cmd = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="static_tf_base_link",
-        arguments=["--frame-id", "base_footprint", "--child-frame-id", "base_link"],
-        output="screen",
-    )
-
-    static_tf_base_scan_cmd = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="static_tf_base_scan",
-        arguments=["--frame-id", "base_link", "--child-frame-id", "base_scan"],
-        output="screen",
     )
 
     map_server_cmd = Node(
@@ -278,6 +324,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
+                "use_sim_time": True,
                 "initial_x": initial_x,
                 "initial_y": initial_y,
                 "initial_yaw": initial_yaw,
@@ -285,12 +332,20 @@ def generate_launch_description():
                 "decision_mode": decision_mode,
                 "decision_mode_topic": decision_mode_topic,
                 "publish_referee_inputs": publish_referee_inputs,
+                "current_hp": current_hp,
+                "projectile_allowance_17mm": projectile_allowance_17mm,
                 "publish_vision_target": publish_vision_target,
                 "vision_tracking": vision_tracking,
                 "vision_nav_hold": vision_nav_hold,
+                "vision_fire_permitted": vision_fire_permitted,
                 "vision_target_id": vision_target_id,
+                "vision_confidence": vision_confidence,
+                "vision_target_distance": vision_target_distance,
                 "vision_target_yaw": vision_target_yaw,
                 "vision_target_pitch": vision_target_pitch,
+                "vision_target_position_gimbal_x": vision_target_position_gimbal_x,
+                "vision_target_position_gimbal_y": vision_target_position_gimbal_y,
+                "vision_target_position_gimbal_z": vision_target_position_gimbal_z,
                 "vision_target_position_map_x": vision_target_position_map_x,
                 "vision_target_position_map_y": vision_target_position_map_y,
                 "vision_target_position_map_z": vision_target_position_map_z,
@@ -354,20 +409,26 @@ def generate_launch_description():
     ld.add_action(declare_decision_mode_cmd)
     ld.add_action(declare_decision_mode_topic_cmd)
     ld.add_action(declare_publish_referee_inputs_cmd)
+    ld.add_action(declare_current_hp_cmd)
+    ld.add_action(declare_projectile_allowance_17mm_cmd)
     ld.add_action(declare_publish_vision_target_cmd)
     ld.add_action(declare_vision_tracking_cmd)
     ld.add_action(declare_vision_nav_hold_cmd)
+    ld.add_action(declare_vision_fire_permitted_cmd)
     ld.add_action(declare_vision_target_id_cmd)
+    ld.add_action(declare_vision_confidence_cmd)
+    ld.add_action(declare_vision_target_distance_cmd)
     ld.add_action(declare_vision_target_yaw_cmd)
     ld.add_action(declare_vision_target_pitch_cmd)
+    ld.add_action(declare_vision_target_position_gimbal_x_cmd)
+    ld.add_action(declare_vision_target_position_gimbal_y_cmd)
+    ld.add_action(declare_vision_target_position_gimbal_z_cmd)
     ld.add_action(declare_vision_target_position_map_x_cmd)
     ld.add_action(declare_vision_target_position_map_y_cmd)
     ld.add_action(declare_vision_target_position_map_z_cmd)
     ld.add_action(declare_vision_has_target_position_map_cmd)
     ld.add_action(declare_vision_target_position_map_frame_cmd)
 
-    ld.add_action(static_tf_base_link_cmd)
-    ld.add_action(static_tf_base_scan_cmd)
     ld.add_action(map_server_cmd)
     ld.add_action(map_server_lifecycle_cmd)
     ld.add_action(loopback_sim_cmd)

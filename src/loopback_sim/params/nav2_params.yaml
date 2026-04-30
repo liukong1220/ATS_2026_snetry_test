@@ -2,7 +2,7 @@ bt_navigator:
   ros__parameters:
     use_sim_time: True
     global_frame: map
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     odom_topic: /odom
     bt_loop_duration: 10
     default_server_timeout: 20
@@ -325,7 +325,7 @@ local_costmap:
       update_frequency: 5.0
       publish_frequency: 2.0
       global_frame: odom
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: True
       rolling_window: true
       # Parameters `local_costmap.width / local_costmap.height`
@@ -371,7 +371,7 @@ global_costmap:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: True
       robot_radius: 0.22
       resolution: 0.05
@@ -453,7 +453,7 @@ behavior_server:
     assisted_teleop:
       plugin: "nav2_behaviors/AssistedTeleop"
     global_frame: odom
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     transform_tolerance: 0.1
     use_sim_time: true
     simulate_ahead_time: 2.0
@@ -500,6 +500,9 @@ loopback_simulator:
     scan_frame_id: "base_scan" # tb4_loopback_simulator.launch.py remaps to 'rplidar_link'
     enable_stamped_cmd_vel: false
     update_duration: 0.02
+    # 启动后先连续发布几拍 TF/odom，再开始发 scan，
+    # 避免 RViz / Nav2 的 message filter 在 sim_time 下报“scan 早于 TF 缓存”。
+    scan_tf_warmup_cycles: 3
     scan_range_min: 0.05
     scan_range_max: 30.0
     scan_angle_min: -3.1415

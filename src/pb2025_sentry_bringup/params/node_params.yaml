@@ -1,5 +1,9 @@
 standard_robot_pp_ros2:
   ros__parameters:
+    # 这里是实车总入口的本体/传感器/导航参数集合。
+    # 行为树决策参数不在这份文件里，而在：
+    # src/pb2025_sentry_behavior/params/sentry_behavior.yaml
+    # bringup.launch.py 会同时加载本文件和 sentry_behavior.yaml。
     device_name: /dev/ttyACM0
     baud_rate: 115200
     flow_control: none
@@ -24,6 +28,11 @@ robot_state_publisher:
 
 livox_ros_driver2:
   ros__parameters:
+    # 当前雷达安装位姿已经发生调整，相关影响会直接传递到：
+    # 1. 点云到 costmap 的障碍投影
+    # 2. 实车可贴墙程度
+    # 3. 视觉/导航对狭窄转角的判定
+    # 因此 attack_radius、膨胀层、安全距离等不要脱离这个安装位姿单独理解。
     xfer_format: 4                                      # 0-PointCloud2Msg(PointXYZRTL), 1-LivoxCustomMsg, 2-PclPxyziMsg, 3-LivoxImuMsg, 4-AllMsg
     multi_topic: 0                                      # 0-All LiDARs share the same topic, 1-One LiDAR one topic
     data_src: 0                                         # 0-lidar, others-Invalid data src
@@ -179,6 +188,8 @@ fake_vel_transform:
     use_sim_time: false
     odom_topic: "odometry"
     local_plan_topic: "transformed_global_plan"
+    # 当前底盘运动学和云台/车体坐标关系仍然以 gimbal_yaw 为机器人运动参考轴。
+    # 若后续修改雷达或车体主参考系，这里的 frame 链要和 TF、定位、视觉同步检查。
     robot_base_frame: "gimbal_yaw"
     fake_robot_base_frame: "gimbal_yaw_fake"
     input_cmd_vel_topic: "cmd_vel_nav2_result"

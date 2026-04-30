@@ -9,8 +9,11 @@
 #include <string>
 #include <vector>
 
+#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "behaviortree_ros2/tree_execution_server.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 namespace pb2025_sentry_behavior
 {
@@ -79,6 +82,12 @@ private:
   std::string decision_vision_topic_;
   double decision_vision_timeout_s_ = 0.5;
   double decision_hit_spin_speed_ = 7.0;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  std::string pose_expected_frame_ = "map";
+  std::vector<std::string> pose_base_frame_candidates_{"base_footprint", "base_link"};
+  double pose_timeout_s_ = 0.5;
+  bool pose_tf_fallback_enabled_ = true;
 };
 
 }  // namespace pb2025_sentry_behavior

@@ -138,17 +138,27 @@ enum mode
 
 其中最关键的触发入口是：
 
+当前主线已经不再通过单个：
+
 ```xml
-<IsRobotHpBelow threshold="{@decision_defend_mode_hp}"/>
+<IsRobotHpBelow threshold="..."/>
 ```
 
-也就是当：
+来统一决定是否进入防御分支。
+
+现在的正式入口改成：
+
+```xml
+<IsRobotResourceMode state="defend" robot_status="{@referee_robotStatus}"/>
+```
+
+也就是资源状态机统一先判断：
 
 ```text
-current_hp <= decision.mode_thresholds.defend_hp
+engage / resupply / defend
 ```
 
-时，行为树会进入低血量分支，并切换为防御姿态。
+然后再由对应分支发布 `move / attack / defend` 姿态。
 
 如果后续你要新增“半防御”“警戒”“补给”等姿态，建议先确认三件事再动代码：
 
@@ -526,7 +536,12 @@ aft_tf_vel.angular.z = twist->angular.z + spin_speed_;
 | 参数名 | 默认值 | 作用 | 影响模块 |
 | --- | --- | --- | --- |
 | `decision.topics.robot_mode` | `decision/robot_mode` | 姿态模式发布话题 | 行为树 / 串口 |
-| `decision.mode_thresholds.defend_hp` | `300` | 低于该血量进入防御分支 | 行为树 |
+| `decision.resource_policy.defend_enter_hp` | `300` | 进入极低血量退防态的阈值 | 行为树 |
+| `decision.resource_policy.defend_exit_hp` | `340` | 离开极低血量退防态的恢复阈值 | 行为树 |
+| `decision.resource_policy.resupply_enter_hp` | `360` | 进入补给安全点分支的血量阈值 | 行为树 |
+| `decision.resource_policy.resupply_exit_hp` | `390` | 离开补给安全点分支的恢复血量阈值 | 行为树 |
+| `decision.resource_policy.resupply_enter_ammo` | `50` | 低弹量时进入补给安全点分支的阈值 | 行为树 |
+| `decision.resource_policy.resupply_exit_ammo` | `90` | 低弹量恢复后离开补给分支的阈值 | 行为树 |
 | `decision.mode_limits.switch_cooldown_s` | `5.0` | 姿态切换冷却时间 | `PublishRobotMode` |
 | `decision.mode_limits.max_cumulative_s` | `180.0` | 单局单姿态累计时长上限 | `PublishRobotMode` |
 | `decision.motion.hit_spin_speed` | `7.0` | 受击时发布的自旋角速度 | 行为树 |
@@ -543,22 +558,21 @@ params/*.yaml
   -> pb2025_sentry_behavior_server declare/get_parameter
   -> globalBlackboard()->set(...)
   -> behavior tree XML 通过 {@...} 取值
-  -> PublishRobotMode / IsAttacked / IsRobotHpBelow 读取端口
+  -> PublishRobotMode / IsAttacked / IsRobotResourceMode 读取端口
   -> 发布 robot_mode 或 spin 速度
 ```
 
-例如防御阈值和姿态冷却是这样接上的：
+例如资源状态阈值和姿态冷却是这样接上的：
 
 ```cpp
 // pb2025_sentry_behavior_server.cpp
-globalBlackboard()->set("decision_defend_mode_hp", defend_mode_hp);
 globalBlackboard()->set("decision_mode_switch_cooldown_s", mode_switch_cooldown_s);
 globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
 ```
 
 ```xml
 <!-- rmul_2026.xml -->
-<IsRobotHpBelow threshold="{@decision_defend_mode_hp}"/>
+<IsRobotResourceMode state="defend" robot_status="{@referee_robotStatus}"/>
 <PublishRobotMode mode="attack"
                   cooldown_s="{@decision_mode_switch_cooldown_s}"
                   max_cumulative_s="{@decision_mode_max_cumulative_s}"/>
@@ -596,16 +610,17 @@ globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s)
 - 锁存最近一次受击信息
 - 在可配置的超时时间内维持 `SUCCESS`
 
-### 10.3 低血量防御判断
+### 10.3 统一资源状态判断
 
-- `src/pb2025_sentry_behavior/plugins/condition/is_robot_hp_below.cpp`
-- `src/pb2025_sentry_behavior/include/pb2025_sentry_behavior/plugins/condition/is_robot_hp_below.hpp`
+- `src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp`
+- `src/pb2025_sentry_behavior/include/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.hpp`
 
 职责：
 
-- 从 `RobotStatus` 读取当前血量
-- 与 `decision.mode_thresholds.defend_hp` 进行比较
-- 为主树是否进入防御分支提供条件判断
+- 从 `RobotStatus` 读取当前血量和弹量
+- 根据 `decision.resource_policy.*` 统一判定 `engage / resupply / defend`
+- 用 enter / exit 迟滞避免资源阈值边缘频繁横跳
+- 为主树是否进入巡逻、补给或退防分支提供统一条件判断
 
 ### 10.4 参数声明与黑板注入
 

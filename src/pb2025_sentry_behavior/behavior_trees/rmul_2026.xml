@@ -2,6 +2,8 @@
 <root BTCPP_format="4">
   <BehaviorTree ID="vision_override_realtime">
     <Sequence>
+      <IsRobotResourceMode state="engage"
+                           robot_status="{@referee_robotStatus}"/>
       <IsVisionTargetValid key_port="{@sp_vision_target}"
                            timeout_s="{@decision_vision_timeout_s}"
                            require_nav_hold="true"
@@ -199,18 +201,28 @@
       <SubTree ID="check_game_start"/>
       <ReactiveFallback>
         <Sequence>
-          <IsHpBand band="critical"/>
-          <SubTree ID="decision_safe_point"/>
-        </Sequence>
-
-        <Sequence>
-          <IsRobotHpBelow threshold="{@decision_defend_mode_hp}"/>
+          <IsRobotResourceMode state="defend"
+                               robot_status="{@referee_robotStatus}"/>
           <SubTree ID="decision_retreat"/>
         </Sequence>
 
         <Sequence>
+          <IsRobotResourceMode state="resupply"
+                               robot_status="{@referee_robotStatus}"/>
+          <SubTree ID="decision_safe_point"/>
+        </Sequence>
+
+        <Sequence>
+          <IsRobotResourceMode state="engage"
+                               robot_status="{@referee_robotStatus}"/>
           <IsGameTimeStage stage="critical"/>
           <SubTree ID="decision_critical_time_target"/>
+        </Sequence>
+
+        <Sequence>
+          <IsRobotResourceMode state="engage"
+                               robot_status="{@referee_robotStatus}"/>
+          <SubTree ID="decision_patrol"/>
         </Sequence>
 
         <Sequence>
@@ -235,7 +247,7 @@
                               duration="0.0"
                               topic_name="{@decision_spin_topic}"/>
           </ReactiveFallback>
-          <ReactiveFallback>
+        <ReactiveFallback>
             <SubTree ID="vision_override_realtime"/>
 
             <Sequence>

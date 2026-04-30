@@ -4,6 +4,7 @@ import math
 from typing import List, Optional, Tuple
 
 import rclpy
+from geometry_msgs.msg import PointStamped
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from pb_rm_interfaces.msg import GameStatus, RfidStatus, RobotStatus
 from rclpy.node import Node
@@ -25,6 +26,8 @@ class FakeDecisionSimInputs(Node):
         super().__init__("fake_decision_sim_inputs")
 
         self.declare_parameter("publish_rate", 5.0)
+        # use_sim_time 由 launch 统一注入。
+        # 这里不要重复 declare，否则在 ROS 已经自动声明该参数时会直接启动失败。
         # loopback 只需要在启动时给一次 initialpose。
         # 若在导航过程中反复发布，会持续改写 map->odom，导致 RViz 里局部路径/rollout 看起来“乱飘”。
         self.declare_parameter("initial_pose_repeats", 1)
@@ -39,7 +42,9 @@ class FakeDecisionSimInputs(Node):
         self.declare_parameter("decision_mode_topic", "decision/sim_mode")
         self.declare_parameter("mode_script", [])
 
-        self.declare_parameter("publish_referee_inputs", False)
+        # loopback 现在默认也发布假裁判数据，
+        # 这样资源模式、视觉接管和实机主线的行为语义更一致。
+        self.declare_parameter("publish_referee_inputs", True)
         self.declare_parameter("game_progress", int(GameStatus.RUNNING))
         self.declare_parameter("stage_remain_time", 420)
 
@@ -49,6 +54,8 @@ class FakeDecisionSimInputs(Node):
         self.declare_parameter("publish_vision_target", False)
         self.declare_parameter("vision_topic", "vision/target")
         self.declare_parameter("vision_tracking", False)
+        # nav_hold 代表视觉明确建议“导航接管已经成立”。
+        # 当前行为树主线会要求 nav_hold=true 才允许进入视觉跟随。
         self.declare_parameter("vision_nav_hold", True)
         self.declare_parameter("vision_fire_permitted", False)
         self.declare_parameter("vision_target_id", 7)
@@ -94,6 +101,9 @@ class FakeDecisionSimInputs(Node):
         self.vision_topic = str(self.get_parameter("vision_topic").value)
         self.vision_target_pub = self.create_publisher(
             VisionTargetMsg, self.vision_topic, 10
+        )
+        self.vision_target_point_map_pub = self.create_publisher(
+            PointStamped, "vision/target_point_map", 10
         )
         self.game_status_pub = self.create_publisher(
             GameStatus, "referee/game_status", 10
@@ -340,6 +350,15 @@ class FakeDecisionSimInputs(Node):
             self.get_parameter("vision_target_position_map_frame").value
         )
         self.vision_target_pub.publish(msg)
+
+        if msg.has_target_position_map and msg.target_position_map_frame:
+            # 单独补发一个 PointStamped，直接喂给 RViz 的 PointStamped display，
+            # 这样在 loopback 下可以直观看到视觉目标地图点是否真的更新了。
+            target_point = PointStamped()
+            target_point.header.stamp = msg.timestamp
+            target_point.header.frame_id = msg.target_position_map_frame
+            target_point.point = msg.target_position_map
+            self.vision_target_point_map_pub.publish(target_point)
 
     def publish_loop(self):
         self.publish_decision_mode()

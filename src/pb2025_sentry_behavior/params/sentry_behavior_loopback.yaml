@@ -53,10 +53,6 @@ pb2025_sentry_behavior_server:
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
-      mode_thresholds:
-        # current_hp <= defend_hp 时，主树可切入 defend 相关分支。
-        defend_hp: 300
-
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
         switch_cooldown_s: 5.0
@@ -72,19 +68,85 @@ pb2025_sentry_behavior_server:
 
       vision:
         topic: vision/target
+        # 视觉融合消息允许的最大年龄。
+        # 如果视觉发布时间低于行为树 tick，或链路偶尔抖动，可以适当调大；
+        # 但太大又会追一个已经过期的旧目标。
         timeout_s: 0.5
+        # 初次进入视觉跟随前，需要持续满足 tracking/时间戳/姿态有效的最短时长。
+        # 调大后更稳，不容易一看到目标就冲过去；调小后接管更快。
+        activation_hold_s: 0.25
+        # 已经锁定目标 A 后，如果突然出现目标 B，
+        # 只有 B 持续稳定超过这个时长才允许切换，避免遮挡一下就来回换敌人。
+        switch_target_hold_s: 0.45
+        # tracking 短时抖动、单帧丢消息或视觉暂时遮挡时，额外维持当前视觉接管的时间。
+        # 这是“退出视觉跟随”的缓冲窗口，不是“强制一直视觉优先”的开关。
+        override_hold_s: 0.6
+        # 与目标保持的理想跟随半径，单位 m。
+        # 调大：更保守，更不容易贴脸撞墙，但在狭窄转角更容易被卡住。
+        # 调小：更容易穿过狭窄区域，但更依赖 costmap 和 MPPI 的稳定性。
         attack_radius: 2.0
+        # costmap 栅格大于等于该值就视为不可走。
+        # 调小会更保守，离墙更远；调大则更激进，更愿意贴边通过。
         follow_occupied_threshold: 50
+        # 候选采样点数量。
+        # 调大通常能提高在复杂转角附近找到可行点的概率，但也会更频繁换点。
         follow_sample_count: 16
+        # 围绕目标搜索跟随点时的半圆展开范围。
+        # 90 度代表主要在目标两侧和正后方找点；
+        # 再调大更容易绕开障碍，但也更可能选到“反向侧”的点。
         follow_arc_half_angle_deg: 90.0
+        # 两次重规划的最小时间间隔。
+        # 这是抑制 RViz 里轨迹乱飘、MPPI 被高频改目标打乱的第一道节流。
         min_replan_interval_s: 0.4
+        # 新跟随点相对旧跟随点至少要偏移这么多，才值得重发新导航目标。
+        # 这是抑制“目标轻微抖动就左右反复试探”的第二道节流。
         min_goal_shift_m: 0.35
+        # 是否优先保持上一帧已经选定的跟随侧。
+        # 建议保持 true。它主要用来抑制“快到攻击半径边界时突然翻到目标另一侧”。
+        prefer_previous_goal_side: true
+        # 只有当敌方地图点相对上一帧移动不超过这个距离时，才继续保持旧侧。
+        # 调大：更不容易左右翻边，但目标快速横移时跟随会更保守。
+        # 调小：更容易重新选侧，但在转角和终点附近更可能再次左右试探。
+        max_target_shift_for_side_hold_m: 0.8
+        # 每个决策周期允许攻击圆周目标沿圆周转过的最大角度。
+        # loopback 中若想更明显观察“实时追随”，可先尝试调到 24~30。
+        max_goal_angle_step_deg: 18.0
+        # loopback 中若手动发 /initialpose 或拖动车体后，希望立刻切到新的最近圆周点，
+        # 可调这个阈值；调小会更敏感，调大则更保守。
+        pose_jump_reset_distance_m: 0.8
         visualization_enabled: true
         visualization_topic: decision/vision_follow_markers
 
+      resource_policy:
+        # 统一资源决策状态机：
+        # engage   = 血量/弹量健康，允许巡逻和视觉接管
+        # resupply = 资源不健康，退出追击并回补给安全点
+        # defend   = 血量过低，优先退防保命
+        #
+        # enter_* 是“进入该状态”的阈值。
+        # exit_*  是“离开该状态”的阈值。
+        # exit 通常要高于 enter，用来形成迟滞，避免阈值边缘来回切换。
+        #
+        # 仿真建议：
+        # 1. 先保持 defend_enter_hp < resupply_enter_hp，保证保命优先级更高。
+        # 2. defend_exit_hp 至少比 defend_enter_hp 高 20~40。
+        # 3. 弹量阈值按一轮交战期望消耗来设，不要只看单次弹仓上限。
+        defend_enter_hp: 250
+        defend_exit_hp: 300
+        resupply_enter_hp: 100
+        resupply_exit_hp: 400
+        resupply_enter_ammo: 50
+        resupply_exit_ammo: 100
+
       pose:
+        # 行为树规划默认使用的全局坐标系。
         expected_frame: map
+        # blackboard 中的 decision_current_pose 超过这个时间没更新，
+        # 就视为 stale，允许行为层尝试用 TF 刷新位姿。
         timeout_s: 0.5
+        # loopback 中手动改 initialpose 或机器人静止时，odom 可能更新不及时；
+        # 打开后会优先从 map->base_footprint/base_link 的 TF 兜底刷新位姿，减少卡死。
+        tf_fallback_enabled: true
 
       time_thresholds:
         abundant: 300
@@ -115,6 +177,20 @@ pb2025_sentry_behavior_server:
         nav2_action_server: "/navigate_through_poses"
         decision_period_ms: 100
         goal_position_tolerance: 0.2
+        # 行为层判断“是否已处于路径终点附近”的容差。
+        # loopback 中要和 Nav2 general_goal_checker.xy_goal_tolerance 保持一致，
+        # 否则可能出现 Nav2 已成功、行为层却继续重发同一路径。
+        path_goal_reached_tolerance: 0.35
+        # 若新路径与当前已发给 Nav2 的路径只差这一点点以内，
+        # 则先不要抢占重发，避免视觉小抖动在近终点/转角处放大成左右试探。
+        active_goal_hold_tolerance: 0.45
+        # 即使检测到近似新目标，也至少隔这么久才允许再次重发。
+        # 仿真里如果仍出现“快到点就来回改主意”，可以先向 1.0~1.2 方向尝试。
+        active_goal_min_resend_interval_s: 0.8
+        # 视觉实时跟随专用抢占阈值：
+        # 当机器人或敌方发生变化时，需要比普通巡逻更快接受新的最近圆周点。
+        vision_active_goal_hold_tolerance: 0.18
+        vision_active_goal_min_resend_interval_s: 0.25
         waypoint_stop_duration_s: 0.3
         patrol_preview_points: 1
         action_server_wait_timeout_s: 0.5

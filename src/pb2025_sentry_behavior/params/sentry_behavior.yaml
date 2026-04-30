@@ -53,10 +53,6 @@ pb2025_sentry_behavior_server:
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
-      mode_thresholds:
-        # current_hp <= defend_hp 时，主树可切入 defend 相关分支。
-        defend_hp: 300
-
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
         switch_cooldown_s: 5.0
@@ -72,19 +68,81 @@ pb2025_sentry_behavior_server:
 
       vision:
         topic: vision/target
+        # 视觉融合消息允许的最大年龄。
+        # 实车若视觉链路整体时延偏大，可以略调大；
+        # 但过大时会继续追一个已经丢失的旧目标。
         timeout_s: 0.5
+        # 初次进入视觉跟随前，需要连续稳定满足条件的最短时间。
+        # 实车建议先从 0.2~0.35s 起调，兼顾响应速度和抗误检能力。
+        activation_hold_s: 0.25
+        # 目标切换确认时间。
+        # 如果原目标暂时被遮挡、同时旁边冒出新目标，只有新目标持续稳定超过该时间才切换。
+        switch_target_hold_s: 0.45
+        # tracking 短时抖动、单帧丢消息或视觉暂时被挡住时，额外维持当前视觉接管的时间。
+        # 只有这个保持时间也耗尽后，系统才会平滑回到普通巡航/裁判决策。
+        override_hold_s: 0.6
+        # 跟随目标时的期望攻击半径，单位 m。
+        # 实车上这个参数要结合雷达安装位姿、车体外形、射界和墙边安全裕度一起调。
         attack_radius: 2.0
+        # costmap 代价值达到该阈值后就不再把该点作为候选跟随点。
+        # 实车贴墙过于激进时先尝试调小；狭窄区域总过不去再考虑调大。
         follow_occupied_threshold: 50
+        # 候选跟随点采样密度。
+        # 更多采样通常更容易绕开局部障碍，但也会让目标点更新更敏感。
         follow_sample_count: 16
+        # 围绕敌方目标搜索候选点的半角范围。
+        # 建议优先在 60~110 度之间调，太大时更容易跨到“反侧”导致局部反向试探。
         follow_arc_half_angle_deg: 90.0
+        # 重发跟随目标前的最小时间间隔。
+        # 实车上如果 MPPI 局部轨迹乱飘、左右抽动，优先略调大。
         min_replan_interval_s: 0.4
+        # 新跟随目标点相对旧目标点至少移动这么多才重发。
+        # 这是控制“视觉轻微抖动是否值得重新规划”的关键参数。
         min_goal_shift_m: 0.35
+        # 是否优先保持上一帧已经选定的跟随侧。
+        # 实车强烈建议保持 true，这对转角处、贴边交会和接近终点时的稳定性帮助很大。
+        prefer_previous_goal_side: true
+        # 只有当敌方地图点变化不超过该距离时，才继续沿用旧的包夹侧。
+        # 如果实车上发现目标横移很快但机器人仍执着守着旧侧，可适度调小。
+        max_target_shift_for_side_hold_m: 0.8
+        # 每个决策周期允许攻击圆周跟随点沿圆周转过的最大角度。
+        # 调大：更灵敏，更像“立刻扑向新方向”；
+        # 调小：更平滑，但快速横移目标时会有一点跟随滞后。
+        max_goal_angle_step_deg: 18.0
+        # 若当前车位相对上一拍参考位姿瞬时跳变超过该距离，
+        # 直接清空视觉跟随平滑缓存，立即按当前车位重新选最近圆周点。
+        # 主要用于 RViz 重定位、loopback 手动改 initialpose、实车定位校正等场景。
+        pose_jump_reset_distance_m: 0.8
         visualization_enabled: true
         visualization_topic: decision/vision_follow_markers
 
+      resource_policy:
+        # 统一资源决策状态机：
+        # engage   = 健康巡航，可允许视觉接管
+        # resupply = 血量或弹量不足，退出追击并回补给安全点
+        # defend   = 血量过低，直接进入退防保命
+        #
+        # 官方比赛中血量和弹量都会有离散跳变，因此必须用 enter/exit 做迟滞。
+        # 调参原则：
+        # 1. defend_enter_hp < resupply_enter_hp
+        # 2. defend_exit_hp >= defend_enter_hp + 20
+        # 3. resupply_exit_hp >= resupply_enter_hp + 20
+        # 4. resupply_exit_ammo >= resupply_enter_ammo + 20
+        defend_enter_hp: 250
+        defend_exit_hp: 300
+        resupply_enter_hp: 100
+        resupply_exit_hp: 400
+        resupply_enter_ammo: 50
+        resupply_exit_ammo: 100
+
       pose:
+        # 行为树默认认为导航位姿应处在这个坐标系下。
         expected_frame: map
+        # 超过该时长未更新的 decision_current_pose 会被视为过期。
         timeout_s: 0.5
+        # 实车正常情况下主要依赖 odom / localization 更新当前位姿；
+        # 若极少数情况下 odom 停顿但 TF 仍连续，这个开关允许行为层用 TF 兜底。
+        tf_fallback_enabled: true
 
       time_thresholds:
         abundant: 300
@@ -115,6 +173,20 @@ pb2025_sentry_behavior_server:
         nav2_action_server: "/navigate_through_poses"
         decision_period_ms: 100
         goal_position_tolerance: 0.2
+        # 行为层“是否到达目标”的判定容差，需要与实车 Nav2 goal checker 对齐。
+        # 当前实车链路 general_goal_checker.xy_goal_tolerance 为 0.15。
+        path_goal_reached_tolerance: 0.15
+        # 若行为树新给出的路径只是在当前目标附近轻微漂移，
+        # 则先保持 Nav2 正在执行的目标，避免实车在墙角和终点附近被频繁抢占。
+        active_goal_hold_tolerance: 0.45
+        # 同一类导航目标最短重发间隔。
+        # 实车若仍有“目标点附近左右试探”，优先先略调大到 0.9~1.2。
+        active_goal_min_resend_interval_s: 0.8
+        # 视觉实时跟随要比普通巡逻更积极地接受“最近圆周点变化”，
+        # 否则机器人换位后，新的圆周点会被近似保持逻辑吞掉。
+        vision_active_goal_hold_tolerance: 0.18
+        # 视觉单点跟随的最短重发间隔，兼顾实时追敌与 Nav2 平滑性。
+        vision_active_goal_min_resend_interval_s: 0.25
         waypoint_stop_duration_s: 0.0
         patrol_preview_points: 1
         action_server_wait_timeout_s: 0.5

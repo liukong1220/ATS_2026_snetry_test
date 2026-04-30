@@ -53,10 +53,6 @@ pb2025_sentry_behavior_server:
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
-      mode_thresholds:
-        # current_hp <= defend_hp 时，主树可切入 defend 相关分支。
-        defend_hp: 300
-
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
         switch_cooldown_s: 5.0
@@ -72,19 +68,50 @@ pb2025_sentry_behavior_server:
 
       vision:
         topic: vision/target
+        # 专用视觉测试树也沿用与主树一致的消息时效约束，方便结论直接迁移回主树。
         timeout_s: 0.5
+        # 初次进入视觉跟随前，需要先持续稳定满足条件一小段时间。
+        activation_hold_s: 0.25
+        # 如果当前已锁定某个目标，新目标必须稳定保持这么久才允许切换。
+        switch_target_hold_s: 0.45
+        # 视觉专用测试入口中，用于抵御 tracking 抖动、短时遮挡和仿真消息频率波动。
+        override_hold_s: 0.6
+        # 这些跟随参数与主树保持同源，这样 vision_test 中调出的结果才容易迁回 rmul_2026。
         attack_radius: 2.0
         follow_occupied_threshold: 50
         follow_sample_count: 16
         follow_arc_half_angle_deg: 90.0
         min_replan_interval_s: 0.4
         min_goal_shift_m: 0.35
+        # 是否优先保持上一帧已经选定的跟随侧，避免专用视觉测试里出现无意义的左右翻边。
+        prefer_previous_goal_side: true
+        # 只有目标地图点变化较小时，才继续沿用上一帧跟随侧。
+        max_target_shift_for_side_hold_m: 0.8
+        # 每个决策周期允许视觉圆周跟随点变化的最大角度，用来兼顾实时性和轨迹平滑。
+        max_goal_angle_step_deg: 18.0
+        # 视觉测试中若运行中重定位或手动改位姿，超过该跳变距离后会立刻清空旧缓存，
+        # 避免目标点先沿旧侧过渡几拍再切到新的最近圆周点。
+        pose_jump_reset_distance_m: 0.8
         visualization_enabled: true
         visualization_topic: decision/vision_follow_markers
 
+      resource_policy:
+        # vision_test 不是“无条件视觉优先”测试树。
+        # 它仍然遵守和主树一致的资源门控，这样仿真结果才更接近实车。
+        defend_enter_hp: 250
+        defend_exit_hp: 300
+        resupply_enter_hp: 100
+        resupply_exit_hp: 400
+        resupply_enter_ammo: 50
+        resupply_exit_ammo: 100
+
       pose:
+        # 行为树默认使用 map 作为决策位姿坐标系。
         expected_frame: map
+        # 当前位姿超过该时长未更新则视为 stale。
         timeout_s: 0.5
+        # 允许在 odom 停更时用 TF 刷新 blackboard 位姿，方便 loopback 重定位测试。
+        tf_fallback_enabled: true
 
       time_thresholds:
         abundant: 300
@@ -115,6 +142,15 @@ pb2025_sentry_behavior_server:
         nav2_action_server: "/navigate_through_poses"
         decision_period_ms: 100
         goal_position_tolerance: 0.2
+        # 与 loopback Nav2 的到点容差对齐，防止 Goal succeeded 后行为层继续重发。
+        path_goal_reached_tolerance: 0.35
+        # 视觉专测也沿用正式主树的抢占节流逻辑，避免测试树结果偏离主树表现。
+        active_goal_hold_tolerance: 0.45
+        active_goal_min_resend_interval_s: 0.8
+        # 视觉专测需要更直接地体现“最近圆周点实时变化”，
+        # 因此这里额外给视觉单点跟随一组更灵敏的重发阈值。
+        vision_active_goal_hold_tolerance: 0.18
+        vision_active_goal_min_resend_interval_s: 0.25
         waypoint_stop_duration_s: 0.3
         patrol_preview_points: 1
         action_server_wait_timeout_s: 0.5
