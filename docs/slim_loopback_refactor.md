@@ -17,8 +17,10 @@
    [`../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml`](../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
 4. 视觉测试行为树参数  
    [`../src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml`](../src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
-5. loopback Nav2 与 MPPI 参数  
+5. loopback Nav2 与 MPPI 参数
    [`../src/loopback_sim/params/nav2_params.yaml`](../src/loopback_sim/params/nav2_params.yaml)
+6. 实车总入口 Nav2 主参数
+   [`../src/pb2025_sentry_bringup/params/node_params.yaml`](../src/pb2025_sentry_bringup/params/node_params.yaml)
 
 当前建议直接使用：
 
@@ -41,6 +43,32 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True
 3. 已被后续文档细化或纠正的中间结论
 
 请把它们视为开发存档，而不是当前唯一标准。
+
+## 0.1 当前最容易调错的地方
+
+这条命令：
+
+```bash
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+```
+
+默认读取的是：
+
+- [`../src/loopback_sim/params/nav2_params.yaml`](../src/loopback_sim/params/nav2_params.yaml)
+
+而不是：
+
+- [`../src/pb2025_sentry_bringup/params/node_params.yaml`](../src/pb2025_sentry_bringup/params/node_params.yaml)
+
+后者是当前实车总入口 [`../src/pb2025_sentry_bringup/launch/bringup.launch.py`](../src/pb2025_sentry_bringup/launch/bringup.launch.py) 的默认主参数文件。
+
+这意味着：
+
+1. 你在 loopback 里看到的 MPPI 现象，首先要去看 `src/loopback_sim/params/nav2_params.yaml`。
+2. 你在实车里看到的 MPPI 现象，首先要去看 `src/pb2025_sentry_bringup/params/node_params.yaml`。
+3. 如果两边参数不同，出现“仿真调好了，实车还是不对”是正常现象，不一定是代码坏了。
+
+本轮已经专门把 loopback 的 MPPI 调参方向重新收敛到和实车主参数一致，但它们仍然是两份文件，各自服务不同入口。
 
 ## 1. 文档目标
 
@@ -1368,6 +1396,14 @@ ros2 run sp_vision25 sentry --help
 
 ## 18. 局部控制器迁移：PID → MPPI
 
+> 更新说明
+> 本节保留了 PID 迁到 MPPI 的历史背景，但当前仓库已经进入 MPPI 唯一主线阶段。
+> 如果本节中的历史数值与你现在代码不一致，请优先以下列现状文件为准：
+> - `src/pb2025_sentry_bringup/params/node_params.yaml`
+> - `src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`
+> - `src/loopback_sim/params/nav2_params.yaml`
+> - `docs/mppi_parameter_tuning_guide.md`
+
 ### 18.1 迁移背景
 
 原有的局部控制器 `pb_omni_pid_pursuit_controller::OmniPidPursuitController` 采用纯追踪（Pure Pursuit）+ 双 PID 的架构：
@@ -1438,6 +1474,25 @@ u* = ∫ u · exp(-S(u)/λ) du  /  ∫ exp(-S(u)/λ) du
 - 代价地图层配置
 
 ### 18.4 三种环境的 MPPI 配置差异
+
+这里最容易被忽略的不是参数表本身，而是三种环境观测条件并不相同：
+
+1. loopback
+   - 没有真实 Livox、没有真实 TF 外参链
+   - 更适合先定位“行为树问题”或“MPPI 基础参数问题”
+2. 完整仿真 / 实车导航
+   - 依赖 `front_mid360 -> gimbal_yaw` 这条真实外参关系
+   - 点云、costmap、局部轨迹稳定性都会受雷达位姿影响
+3. 实机总入口
+   - 真正默认生效的总参数通常先看 `src/pb2025_sentry_bringup/params/node_params.yaml`
+   - 不要误以为只改 `pb2025_nav_bringup/config/reality/nav2_params.yaml` 就一定覆盖整车启动
+
+近期还专门修正过一个会直接影响调参判断的点：
+
+- 实车模型 `pb2025_sentry_robot.sdf.xmacro`
+  - Livox 位姿：`0.1 0.245 0.3 ${68*pi/180} 0 -${161*pi/180}`
+- 仿真模型 `simulation_robot.sdf.xmacro`
+  - 现在也应保持同一位姿，避免仿真外参比实车多出额外 pitch
 
 | 参数 | 仿真 (Omni) | 实车 (Omni) | Loopback (DiffDrive) |
 |------|------------|------------|---------------------|

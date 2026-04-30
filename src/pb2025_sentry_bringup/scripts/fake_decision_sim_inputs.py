@@ -25,7 +25,9 @@ class FakeDecisionSimInputs(Node):
         super().__init__("fake_decision_sim_inputs")
 
         self.declare_parameter("publish_rate", 5.0)
-        self.declare_parameter("initial_pose_repeats", 10)
+        # loopback 只需要在启动时给一次 initialpose。
+        # 若在导航过程中反复发布，会持续改写 map->odom，导致 RViz 里局部路径/rollout 看起来“乱飘”。
+        self.declare_parameter("initial_pose_repeats", 1)
         self.declare_parameter("initial_pose_period", 0.5)
 
         self.declare_parameter("initial_x", 0.0)

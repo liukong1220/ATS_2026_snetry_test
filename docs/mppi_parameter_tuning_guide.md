@@ -15,6 +15,15 @@
 
 但建议先在 loopback 中把现象调顺，再同步到正式仿真和实车。
 
+另外一定要记住：
+
+- `loopback_decision_sim.launch.py`
+  - 默认读取 `src/loopback_sim/params/nav2_params.yaml`
+- `bringup.launch.py`
+  - 默认读取 `src/pb2025_sentry_bringup/params/node_params.yaml`
+
+如果你在 loopback 里观察局部路径和 trajectories，却去改 `node_params.yaml`，那么大概率不会看到你预期的变化。
+
 ## 官方参考
 
 本文关于参数定义、默认值和调参原则，优先参考 Nav2 官方 MPPI 文档：
@@ -32,6 +41,13 @@
 4. `visualize` 很适合调试，但官方明确提醒它会增加控制器计算开销。
 5. `ObstaclesCritic.inflation_radius` 与 `cost_scaling_factor` 在 Humble 下应与 costmap inflation layer 保持一致。
 6. 官方特别提醒：很多实际问题，最先该检查的是运动模型、速度边界和 obstacle critic 与 inflation layer 的匹配关系，而不是先猛调 critic 权重。
+
+另外两份本次项目中非常常用的官方参考：
+
+- Nav2 Inflation Layer：
+  - https://docs.nav2.org/configuration/packages/costmap-plugins/inflation.html
+- Nav2 Smac Hybrid-A* Planner：
+  - https://docs.nav2.org/configuration/packages/smac/configuring-smac-hybrid.html
 
 ## 为什么 MPPI 调参容易痛苦
 
@@ -71,6 +87,17 @@ MPPI 不是单一 PID 参数，而是：
   - 先查 MPPI 参数
 - `transformed_global_plan` 本身就奇怪
   - 先查行为树、路径点切换、全局规划输入
+
+- `transformed_global_plan` 正常，但机器人一边走一边像“地图坐标被轻微重置”
+  - 先查 loopback 是否在反复发布 `initialpose`
+- `scan`/costmap 偶发抖动，且日志里出现 message filter 早于 TF cache
+  - 先查 loopback 时间戳链，而不是先怀疑 MPPI critic
+
+如果你现在正在调“贴墙、狭窄通道、终点抖动”，建议再同时观察：
+
+- `local_costmap/costmap_raw`
+- `global_costmap/costmap_raw`
+- `back_up_free_space_markers`（如果恢复可视化打开）
 
 ## 调参基本顺序
 
@@ -494,6 +521,184 @@ prediction_horizon = time_steps * model_dt
 经验：
 
 - 如果终点旁边没有真实障碍，但车像被“看不见的墙”推开，优先看这组参数和 inflation 配置是否匹配
+
+## 全局层和局部层不要用同一种调参思路
+
+很多人调窄路问题时会把 global / local inflation 一起往下压，这很容易把问题从“过不去”变成“能过去但贴墙撞边”。
+
+建议把这两层分开理解：
+
+### global costmap inflation
+
+职责：
+
+- 决定全局规划更愿意走通道中心还是沿墙走
+
+优先调这些参数：
+
+- `global_costmap.inflation_layer.inflation_radius`
+- `global_costmap.inflation_layer.cost_scaling_factor`
+- `planner_server.GridBased.cost_travel_multiplier`
+- `planner_server.GridBased.cost_penalty`
+
+经验：
+
+- 全局层通常应该比局部层更保守
+- 如果全局路径太激进、容易贴墙，先提 `cost_travel_multiplier`
+- 再提 `cost_penalty`
+- 如果还不够，再把 global inflation 略放大
+
+### local costmap + MPPI obstacle critic
+
+职责：
+
+- 决定局部控制敢不敢从狭窄通道通过
+- 决定 MPPI 是被代价场推回去，还是能稳定贴着中心穿过去
+
+优先调这些参数：
+
+- `local_costmap.inflation_layer.inflation_radius`
+- `local_costmap.inflation_layer.cost_scaling_factor`
+- `FollowPath.ObstaclesCritic.repulsion_weight`
+- `FollowPath.ObstaclesCritic.inflation_radius`
+- `FollowPath.ObstaclesCritic.cost_scaling_factor`
+
+经验：
+
+- `ObstaclesCritic.inflation_radius / cost_scaling_factor` 在 Humble 下应和 local inflation 保持一致
+- 局部层缩得太小，虽然过窄路会更容易，但机器人会更喜欢贴边
+- 如果已经能过窄路，但出现刮墙趋势，优先略增 `repulsion_weight`
+
+## 现象 6：全局路径能过窄路，但越来越贴墙
+
+优先检查：
+
+1. `planner_server.GridBased.cost_travel_multiplier`
+2. `planner_server.GridBased.cost_penalty`
+3. `global_costmap.inflation_layer.*`
+
+推荐方向：
+
+- 提高 `cost_travel_multiplier`
+- 再提高 `cost_penalty`
+- 保持 global inflation 稍微大于 local inflation
+
+## 现象 7：转角前后反向试探，切换巡逻点时更明显
+
+优先检查：
+
+1. `PathAngleCritic.cost_weight`
+2. `PathAngleCritic.max_angle_to_furthest`
+3. `PathAngleCritic.forward_preference`
+4. `PathAlignCritic.cost_weight`
+5. `PathAlignCritic.offset_from_furthest`
+
+推荐方向：
+
+- 增大 `PathAngleCritic.cost_weight`
+- 适当减小 `max_angle_to_furthest`
+- 对全向底盘也可打开 `forward_preference`，减少“先反一下再转”的试探
+- 如果还被路径强拽着走，再降低 `PathAlignCritic.cost_weight`
+- 再缩短 `offset_from_furthest`
+
+## 现象 8：快到终点或刚切到下一个巡逻点时局部预测偏离
+
+优先检查：
+
+1. `GoalCritic.cost_weight`
+2. `GoalCritic.threshold_to_consider`
+3. `xy_goal_tolerance`
+4. `VelocityDeadbandCritic`
+5. `time_steps * model_dt`
+
+推荐方向：
+
+- 让 `GoalCritic` 更早接管
+- 提高 `GoalCritic.cost_weight`
+- 略放宽 `xy_goal_tolerance`
+- 如果预测范围明显长过头，优先缩短 horizon，而不是只改 critic
+
+## 卡在膨胀层里的脱困如何理解
+
+这类问题不只靠 MPPI 正常跟踪能解决，恢复链也要一起看。
+
+当前项目已经额外做了一层处理：
+
+- 恢复插件使用 `pb_nav2_behaviors/BackUpFreeSpace`
+- 它会读取 costmap，搜索低代价退让方向
+- 新增了 `max_allowed_cost`
+- 高于该阈值的膨胀层区域，不再被当作“可退空间”
+
+这样做的原因是：
+
+- 如果恢复动作把高 cost 的膨胀区也当安全区
+- 机器人会在“看似能退、其实越退越贴墙”的方向上来回试探
+
+所以调脱困时要一起看：
+
+- `behavior_server.max_allowed_cost`
+- BT 中 `BackUp.backup_dist`
+- BT 中 `BackUp.backup_speed`
+- `progress_checker.required_movement_radius`
+- `progress_checker.movement_time_allowance`
+
+## 外参错了时，看起来很像 MPPI 参数没调好
+
+如果你遇到这些现象：
+
+- 局部障碍整体像斜着摆
+- `trajectories` 在空旷处也被无形推开
+- 仿真和实车同一套参数表现差异特别大
+
+优先检查传感器外参，不要急着继续改 MPPI。
+
+当前项目中要特别注意：
+
+- 实车模型 `pb2025_sentry_robot.sdf.xmacro`
+  - Livox 位姿：`0.1 0.245 0.3 ${68*pi/180} 0 -${161*pi/180}`
+- 仿真模型 `simulation_robot.sdf.xmacro`
+  - 应与实车保持同一位姿
+- 导航链路默认仍使用：
+  - `lidar_frame: front_mid360`
+  - `robot_base_frame: gimbal_yaw`
+
+而 `sensor_scan_generation`、`loam_interface`、costmap `sensor_frame` 依赖的是运行时 TF 结果。
+
+所以真正要确认的是：
+
+1. 机器人描述里的外参是否改了
+2. 仿真模型是否同步改了
+3. 运行时 TF 是否真的是新的安装位姿
+
+## loopback 特有的两个“假故障源”
+
+这两项不是 MPPI 参数本身，但它们会非常像 MPPI 没调好：
+
+### 1. 反复发布 initialpose
+
+如果 loopback 在导航进行中不断重发 `initialpose`，`nav2_loopback_sim` 会持续重算 `map->odom`。
+
+表现出来就是：
+
+- RViz 里局部路径、rollout、costmap 参考关系像在轻微漂移
+- 你以为是 MPPI rollout 发散
+- 实际上是仿真定位原点在反复被改写
+
+当前项目已把假输入节点默认 `initial_pose_repeats` 调整为 `1`，只在启动时给一次初始位姿。
+
+### 2. Omni 控制器和速度平滑器侧移约束不一致
+
+如果 MPPI `motion_model=Omni`，但 `velocity_smoother` 又把 `linear.y` 限成 `0`，就会出现：
+
+- 控制器采样认为自己可以侧移
+- 底层执行却不允许侧移
+- 转角、终点、切换巡逻点时更容易出现反向试探和预测偏离
+
+所以 loopback 里必须保证：
+
+- `FollowPath.motion_model: Omni`
+- `velocity_smoother.max_velocity[1] / min_velocity[1]`
+  - 不要被锁成 `0`
 
 #### `ConstraintCritic`
 

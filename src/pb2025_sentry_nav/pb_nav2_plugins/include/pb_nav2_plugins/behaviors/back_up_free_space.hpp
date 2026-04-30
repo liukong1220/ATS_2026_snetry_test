@@ -82,6 +82,7 @@ protected:
   // parameters
   std::string service_name_;
   double max_radius_;
+  int max_allowed_cost_;
   bool visualize_;
 };
 

@@ -3,6 +3,9 @@
 
 #include "pb_nav2_plugins/behaviors/back_up_free_space.hpp"
 
+#include <cmath>
+#include <limits>
+
 namespace pb_nav2_behaviors
 {
 
@@ -17,11 +20,14 @@ void BackUpFreeSpace::onConfigure()
   nav2_util::declare_parameter_if_not_declared(node, "max_radius", rclcpp::ParameterValue(1.0));
   nav2_util::declare_parameter_if_not_declared(
     node, "service_name", rclcpp::ParameterValue("local_costmap/get_costmap"));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "max_allowed_cost", rclcpp::ParameterValue(96));
   nav2_util::declare_parameter_if_not_declared(node, "visualize", rclcpp::ParameterValue(false));
 
   node->get_parameter("global_frame", global_frame_);
   node->get_parameter("max_radius", max_radius_);
   node->get_parameter("service_name", service_name_);
+  node->get_parameter("max_allowed_cost", max_allowed_cost_);
   node->get_parameter("visualize", visualize_);
 
   costmap_client_ = node->create_client<nav2_msgs::srv::GetCostmap>(service_name_);
@@ -151,11 +157,12 @@ float BackUpFreeSpace::findBestDirection(
 {
   float best_angle = start_angle;
 
-  float first_safe_angle = -1.0f;
-  float last_unsafe_angle = -1.0f;
-
-  float final_safe_angle = 0.0f;
-  float final_unsafe_angle = 0.0f;
+  float current_safe_start = std::numeric_limits<float>::quiet_NaN();
+  float current_cost_sum = 0.0f;
+  int current_samples = 0;
+  float best_safe_start = std::numeric_limits<float>::quiet_NaN();
+  float best_safe_end = std::numeric_limits<float>::quiet_NaN();
+  float best_avg_cost = std::numeric_limits<float>::infinity();
 
   float resolution = costmap.metadata.resolution;
   float origin_x = costmap.metadata.origin.position.x;
@@ -170,6 +177,8 @@ float BackUpFreeSpace::findBestDirection(
 
   for (float angle = start_angle; angle <= end_angle; angle += angle_increment) {
     bool is_safe = true;
+    float ray_cost_sum = 0.0f;
+    int ray_samples = 0;
 
     for (float r = 0; r <= radius; r += resolution) {
       float x = pose.x + r * std::cos(angle);
@@ -180,10 +189,13 @@ float BackUpFreeSpace::findBestDirection(
         int j = static_cast<int>((y - origin_y) / resolution);
 
         if (i >= 0 && i < size_x && j >= 0 && j < size_y) {
-          if (costmap.data[i + j * size_x] >= 253) {
+          auto cell_cost = static_cast<unsigned char>(costmap.data[i + j * size_x]);
+          if (cell_cost >= 253 || cell_cost > max_allowed_cost_) {
             is_safe = false;
             break;
           }
+          ray_cost_sum += static_cast<float>(cell_cost);
+          ray_samples++;
         } else {
           is_safe = false;
           break;
@@ -193,27 +205,70 @@ float BackUpFreeSpace::findBestDirection(
         break;
       }
     }
-    if (is_safe && first_safe_angle == -1.0f) {
-      first_safe_angle = angle;
+    if (is_safe) {
+      if (std::isnan(current_safe_start)) {
+        current_safe_start = angle;
+        current_cost_sum = 0.0f;
+        current_samples = 0;
+      }
+      current_cost_sum += ray_cost_sum;
+      current_samples += ray_samples;
+      continue;
     }
 
-    if (!is_safe && first_safe_angle != -1.0f && last_unsafe_angle == -1.0f) {
-      last_unsafe_angle = angle;
-    }
+    if (!std::isnan(current_safe_start)) {
+      const float current_safe_end = angle - angle_increment;
+      const float current_span = current_safe_end - current_safe_start;
+      const float best_span = std::isnan(best_safe_start) ? -1.0f : best_safe_end - best_safe_start;
+      const float current_avg_cost =
+        current_samples > 0 ? current_cost_sum / static_cast<float>(current_samples) :
+        std::numeric_limits<float>::infinity();
 
-    if (
-      last_unsafe_angle - first_safe_angle > final_unsafe_angle - final_safe_angle &&
-      first_safe_angle != -1.0f && last_unsafe_angle != -1.0f) {
-      final_safe_angle = first_safe_angle;
-      final_unsafe_angle = last_unsafe_angle;
-      first_safe_angle = -1.0f;
-      last_unsafe_angle = -1.0f;
+      if (
+        std::isnan(best_safe_start) || current_span > best_span + 1e-4f ||
+        (std::fabs(current_span - best_span) <= 1e-4f && current_avg_cost < best_avg_cost)) {
+        best_safe_start = current_safe_start;
+        best_safe_end = current_safe_end;
+        best_avg_cost = current_avg_cost;
+      }
+
+      current_safe_start = std::numeric_limits<float>::quiet_NaN();
+      current_cost_sum = 0.0f;
+      current_samples = 0;
     }
   }
-  best_angle = (final_safe_angle + final_unsafe_angle) / 2.0f;
+
+  if (!std::isnan(current_safe_start)) {
+    const float current_safe_end = end_angle;
+    const float current_span = current_safe_end - current_safe_start;
+    const float best_span = std::isnan(best_safe_start) ? -1.0f : best_safe_end - best_safe_start;
+    const float current_avg_cost =
+      current_samples > 0 ? current_cost_sum / static_cast<float>(current_samples) :
+      std::numeric_limits<float>::infinity();
+
+    if (
+      std::isnan(best_safe_start) || current_span > best_span + 1e-4f ||
+      (std::fabs(current_span - best_span) <= 1e-4f && current_avg_cost < best_avg_cost)) {
+      best_safe_start = current_safe_start;
+      best_safe_end = current_safe_end;
+      best_avg_cost = current_avg_cost;
+    }
+  }
+
+  if (!std::isnan(best_safe_start)) {
+    best_angle = (best_safe_start + best_safe_end) / 2.0f;
+  } else {
+    RCLCPP_WARN(
+      logger_,
+      "No recovery ray stayed below cost threshold %d, falling back to straight backup search.",
+      max_allowed_cost_);
+  }
 
   if (visualize_) {
-    visualize(pose, radius, final_safe_angle, final_unsafe_angle);
+    visualize(
+      pose, radius,
+      std::isnan(best_safe_start) ? start_angle : best_safe_start,
+      std::isnan(best_safe_end) ? start_angle : best_safe_end);
   }
 
   return best_angle;

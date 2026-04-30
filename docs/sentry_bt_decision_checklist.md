@@ -34,6 +34,26 @@ launch 文件
   -> 输出 cmd_vel / 底盘运动
 ```
 
+当前导航恢复链也建议一起记住：
+
+```text
+行为树生成 decision_path
+  -> SendNavThroughPoses
+  -> Nav2 Planner + MPPI FollowPath
+  -> 若局部长期无有效进展
+  -> progress_checker 判定失败
+  -> BT RecoveryFallback
+  -> 清空 costmap
+  -> BackUpFreeSpace 选择低代价退让方向
+  -> 重新回到 FollowPath
+```
+
+这意味着：
+
+1. 行为树负责“该去哪”。
+2. Nav2 负责“如何规划、如何控制、何时认定卡住”。
+3. 恢复动作已经是当前主导航链的一部分，而不是旧 PID 时代的旁路补丁。
+
 ---
 
 ## 2. 当前工程里谁负责什么
