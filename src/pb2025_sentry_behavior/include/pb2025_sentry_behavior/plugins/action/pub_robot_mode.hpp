@@ -2,10 +2,13 @@
 #define PB2025_SENTRY_BEHAVIOR__PLUGINS__ACTION__PUB_ROBOT_MODE_HPP_
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "behaviortree_ros2/bt_topic_pub_action_node.hpp"
 #include "example_interfaces/msg/u_int8.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 namespace pb2025_sentry_behavior
 {
@@ -58,6 +61,14 @@ private:
    * 3. 当前 active_mode 也已超限，触发回退姿态选择
    */
   uint8_t resolveModeWithConstraints(uint8_t requested_mode);
+
+  /// @brief 在 RViz 中发布当前姿态颜色块和文字，方便 loopback 与实车联调观察。
+  void publishModeVisualization(uint8_t active_mode);
+
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Logger logger_ = rclcpp::get_logger("PublishRobotModeAction");
+  bool visualization_enabled_ = true;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr visualization_publisher_;
 };
 
 }  // namespace pb2025_sentry_behavior

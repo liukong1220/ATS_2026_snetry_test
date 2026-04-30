@@ -384,6 +384,18 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: decision/vision_follow_markers
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: RobotModeMarkers
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: decision/robot_mode_markers
+      Value: true
     - Class: rviz_default_plugins/Camera
       Enabled: false
       Far Plane Distance: 100
@@ -424,6 +436,7 @@ Visualization Manager:
         TrackerMarker: true
         Value: true
         VisionFollowMarkers: true
+        RobotModeMarkers: true
         VisionTargetPoint: true
         WayPoints: true
       Zoom Factor: 1
@@ -507,7 +520,7 @@ Window Geometry:
     collapsed: false
   Displays:
     collapsed: false
-  Height: 1824
+  Height: 842
   Hide Left Dock: false
   Hide Right Dock: false
   Navigation 2:
@@ -519,6 +532,6 @@ Window Geometry:
     collapsed: false
   Views:
     collapsed: false
-  Width: 2926
-  X: 616
-  Y: 56
+  Width: 1411
+  X: 346
+  Y: 120

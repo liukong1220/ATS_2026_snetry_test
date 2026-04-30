@@ -6,6 +6,8 @@
 
 #include "pb2025_sentry_behavior/decision_utils.hpp"
 #include "pb_rm_interfaces/msg/game_status.hpp"
+#include "visualization_msgs/msg/marker.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 namespace pb2025_sentry_behavior
 {
@@ -20,6 +22,7 @@ constexpr uint8_t kDefendMode = 2;
 constexpr double kDefaultModeSwitchCooldownSeconds = 5.0;
 constexpr double kDefaultModeMaxCumulativeSeconds = 180.0;
 constexpr char kRobotModeRuntimeStateKey[] = "decision_robot_mode_runtime_state";
+constexpr char kDefaultRobotModeVisualizationTopic[] = "decision/robot_mode_markers";
 
 struct RobotModeRuntimeState
 {
@@ -127,8 +130,17 @@ uint8_t selectAvailableMode(
 
 PublishRobotModeAction::PublishRobotModeAction(
   const std::string & name, const BT::NodeConfig & config, const BT::RosNodeParams & params)
-: RosTopicPubStatefulActionNode(name, config, params)
+: RosTopicPubStatefulActionNode(name, config, params),
+  node_(decision::getNodeFromBlackboard(*this))
 {
+  logger_ = node_->get_logger();
+  std::string visualization_topic = kDefaultRobotModeVisualizationTopic;
+  node_->get_parameter("decision.mode_visualization.enabled", visualization_enabled_);
+  node_->get_parameter("decision.mode_visualization.topic", visualization_topic);
+  if (visualization_enabled_) {
+    visualization_publisher_ =
+      node_->create_publisher<visualization_msgs::msg::MarkerArray>(visualization_topic, 10);
+  }
 }
 
 BT::PortsList PublishRobotModeAction::providedPorts()
@@ -235,13 +247,87 @@ uint8_t PublishRobotModeAction::resolveModeWithConstraints(uint8_t requested_mod
   }
 
   if (resolved_mode != state.active_mode) {
+    const double previous_mode_used_s = state.cumulative_s[modeIndex(state.active_mode)];
+    const double requested_mode_used_s = state.cumulative_s[modeIndex(resolved_mode)];
+    RCLCPP_INFO(
+      logger_,
+      "Robot posture switched: %s -> %s (requested=%s, cooldown=%.1fs, used=%.1fs/%.1fs, next_used=%.1fs/%.1fs)",
+      modeName(state.active_mode), modeName(resolved_mode), modeName(requested_mode), cooldown_s,
+      previous_mode_used_s, max_cumulative_s, requested_mode_used_s, max_cumulative_s);
     // 只有真正发生切换时，才刷新当前姿态和切换时间戳。
     state.active_mode = resolved_mode;
     state.last_switch_ns = now_ns;
   }
 
   root_blackboard->set(kRobotModeRuntimeStateKey, state);
+  publishModeVisualization(state.active_mode);
   return state.active_mode;
+}
+
+void PublishRobotModeAction::publishModeVisualization(uint8_t active_mode)
+{
+  if (!visualization_enabled_ || !visualization_publisher_) {
+    return;
+  }
+
+  visualization_msgs::msg::MarkerArray markers;
+
+  visualization_msgs::msg::Marker text_marker;
+  text_marker.header.frame_id = "base_link";
+  text_marker.header.stamp = node_->now();
+  text_marker.ns = "robot_mode";
+  text_marker.id = 0;
+  text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+  text_marker.action = visualization_msgs::msg::Marker::ADD;
+  text_marker.pose.position.x = 0.0;
+  text_marker.pose.position.y = 0.0;
+  text_marker.pose.position.z = 1.6;
+  text_marker.pose.orientation.w = 1.0;
+  text_marker.scale.z = 0.35;
+  text_marker.color.a = 1.0;
+  text_marker.text = std::string("MODE: ") + modeName(active_mode);
+
+  visualization_msgs::msg::Marker panel_marker;
+  panel_marker.header = text_marker.header;
+  panel_marker.ns = "robot_mode";
+  panel_marker.id = 1;
+  panel_marker.type = visualization_msgs::msg::Marker::CUBE;
+  panel_marker.action = visualization_msgs::msg::Marker::ADD;
+  panel_marker.pose.position.x = 0.0;
+  panel_marker.pose.position.y = 0.0;
+  panel_marker.pose.position.z = 1.3;
+  panel_marker.pose.orientation.w = 1.0;
+  panel_marker.scale.x = 0.7;
+  panel_marker.scale.y = 0.18;
+  panel_marker.scale.z = 0.08;
+  panel_marker.color.a = 0.9;
+
+  if (active_mode == kAttackMode) {
+    text_marker.color.r = 1.0;
+    text_marker.color.g = 0.95;
+    text_marker.color.b = 0.95;
+    panel_marker.color.r = 0.85;
+    panel_marker.color.g = 0.15;
+    panel_marker.color.b = 0.15;
+  } else if (active_mode == kDefendMode) {
+    text_marker.color.r = 1.0;
+    text_marker.color.g = 1.0;
+    text_marker.color.b = 1.0;
+    panel_marker.color.r = 0.15;
+    panel_marker.color.g = 0.35;
+    panel_marker.color.b = 0.95;
+  } else {
+    text_marker.color.r = 0.08;
+    text_marker.color.g = 0.08;
+    text_marker.color.b = 0.08;
+    panel_marker.color.r = 0.15;
+    panel_marker.color.g = 0.85;
+    panel_marker.color.b = 0.25;
+  }
+
+  markers.markers.push_back(text_marker);
+  markers.markers.push_back(panel_marker);
+  visualization_publisher_->publish(markers);
 }
 
 }  // namespace pb2025_sentry_behavior

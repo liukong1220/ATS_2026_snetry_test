@@ -449,6 +449,93 @@ ros2 param set /fake_decision_sim_inputs decision_mode retreat
 ros2 param set /fake_decision_sim_inputs decision_mode safe
 ```
 
+如果你现在要重点观察“哨兵姿态模式”而不只是路径变化，当前工程已经额外接入了两条观测链：
+
+- 终端 INFO 日志
+- RViz 姿态 Marker
+
+具体行为如下：
+
+1. 当行为树真实触发姿态切换时，`pb2025_sentry_behavior_server` 所在终端会打印 `RCLCPP_INFO`
+2. 日志内容会明确显示：
+   - 上一姿态
+   - 当前新姿态
+   - 本次请求姿态
+   - 当前切换冷却时间
+   - 当前姿态和目标姿态已经累计使用了多久
+3. 这套日志在 loopback 和实车共用，因此你在仿真里看到的姿态切换打印方式，后续上车也会保持一致
+
+典型日志类似：
+
+```text
+[pb2025_sentry_behavior_server-8] [INFO] [...] Robot posture switched: move -> attack (requested=attack, cooldown=5.0s, used=12.4s/180.0s, next_used=3.1s/180.0s)
+```
+
+如果你想在 RViz 中直接看姿态切换效果，请使用当前默认启动方式：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+```
+
+现在这条 launch 默认会加载：
+
+- [`../src/pb2025_sentry_bringup/rviz/sentry_default_view.rviz`](../src/pb2025_sentry_bringup/rviz/sentry_default_view.rviz)
+
+而不是旧的 Nav2 通用默认视图。这样做的原因是当前 `sentry_default_view.rviz` 已经预先加入了：
+
+- `VisionFollowMarkers`
+- `RobotModeMarkers`
+
+其中 `RobotModeMarkers` 订阅：
+
+- `decision/robot_mode_markers`
+
+这个 Marker 会在机器人本体上方显示一块有颜色的模式提示牌：
+
+- 绿色：`move`
+- 红色：`attack`
+- 蓝色：`defend`
+
+同时还会显示文字：
+
+```text
+MODE: move
+MODE: attack
+MODE: defend
+```
+
+因此在 loopback 下，你可以同时观察三件事：
+
+1. 机器人路径是否变化
+2. 终端 INFO 是否提示姿态已切换
+3. RViz 机器人头顶文字和颜色块是否同步变化
+
+如果你只想看姿态 Marker，也可以单独检查话题：
+
+```bash
+ros2 topic echo /decision/robot_mode
+ros2 topic echo /decision/robot_mode_markers
+```
+
+其中：
+
+- `/decision/robot_mode` 是给下位机的数值模式，`0/1/2`
+- `/decision/robot_mode_markers` 是给 RViz 的可视化结果
+
+如果你后续不想发布姿态 Marker，也可以在参数文件里关闭：
+
+- [`../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml`](../src/pb2025_snetry_test/src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
+
+对应参数为：
+
+```yaml
+decision:
+  mode_visualization:
+    enabled: true
+    topic: decision/robot_mode_markers
+```
+
 如果你要做脚本化切换，`fake_decision_sim_inputs.py` 还支持 `mode_script` 参数，格式是：
 
 ```text
@@ -462,6 +549,210 @@ ros2 param set /fake_decision_sim_inputs decision_mode safe
 15:anchor
 30:retreat
 ```
+
+### 6.1 现在是否可以直接改 loopback 参数来测试姿态切换
+
+可以，而且这也是当前最推荐的仿真调试方式。  
+你不需要先上车，就可以先在 loopback 里把姿态切换链路跑通、看清楚、调参数。
+
+当前最常改的参数文件是：
+
+- [`../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml`](../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
+
+这份文件里与姿态切换直接相关的参数主要有：
+
+```yaml
+decision:
+  input_source: simulation
+
+  motion:
+    hit_spin_speed: 7.0
+    hit_spin_stop_after_no_hp_drop_s: 2.0
+
+  mode_thresholds:
+    defend_hp: 300
+
+  mode_limits:
+    switch_cooldown_s: 5.0
+    max_cumulative_s: 180.0
+
+  mode_visualization:
+    enabled: true
+    topic: decision/robot_mode_markers
+```
+
+这些参数的作用可以直接按下面理解：
+
+- `decision.motion.hit_spin_speed`
+  受击后发送给下位机的自旋角速度，当前逻辑最终体现在 `cmd_vel.angular.z`，也就是常说的 `wz`。
+- `decision.motion.hit_spin_stop_after_no_hp_drop_s`
+  最近一次掉血后，如果连续这么久没有新的掉血事件，就停止自旋。
+- `decision.mode_thresholds.defend_hp`
+  当 `current_hp <= defend_hp` 时，行为树允许进入 `defend` 相关分支。
+- `decision.mode_limits.switch_cooldown_s`
+  两次成功姿态切换之间的最短间隔，用来防止 `move / attack / defend` 高频抖动。
+- `decision.mode_limits.max_cumulative_s`
+  单局比赛中同一姿态允许累计存在的最大时长，默认 `180s`，也就是 `3 分钟`。
+- `decision.mode_visualization.enabled`
+  是否发布 RViz 用的姿态 Marker。
+
+如果你只是临时调试，不一定要改 yaml，也可以在节点启动后直接动态改参数，例如：
+
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.mode_thresholds.defend_hp 260
+ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.switch_cooldown_s 3.0
+ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.max_cumulative_s 120.0
+ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_speed 5.5
+ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_stop_after_no_hp_drop_s 1.5
+```
+
+这样做的好处是：
+
+- 不用重编译
+- 不用改正式参数文件
+- 便于快速比较不同阈值的切换手感
+
+### 6.2 loopback 里到底能测哪些姿态
+
+这点需要分清楚，否则很容易误以为“参数改了但没生效”。
+
+#### 6.2.1 `simulation` 输入源下能直接测的
+
+默认 `loopback_decision_sim.launch.py` 使用：
+
+```yaml
+decision:
+  input_source: simulation
+```
+
+这时行为树主要吃的是：
+
+- `decision/sim_mode`
+
+对应关系是：
+
+- `patrol -> move`
+- `anchor -> move`
+- `retreat -> defend`
+- `safe -> defend`
+
+也就是说，在默认 loopback 下你可以非常直接地测试：
+
+1. `move`
+2. `defend`
+3. 姿态切换冷却是否生效
+4. 单局累计时长限制是否生效
+5. RViz Marker 和终端日志是否同步
+
+常用测试命令如下：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+```
+
+启动后切换模式：
+
+```bash
+ros2 param set /fake_decision_sim_inputs decision_mode patrol
+ros2 param set /fake_decision_sim_inputs decision_mode anchor
+ros2 param set /fake_decision_sim_inputs decision_mode retreat
+ros2 param set /fake_decision_sim_inputs decision_mode safe
+```
+
+建议这样观察结果：
+
+1. `patrol` 或 `anchor` 时，应看到 `move`
+2. `retreat` 或 `safe` 时，应看到 `defend`
+3. 若 5 秒内连续反复切换，请确认终端日志里是否因为冷却被拦截
+4. 若把 `max_cumulative_s` 临时调得很小，例如 `15s`，可以更容易观察到超时后的限制效果
+
+#### 6.2.2 `attack` 不能只靠默认 simulation 模式测出来
+
+`attack` 不是由 `decision/sim_mode` 直接产生的。  
+当前工程里，`attack` 来自视觉接管分支，也就是要满足有效的 `vision/target` 输入。
+
+如果你想在仿真里看 `attack`，推荐直接使用：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0
+```
+
+这时你应该重点观察：
+
+1. `/vision/target` 是否在正常发布
+2. `pb2025_sentry_behavior_server` 终端是否打印切到 `attack`
+3. `/decision/robot_mode` 是否变成 `1`
+4. RViz 头顶 Marker 是否变成红色 `MODE: attack`
+
+如果视觉目标失效，行为树会回退到普通仿真分支，此时姿态也会回到 `move` 或 `defend`。
+
+#### 6.2.3 低血量防御与受击自旋需要 referee 输入链路
+
+如果你要测的是这两类逻辑：
+
+1. `current_hp <= defend_hp` 后切到 `defend`
+2. 掉血后开始自旋
+3. 连续 `hit_spin_stop_after_no_hp_drop_s` 没再掉血后停止自旋
+
+那么建议切到裁判输入模式，而不是只靠默认 `simulation`。
+
+启动方式：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  publish_decision_mode:=False \
+  behavior_params_file:=/home/aw/ATS_2026_snetry_test/src/pb2025_sentry_behavior/params/sentry_behavior.yaml
+```
+
+然后可以动态改假输入节点参数：
+
+```bash
+ros2 param set /fake_decision_sim_inputs game_progress 4
+ros2 param set /fake_decision_sim_inputs stage_remain_time 120
+ros2 param set /fake_decision_sim_inputs current_hp 280
+ros2 param set /fake_decision_sim_inputs is_hp_deduced true
+```
+
+更贴近实际的测试节奏建议是：
+
+1. 先把 `current_hp` 设在防御阈值以上，例如 `350`
+2. 观察姿态应保持 `move`
+3. 再把 `current_hp` 调到阈值以下，例如 `280`
+4. 观察姿态是否切到 `defend`
+5. 手动制造一次新的掉血事件，观察 `cmd_vel.angular.z` 是否变成自旋速度
+6. 保持 2 秒左右不再掉血，观察自旋是否自动停止
+
+由于当前掉血判断是按“是否发生新的血量下降”来认定的，所以如果你只把 `is_hp_deduced` 常驻为 `true` 而不让血量继续变化，停止窗口到期后依然会停转，这属于当前逻辑的正常表现。
+
+### 6.3 建议的 loopback 姿态联调流程
+
+如果你现在要系统地联调姿态切换，建议按下面顺序测试：
+
+1. 先在默认 `simulation` 模式下确认 `move / defend` 的基础切换是否正常
+2. 再测试 `switch_cooldown_s`，确认短时间切换请求不会抖动
+3. 再把 `max_cumulative_s` 临时调小，确认累计时长限制生效
+4. 再切到 `loopback_vision_test.launch.py` 验证 `attack`
+5. 最后切到 `referee` 输入链路，验证低血量防御和受击自旋
+
+这样做的原因是：
+
+- `simulation` 最容易先验证模式链路本身
+- `vision` 最适合单独验证 `attack`
+- `referee` 最适合单独验证血量与受击逻辑
+
+把三部分拆开测，定位问题会比“一次把所有输入都打开”清楚很多。
 
 ## 7. 手动裁判仿真
 

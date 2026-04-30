@@ -63,6 +63,13 @@ pb2025_sentry_behavior_server:
         # 每局比赛内单一姿态允许累计存在的最大时长。
         max_cumulative_s: 180.0
 
+      mode_visualization:
+        # 是否发布姿态可视化 Marker。
+        # 视觉接管 loopback 下建议保持 true，方便观察攻击/移动/防御切换。
+        enabled: true
+        # 姿态可视化 Marker 话题。
+        topic: decision/robot_mode_markers
+
       vision:
         topic: vision/target
         timeout_s: 0.5

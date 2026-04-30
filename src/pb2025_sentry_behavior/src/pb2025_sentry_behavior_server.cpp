@@ -197,6 +197,9 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.mode_thresholds.defend_hp", 300);
   declare_parameter("decision.mode_limits.switch_cooldown_s", 5.0);
   declare_parameter("decision.mode_limits.max_cumulative_s", 180.0);
+  declare_parameter("decision.mode_visualization.enabled", true);
+  declare_parameter(
+    "decision.mode_visualization.topic", std::string("decision/robot_mode_markers"));
   // 视觉侧接入参数单独放到 `decision.vision.*` 下，
   // 方便后续继续扩展超时、目标选择策略和启停开关。
   declare_parameter("decision.vision.topic", std::string("vision/target"));
