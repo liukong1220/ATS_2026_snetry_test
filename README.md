@@ -1,25 +1,43 @@
 # ATS 2026 Sentry Workspace
 
-安徽信息工程学院 Artisans 战队哨兵机器人工作区。当前仓库整合了：
+安徽信息工程学院 Artisans 战队 2026 哨兵机器人工作区。
+
+当前仓库实际主线只保留下面四条链路：
 
 1. 实机总启动链路
-2. 导航与定位模块
-3. 行为树决策模块
-4. 视觉接入与视觉跟随调试链路
-5. loopback 轻量仿真链路
+2. 行为树决策与姿态切换链路
+3. Nav2 + MPPI 导航执行链路
+4. loopback 轻量仿真与视觉跟随测试链路
 
----
+## 当前主线
 
-## 1. 环境要求
+当前默认架构是：
 
-推荐基础环境：
+```text
+pb2025_sentry_bringup
+  -> pb2025_sentry_behavior
+  -> /navigate_through_poses
+  -> Nav2 Planner + MPPI Controller
+  -> /cmd_vel
+  -> standard_robot_pp_ros2 / loopback_sim
+```
+
+其中：
+
+- `pb2025_sentry_behavior` 负责决策、姿态切换、视觉接管、受击自旋
+- `pb2025_sentry_bringup` 负责实机与 loopback 启动编排
+- `pb2025_sentry_nav` 负责 Nav2、定位、地图、传感器链路
+- `standard_robot_pp_ros2` 负责上下位机串口与裁判系统接口
+- `loopback_sim` 负责无实车条件下的软件闭环仿真
+
+## 环境要求
 
 - Ubuntu 22.04
 - ROS 2 Humble
-- CMake 3.16+
 - GCC / G++ 11
+- CMake 3.16+
 
-常用系统依赖建议至少包含：
+常用依赖：
 
 ```bash
 sudo apt update
@@ -28,332 +46,261 @@ sudo apt install -y \
   build-essential cmake pkg-config libeigen3-dev libomp-dev
 ```
 
-如果还没有初始化 `rosdep`：
+首次配置：
 
 ```bash
 sudo rosdep init
 rosdep update
 ```
 
-### 1.1 可选外部依赖
+## 构建
 
-以下依赖不是每个人一上来都必须装，但在实机或视觉模块调试时经常会用到：
-
-- HikRobot MVS SDK
-- MindVision SDK
-- Livox SDK2
-- OpenVINO
-- `small_gicp`
-
-建议做法：
-
-1. 先完成 ROS 2 和工作区基础构建
-2. 再按自己当前任务补对应 SDK
-3. 不要一开始把所有外部依赖都堆上去，排错会更困难
-
-### 1.2 WSL 使用建议
-
-如果你在 WSL 下工作，建议：
-
-1. 不要在 `~/.bashrc` 长期 source 其它旧工作区
-2. 初次构建时使用低并发
-3. 优先先跑 loopback，再去接实机链路
-
----
-
-## 2. 获取代码
-
-```bash
-git clone -b develop https://github.com/liukong1220/ATS_2026_snetry_test.git
-cd ATS_2026_snetry_test
-```
-
-如果你们的依赖是通过 `vcs` 或其它内部方式管理，请按团队当前规则补齐依赖源；本 README 不重复维护所有外部仓库地址。
-
----
-
-## 3. 构建流程
-
-### 3.1 基础构建
-
-先只加载 ROS 官方环境：
+推荐直接使用仓库的一键脚本：
 
 ```bash
 source /opt/ros/humble/setup.bash
+./build.sh
+source install/setup.bash
 ```
 
-安装 ROS 依赖：
+如果需要补 ROS 依赖：
 
 ```bash
 rosdep install -r --from-paths src --ignore-src --rosdistro humble -y
 ```
 
-推荐构建：
+## 当前常用启动入口
 
-```bash
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-```
-
-构建完成后：
-
-```bash
-source install/setup.bash
-```
-
-### 3.2 WSL 推荐构建
-
-如果你在 WSL 下，推荐先用保守配置：
-
-```bash
-source /opt/ros/humble/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=1
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 1
-```
-
-### 3.3 视觉 / 传感器相关可选环境变量
-
-如果你当前需要接真实视觉或雷达，再补这些环境变量：
-
-```bash
-export HIKROBOT_SDK_ROOT=<YOUR_HIK_SDK_PATH>
-export MINDVISION_SDK_ROOT=<YOUR_MINDVISION_SDK_PATH>
-export LIVOX_SDK2_ROOT=<YOUR_LIVOX_SDK2_PATH>
-```
-
-只有在你实际使用对应设备时，这些变量才有必要配置。
-
----
-
-## 4. 配置流程
-
-建议按下面顺序配置，而不是一上来同时改很多文件。
-
-### 4.1 先确定你当前要跑哪条链路
-
-常见有三种：
-
-1. loopback 通用仿真
-2. loopback 视觉跟随测试
-3. 实机总启动
-
-### 4.2 再准备地图与点云资源
-
-当前默认资源入口在：
-
-- [`src/pb2025_sentry_bringup/map`](./src/pb2025_sentry_bringup/map)
-- [`src/pb2025_sentry_bringup/pcd`](./src/pb2025_sentry_bringup/pcd)
-
-如果你新增地图，通常需要保证：
-
-1. 栅格地图在 `map/`
-2. 先验点云在 `pcd/`
-3. `world` 参数与文件名一致
-
-### 4.3 再确认行为树参数文件
-
-当前最常用的是这三份：
-
-1. loopback 通用参数  
-   [`src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml`](./src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
-2. 实机主线参数  
-   [`src/pb2025_sentry_behavior/params/sentry_behavior.yaml`](./src/pb2025_sentry_behavior/params/sentry_behavior.yaml)
-3. 视觉测试参数  
-   [`src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml`](./src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
-
-当前哨兵姿态与受击自旋逻辑也已经接入这三份参数文件，推荐同步阅读：
-
-- [`docs/sentry_posture_switch_logic.md`](./docs/sentry_posture_switch_logic.md)
-
-最常需要调的相关参数有：
-
-- `decision.mode_thresholds.defend_hp`
-- `decision.mode_limits.switch_cooldown_s`
-- `decision.mode_limits.max_cumulative_s`
-- `decision.motion.hit_spin_speed`
-- `decision.motion.hit_spin_stop_after_no_hp_drop_s`
-
-### 4.4 再确认导航参数文件
-
-这里最容易改错，建议直接记住：
-
-1. loopback Nav2 参数  
-   [`src/loopback_sim/params/nav2_params.yaml`](./src/loopback_sim/params/nav2_params.yaml)
-2. 实机总入口默认参数  
-   [`src/pb2025_sentry_bringup/params/node_params.yaml`](./src/pb2025_sentry_bringup/params/node_params.yaml)
-3. 独立导航包默认参数  
-   [`src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`](./src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)
-
-### 4.5 推荐的实际配置顺序
-
-建议新同学或新机器按这个顺序推进：
-
-1. 先编过工作区
-2. 先跑 loopback 通用仿真
-3. 再跑 loopback 视觉测试
-4. 再调整行为树与 MPPI 参数
-5. 最后接实机总启动
-
----
-
-## 5. 常用启动入口
-
-### 5.1 loopback 通用仿真
+### 1. loopback 通用决策仿真
 
 ```bash
 source install/setup.bash
 ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ```
 
-入口文件：
+对应入口：
 
-- [`src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py`](./src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
+- [src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py](./src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
 
-### 5.2 loopback 视觉跟随测试
+### 2. loopback 视觉跟随测试
 
 ```bash
+export ROS_DOMAIN_ID=90
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True
+ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+  use_rviz:=True \
+  publish_referee_inputs:=True \
+  current_hp:=400 \
+  projectile_allowance_17mm:=200 \
+  publish_vision_target:=True \
+  vision_tracking:=True \
+  vision_nav_hold:=True \
+  vision_has_target_position_map:=True \
+  vision_target_position_map_frame:=map \
+  vision_target_position_map_x:=5.0 \
+  vision_target_position_map_y:=2.0 \
+  vision_target_position_map_z:=0.0 \
+  vision_target_yaw:=0.30 \
+  vision_target_pitch:=-0.06
 ```
 
-入口文件：
+对应入口：
 
-- [`src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py`](./src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py)
+- [src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py](./src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py)
 
-### 5.3 实机总启动
+### 3. 实机总启动
 
 ```bash
 source install/setup.bash
 ros2 launch pb2025_sentry_bringup bringup.launch.py world:=<YOUR_WORLD_NAME> use_rviz:=True
 ```
 
-入口文件：
+对应入口：
 
-- [`src/pb2025_sentry_bringup/launch/bringup.launch.py`](./src/pb2025_sentry_bringup/launch/bringup.launch.py)
+- [src/pb2025_sentry_bringup/launch/bringup.launch.py](./src/pb2025_sentry_bringup/launch/bringup.launch.py)
 
----
+## 当前最常改的参数文件
 
-## 6. 工程目录说明
+### 行为树参数
 
-### 6.1 工作区顶层
+- loopback 主树：
+  [src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml](./src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
+- 视觉专测：
+  [src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml](./src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
+- 实机主树：
+  [src/pb2025_sentry_behavior/params/sentry_behavior.yaml](./src/pb2025_sentry_behavior/params/sentry_behavior.yaml)
 
-```text
-.
-├── docs/                       # 面向维护者的说明文档
-├── src/                        # 工作区源码
-├── build/ install/ log/        # colcon 产物
-├── README.md                   # 当前总说明
-├── nav_README.md               # 历史导航说明
-└── ws_README.md                # 历史工作区说明
+### Nav2 参数
+
+- loopback Nav2：
+  [src/loopback_sim/params/nav2_params.yaml](./src/loopback_sim/params/nav2_params.yaml)
+- 实机总入口 Nav2：
+  [src/pb2025_sentry_bringup/params/node_params.yaml](./src/pb2025_sentry_bringup/params/node_params.yaml)
+- 导航包 reality 默认参数：
+  [src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml](./src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)
+
+### 串口与模式下发参数
+
+- [src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml](./src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml)
+
+关键项：
+
+- `robot_mode_topic`
+- `/cmd_vel.angular.z -> speed_vector.wz`
+- `/decision/robot_mode -> speed_vector.mode`
+
+## 当前功能结论
+
+### 姿态模式
+
+当前姿态枚举固定为：
+
+- `move = 0`
+- `attack = 1`
+- `defend = 2`
+
+行为树通过 `decision/robot_mode` 发布姿态，下位机串口层写入：
+
+- `SendRobotCmdData.data.speed_vector.mode`
+
+### 受击自旋
+
+当前受击逻辑使用：
+
+- `RobotStatus.is_hp_deduced == true`
+
+只要检测到新的掉血，就触发自旋；连续一段时间没有新的掉血，则停止自旋。
+
+当前自旋速度由：
+
+- `decision.motion.hit_spin_speed`
+
+控制，最终通过：
+
+- `/cmd_vel.angular.z`
+
+发送给下位机，对应串口字段：
+
+- `SendRobotCmdData.data.speed_vector.wz`
+
+### 视觉跟随
+
+当前视觉跟随使用 `VisionTargetMsg.target_position_map` 作为导航目标基础输入。
+
+行为层每个决策周期都会：
+
+1. 根据当前车位和敌方地图点计算最近攻击圆周点
+2. 结合 costmap、边界余量、局部可通行性筛选候选点
+3. 对最终点做角度限幅平滑
+4. 通过 `SendNavThroughPoses` 发送到 Nav2
+
+这套逻辑在 loopback 和实车共用。
+
+## 当前最常调的关键参数
+
+### 姿态与资源
+
+- `decision.mode_limits.switch_cooldown_s`
+- `decision.mode_limits.max_cumulative_s`
+- `decision.resource_policy.defend_enter_hp`
+- `decision.resource_policy.defend_exit_hp`
+- `decision.resource_policy.resupply_enter_hp`
+- `decision.resource_policy.resupply_exit_hp`
+- `decision.resource_policy.resupply_enter_ammo`
+- `decision.resource_policy.resupply_exit_ammo`
+
+### 受击自旋
+
+- `decision.motion.hit_spin_speed`
+- `decision.motion.hit_spin_stop_after_no_hp_drop_s`
+
+### 视觉跟随
+
+- `decision.vision.attack_radius`
+- `decision.vision.timeout_s`
+- `decision.vision.activation_hold_s`
+- `decision.vision.switch_target_hold_s`
+- `decision.vision.override_hold_s`
+- `decision.vision.min_replan_interval_s`
+- `decision.vision.min_goal_shift_m`
+- `decision.vision.max_goal_angle_step_deg`
+- `decision.vision.pose_jump_reset_distance_m`
+- `decision.vision.pose_jump_reset_angle_deg`
+
+### 路径重发节流
+
+- `decision.decision_config.path_goal_reached_tolerance`
+- `decision.decision_config.active_goal_hold_tolerance`
+- `decision.decision_config.active_goal_min_resend_interval_s`
+- `decision.decision_config.vision_active_goal_hold_tolerance`
+- `decision.decision_config.vision_active_goal_min_resend_interval_s`
+
+## 当前常用调试命令
+
+### 查看姿态
+
+```bash
+ros2 topic echo /decision/robot_mode
+ros2 topic echo /decision/robot_mode_markers
 ```
 
-### 6.2 `src/` 主目录
+### 查看视觉接管与攻击圆周
+
+```bash
+ros2 topic echo /vision/target
+ros2 topic echo /decision/vision_follow_markers
+```
+
+### 查看受击自旋链
+
+```bash
+ros2 topic echo /cmd_spin
+ros2 topic echo /cmd_vel
+```
+
+### loopback 运行中重定位
+
+```bash
+export ROS_DOMAIN_ID=90
+source install/setup.bash
+ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
+  "{header: {frame_id: map}, pose: {pose: {position: {x: 1.5, y: 4.5, z: 0.0}, orientation: {z: 0.70710678, w: 0.70710678}}}}"
+```
+
+## 文档入口
+
+建议按下面顺序阅读：
+
+1. [docs/移植.md](./docs/移植.md)
+2. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
+3. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
+4. [docs/slim_loopback_refactor.md](./docs/slim_loopback_refactor.md)
+5. [docs/融合.md](./docs/融合.md)
+6. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
+7. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
+8. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
+9. [docs/navigate_through_poses_migration_checklist.md](./docs/navigate_through_poses_migration_checklist.md)
+
+## 仓库结构
 
 ```text
 src/
-├── dependencies/              # 第三方依赖与公共库
-├── interfaces/                # 自定义 ROS 2 接口
-├── loopback_sim/              # 轻量 loopback 仿真与其 Nav2 参数
-├── pb2025_robot_description/  # 机器人模型与描述
-├── pb2025_sentry_behavior/    # 行为树、决策节点、BT 插件
-├── pb2025_sentry_bringup/     # 全系统启动入口、地图、pcd、脚本
-├── pb2025_sentry_nav/         # 导航、定位、传感器相关包
-├── sp_vision25/               # 视觉算法工程
-├── standard_robot_pp_ros2/    # 串口与机器人本体接口
-└── tools/                     # 辅助工具
+├── loopback_sim              # 轻量仿真闭环
+├── pb2025_robot_description  # 机器人模型
+├── pb2025_sentry_behavior    # 行为树与 BT 插件
+├── pb2025_sentry_bringup     # 实机 / loopback 启动入口
+├── pb2025_sentry_nav         # 导航、定位、地图、传感器
+├── sp_vision25               # 视觉算法工程
+├── standard_robot_pp_ros2    # 串口驱动与机器人本体接口
+├── interfaces                # 自定义消息
+├── dependencies              # 第三方依赖
+└── tools                     # 辅助工具
 ```
 
-### 6.3 你最常会改到的地方
+## 当前维护原则
 
-| 需求 | 优先看哪里 |
-| --- | --- |
-| 改启动链路 | `src/pb2025_sentry_bringup/launch/` |
-| 改行为树策略 | `src/pb2025_sentry_behavior/` |
-| 改 loopback 仿真参数 | `src/loopback_sim/params/nav2_params.yaml` |
-| 改实机导航参数 | `src/pb2025_sentry_bringup/params/node_params.yaml` |
-| 改地图 / pcd | `src/pb2025_sentry_bringup/map/`、`pcd/` |
-| 改视觉消息或视觉接管 | `src/pb2025_sentry_nav/sp_msgs/`、`src/pb2025_sentry_behavior/` |
-
----
-
-## 7. 推荐的文档阅读顺序
-
-`docs/` 里现在已经按“现状优先”整理过。建议不要随便跳着读，先按下面顺序。
-
-### 7.1 第一次接手项目
-
-1. [`docs/移植.md`](./docs/移植.md)  
-   先建立“哪些包负责什么、哪些参数文件会生效”的整体概念
-2. [`docs/sentry_bt_decision_checklist.md`](./docs/sentry_bt_decision_checklist.md)  
-   再理解当前行为树主线、黑板、分支优先级
-3. [`docs/sentry_posture_switch_logic.md`](./docs/sentry_posture_switch_logic.md)  
-   再确认姿态切换、血量阈值、受击自旋和下位机模式发送规则
-
-### 7.2 只想快速跑通仿真
-
-1. [`docs/slim_loopback_refactor.md`](./docs/slim_loopback_refactor.md)  
-   先知道 loopback 是什么、从哪里启动
-2. [`docs/mppi_parameter_tuning_guide.md`](./docs/mppi_parameter_tuning_guide.md)  
-   再看 MPPI 参数和观测指标
-
-### 7.3 要调视觉接管
-
-1. [`docs/融合.md`](./docs/融合.md)
-2. [`docs/视觉跟随仿真调试.md`](./docs/视觉跟随仿真调试.md)
-3. [`docs/实机视觉跟随优化方案.md`](./docs/实机视觉跟随优化方案.md)
-
-### 7.4 要调 MPPI 局部控制
-
-1. [`docs/mppi_parameter_tuning_guide.md`](./docs/mppi_parameter_tuning_guide.md)
-2. [`docs/mppi_local_plan_fix.md`](./docs/mppi_local_plan_fix.md)
-
-### 7.5 哪些文档是“现状主文档”
-
-优先级最高的是：
-
-1. [`docs/移植.md`](./docs/移植.md)
-2. [`docs/sentry_bt_decision_checklist.md`](./docs/sentry_bt_decision_checklist.md)
-3. [`docs/sentry_posture_switch_logic.md`](./docs/sentry_posture_switch_logic.md)
-4. [`docs/融合.md`](./docs/融合.md)
-5. [`docs/视觉跟随仿真调试.md`](./docs/视觉跟随仿真调试.md)
-
-历史长文和阶段性记录仍然保留，但应作为补充材料看，不要替代上面几份现状文档。
-
----
-
-## 8. 推荐的上手路径
-
-如果你是新加入项目，推荐按这个流程上手：
-
-1. 先读本 README
-2. 再读 `docs/移植.md`
-3. 跑一次 `loopback_decision_sim.launch.py`
-4. 再读 `docs/sentry_bt_decision_checklist.md`
-5. 如需视觉，再跑 `loopback_vision_test.launch.py`
-6. 最后再接实机 `bringup.launch.py`
-
-这样能把问题拆开：
-
-1. 先确认工作区能构建
-2. 再确认导航与行为树链路能闭环
-3. 再确认视觉接管能闭环
-4. 最后再处理真实硬件问题
-
----
-
-## 9. 额外说明
-
-1. 根目录的 [`nav_README.md`](./nav_README.md) 和 [`ws_README.md`](./ws_README.md) 仍保留历史信息，但不再作为当前主索引。
-2. 各子包自己的 README 仍然有价值，尤其是：
-   - [`src/pb2025_sentry_behavior/README.md`](./src/pb2025_sentry_behavior/README.md)
-   - [`src/pb2025_sentry_nav/README.md`](./src/pb2025_sentry_nav/README.md)
-   - [`src/loopback_sim/README.md`](./src/loopback_sim/README.md)
-   - [`src/standard_robot_pp_ros2/README.md`](./src/standard_robot_pp_ros2/README.md)
-3. 如果你发现 README 与 `docs/` 有冲突，请以 `docs/` 中已经明确标注为“现状”的文档为准。
-
----
-
-## 10. 一句话总结
-
-这个仓库当前最推荐的理解方式是：
-
-> 根 README 负责告诉你“怎么配、去哪改、先读什么”，`docs/` 负责告诉你“当前系统怎么组织、怎么调试”，子包 README 再负责各模块自己的细节。
+1. 以 `pb2025_sentry_bringup` 为系统启动总入口
+2. 以 `pb2025_sentry_behavior` 为主决策入口
+3. 以 `/navigate_through_poses` 为统一导航执行接口
+4. 以 `docs/` 中现状文档为维护说明主入口
+5. 不再把旧的 PID / `goal_pose` / 旧决策支链当作当前主线

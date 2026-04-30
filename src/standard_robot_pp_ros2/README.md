@@ -1,139 +1,124 @@
 # standard_robot_pp_ros2
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Build and Test](https://github.com/SMBU-PolarBear-Robotics-Team/standard_robot_pp_ros2/actions/workflows/ci.yml/badge.svg)](https://github.com/SMBU-PolarBear-Robotics-Team/standard_robot_pp_ros2/actions/workflows/ci.yml)
+当前项目中的上下位机串口接口层。
 
-![PolarBear Logo](https://raw.githubusercontent.com/SMBU-PolarBear-Robotics-Team/.github/main/.docs/image/polarbear_logo_text.png)
+这个包在当前仓库里的职责是：
 
-## 1. Introduction
+1. 接收下位机串口数据并发布成 ROS topic
+2. 接收上层行为树和导航输出并写回串口发送结构
+3. 作为实机链路中 `cmd_vel`、姿态模式、裁判系统信息的接口桥梁
 
-standard_robot_pp_ros2 是配合 [StandardRobot++](https://gitee.com/SMBU-POLARBEAR/StandardRobotpp.git) 下位机控制使用的机器人驱动，提供了机器人的控制接口、数据接口。
+## 当前入口
 
-本项目获取下位机的 packet 并发布为 topic，并将下位机处理后的动态关节信息数据发布到 `joint_states` 话题，通过 [joint_state_publisher](https://github.com/ros/joint_state_publisher/tree/ros2/joint_state_publisher) 和 [robot_state_publisher](https://github.com/ros/robot_state_publisher/tree/humble) 建立整车 TF 树（包含 static 和 dynamic）。
+启动文件：
 
-![frames](https://raw.githubusercontent.com/LihanChen2004/picx-images-hosting/master/frames.5xaq4wriyy.webp)
+- [launch/standard_robot_pp_ros2.launch.py](./launch/standard_robot_pp_ros2.launch.py)
 
-## 2. Quick Start
+默认参数文件：
 
-### 2.1 Setup Environment
+- [config/standard_robot_pp_ros2.yaml](./config/standard_robot_pp_ros2.yaml)
 
-- Ubuntu 22.04
-- ROS: [Humble](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html)
+在整车主线中，通常由：
 
-### 2.2 Create Workspace
+- [../pb2025_sentry_bringup/launch/bringup.launch.py](../pb2025_sentry_bringup/launch/bringup.launch.py)
 
-```bash
-sudo pip install vcstool2
-pip install xmacro
-```
+统一拉起。
 
-```bash
-mkdir -p ~/ros_ws
-cd ~/ros_ws
-```
+## 当前与上层决策的对接关系
 
-```bash
-git clone https://github.com/SMBU-PolarBear-Robotics-Team/standard_robot_pp_ros2.git src/standard_robot_pp_ros2
-```
+### 1. 姿态模式
 
-```bash
-vcs import src < src/standard_robot_pp_ros2/dependencies.repos
-vcs import src < src/pb2025_robot_description/dependencies.repos
-```
+当前行为树通过：
 
-### 2.3 Build
+- `decision/robot_mode`
 
-```bash
-rosdep install -r --from-paths src --ignore-src --rosdistro $ROS_DISTRO -y
-```
+发布姿态模式。
 
-```bash
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-```
+本包订阅该话题后，写入串口发送结构中的：
 
-### 2.4 Running
+- `SendRobotCmdData.data.speed_vector.mode`
 
-1. 配置 udev，用来定向下位机 RoboMaster C 型开发板串口硬件并给予串口权限
-
-    > 本命令在一台主机中只需要运行一次，无需重复运行。
-
-    ```bash
-    ./script/create_udev_rules.sh
-    ```
-
-2. 构建程序
-
-    ```bash
-    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=release
-    ```
-
-3. 运行上下位机通讯
-
-    Tips: 如需开启 RViz 可视化，请添加 `use_rviz:=True` 参数。
-
-    ```bash
-    ros2 launch standard_robot_pp_ros2 standard_robot_pp_ros2.launch.py
-    ```
-
-### 2.5 Launch Arguments
-
-| 参数 | 描述 | 类型 | 默认值 |
-|-|-|-|-|
-| `namespace` | 顶级命名空间 | string | "" |
-| `params_file` | 用于所有启动节点的 ROS2 参数文件的完整路径 | string | [vision_params.yaml](./config/standard_robot_pp_ros2.yaml) |
-| `robot_name` | 要使用的机器人 xmacro 文件名 | string | "pb2025_sentry_robot" |
-| `use_rviz` | 是否启动 RViz | bool | True |
-| `use_respawn` | 如果节点崩溃，是否重新启动。本参数仅 `use_composition:=False` 时有效 | bool | False |
-| `log_level` | 日志级别 | string | "info" |
-
-### 2.6 Robot Mode 对接
-
-当前哨兵上层决策会通过 `decision/robot_mode` 发送姿态模式，本包订阅该话题后，将模式写入串口下发结构中的 `SendRobotCmdData.data.speed_vector.mode`。
-
-默认参数位于：
-
-- [`./config/standard_robot_pp_ros2.yaml`](./config/standard_robot_pp_ros2.yaml)
-
-关键参数：
-
-- `robot_mode_topic`，默认值为 `decision/robot_mode`
-
-当前模式约定：
+当前模式约定固定为：
 
 - `move = 0`
 - `attack = 1`
 - `defend = 2`
 
-具体姿态切换规则、冷却时间、血量阈值与受击自旋逻辑请以：
+对应代码位置：
 
-- [`../../docs/sentry_posture_switch_logic.md`](../../docs/sentry_posture_switch_logic.md)
+- [src/standard_robot_pp_ros2.cpp](./src/standard_robot_pp_ros2.cpp)
+- [include/standard_robot_pp_ros2/packet_typedef.hpp](./include/standard_robot_pp_ros2/packet_typedef.hpp)
 
-为准。
+### 2. 底盘速度
 
-## 3. 协议结构
+当前本包订阅：
 
-### 3.1 数据帧构成
+- `/cmd_vel`
 
-|字段|长度 (Byte)|备注|
-|:-:|:-:|:-:|
-|frame_header|4|帧头|
-|time_stamp|4|时间戳（基于下位机运行时间）|
-|data|n|数据段|
-|checksum|2|校验码|
+并把速度写入：
 
-### 3.2 帧头构成
+- `SendRobotCmdData.data.speed_vector.vx`
+- `SendRobotCmdData.data.speed_vector.vy`
+- `SendRobotCmdData.data.speed_vector.wz`
 
-|字段|长度 (Byte)|备注|
-|:-:|:-:|:-:|
-|sof|1|数据帧起始字节，固定值为 0x5A|
-|len|1|数据段长度|
-|id|1|数据段id|
-|crc|1|数据帧头的 CRC8 校验|
+因此：
 
-### 3.3 data 数据段内容
+- 上层受击自旋最终就是通过 `/cmd_vel.angular.z`
+- 再映射到串口结构体的 `speed_vector.wz`
 
-详见飞书文档 [上下位机串口通信数据包](https://aafxu50hc35.feishu.cn/docx/HRh5dOjrMor4maxi3Xscvff6nCh?from=from_copylink)
+### 3. 裁判系统数据
 
-## 4. 致谢
+当前本包负责把串口中的裁判系统数据转成 ROS topic，供行为树直接消费：
 
-串口通信部分参考了 [rm_vision - serial_driver](https://github.com/chenjunnn/rm_serial_driver.git)，通信协议参考 DJI 裁判系统通信协议。
+- `referee/game_status`
+- `referee/robot_status`
+- `referee/rfid_status`
+
+这也是姿态切换、低血量防御、受击自旋等逻辑的数据来源。
+
+## 当前关键参数
+
+参数文件：
+
+- [config/standard_robot_pp_ros2.yaml](./config/standard_robot_pp_ros2.yaml)
+
+当前和行为树主线最相关的参数：
+
+- `device_name`
+- `baud_rate`
+- `robot_mode_topic`
+
+其中：
+
+- `robot_mode_topic` 默认就是 `decision/robot_mode`
+
+## 当前运行方式
+
+### 单独启动串口层
+
+```bash
+source install/setup.bash
+ros2 launch standard_robot_pp_ros2 standard_robot_pp_ros2.launch.py
+```
+
+### 在整车主线中启动
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup bringup.launch.py world:=<YOUR_WORLD_NAME> use_rviz:=True
+```
+
+## 当前维护建议
+
+1. 改姿态切换规则、攻击/防御触发逻辑，不在本包改，去 `pb2025_sentry_behavior`
+2. 改模式枚举和串口协议字段映射，要同时检查本包和行为层是否一致
+3. 改自旋速度时，不在本包直接写死，优先调行为树参数 `decision.motion.hit_spin_speed`
+4. 改模式话题名时，要同步检查：
+   - `pb2025_sentry_behavior` 的 `decision.topics.robot_mode`
+   - 本包的 `robot_mode_topic`
+
+## 相关文档
+
+- [../../docs/sentry_posture_switch_logic.md](../../docs/sentry_posture_switch_logic.md)
+- [../../docs/sentry_bt_decision_checklist.md](../../docs/sentry_bt_decision_checklist.md)
+- [../../docs/实机视觉跟随优化方案.md](../../docs/实机视觉跟随优化方案.md)

@@ -1,679 +1,370 @@
-# 哨兵姿态转换逻辑说明
+# 哨兵姿态切换与受击自旋说明
 
-本文档面向后续维护者，详细说明当前仓库中“姿态切换 + 受击自旋 + 下位机模式发送”的完整链路。  
+这份文档详细说明当前仓库中姿态模式、资源状态机、受击自旋和下位机下发链路。
+
 涉及代码主要在：
 
 - `src/pb2025_sentry_behavior`
+- `src/pb2025_sentry_nav/fake_vel_transform`
 - `src/standard_robot_pp_ros2`
-- `src/pb2025_sentry_bringup`
 
-如果后续行为树、串口协议或裁判系统接线发生调整，请优先同步更新本文档。
+## 1. 当前这套逻辑要解决什么
 
-## 1. 这套逻辑解决什么问题
+当前实现同时解决四件事：
 
-当前实现要同时满足四个目标：
+1. 给下位机发送当前姿态模式
+2. 避免姿态在高频 tick 中来回抖动
+3. 限制单局比赛中某一姿态累计占用时间
+4. 检测到新的掉血时触发自旋，并在一段时间没有新掉血后自动停转
 
-1. 让哨兵在不同决策阶段明确告诉下位机“现在是什么姿态”。
-2. 避免姿态在高频 tick 的行为树里来回抖动。
-3. 避免单局比赛里某一种姿态无限占用，违反比赛规则。
-4. 只在“真实受击”时触发底盘自旋，并在短时间未继续掉血后自动停转。
+## 2. 当前两条主链
 
-因此，代码里把这个需求拆成了两条独立但协同的链路：
-
-1. `姿态模式链路`
-   行为树分支决定想要的姿态，`PublishRobotMode` 统一裁决后发布给下位机。
-2. `受击自旋链路`
-   `IsAttacked` 负责识别是否发生了新的掉血，行为树再决定是否发布自旋角速度。
-
-## 2. 总体数据流
-
-### 2.1 姿态模式数据流
+### 2.1 姿态模式链
 
 ```text
 行为树分支
   -> PublishRobotMode(mode=move/attack/defend)
-  -> 读取黑板中的比赛状态、冷却时间、累计时长限制
-  -> resolveModeWithConstraints() 做最终姿态裁决
-  -> 发布到 decision/robot_mode
-  -> standard_robot_pp_ros2 订阅该话题
+  -> resolveModeWithConstraints()
+  -> 发布 decision/robot_mode
+  -> standard_robot_pp_ros2 订阅
   -> 写入 SendRobotCmdData.data.speed_vector.mode
   -> 串口发送给下位机
 ```
 
-### 2.2 受击自旋数据流
+### 2.2 受击自旋链
 
 ```text
-裁判系统 RobotStatus
+referee/robot_status
   -> IsAttacked
-  -> 判断本次是否发生掉血
-  -> 若命中则刷新最近一次受击时间
-  -> 在一段可配置的持续时间内返回 SUCCESS
-  -> 行为树发布 decision.motion.hit_spin_speed
-  -> 若超时没有新掉血则回到 0.0
+  -> PublishSpinSpeed
+  -> 发布 cmd_spin
+  -> fake_vel_transform 把 cmd_spin 叠加到 /cmd_vel
+  -> standard_robot_pp_ros2 订阅 /cmd_vel
+  -> 把 angular.z 写入 speed_vector.wz
+  -> 串口发送给下位机
 ```
 
-## 3. 姿态定义与下发
+## 3. 当前姿态定义
 
-当前姿态枚举定义如下：
+当前姿态固定为：
 
 - `move = 0`
 - `attack = 1`
 - `defend = 2`
 
-上层行为树统一发布 `example_interfaces/msg/UInt8` 到 `decision/robot_mode`。  
-下位机接口层订阅这个话题后，将其写入：
+行为树发布：
+
+- `decision/robot_mode`
+
+串口层最终写入：
 
 ```cpp
 send_robot_cmd_data_.data.speed_vector.mode
 ```
 
-对应的下位机串口结构体定义位于：
+协议定义位置：
 
-- `src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp`
+- [../src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp](../src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp)
 
-其中枚举如下：
+## 4. 当前三种姿态分别何时触发
 
-```cpp
-enum mode
-{
-  Move = 0,
-  Attack = 1,
-  Defend = 2,
-} mode;
-```
+### 4.1 `move`
 
-为了避免后续维护者把“姿态”和“动作”混在一起，可以直接按下面理解：
+当前普通机动分支会发布 `move`：
 
-| 姿态 | 数值 | 谁来触发 | 下位机应如何理解 |
-| --- | --- | --- | --- |
-| `move` | `0` | 常规巡逻、转点、锚点移动等普通机动分支 | 机器人处于正常机动态，不带防守或进攻姿态语义 |
-| `attack` | `1` | 识别到敌方装甲板且视觉接管分支成立 | 机器人处于主动进攻态，可配合下位机做更激进的底盘/上装策略 |
-| `defend` | `2` | 血量低于防御阈值，进入撤退/保守分支 | 机器人处于防御保命态，下位机可切换到保守机动/防御姿态 |
+1. 巡逻
+2. 锚点移动
+3. 关键时间点位移动
 
-这里要特别强调两点：
+### 4.2 `attack`
 
-1. `defend` 不是“被打了就立刻切换”，而是“当前血量已经低于防御阈值”。
-2. 自旋不是姿态本身的一部分，而是受击事件触发的额外运动行为，所以文档后面把它单独拆出来说明。
+当前只有视觉接管成立时才会发布 `attack`。
 
-## 4. 行为树里哪些分支会发布什么姿态
+当前必须同时满足：
 
-当前主树 `rmul_2026.xml` 中，姿态不是在根节点统一发布，而是跟随分支语义分别发布。
-
-### 4.1 `attack`
-
-视觉接管分支 `vision_override_realtime` 中会先判断目标是否合法，若合法则立即发布：
-
-```xml
-<PublishRobotMode mode="attack"
-                  duration="0.0"
-                  topic_name="{@decision_robot_mode_topic}"/>
-```
-
-语义是：
-
-- 当前已经进入视觉接管
-- 导航/云台都在围绕敌方目标工作
-- 需要下位机切到进攻姿态
-
-### 4.2 `move`
-
-以下常规移动分支会发布 `move`：
-
-- `decision_patrol`
-- `decision_anchor_target`
-- `decision_critical_time_target`
-
-它们的共同语义是：
-
-- 当前在执行正常巡逻或移动任务
-- 不是低血量防守态
-- 也不是视觉接管的主动进攻态
+1. 资源模式是 `engage`
+2. 视觉目标有效
+3. `nav_hold=true`
+4. 视觉消息未超时
 
 ### 4.3 `defend`
 
-以下分支会发布 `defend`：
+当前低资源与保命分支会发布 `defend`：
 
-- `decision_safe_point`
-- `decision_retreat`
+1. 回安全点
+2. 最近退防点
 
-其中最关键的触发入口是：
+当前是否进入 `defend`，统一由资源状态机决定，而不是由分支自己单独判断血量。
 
-当前主线已经不再通过单个：
+## 5. 当前姿态裁决算法
 
-```xml
-<IsRobotHpBelow threshold="..."/>
-```
+对应实现：
 
-来统一决定是否进入防御分支。
+- [../src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp](../src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp)
 
-现在的正式入口改成：
+当前内部做了三步：
 
-```xml
-<IsRobotResourceMode state="defend" robot_status="{@referee_robotStatus}"/>
-```
+### 5.1 解析请求姿态
 
-也就是资源状态机统一先判断：
+行为树 XML 中写的是：
 
-```text
-engage / resupply / defend
-```
+- `move`
+- `attack`
+- `defend`
 
-然后再由对应分支发布 `move / attack / defend` 姿态。
+`PublishRobotMode` 会先统一解析成数值枚举。
 
-如果后续你要新增“半防御”“警戒”“补给”等姿态，建议先确认三件事再动代码：
+### 5.2 根据冷却时间决定是否允许切换
 
-1. 这是不是一个真正需要发给下位机的离散模式。
-2. 它是否也需要冷却时间与单局累计时长限制。
-3. 它是新增行为树分支，还是只是现有分支里的另一种运动参数。
-
-## 5. 姿态切换为什么还要经过统一裁决
-
-行为树每个 tick 都可能重新评估分支。  
-如果每次分支一变就直接向下位机发模式，会有三个明显问题：
-
-1. 模式可能在 `attack / move / defend` 之间频繁抖动。
-2. 某姿态可能累计时间超规则后还在继续使用。
-3. 不同分支之间可能同时“想切换”，导致下位机感知不稳定。
-
-所以项目里新增了 `PublishRobotModeAction`，专门把“分支想要的模式”转成“最终允许下发的模式”。
-
-核心函数是：
-
-```cpp
-uint8_t PublishRobotModeAction::resolveModeWithConstraints(uint8_t requested_mode)
-```
-
-它做的事情不是“盲发 requested_mode”，而是按下面顺序进行判断：
-
-1. 读取比赛状态，判断是否处于一局比赛的 `RUNNING` 阶段。
-2. 维护本局三种姿态的累计时长。
-3. 判断目标姿态是否已经达到累计上限。
-4. 判断距离上一次切姿态是否还处于冷却时间。
-5. 如果目标姿态不可用，则选择一个当前仍合法的回退姿态。
-6. 最后才把最终结果发布到 `decision/robot_mode`。
-
-如果你想快速理解这个函数，可以直接把它看成下面这段伪代码：
-
-```cpp
-resolved_mode = requested_mode;
-
-更新当前局内累计时长;
-
-if (当前 active_mode 已超单局累计上限) {
-  resolved_mode = 从 requested_mode / active_mode / move / attack / defend 中选一个仍合法的;
-} else {
-  if (requested_mode 已超上限) {
-    resolved_mode = active_mode;
-  }
-
-  if (resolved_mode != active_mode && 距离上次成功切换 < cooldown_s) {
-    resolved_mode = active_mode;
-  }
-}
-
-if (resolved_mode != active_mode) {
-  active_mode = resolved_mode;
-  刷新 last_switch_ns;
-}
-
-return active_mode;
-```
-
-这也是本文档最核心的一条维护原则：
-
-- 行为树负责“提出请求”
-- `PublishRobotMode` 负责“决定是否允许切换”
-- 串口节点只负责“把最终结果发给下位机”
-
-## 6. 姿态切换约束
-
-### 6.1 切换冷却
-
-参数：
+当前参数：
 
 - `decision.mode_limits.switch_cooldown_s`
 
-默认值：
+算法含义：
 
-- `5.0`
+1. 当前分支请求了一个新姿态
+2. 如果距离上次真正切换姿态还没到冷却时间
+3. 则继续保持旧姿态，不立即切换
 
-含义：
+### 5.3 根据单局累计时长决定该姿态是否还能继续使用
 
-- 不是“5 秒后再发一次同样的模式”
-- 而是“距离上一次成功切换姿态不足 5 秒时，不允许切到另一个新姿态”
-
-例如：
-
-1. 当前是 `move`
-2. 这一刻视觉目标出现，请求切 `attack`
-3. 若此时距离上一次姿态切换不足 `5s`
-4. 则本次保持原姿态，不立即切换
-
-这样做是为了避免：
-
-- 视觉目标一闪而过导致来回切换
-- 血量阈值边界抖动导致 `move/defend` 反复横跳
-
-一个典型时序例如下：
-
-```text
-t = 0.0s   当前 active_mode = move
-t = 1.0s   视觉目标出现，请求 attack，允许切换，active_mode = attack
-t = 3.0s   目标丢失，请求 move，但距离上次切换仅 2s < cooldown(5s)
-           因此保持 attack，不切回 move
-t = 6.2s   仍然请求 move，且已经超过 5s 冷却
-           此时才真正切回 move
-```
-
-所以冷却限制的是“姿态之间的切换频率”，不是“消息发布频率”。
-
-### 6.2 单局累计时长限制
-
-参数：
+当前参数：
 
 - `decision.mode_limits.max_cumulative_s`
 
-默认值：
+算法含义：
 
-- `180.0`
+1. 只在比赛 `RUNNING` 阶段累计姿态使用时长
+2. 如果当前姿态累计时间已经超限
+3. 则从允许的姿态里选择一个合法回退姿态
 
-含义：
+## 6. 当前资源状态机算法
 
-- `move`、`attack`、`defend` 每一种姿态，各自独立累计时长
-- 任意一种姿态在单局中累计达到上限后，就不再允许重新切入该姿态
+对应实现：
 
-当前累计状态存放在 `PublishRobotModeAction` 内部维护的运行时状态中：
+- [../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp](../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp)
 
-```cpp
-struct RobotModeRuntimeState
-{
-  bool initialized = false;
-  bool match_running = false;
-  uint8_t last_game_progress = pb_rm_interfaces::msg::GameStatus::NOT_START;
-  uint8_t active_mode = kMoveMode;
-  int64_t last_update_ns = 0;
-  int64_t last_switch_ns = 0;
-  std::array<double, 3> cumulative_s{0.0, 0.0, 0.0};
-};
-```
+当前资源模式只有三种：
 
-其中：
+- `engage`
+- `resupply`
+- `defend`
 
-- `active_mode` 表示当前生效姿态
-- `last_switch_ns` 用来判断冷却时间
-- `cumulative_s[0/1/2]` 分别记录 `move/attack/defend` 的单局累计时长
+当前输入字段：
 
-建议按下面方式理解这个限制：
+- `RobotStatus.current_hp`
+- `RobotStatus.projectile_allowance_17mm`
 
-1. 它限制的是“累计使用时长”，不是“连续使用时长”。
-2. 每种姿态各记各的，不会互相抵扣。
-3. 到达上限后，不是强制停机，而是“不再允许重新选择该姿态”。
-4. 若当前正在使用的姿态在累计更新后碰到上限，下一次裁决时会尝试回退到其他合法姿态。
+当前算法是迟滞锁存状态机：
 
-### 6.3 单局计时什么时候清零
+1. 当前处于 `engage` 时
+   - 若血量低于 `defend_enter_hp`，进入 `defend`
+   - 否则若血量或弹量低于补给进入阈值，进入 `resupply`
+   - 否则保持 `engage`
+2. 当前处于 `resupply` 时
+   - 若血量继续掉到 `defend_enter_hp` 以下，升级为 `defend`
+   - 若血量与弹量都恢复到退出阈值以上，回到 `engage`
+   - 否则保持 `resupply`
+3. 当前处于 `defend` 时
+   - 若血量仍低于 `defend_exit_hp`，保持 `defend`
+   - 若血量恢复但资源仍不健康，降到 `resupply`
+   - 若资源完全恢复，回到 `engage`
 
-当前逻辑不是节点重启就清零，而是：
+当前参数：
 
-- 当比赛从“非 RUNNING”进入 `RUNNING` 时
-- 视为新的一局开始
-- 三种姿态累计时间全部重置为 `0`
+- `decision.resource_policy.defend_enter_hp`
+- `decision.resource_policy.defend_exit_hp`
+- `decision.resource_policy.resupply_enter_hp`
+- `decision.resource_policy.resupply_exit_hp`
+- `decision.resource_policy.resupply_enter_ammo`
+- `decision.resource_policy.resupply_exit_ammo`
 
-代码中对应逻辑在：
+## 7. 当前受击自旋检测算法
 
-```cpp
-if (!state.match_running && match_running) {
-  initializeRuntimeState(state, now_ns, true, current_game_progress, cooldown_s);
-}
-```
+对应实现：
 
-这样做的好处是：
+- [../src/pb2025_sentry_behavior/plugins/condition/is_attacked.cpp](../src/pb2025_sentry_behavior/plugins/condition/is_attacked.cpp)
 
-- 平时调试不容易误把上一局比赛时长带进来
-- 也不需要依赖人工手动清理状态
-
-### 6.4 超限后的回退策略
-
-如果请求姿态已经到达累计上限，系统不会直接报错退出，而是尝试回退到仍然可用的姿态。
-
-当前回退优先级为：
-
-1. `requested_mode`
-2. `state.active_mode`
-3. `move`
-4. `attack`
-5. `defend`
-
-对应代码：
-
-```cpp
-const std::array<uint8_t, 5> candidates = {
-  preferred_mode, state.active_mode, kMoveMode, kAttackMode, kDefendMode};
-```
-
-这样设计的原因是：
-
-1. 先尽量满足当前分支想要的姿态。
-2. 如果不行，优先保持当前姿态，降低抖动。
-3. 如果当前姿态也超限，再回退到其他仍合法的姿态。
-
-可以把这个回退逻辑理解为一句话：
-
-> 先满足当前分支，再尽量保持稳定，最后才全局兜底。
-
-这也是为什么不会简单地“某个姿态超限就永远强制 move”，而是会把其余合法姿态也纳入选择。
-
-## 7. 受击旋转逻辑
-
-### 7.1 为什么受击自旋和防御姿态分开处理
-
-“进入防御姿态”与“是否自旋”不是一个概念。
-
-- 防御姿态看的是血量是否低于阈值。
-- 受击自旋看的是最近是否发生过新的掉血。
-
-因此当前实现中：
-
-- 低血量时可以进入 `defend`
-- 但只有在最近发生真实掉血时才自旋
-- 若后续一段可配置时间内没有继续掉血，则停止自旋
-
-这样更符合你的需求：
-
-- 不是低血量就一直转
-- 但一旦检测到本次掉血，就优先尽快触发自旋保护
-
-### 7.2 触发条件
-
-当前实现里，只要满足以下条件，就认定本次应触发自旋：
-
-1. `is_hp_deduced == true`
-
-对应代码：
+当前触发条件：
 
 ```cpp
 const bool is_attacked = msg->is_hp_deduced;
 ```
 
-这意味着下列情况都不会触发自旋：
+也就是说：
 
-- 并未实际掉血
-- 当前没有新的裁判系统受击信息
+1. 只要检测到新的掉血，就触发自旋
+2. 不再额外要求 `hp_deduction_reason == ARMOR_HIT`
 
-这样调整的原因是：
+当前这样设计的目的，是在高频掉血或裁判反馈存在延迟时，也能更快进入保护性自旋。
 
-1. 当裁判系统掉血原因字段存在延迟、抖动或和实际受击不同步时，自旋不应该被拦住。
-2. 当短时间内血量下降较快时，优先保证机器人尽快进入保护性自旋状态。
-3. 当前策略更偏向“宁可更早触发自旋，也不要因为原因字段过滤而漏触发”。
+### 7.1 当前锁存逻辑
 
-### 7.3 受击方向怎么得到
+检测到掉血后，节点会：
 
-当前根据裁判系统给出的 `armor_id` 推算云台/底盘应面对的受击方向：
+1. 记录最近一次掉血时间
+2. 记录最近一次受击装甲方向
+3. 在一段时间内持续返回 `SUCCESS`
 
-- `0 -> 0`
-- `1 -> +pi/2`
-- `2 -> +pi`
-- `3 -> -pi/2`
-
-代码中用 `last_attack_yaw_` 保存最近一次受击方向。  
-如果 `armor_id` 非法，会打告警，但不会让节点崩溃。
-
-### 7.4 为什么要做“锁存”
-
-受击消息通常只会在某一帧出现一次。  
-如果条件节点只在“当前这一帧”返回成功，那么行为树下一帧就可能立刻停转，实际效果太短。
-
-所以 `IsAttackedCondition` 额外维护了：
-
-- `attack_latched_`
-- `last_attack_time_`
-- `last_attack_yaw_`
-
-逻辑是：
-
-1. 一旦收到一次新的掉血，先记住“最近被打过”。
-2. 后续即使下一帧没有新的受击消息，只要没超过超时时间，仍然返回 `SUCCESS`。
-3. 一旦超过超时时间还没有新掉血，就清掉锁存，返回 `FAILURE`。
-
-也就是说，`IsAttacked` 不是一个只看“当前帧”的瞬时条件，而是一个“短时记忆条件”。
-这点非常关键，因为行为树是周期 tick 的，如果没有这个短时锁存，自旋会因为消息不是每帧都带受击信息而显得断断续续。
-
-### 7.5 停止条件
-
-参数：
+当前参数：
 
 - `decision.motion.hit_spin_stop_after_no_hp_drop_s`
 
-默认值：
+语义不是“固定自旋总时长”，而是：
 
-- `2.0`
+- 最近一次掉血后，如果连续这段时间没有新的掉血，就停转
 
-含义：
+## 8. 当前自旋速度是如何进入下位机的
 
-- 不是固定自旋 2 秒
-- 而是“最近一次掉血之后，若连续 2 秒没有再次掉血，则停止自旋”
+对应实现链路：
 
-这和“固定定时器”相比更合理，因为：
+### 8.1 行为树发布 `cmd_spin`
 
-1. 若敌人持续命中，旋转会持续刷新，不会过早停下。
-2. 若只是偶发受击，很快就能自动停转，不会一直空转。
+对应节点：
 
-一个更直观的例子：
+- [../src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp](../src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp)
 
-```text
-t = 10.0s  第一次掉血，开始自旋
-t = 10.8s  再次掉血，刷新最近受击时间
-t = 11.6s  再次掉血，继续刷新
-t = 13.4s  仍未超过 stop_after_s，自旋继续
-t = 13.7s  距离最近一次掉血已超过 stop_after_s，停止自旋
-```
+它只负责发布一个标量：
 
-因此该参数本质上描述的是：
+- `spin_speed`
 
-- “没有继续掉血时，受击自旋还能保留多久”
+### 8.2 `fake_vel_transform` 把自旋速度叠加到 `/cmd_vel`
 
-而不是：
+对应实现：
 
-- “每次受击固定转几秒”
+- [../src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp](../src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp)
 
-### 7.6 自旋速度
-
-参数：
-
-- `decision.motion.hit_spin_speed`
-
-默认值：
-
-- `7.0 rad/s`
-
-该参数只在 `IsAttacked` 返回 `SUCCESS` 的那段时间内被发布。  
-其余情况行为树会发送 `0.0`。
-
-### 7.7 自旋速度最终是不是通过 `wz` 发给下位机
-
-是的，当前实现里受击自旋速度最终就是通过底盘速度指令里的 `angular.z`，也就是下位机串口结构体中的 `speed_vector.wz` 发下去的。
-
-完整链路如下：
-
-```text
-IsAttacked 返回 SUCCESS
-  -> PublishSpinSpeed 发布 Float32 到 cmd_spin
-  -> fake_vel_transform 订阅 cmd_spin，保存 spin_speed_
-  -> fake_vel_transform 在速度变换时执行：
-     aft_tf_vel.angular.z = twist->angular.z + spin_speed_
-  -> 输出新的 cmd_vel
-  -> standard_robot_pp_ros2 订阅 /cmd_vel
-  -> send_robot_cmd_data_.data.speed_vector.wz = msg->angular.z
-  -> 串口发送给下位机
-```
-
-也就是说，`decision.motion.hit_spin_speed` 并不是单独通过一个“姿态字段”或者“专用自旋字段”发下去，而是叠加到底盘角速度命令中。
-
-对应代码位置如下：
-
-- `PublishSpinSpeed` 将自旋速度发布到 `cmd_spin`
-  - `src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp`
-- `fake_vel_transform` 将 `cmd_spin` 叠加到 `cmd_vel.angular.z`
-  - `src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp`
-- `standard_robot_pp_ros2` 将 `cmd_vel.angular.z` 写入 `speed_vector.wz`
-  - `src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp`
-
-其中最关键的一行是：
+关键代码语义：
 
 ```cpp
 aft_tf_vel.angular.z = twist->angular.z + spin_speed_;
 ```
 
-它表示：
+也就是说：
 
-1. 导航或上层原本给出的角速度是 `twist->angular.z`
-2. 受击自旋附加角速度是 `spin_speed_`
-3. 最终发给下位机的 `wz` 是两者叠加后的结果
+1. Nav2 正常输出线速度与角速度
+2. 行为树额外输出 `cmd_spin`
+3. `fake_vel_transform` 把两者合成为最终 `/cmd_vel`
 
-所以如果后续你发现“机器人在移动时受击会边走边转”，这是当前设计的正常结果，因为自旋速度本来就是作为额外 `wz` 叠加进去的。
+### 8.3 `standard_robot_pp_ros2` 把 `/cmd_vel.angular.z` 写入 `wz`
 
-## 8. 参数总表
+对应实现：
 
-| 参数名 | 默认值 | 作用 | 影响模块 |
-| --- | --- | --- | --- |
-| `decision.topics.robot_mode` | `decision/robot_mode` | 姿态模式发布话题 | 行为树 / 串口 |
-| `decision.resource_policy.defend_enter_hp` | `300` | 进入极低血量退防态的阈值 | 行为树 |
-| `decision.resource_policy.defend_exit_hp` | `340` | 离开极低血量退防态的恢复阈值 | 行为树 |
-| `decision.resource_policy.resupply_enter_hp` | `360` | 进入补给安全点分支的血量阈值 | 行为树 |
-| `decision.resource_policy.resupply_exit_hp` | `390` | 离开补给安全点分支的恢复血量阈值 | 行为树 |
-| `decision.resource_policy.resupply_enter_ammo` | `50` | 低弹量时进入补给安全点分支的阈值 | 行为树 |
-| `decision.resource_policy.resupply_exit_ammo` | `90` | 低弹量恢复后离开补给分支的阈值 | 行为树 |
-| `decision.mode_limits.switch_cooldown_s` | `5.0` | 姿态切换冷却时间 | `PublishRobotMode` |
-| `decision.mode_limits.max_cumulative_s` | `180.0` | 单局单姿态累计时长上限 | `PublishRobotMode` |
-| `decision.motion.hit_spin_speed` | `7.0` | 受击时发布的自旋角速度 | 行为树 |
-| `decision.motion.hit_spin_stop_after_no_hp_drop_s` | `2.0` | 没有继续掉血多久后停转 | `IsAttacked` |
-| `standard_robot_pp_ros2.robot_mode_topic` | `decision/robot_mode` | 串口节点订阅的姿态话题 | 下位机接口 |
+- [../src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp](../src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp)
 
-## 9. 参数是如何从 YAML 流到代码里的
-
-很多后续维护问题其实不是“逻辑错了”，而是“不知道参数最终被谁用了”。  
-当前这套姿态系统的参数流转顺序如下：
-
-```text
-params/*.yaml
-  -> pb2025_sentry_behavior_server declare/get_parameter
-  -> globalBlackboard()->set(...)
-  -> behavior tree XML 通过 {@...} 取值
-  -> PublishRobotMode / IsAttacked / IsRobotResourceMode 读取端口
-  -> 发布 robot_mode 或 spin 速度
-```
-
-例如资源状态阈值和姿态冷却是这样接上的：
+最终写入：
 
 ```cpp
-// pb2025_sentry_behavior_server.cpp
-globalBlackboard()->set("decision_mode_switch_cooldown_s", mode_switch_cooldown_s);
-globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
+send_robot_cmd_data_.data.speed_vector.wz = msg->angular.z;
 ```
 
-```xml
-<!-- rmul_2026.xml -->
-<IsRobotResourceMode state="defend" robot_status="{@referee_robotStatus}"/>
-<PublishRobotMode mode="attack"
-                  cooldown_s="{@decision_mode_switch_cooldown_s}"
-                  max_cumulative_s="{@decision_mode_max_cumulative_s}"/>
+因此当前可以明确认为：
+
+- 自旋速度最终就是通过 `wz` 发给下位机的
+
+## 9. 当前与下位机模式位的关系
+
+当前上位机发布的是枚举语义，但下位机完全可以按整数位接收。
+
+也就是说，下面两种理解在作用上是等价的：
+
+1. 上位机使用 `enum` 表达 `move / attack / defend`
+2. 下位机使用 `int32_t mode`，按 `0 / 1 / 2` 判断
+
+只要双方约定一致即可：
+
+- `0 -> move`
+- `1 -> attack`
+- `2 -> defend`
+
+## 10. 当前最常调的参数
+
+### 10.1 姿态相关
+
+- `decision.mode_limits.switch_cooldown_s`
+- `decision.mode_limits.max_cumulative_s`
+- `decision.resource_policy.defend_enter_hp`
+- `decision.resource_policy.defend_exit_hp`
+- `decision.resource_policy.resupply_enter_hp`
+- `decision.resource_policy.resupply_exit_hp`
+
+### 10.2 自旋相关
+
+- `decision.motion.hit_spin_speed`
+- `decision.motion.hit_spin_stop_after_no_hp_drop_s`
+
+### 10.3 视觉接管相关
+
+- `decision.vision.timeout_s`
+- `decision.vision.activation_hold_s`
+- `decision.vision.switch_target_hold_s`
+- `decision.vision.override_hold_s`
+- `decision.vision.attack_radius`
+
+## 11. 当前调试命令
+
+### 11.1 查看姿态模式
+
+```bash
+ros2 topic echo /decision/robot_mode
 ```
 
-这意味着：
+### 11.2 查看姿态 Marker
 
-1. 如果你只想调阈值，优先改 YAML。
-2. 如果你改了黑板 key，XML 和插件端口默认值都要同步。
-3. 如果你改了 topic 名称，行为树发布端和串口订阅端要一起改。
+```bash
+ros2 topic echo /decision/robot_mode_markers
+```
 
-## 10. 关键代码落点
+### 11.3 查看自旋速度链
 
-### 10.1 姿态统一裁决
+```bash
+ros2 topic echo /cmd_spin
+ros2 topic echo /cmd_vel
+```
 
-- `src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp`
-- `src/pb2025_sentry_behavior/include/pb2025_sentry_behavior/plugins/action/pub_robot_mode.hpp`
+### 11.4 loopback 下测试受击自旋
 
-职责：
+```bash
+ros2 param set /fake_decision_sim_inputs current_hp 280
+ros2 param set /fake_decision_sim_inputs is_hp_deduced true
+```
 
-- 将字符串姿态 `move / attack / defend` 转成枚举值
-- 维护单局运行时状态
-- 处理冷却时间
-- 处理累计时长限制
-- 计算最终允许发布的姿态
+### 11.5 修改姿态和自旋参数
 
-### 10.2 受击检测与停转
+```bash
+ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.switch_cooldown_s 3.0
+ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.max_cumulative_s 120.0
+ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_speed 5.5
+ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_stop_after_no_hp_drop_s 1.5
+```
 
-- `src/pb2025_sentry_behavior/plugins/condition/is_attacked.cpp`
-- `src/pb2025_sentry_behavior/include/pb2025_sentry_behavior/plugins/condition/is_attacked.hpp`
+## 12. 当前实车与 loopback 是否共用这套逻辑
 
-职责：
+共用部分：
 
-- 判断是否检测到了新的掉血
-- 锁存最近一次受击信息
-- 在可配置的超时时间内维持 `SUCCESS`
+1. 姿态切换算法
+2. 冷却时间与累计时长限制
+3. 资源模式状态机
+4. 受击自旋检测
+5. 自旋速度叠加逻辑
+6. 视觉接管触发 `attack`
 
-### 10.3 统一资源状态判断
+差异主要只在输入源：
 
-- `src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp`
-- `src/pb2025_sentry_behavior/include/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.hpp`
+- loopback 由 `fake_decision_sim_inputs.py` 伪造输入
+- 实机由串口与真实视觉链路提供输入
 
-职责：
+## 13. 相关代码入口
 
-- 从 `RobotStatus` 读取当前血量和弹量
-- 根据 `decision.resource_policy.*` 统一判定 `engage / resupply / defend`
-- 用 enter / exit 迟滞避免资源阈值边缘频繁横跳
-- 为主树是否进入巡逻、补给或退防分支提供统一条件判断
-
-### 10.4 参数声明与黑板注入
-
-- `src/pb2025_sentry_behavior/src/pb2025_sentry_behavior_server.cpp`
-
-职责：
-
-- 声明姿态模式和受击自旋相关参数
-- 将参数放入黑板
-- 让 XML 可以通过 `{@...}` 直接引用这些值
-
-### 10.5 下位机模式发送
-
-- `src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp`
-- `src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp`
-
-职责：
-
-- 订阅 `decision/robot_mode`
-- 校验模式值是否合法
-- 将模式写入 `SendRobotCmdData.data.speed_vector.mode`
-- 经串口发给下位机
-
-## 11. 维护时最常看的几个函数
-
-如果你是第一次接手这部分代码，建议按下面顺序看：
-
-1. `PublishRobotModeAction::setMessage`
-   入口函数，负责把 XML 里的字符串姿态转成枚举，并调用统一裁决函数。
-2. `PublishRobotModeAction::resolveModeWithConstraints`
-   真正执行冷却时间、累计时长限制、回退策略的核心函数。
-3. `IsRobotHpBelowCondition::tickCondition`
-   低血量进入防御分支的最直接入口。
-4. `IsAttackedCondition::checkIsAttacked`
-   受击锁存、自旋保持、停止条件的核心函数。
-5. `StandardRobotPpRos2Node::cmdRobotModeCallback`
-   上层姿态最终写入串口发送结构体的位置。
-
-如果调试时发现“行为树看起来进入了某个分支，但下位机收到的模式不是预期值”，优先检查第 2 个函数，因为很可能是被冷却时间或累计时长限制拦住了。
-
-## 12. 当前默认参数
-
-- 防御姿态血量阈值：`300`
-- 姿态切换冷却：`5.0 s`
-- 单姿态单局累计上限：`180.0 s`
-- 受击自旋速度：`7.0 rad/s`
-- 无继续掉血后的停转时间：`2.0 s`
-
-## 13. 维护建议
-
-1. 如果只改了阈值、冷却时间或停转时间，优先改 yaml 参数，不要先改代码常量。
-2. 如果新增第四种姿态，必须同步修改：
-   - `PublishRobotModeAction` 的枚举和累计数组
-   - 下位机 `packet_typedef.hpp` 的 `mode` 枚举
-   - 相关 README 和本文档
-3. 如果比赛规则再次变化，先确认“限制的是切换次数、连续时间还是累计时间”，不要直接在当前逻辑上硬改。
+- 姿态裁决：  
+  `src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp`
+- 受击检测：  
+  `src/pb2025_sentry_behavior/plugins/condition/is_attacked.cpp`
+- 自旋速度发布：  
+  `src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp`
+- 速度合成：  
+  `src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp`
+- 串口模式下发：  
+  `src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp`
+- 串口协议定义：  
+  `src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp`

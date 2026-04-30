@@ -868,7 +868,6 @@ prediction_horizon = time_steps * model_dt
 
 可配合阅读：
 
-- `docs/mppi_local_plan_fix.md`
   - 记录 MPPI 可视化话题和迁移问题
 - `docs/slim_loopback_refactor.md`
   - 记录 loopback 精简和重构过程
