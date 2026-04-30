@@ -239,8 +239,11 @@ uint8_t PublishRobotModeAction::resolveModeWithConstraints(uint8_t requested_mod
 
     if (resolved_mode != state.active_mode) {
       const double since_switch_s = static_cast<double>(now_ns - state.last_switch_ns) / 1e9;
+      // 回到 move 代表当前追击/防御条件已经解除，应该允许尽快释放姿态，
+      // 否则会出现导航目标已经切回巡航，但下位机模式还被旧的 attack/defend 卡住几秒。
+      const bool releasing_to_move = (resolved_mode == kMoveMode);
       // 目标姿态合法，但仍要经过冷却时间校验，避免行为树在高频 tick 中反复抢切。
-      if (since_switch_s < cooldown_s) {
+      if (!releasing_to_move && since_switch_s < cooldown_s) {
         resolved_mode = state.active_mode;
       }
     }

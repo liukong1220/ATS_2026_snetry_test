@@ -98,10 +98,10 @@ pb2025_sentry_behavior_server:
       resource_policy:
         # loopback_vision_test 默认也走与实车一致的 rmul_2026 主树。
         # 视觉接管仍然受资源门控约束，这样仿真结果才更接近实车。
-        defend_enter_hp: 250
-        defend_exit_hp: 300
-        resupply_enter_hp: 100
-        resupply_exit_hp: 400
+        defend_enter_hp: 100
+        defend_exit_hp: 150
+        resupply_enter_hp: 250
+        resupply_exit_hp: 300
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100
 
