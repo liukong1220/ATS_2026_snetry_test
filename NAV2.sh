@@ -1,48 +1,44 @@
-#!/bin/bash
-###
- # @Description: This is a ros-based project!
- # @Author: Liu Biao
- # @Date: 2023-01-02 22:20:13
- # @LastEditTime: 2023-05-05 15:23:45
- # @FigtPath: /TUP-Vision-2023-Based/WatchDog.sh
-### 
+#!/usr/bin/env bash
 
+WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SETUP_SCRIPT="$WORKSPACE_DIR/install/setup.bash"
+WORLD_NAME="${1:-emul}"
+USE_RVIZ="${USE_RVIZ:-True}"
 
-export ROS_HOME="/home/ats/pd/pb2025_sentry_ws"
-cd /home/ats/pd/pb2025_sentry_ws
-# 设置需要启动和监视的ros命令
-declare -a commands=("ros2 launch pb2025_nav_bringup rm_navigation_reality_launch.py \
-world:=rmuc \
-slam:=False \
-use_robot_state_pub:=False")
+export ROS_HOME="$WORKSPACE_DIR/.ros"
+cd "$WORKSPACE_DIR" || exit 1
 
-# 定义函数来启动ros命令
+declare -a commands=(
+  "ros2 launch pb2025_sentry_bringup bringup.launch.py 
+  world:=$WORLD_NAME 
+  slam:=False 
+  use_rviz:=$USE_RVIZ"
+)
+
+start_command() {
+  local cmd="$1"
+  gnome-terminal -- bash -lc "cd \"$WORKSPACE_DIR\"; source \"$SETUP_SCRIPT\"; $cmd; exec bash"
+}
+
 start_commands() {
-  for cmd in "${commands[@]}"
-  do
-    gnome-terminal -- bash -c "source install/setup.bash;$cmd;exec bash;"
+  for cmd in "${commands[@]}"; do
+    start_command "$cmd"
     sleep 3
   done
 }
 
-# 定义函数来监视ros进程是否在运行
 watch_commands() {
-  while true
-  do
-    for cmd in "${commands[@]}"
-    do
-      process_name=$(echo $cmd | awk '{print $1}') # 提取进程名
-      if ! pgrep -f "$cmd" > /dev/null
-      then
+  while true; do
+    for cmd in "${commands[@]}"; do
+      if ! pgrep -f "$cmd" > /dev/null; then
         echo "$cmd 未在运行, 重新启动"
-    gnome-terminal -- bash -c "source install/setup.bash;$cmd;exec bash;"
-    sleep 3
+        start_command "$cmd"
+        sleep 3
       fi
     done
-    sleep 5 # 设置睡眠时间，以便在下一次检查之前给进程足够的时间运行
+    sleep 5
   done
 }
 
-# 启动ros命令和监视进程
 start_commands
 watch_commands

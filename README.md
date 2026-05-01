@@ -112,12 +112,205 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py world:=<YOUR_WORLD_NAME> use_rviz:=True
+ros2 launch pb2025_sentry_bringup bringup.launch.py \
+  world:=<YOUR_WORLD_NAME> \
+  slam:=False \
+  use_rviz:=True
 ```
 
 对应入口：
 
 - [src/pb2025_sentry_bringup/launch/bringup.launch.py](./src/pb2025_sentry_bringup/launch/bringup.launch.py)
+
+### 4. 实车直接命令速查
+
+下面默认都在工作区根目录执行，并且统一以：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup bringup.launch.py ...
+```
+
+作为实车主入口。
+
+推荐优先使用这条链路，而不是直接单独启动 `rm_navigation_reality_launch.py`，因为它会同时补齐：
+
+- 串口驱动与云台关节状态
+- `robot_state_publisher` / `joint_state_publisher`
+- `base_footprint -> base_link` 静态 TF
+- Nav2、行为树以及整套实车参数
+
+这样更符合当前仓库结构，也更不容易出现 TF 树缺失。
+
+#### 4.1 通用准备
+
+每开一个新终端，都先执行：
+
+```bash
+cd /home/aw/ATS_2026_snetry_test
+source install/setup.bash
+```
+
+如果只是想确认当前参数文件入口，可查看：
+
+- [src/pb2025_sentry_bringup/params/node_params.yaml](./src/pb2025_sentry_bringup/params/node_params.yaml)
+- [src/pb2025_sentry_bringup/launch/bringup.launch.py](./src/pb2025_sentry_bringup/launch/bringup.launch.py)
+
+#### 4.2 实车建图
+
+推荐直接使用总入口切到 SLAM 模式：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup bringup.launch.py \
+  world:=<YOUR_WORLD_NAME> \
+  slam:=True \
+  use_rviz:=True
+```
+
+说明：
+
+- `slam:=True` 会进入建图模式，关闭重定位，改为 `slam_toolbox + point_lio` 链路。
+- `world:=<YOUR_WORLD_NAME>` 建议在建图阶段就写成你最终想保存的地图名，后面导航时可以直接复用同名文件。
+- `use_rviz:=True` 方便直接在 RViz 里看点云、地图和 TF；如果不需要图形界面，可以改成 `False`。
+
+#### 4.3 保存地图
+
+建图完成后，另开一个终端执行：
+
+```bash
+cd /home/aw/ATS_2026_snetry_test
+source install/setup.bash
+ros2 run nav2_map_server map_saver_cli \
+  -f src/pb2025_sentry_bringup/map/<YOUR_WORLD_NAME>
+```
+
+这条命令会在工作区里生成：
+
+- `src/pb2025_sentry_bringup/map/<YOUR_WORLD_NAME>.yaml`
+- `src/pb2025_sentry_bringup/map/<YOUR_WORLD_NAME>.pgm`
+
+`map_saver_cli` 常用参数：
+
+- `-f <mapname>`：输出文件前缀；不需要手动写 `.yaml` 或 `.pgm`
+- `-t <map_topic>`：指定保存哪个地图 topic，默认通常是 `/map`
+- `--occ <threshold_occupied>`：占用阈值
+- `--free <threshold_free>`：空闲阈值
+- `--fmt <image_format>`：地图图像格式，例如 `pgm`
+- `--mode trinary|scale|raw`：地图保存模式，默认 `trinary`
+
+如果后续使用了 namespace，再在命令尾部追加：
+
+```bash
+--ros-args -r __ns:=/<YOUR_NAMESPACE>
+```
+
+#### 4.4 保存建图得到的 PCD
+
+当前建图链路里，`slam:=True` 时会额外打开 Point-LIO 的 `pcd_save.pcd_save_en`。结束建图并退出对应进程后，会在：
+
+- [src/pb2025_sentry_nav/point_lio/PCD](./src/pb2025_sentry_nav/point_lio/PCD)
+
+下生成类似 `scans_20260501_123456_789.pcd` 的点云文件。
+
+如果你希望后续导航直接按 `world` 自动加载先验点云，建议把最新生成的 PCD 复制成和 `world` 同名：
+
+```bash
+cd /home/aw/ATS_2026_snetry_test
+cp "$(ls -t src/pb2025_sentry_nav/point_lio/PCD/scans_*.pcd | head -n 1)" \
+  "src/pb2025_sentry_bringup/pcd/<YOUR_WORLD_NAME>.pcd"
+```
+
+这样后续导航时，`bringup.launch.py` 会按默认规则去找：
+
+- `src/pb2025_sentry_bringup/map/<YOUR_WORLD_NAME>.yaml`
+- `src/pb2025_sentry_bringup/pcd/<YOUR_WORLD_NAME>.pcd`
+
+#### 4.5 实车导航
+
+保存好地图和先验点云后，直接使用总入口切回导航模式：
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup bringup.launch.py \
+  world:=<YOUR_WORLD_NAME> \
+  slam:=False \
+  use_rviz:=True
+```
+
+说明：
+
+- `world:=<YOUR_WORLD_NAME>` 会自动对应到同名的 `.yaml` 和 `.pcd`
+- `slam:=False` 表示进入导航/重定位模式
+- 这也是当前更推荐的实车导航启动方式
+
+#### 4.6 rosbag2 直接录包
+
+如果你想不用脚本，直接手动录制和当前仓库一致的最小实车数据集，可以执行：
+
+```bash
+cd /home/aw/ATS_2026_snetry_test
+source install/setup.bash
+mkdir -p rosbags
+ros2 bag record \
+  -o rosbags/sentry_$(date +%F_%H-%M-%S) \
+  /serial/gimbal_joint_state \
+  /livox/imu \
+  /livox/lidar \
+  --compression-mode file \
+  --compression-format zstd \
+  -d 30
+```
+
+这条命令和当前 [src/pb2025_sentry_bringup/launch/record_rosbag_launch.py](./src/pb2025_sentry_bringup/launch/record_rosbag_launch.py) 记录的话题基本一致。
+
+`ros2 bag record` 里这几个参数的含义：
+
+- `-o rosbags/...`：输出 bag 目录
+- `/serial/gimbal_joint_state /livox/imu /livox/lidar`：当前默认录制的话题
+- `--compression-mode file`：按文件压缩
+- `--compression-format zstd`：压缩算法用 `zstd`
+- `-d 30`：每 30 秒切分一个 bag 文件
+
+如果你要排查 TF、建图或导航异常，建议额外把下面这些 topic 一起录进去：
+
+```bash
+cd /home/aw/ATS_2026_snetry_test
+source install/setup.bash
+mkdir -p rosbags
+ros2 bag record \
+  -o rosbags/sentry_debug_$(date +%F_%H-%M-%S) \
+  /serial/gimbal_joint_state \
+  /livox/imu \
+  /livox/lidar \
+  /tf \
+  /tf_static \
+  /map \
+  /odometry \
+  /cloud_registered \
+  /terrain_map_ext \
+  --compression-mode file \
+  --compression-format zstd \
+  -d 30
+```
+
+#### 4.7 当前总入口里和 rosbag 相关的默认参数
+
+`bringup.launch.py` 内部还会启动一个 `rosbag_recorder` 节点，对应参数在：
+
+- [src/pb2025_sentry_bringup/params/node_params.yaml](./src/pb2025_sentry_bringup/params/node_params.yaml)
+
+当前默认配置是：
+
+- `bag_prefix: "rosbag_sentry_"`
+- `topics: ["/serial/gimbal_joint_state", "/livox/imu", "/livox/lidar"]`
+- `storage_id: "sqlite3"`
+- `record_all: False`
+- `disable_discovery: False`
+- `start_recording_immediately: False`
+- `max_bagfile_duration: 15`
+
+如果你希望完全手动控制录包，优先使用上面的 `ros2 bag record ...` 命令即可。
 
 ## 当前最常改的参数文件
 
