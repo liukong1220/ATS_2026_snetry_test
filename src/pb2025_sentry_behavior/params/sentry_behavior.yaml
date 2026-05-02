@@ -83,7 +83,7 @@ pb2025_sentry_behavior_server:
         override_hold_s: 0.6
         # 跟随目标时的期望攻击半径，单位 m。
         # 实车上这个参数要结合雷达安装位姿、车体外形、射界和墙边安全裕度一起调。
-        attack_radius: 2.0
+        attack_radius: 1.0
         # costmap 代价值达到该阈值后就不再把该点作为候选跟随点。
         # 实车贴墙过于激进时先尝试调小；狭窄区域总过不去再考虑调大。
         follow_occupied_threshold: 50
@@ -189,7 +189,7 @@ pb2025_sentry_behavior_server:
         vision_active_goal_min_resend_interval_s: 0.25
         waypoint_stop_duration_s: 0.0
         patrol_preview_points: 1
-        action_server_wait_timeout_s: 0.5
+        action_server_wait_timeout_s: 0.0
 
 pb2025_sentry_behavior_client:
   ros__parameters:

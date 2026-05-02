@@ -644,6 +644,26 @@ behavior_server:
     # params for pb_nav2_behaviors/BackUpFreeSpace
     service_name: "global_costmap/get_costmap"
     max_radius: 2.0
+    # 仿真里也保持与实车一致的膨胀层过滤逻辑，避免恢复动作贴着高 cost 边界乱试探。
+    max_allowed_cost: 96
+    # 以下参数语义与 reality 配置一致，便于仿真和实车联调同一套恢复行为。
+    search_half_span_deg: 140.0
+    search_angle_increment_deg: 10.0
+    trajectory_sample_step: 0.08
+    corridor_half_width: 0.22
+    corridor_lateral_step: 0.08
+    heading_stickiness_weight: 6.0
+    replanning_cooldown_s: 0.35
+    blocked_enter_cycles: 3
+    clear_exit_cycles: 2
+    max_replan_attempts: 6
+    speed_filter_tau: 0.18
+    translational_acc_limit: 0.8
+    translational_decel_limit: 1.2
+    minimum_speed_xy: 0.08
+    goal_tolerance: 0.04
+    monitor_lookahead_distance: 0.35
+    enable_full_circle_fallback: true
     visualize: false
 
 waypoint_follower:

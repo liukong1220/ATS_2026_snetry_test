@@ -3,11 +3,32 @@
 
 #include "pb_nav2_plugins/behaviors/back_up_free_space.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace pb_nav2_behaviors
 {
+
+namespace
+{
+
+constexpr unsigned char kInscribedObstacleCost = 253;
+
+// 统一角度到 [-pi, pi]。
+// 恢复方向搜索和“上一条方向黏性”都依赖稳定的角度差计算。
+double normalizeAngle(double angle)
+{
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
+
+}  // namespace
 
 void BackUpFreeSpace::onConfigure()
 {
@@ -23,12 +44,68 @@ void BackUpFreeSpace::onConfigure()
   nav2_util::declare_parameter_if_not_declared(
     node, "max_allowed_cost", rclcpp::ParameterValue(96));
   nav2_util::declare_parameter_if_not_declared(node, "visualize", rclcpp::ParameterValue(false));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "search_half_span_deg", rclcpp::ParameterValue(140.0));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "search_angle_increment_deg", rclcpp::ParameterValue(10.0));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "trajectory_sample_step", rclcpp::ParameterValue(0.08));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "corridor_half_width", rclcpp::ParameterValue(0.22));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "corridor_lateral_step", rclcpp::ParameterValue(0.08));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "heading_stickiness_weight", rclcpp::ParameterValue(6.0));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "replanning_cooldown_s", rclcpp::ParameterValue(0.35));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "blocked_enter_cycles", rclcpp::ParameterValue(3));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "clear_exit_cycles", rclcpp::ParameterValue(2));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "max_replan_attempts", rclcpp::ParameterValue(6));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "speed_filter_tau", rclcpp::ParameterValue(0.18));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "translational_acc_limit", rclcpp::ParameterValue(0.8));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "translational_decel_limit", rclcpp::ParameterValue(1.2));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "minimum_speed_xy", rclcpp::ParameterValue(0.08));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "goal_tolerance", rclcpp::ParameterValue(0.04));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "monitor_lookahead_distance", rclcpp::ParameterValue(0.35));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "enable_full_circle_fallback", rclcpp::ParameterValue(true));
 
+  // 下面这组参数可以分成四类理解：
+  // 1. 方向搜索：search_half_span_deg / search_angle_increment_deg
+  // 2. 轨迹批量检测：trajectory_sample_step / corridor_half_width / corridor_lateral_step
+  // 3. 状态滞回：blocked_enter_cycles / clear_exit_cycles / replanning_cooldown_s
+  // 4. 速度平滑：speed_filter_tau / translational_acc_limit / translational_decel_limit
   node->get_parameter("global_frame", global_frame_);
   node->get_parameter("max_radius", max_radius_);
   node->get_parameter("service_name", service_name_);
   node->get_parameter("max_allowed_cost", max_allowed_cost_);
   node->get_parameter("visualize", visualize_);
+  node->get_parameter("search_half_span_deg", search_half_span_deg_);
+  node->get_parameter("search_angle_increment_deg", search_angle_increment_deg_);
+  node->get_parameter("trajectory_sample_step", trajectory_sample_step_);
+  node->get_parameter("corridor_half_width", corridor_half_width_);
+  node->get_parameter("corridor_lateral_step", corridor_lateral_step_);
+  node->get_parameter("heading_stickiness_weight", heading_stickiness_weight_);
+  node->get_parameter("replanning_cooldown_s", replanning_cooldown_s_);
+  node->get_parameter("blocked_enter_cycles", blocked_enter_cycles_);
+  node->get_parameter("clear_exit_cycles", clear_exit_cycles_);
+  node->get_parameter("max_replan_attempts", max_replan_attempts_);
+  node->get_parameter("speed_filter_tau", speed_filter_tau_);
+  node->get_parameter("translational_acc_limit", translational_acc_limit_);
+  node->get_parameter("translational_decel_limit", translational_decel_limit_);
+  node->get_parameter("minimum_speed_xy", minimum_speed_xy_);
+  node->get_parameter("goal_tolerance", goal_tolerance_);
+  node->get_parameter("monitor_lookahead_distance", monitor_lookahead_distance_);
+  node->get_parameter("enable_full_circle_fallback", enable_full_circle_fallback_);
 
   costmap_client_ = node->create_client<nav2_msgs::srv::GetCostmap>(service_name_);
 
@@ -43,59 +120,58 @@ void BackUpFreeSpace::onCleanup()
 {
   costmap_client_.reset();
   marker_pub_.reset();
+  resetExecutionState();
 }
 
 nav2_behaviors::Status BackUpFreeSpace::onRun(
   const std::shared_ptr<const BackUpAction::Goal> command)
 {
-  while (!costmap_client_->wait_for_service(std::chrono::seconds(1))) {
-    if (!rclcpp::ok()) {
-      RCLCPP_ERROR(logger_, "Interrupted while waiting for the service. Exiting.");
-      return nav2_behaviors::Status::FAILED;
-    }
-    RCLCPP_WARN(logger_, "service not available, waiting again...");
-  }
-
-  auto request = std::make_shared<nav2_msgs::srv::GetCostmap::Request>();
-  auto result = costmap_client_->async_send_request(request);
-  if (result.wait_for(std::chrono::seconds(1)) == std::future_status::timeout) {
-    RCLCPP_ERROR(logger_, "Interrupted while waiting for the service. Exiting.");
-    return nav2_behaviors::Status::FAILED;
-  }
-
-  // get costmap
-  auto costmap = result.get()->map;
-
   if (!nav2_util::getCurrentPose(
         initial_pose_, *tf_, global_frame_, robot_base_frame_, transform_tolerance_)) {
     RCLCPP_ERROR(logger_, "Initial robot pose is not available.");
     return nav2_behaviors::Status::FAILED;
   }
 
-  // get current pose
-  geometry_msgs::msg::Pose2D pose;
-  pose.x = initial_pose_.pose.position.x;
-  pose.y = initial_pose_.pose.position.y;
-  pose.theta = tf2::getYaw(initial_pose_.pose.orientation);
+  nav2_msgs::msg::Costmap costmap;
+  if (!fetchCostmap(costmap)) {
+    return nav2_behaviors::Status::FAILED;
+  }
 
-  // Find the best direction to back up
-  float best_angle = findBestDirection(costmap, pose, -M_PI, M_PI, max_radius_, M_PI / 32.0);
-
-  // Calculate move command
-  twist_x_ = std::cos(best_angle) * command->speed;
-  twist_y_ = std::sin(best_angle) * command->speed;
+  command_distance_abs_ = std::min(max_radius_, std::fabs(command->target.x));
+  command_speed_abs_ = std::fabs(command->speed);
   command_x_ = command->target.x;
   command_time_allowance_ = command->time_allowance;
-
   end_time_ = clock_->now() + command_time_allowance_;
+  plan_start_pose_ = initial_pose_;
+  filtered_cmd_ = geometry_msgs::msg::Twist {};
+  blocked_cycles_ = 0;
+  clear_cycles_ = 0;
+  failed_replan_attempts_ = 0;
+  last_cycle_time_ = clock_->now();
+  last_replan_time_ = clock_->now();
+  execution_state_ = RecoveryExecutionState::PLANNING;
 
-  if (!nav2_util::getCurrentPose(
-        initial_pose_, *tf_, global_frame_, robot_base_frame_, transform_tolerance_)) {
-    RCLCPP_ERROR(logger_, "Initial robot pose is not available.");
+  const auto current_pose_2d = poseToPose2D(initial_pose_);
+  // 这里不再像旧实现那样只找一个“最空方向”然后直接开退，
+  // 而是先规划一条短时恢复轨迹，后续执行和重规划都围绕这条轨迹展开。
+  if (!planEscapeTrajectory(costmap, current_pose_2d, command_distance_abs_, active_plan_)) {
+    RCLCPP_WARN(
+      logger_,
+      "No smooth omni recovery trajectory found within %.2fm around the robot.",
+      command_distance_abs_);
     return nav2_behaviors::Status::FAILED;
   }
+
+  previous_plan_heading_ = active_plan_.heading;
+  has_previous_plan_heading_ = true;
+  execution_state_ = RecoveryExecutionState::EXECUTING;
+  if (visualize_) {
+    visualizePlan(current_pose_2d, active_plan_);
+  }
   RCLCPP_WARN(
-    logger_, "backing up %f meters towards free space at angle %f", command_x_, best_angle);
+    logger_,
+    "Start omni recovery: distance=%.2f heading=%.2fdeg score=%.2f",
+    active_plan_.distance, active_plan_.heading * 180.0 / M_PI, active_plan_.score);
 
   return nav2_behaviors::Status::SUCCEEDED;
 }
@@ -115,266 +191,457 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
   geometry_msgs::msg::PoseStamped current_pose;
   if (!nav2_util::getCurrentPose(
         current_pose, *tf_, global_frame_, robot_base_frame_, transform_tolerance_)) {
-    RCLCPP_ERROR(logger_, "Current robot pose is not available.");
-    return nav2_behaviors::Status::FAILED;
+      RCLCPP_ERROR(logger_, "Current robot pose is not available.");
+      return nav2_behaviors::Status::FAILED;
   }
 
-  float diff_x = initial_pose_.pose.position.x - current_pose.pose.position.x;
-  float diff_y = initial_pose_.pose.position.y - current_pose.pose.position.y;
-  float distance = hypot(diff_x, diff_y);
+  const auto now = clock_->now();
+  const double dt =
+    last_cycle_time_ ? std::max(1e-3, (now - *last_cycle_time_).seconds()) : 1.0 / cycle_frequency_;
+  last_cycle_time_ = now;
+
+  const auto current_pose_2d = poseToPose2D(current_pose);
+  const double distance = computeProgressAlongPlan(current_pose_2d);
+  const double remaining_distance = std::max(0.0, active_plan_.distance - distance);
 
   feedback_->distance_traveled = distance;
   action_server_->publish_feedback(feedback_);
 
-  if (distance >= std::fabs(command_x_)) {
+  if (remaining_distance <= goal_tolerance_) {
     stopRobot();
     return nav2_behaviors::Status::SUCCEEDED;
   }
 
-  auto cmd_vel = std::make_unique<geometry_msgs::msg::Twist>();
-  cmd_vel->linear.y = twist_y_;
-  cmd_vel->linear.x = twist_x_;
-
-  geometry_msgs::msg::Pose2D pose;
-  pose.x = current_pose.pose.position.x;
-  pose.y = current_pose.pose.position.y;
-  pose.theta = tf2::getYaw(current_pose.pose.orientation);
-
-  if (!isCollisionFree(distance, cmd_vel.get(), pose)) {
-    stopRobot();
-    RCLCPP_WARN(logger_, "Collision Ahead - Exiting DriveOnHeading");
-    return nav2_behaviors::Status::FAILED;
+  // 关键优化 1：
+  // 不再采用“移动一个很小步长后立刻判一次”的离散方式，
+  // 而是对当前恢复轨迹前向一段 lookahead 做批量采样检测。
+  // 这样既能更早发现动态遮挡，也能避免每拍都因为单个采样点抖动而切状态。
+  const bool trajectory_prefix_safe = isTrajectoryPrefixSafe(current_pose_2d, remaining_distance);
+  if (trajectory_prefix_safe) {
+    clear_cycles_++;
+    blocked_cycles_ = 0;
+  } else {
+    blocked_cycles_++;
+    clear_cycles_ = 0;
   }
 
+  if (
+    execution_state_ == RecoveryExecutionState::EXECUTING &&
+    blocked_cycles_ >= blocked_enter_cycles_)
+  {
+    execution_state_ = RecoveryExecutionState::BLOCKED;
+    RCLCPP_WARN(
+      logger_,
+      "Recovery trajectory blocked for %d consecutive cycles, enter BLOCKED state.",
+      blocked_cycles_);
+  } else if (
+    execution_state_ == RecoveryExecutionState::BLOCKED &&
+    clear_cycles_ >= clear_exit_cycles_)
+  {
+    execution_state_ = RecoveryExecutionState::EXECUTING;
+    RCLCPP_INFO(
+      logger_,
+      "Recovery trajectory stayed clear for %d cycles, exit BLOCKED state.",
+      clear_cycles_);
+  }
+
+  if (
+    execution_state_ == RecoveryExecutionState::BLOCKED && last_replan_time_ &&
+    (now - *last_replan_time_).seconds() >= replanning_cooldown_s_)
+  {
+    // 关键优化 2：
+    // 使用“连续阻塞计数 + 重规划冷却时间”形成状态滞回，
+    // 避免 normal / avoid / recovery 在障碍边界附近每拍反复横跳。
+    if (replanFromCurrentPose(current_pose, remaining_distance)) {
+      blocked_cycles_ = 0;
+      clear_cycles_ = 0;
+      failed_replan_attempts_ = 0;
+      execution_state_ = RecoveryExecutionState::EXECUTING;
+      if (visualize_) {
+        visualizePlan(current_pose_2d, active_plan_);
+      }
+    } else {
+      failed_replan_attempts_++;
+      last_replan_time_ = now;
+      RCLCPP_WARN(
+        logger_,
+        "Recovery replan failed %d/%d times.",
+        failed_replan_attempts_, max_replan_attempts_);
+      if (failed_replan_attempts_ >= max_replan_attempts_) {
+        stopRobot();
+        RCLCPP_WARN(logger_, "Recovery failed after repeated replanning attempts.");
+        return nav2_behaviors::Status::FAILED;
+      }
+    }
+  }
+
+  geometry_msgs::msg::Twist desired_cmd;
+  if (execution_state_ == RecoveryExecutionState::EXECUTING) {
+    desired_cmd = buildDesiredCommand(remaining_distance);
+  } else {
+    desired_cmd = geometry_msgs::msg::Twist {};
+  }
+
+  // 关键优化 3：
+  // 对恢复速度做一阶低通 + 加减速度限幅。
+  // 全向舵轮底盘在恢复链里若直接阶跃切到目标速度，最容易出现电机抖动和“挫一下”的卡顿感。
+  const auto filtered_cmd = smoothCommand(desired_cmd, dt);
+  auto cmd_vel = std::make_unique<geometry_msgs::msg::Twist>(filtered_cmd);
   vel_pub_->publish(std::move(cmd_vel));
 
   return nav2_behaviors::Status::RUNNING;
 }
 
-float BackUpFreeSpace::findBestDirection(
-  const nav2_msgs::msg::Costmap & costmap, geometry_msgs::msg::Pose2D pose, float start_angle,
-  float end_angle, float radius, float angle_increment)
+bool BackUpFreeSpace::fetchCostmap(nav2_msgs::msg::Costmap & costmap)
 {
-  float best_angle = start_angle;
-
-  float current_safe_start = std::numeric_limits<float>::quiet_NaN();
-  float current_cost_sum = 0.0f;
-  int current_samples = 0;
-  float best_safe_start = std::numeric_limits<float>::quiet_NaN();
-  float best_safe_end = std::numeric_limits<float>::quiet_NaN();
-  float best_avg_cost = std::numeric_limits<float>::infinity();
-
-  float resolution = costmap.metadata.resolution;
-  float origin_x = costmap.metadata.origin.position.x;
-  float origin_y = costmap.metadata.origin.position.y;
-  int size_x = costmap.metadata.size_x;
-  int size_y = costmap.metadata.size_y;
-
-  float map_min_x = origin_x;
-  float map_max_x = origin_x + (size_x * resolution);
-  float map_min_y = origin_y;
-  float map_max_y = origin_y + (size_y * resolution);
-
-  for (float angle = start_angle; angle <= end_angle; angle += angle_increment) {
-    bool is_safe = true;
-    float ray_cost_sum = 0.0f;
-    int ray_samples = 0;
-
-    for (float r = 0; r <= radius; r += resolution) {
-      float x = pose.x + r * std::cos(angle);
-      float y = pose.y + r * std::sin(angle);
-
-      if (x >= map_min_x && x <= map_max_x && y >= map_min_y && y <= map_max_y) {
-        int i = static_cast<int>((x - origin_x) / resolution);
-        int j = static_cast<int>((y - origin_y) / resolution);
-
-        if (i >= 0 && i < size_x && j >= 0 && j < size_y) {
-          auto cell_cost = static_cast<unsigned char>(costmap.data[i + j * size_x]);
-          if (cell_cost >= 253 || cell_cost > max_allowed_cost_) {
-            is_safe = false;
-            break;
-          }
-          ray_cost_sum += static_cast<float>(cell_cost);
-          ray_samples++;
-        } else {
-          is_safe = false;
-          break;
-        }
-      } else {
-        is_safe = false;
-        break;
-      }
+  // 恢复行为使用服务获取一份瞬时 costmap 快照：
+  // 这样每次 onRun / replan 都能基于最新障碍状态重新做局部规划。
+  while (!costmap_client_->wait_for_service(std::chrono::seconds(1))) {
+    if (!rclcpp::ok()) {
+      RCLCPP_ERROR(logger_, "Interrupted while waiting for the costmap service.");
+      return false;
     }
-    if (is_safe) {
-      if (std::isnan(current_safe_start)) {
-        current_safe_start = angle;
-        current_cost_sum = 0.0f;
-        current_samples = 0;
-      }
-      current_cost_sum += ray_cost_sum;
-      current_samples += ray_samples;
-      continue;
-    }
-
-    if (!std::isnan(current_safe_start)) {
-      const float current_safe_end = angle - angle_increment;
-      const float current_span = current_safe_end - current_safe_start;
-      const float best_span = std::isnan(best_safe_start) ? -1.0f : best_safe_end - best_safe_start;
-      const float current_avg_cost =
-        current_samples > 0 ? current_cost_sum / static_cast<float>(current_samples) :
-        std::numeric_limits<float>::infinity();
-
-      if (
-        std::isnan(best_safe_start) || current_span > best_span + 1e-4f ||
-        (std::fabs(current_span - best_span) <= 1e-4f && current_avg_cost < best_avg_cost)) {
-        best_safe_start = current_safe_start;
-        best_safe_end = current_safe_end;
-        best_avg_cost = current_avg_cost;
-      }
-
-      current_safe_start = std::numeric_limits<float>::quiet_NaN();
-      current_cost_sum = 0.0f;
-      current_samples = 0;
-    }
+    RCLCPP_WARN(logger_, "Recovery costmap service not available, waiting again...");
   }
 
-  if (!std::isnan(current_safe_start)) {
-    const float current_safe_end = end_angle;
-    const float current_span = current_safe_end - current_safe_start;
-    const float best_span = std::isnan(best_safe_start) ? -1.0f : best_safe_end - best_safe_start;
-    const float current_avg_cost =
-      current_samples > 0 ? current_cost_sum / static_cast<float>(current_samples) :
-      std::numeric_limits<float>::infinity();
-
-    if (
-      std::isnan(best_safe_start) || current_span > best_span + 1e-4f ||
-      (std::fabs(current_span - best_span) <= 1e-4f && current_avg_cost < best_avg_cost)) {
-      best_safe_start = current_safe_start;
-      best_safe_end = current_safe_end;
-      best_avg_cost = current_avg_cost;
-    }
+  auto request = std::make_shared<nav2_msgs::srv::GetCostmap::Request>();
+  auto result = costmap_client_->async_send_request(request);
+  if (result.wait_for(std::chrono::seconds(1)) == std::future_status::timeout) {
+    RCLCPP_ERROR(logger_, "Timeout while waiting for recovery costmap response.");
+    return false;
   }
 
-  if (!std::isnan(best_safe_start)) {
-    best_angle = (best_safe_start + best_safe_end) / 2.0f;
-  } else {
-    RCLCPP_WARN(
-      logger_,
-      "No recovery ray stayed below cost threshold %d, falling back to straight backup search.",
-      max_allowed_cost_);
-  }
-
-  if (visualize_) {
-    visualize(
-      pose, radius,
-      std::isnan(best_safe_start) ? start_angle : best_safe_start,
-      std::isnan(best_safe_end) ? start_angle : best_safe_end);
-  }
-
-  return best_angle;
+  costmap = result.get()->map;
+  return true;
 }
 
-std::vector<geometry_msgs::msg::Point> BackUpFreeSpace::gatherFreePoints(
-  const nav2_msgs::msg::Costmap & costmap, geometry_msgs::msg::Pose2D pose, float radius)
+geometry_msgs::msg::Pose2D BackUpFreeSpace::poseToPose2D(
+  const geometry_msgs::msg::PoseStamped & pose) const
 {
-  std::vector<geometry_msgs::msg::Point> results;
-  for (unsigned int i = 0; i < costmap.metadata.size_x; i++) {
-    for (unsigned int j = 0; j < costmap.metadata.size_y; j++) {
-      auto idx = i + j * costmap.metadata.size_x;
-      auto x = i * costmap.metadata.resolution + costmap.metadata.origin.position.x;
-      auto y = j * costmap.metadata.resolution + costmap.metadata.origin.position.y;
-      if (std::hypot(x - pose.x, y - pose.y) <= radius && costmap.data[idx] == 0) {
-        geometry_msgs::msg::Point p;
-        p.x = x;
-        p.y = y;
-        results.push_back(p);
-      }
-    }
-  }
-  return results;
+  geometry_msgs::msg::Pose2D pose_2d;
+  pose_2d.x = pose.pose.position.x;
+  pose_2d.y = pose.pose.position.y;
+  pose_2d.theta = tf2::getYaw(pose.pose.orientation);
+  return pose_2d;
 }
 
-void BackUpFreeSpace::visualize(
-  geometry_msgs::msg::Pose2D pose, float radius, float first_safe_angle, float last_unsafe_angle)
+bool BackUpFreeSpace::planEscapeTrajectory(
+  const nav2_msgs::msg::Costmap & costmap, const geometry_msgs::msg::Pose2D & pose,
+  double target_distance, EscapePlan & best_plan)
 {
-  visualization_msgs::msg::MarkerArray markers;
+  best_plan = EscapePlan();
+  best_plan.score = std::numeric_limits<double>::infinity();
 
-  visualization_msgs::msg::Marker sector_marker;
-  sector_marker.header.frame_id = global_frame_;
-  sector_marker.header.stamp = clock_->now();
-  sector_marker.ns = "direction";
-  sector_marker.id = 0;
-  sector_marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
-  sector_marker.action = visualization_msgs::msg::Marker::ADD;
-  sector_marker.scale.x = 1.0;
-  sector_marker.scale.y = 1.0;
-  sector_marker.scale.z = 1.0;
-  sector_marker.color.r = 0.0f;
-  sector_marker.color.g = 1.0f;
-  sector_marker.color.b = 0.0f;
-  sector_marker.color.a = 0.2f;
+  const double search_half_span = std::clamp(search_half_span_deg_ * M_PI / 180.0, 0.0, M_PI);
+  const double angle_increment = std::max(1e-3, search_angle_increment_deg_ * M_PI / 180.0);
+  const double rear_heading = normalizeAngle(pose.theta + M_PI);
 
-  const float angle_step = 0.05f;
-  for (float angle = first_safe_angle; angle <= last_unsafe_angle; angle += angle_step) {
-    const float next_angle = std::min(angle + angle_step, last_unsafe_angle);
-
-    geometry_msgs::msg::Point origin;
-    origin.x = pose.x;
-    origin.y = pose.y;
-    origin.z = 0.0;
-
-    geometry_msgs::msg::Point p1;
-    p1.x = pose.x + radius * std::cos(angle);
-    p1.y = pose.y + radius * std::sin(angle);
-    p1.z = 0.0;
-
-    geometry_msgs::msg::Point p2;
-    p2.x = pose.x + radius * std::cos(next_angle);
-    p2.y = pose.y + radius * std::sin(next_angle);
-    p2.z = 0.0;
-
-    sector_marker.points.push_back(origin);
-    sector_marker.points.push_back(p1);
-    sector_marker.points.push_back(p2);
-  }
-  markers.markers.push_back(sector_marker);
-
-  auto create_arrow = [&](float angle, int id, float r, float g, float b) {
-    visualization_msgs::msg::Marker arrow;
-    arrow.header.frame_id = global_frame_;
-    arrow.header.stamp = clock_->now();
-    arrow.ns = "direction";
-    arrow.id = id;
-    arrow.type = visualization_msgs::msg::Marker::ARROW;
-    arrow.action = visualization_msgs::msg::Marker::ADD;
-    arrow.scale.x = 0.05;
-    arrow.scale.y = 0.1;
-    arrow.scale.z = 0.1;
-    arrow.color.r = r;
-    arrow.color.g = g;
-    arrow.color.b = b;
-    arrow.color.a = 1.0;
-
-    geometry_msgs::msg::Point start;
-    start.x = pose.x;
-    start.y = pose.y;
-    start.z = 0.0;
-
-    geometry_msgs::msg::Point end;
-    end.x = start.x + radius * std::cos(angle);
-    end.y = start.y + radius * std::sin(angle);
-    end.z = 0.0;
-
-    arrow.points.push_back(start);
-    arrow.points.push_back(end);
-    return arrow;
+  // 以“车尾方向”为主搜索轴，而不是硬编码只允许 x 轴倒车。
+  // 对全向舵轮这点非常重要，因为斜后退 / 侧后退往往比纯后退更容易脱困。
+  auto search_range = [&](double start, double end) {
+    for (double angle = start; angle <= end + 1e-6; angle += angle_increment) {
+      EscapePlan candidate;
+      if (!evaluateCandidateTrajectory(
+            costmap, pose, normalizeAngle(angle), target_distance, candidate))
+      {
+        continue;
+      }
+      if (!best_plan.valid || candidate.score < best_plan.score) {
+        best_plan = candidate;
+      }
+    }
   };
 
-  markers.markers.push_back(create_arrow(first_safe_angle, 1, 0.0f, 0.0f, 1.0f));
-  markers.markers.push_back(create_arrow(last_unsafe_angle, 2, 0.0f, 0.0f, 1.0f));
+  search_range(rear_heading - search_half_span, rear_heading + search_half_span);
 
-  const float best_angle = (first_safe_angle + last_unsafe_angle) / 2.0f;
-  markers.markers.push_back(create_arrow(best_angle, 3, 0.0f, 1.0f, 0.0f));
+  // 对全向舵轮底盘保留一个兜底：
+  // 如果后向和两侧都没有可退让轨迹，再放开到全角域搜索，优先保证能脱困。
+  if (!best_plan.valid && enable_full_circle_fallback_) {
+    search_range(-M_PI, M_PI);
+  }
+
+  return best_plan.valid;
+}
+
+bool BackUpFreeSpace::evaluateCandidateTrajectory(
+  const nav2_msgs::msg::Costmap & costmap, const geometry_msgs::msg::Pose2D & pose,
+  double heading, double target_distance, EscapePlan & candidate) const
+{
+  candidate = EscapePlan();
+  candidate.heading = heading;
+  candidate.distance = target_distance;
+  candidate.score = std::numeric_limits<double>::infinity();
+
+  const double resolution = static_cast<double>(costmap.metadata.resolution);
+  const double sample_step = std::max(trajectory_sample_step_, resolution);
+  const double lateral_step = std::max(corridor_lateral_step_, resolution);
+  const double nx = -std::sin(heading);
+  const double ny = std::cos(heading);
+  double accumulated_cost = 0.0;
+  int sampled_cells = 0;
+
+  // 对每个候选方向，不是只检查一条“中心线”，
+  // 而是构造一条带宽度的恢复走廊并做批量采样。
+  // 这能显著减少因为单格点抖动引起的“能走/不能走”来回切换。
+  for (double s = sample_step; s <= target_distance + 1e-6; s += sample_step) {
+    geometry_msgs::msg::Point center_point;
+    center_point.x = pose.x + s * std::cos(heading);
+    center_point.y = pose.y + s * std::sin(heading);
+    center_point.z = 0.0;
+    candidate.centerline.push_back(center_point);
+
+    for (
+      double offset = -corridor_half_width_; offset <= corridor_half_width_ + 1e-6;
+      offset += lateral_step)
+    {
+      const double sample_x = center_point.x + nx * offset;
+      const double sample_y = center_point.y + ny * offset;
+      const auto cost = sampleCost(costmap, sample_x, sample_y);
+      if (!cost.has_value()) {
+        return false;
+      }
+      if (*cost >= kInscribedObstacleCost || static_cast<int>(*cost) > max_allowed_cost_) {
+        return false;
+      }
+      accumulated_cost += static_cast<double>(*cost);
+      sampled_cells++;
+    }
+  }
+
+  if (candidate.centerline.empty() || sampled_cells == 0) {
+    return false;
+  }
+
+  candidate.goal_point = candidate.centerline.back();
+  candidate.valid = true;
+
+  // 评分包含三部分：
+  // 1. average_cost：平均代价越低越好，代表恢复过程中离障碍更远
+  // 2. rear_bias：越接近车尾主后退方向越好，减少不必要的大侧移
+  // 3. heading_stickiness：与上一条恢复方向越接近越好，减少左右抽动
+  const double average_cost = accumulated_cost / static_cast<double>(sampled_cells);
+  const double rear_heading = normalizeAngle(pose.theta + M_PI);
+  const double rear_bias = std::abs(normalizeAngle(heading - rear_heading));
+  const double heading_stickiness =
+    has_previous_plan_heading_ ? std::abs(normalizeAngle(heading - previous_plan_heading_)) : 0.0;
+  candidate.score = average_cost + rear_bias * 8.0 + heading_stickiness * heading_stickiness_weight_;
+  return true;
+}
+
+std::optional<unsigned char> BackUpFreeSpace::sampleCost(
+  const nav2_msgs::msg::Costmap & costmap, double x, double y) const
+{
+  const double resolution = static_cast<double>(costmap.metadata.resolution);
+  const double origin_x = costmap.metadata.origin.position.x;
+  const double origin_y = costmap.metadata.origin.position.y;
+  const int size_x = static_cast<int>(costmap.metadata.size_x);
+  const int size_y = static_cast<int>(costmap.metadata.size_y);
+  const int map_x = static_cast<int>(std::floor((x - origin_x) / resolution));
+  const int map_y = static_cast<int>(std::floor((y - origin_y) / resolution));
+
+  if (map_x < 0 || map_x >= size_x || map_y < 0 || map_y >= size_y) {
+    return std::nullopt;
+  }
+
+  const auto index =
+    static_cast<std::size_t>(map_y) * static_cast<std::size_t>(size_x) +
+    static_cast<std::size_t>(map_x);
+  if (index >= costmap.data.size()) {
+    return std::nullopt;
+  }
+
+  return static_cast<unsigned char>(costmap.data[index]);
+}
+
+bool BackUpFreeSpace::isTrajectoryPrefixSafe(
+  const geometry_msgs::msg::Pose2D & pose, double remaining_distance)
+{
+  if (!active_plan_.valid) {
+    return false;
+  }
+
+  const double check_distance = std::min(monitor_lookahead_distance_, remaining_distance);
+  const double step = std::max(trajectory_sample_step_, 0.03);
+  bool fetch_data = true;
+
+  // 这里只监控“当前轨迹前方一小段距离”的安全性，而不是整条剩余路径都重新扫一遍。
+  // 原因：
+  // 1. 对动态障碍，当前最重要的是眼前一小段是否还能继续走
+  // 2. 这能把检测做成一个连续的 lookahead 过程，减少旧版那种“走一点停一下”的离散感
+  for (double s = step; s <= check_distance + 1e-6; s += step) {
+    geometry_msgs::msg::Pose2D sample_pose = pose;
+    sample_pose.x += s * std::cos(active_plan_.heading);
+    sample_pose.y += s * std::sin(active_plan_.heading);
+    if (!collision_checker_->isCollisionFree(sample_pose, fetch_data)) {
+      return false;
+    }
+    fetch_data = false;
+  }
+
+  return true;
+}
+
+double BackUpFreeSpace::computeProgressAlongPlan(const geometry_msgs::msg::Pose2D & pose) const
+{
+  if (!active_plan_.valid) {
+    return 0.0;
+  }
+
+  const double dx = pose.x - plan_start_pose_.pose.position.x;
+  const double dy = pose.y - plan_start_pose_.pose.position.y;
+  const double projected =
+    dx * std::cos(active_plan_.heading) + dy * std::sin(active_plan_.heading);
+  return std::clamp(projected, 0.0, active_plan_.distance);
+}
+
+geometry_msgs::msg::Twist BackUpFreeSpace::buildDesiredCommand(double remaining_distance) const
+{
+  geometry_msgs::msg::Twist desired_cmd;
+  if (!active_plan_.valid || remaining_distance <= goal_tolerance_) {
+    return desired_cmd;
+  }
+
+  // 根据剩余距离反推“还能以多大速度安全停住”。
+  // 这样恢复末段会自然减速，而不是等快到目标时突然急刹。
+  const double stop_speed =
+    std::sqrt(std::max(0.0, 2.0 * translational_decel_limit_ * remaining_distance));
+  double target_speed = std::min(command_speed_abs_, stop_speed);
+  if (target_speed < minimum_speed_xy_ && remaining_distance > goal_tolerance_) {
+    target_speed = minimum_speed_xy_;
+  }
+
+  desired_cmd.linear.x = std::cos(active_plan_.heading) * target_speed;
+  desired_cmd.linear.y = std::sin(active_plan_.heading) * target_speed;
+  desired_cmd.angular.z = 0.0;
+  return desired_cmd;
+}
+
+geometry_msgs::msg::Twist BackUpFreeSpace::smoothCommand(
+  const geometry_msgs::msg::Twist & desired_cmd, double dt)
+{
+  geometry_msgs::msg::Twist smoothed_cmd = filtered_cmd_;
+  const double alpha = dt / (speed_filter_tau_ + dt);
+  const double accel_limit = std::max(1e-3, translational_acc_limit_) * dt;
+  const double decel_limit = std::max(1e-3, translational_decel_limit_) * dt;
+
+  // 每个平移轴都做两步：
+  // 1. 先一阶低通，吸收目标速度的尖跳
+  // 2. 再做加减速限幅，保证每拍速度变化不会超过电机和机构更容易接受的范围
+  auto smooth_axis = [&](double current, double desired) {
+    const double blended = current + alpha * (desired - current);
+    const double delta = blended - current;
+    const double limit = std::abs(desired) < std::abs(current) ? decel_limit : accel_limit;
+    return current + std::clamp(delta, -limit, limit);
+  };
+
+  smoothed_cmd.linear.x = smooth_axis(filtered_cmd_.linear.x, desired_cmd.linear.x);
+  smoothed_cmd.linear.y = smooth_axis(filtered_cmd_.linear.y, desired_cmd.linear.y);
+  smoothed_cmd.angular.z = 0.0;
+
+  if (std::fabs(smoothed_cmd.linear.x) < 1e-3) {
+    smoothed_cmd.linear.x = 0.0;
+  }
+  if (std::fabs(smoothed_cmd.linear.y) < 1e-3) {
+    smoothed_cmd.linear.y = 0.0;
+  }
+
+  filtered_cmd_ = smoothed_cmd;
+  return smoothed_cmd;
+}
+
+void BackUpFreeSpace::resetExecutionState()
+{
+  filtered_cmd_ = geometry_msgs::msg::Twist {};
+  active_plan_ = EscapePlan();
+  execution_state_ = RecoveryExecutionState::PLANNING;
+  last_cycle_time_.reset();
+  last_replan_time_.reset();
+  blocked_cycles_ = 0;
+  clear_cycles_ = 0;
+  failed_replan_attempts_ = 0;
+  command_distance_abs_ = 0.0;
+  command_speed_abs_ = 0.0;
+}
+
+bool BackUpFreeSpace::replanFromCurrentPose(
+  const geometry_msgs::msg::PoseStamped & current_pose, double remaining_distance)
+{
+  nav2_msgs::msg::Costmap costmap;
+  if (!fetchCostmap(costmap)) {
+    return false;
+  }
+
+  // BLOCKED 后并不是立刻宣告失败，而是允许基于当前位置再次找一条更顺的恢复轨迹。
+  // 这样可以更好应对：
+  // 1. 动态障碍短时挡路
+  // 2. 膨胀层边界变化
+  // 3. 全向底盘当前已经略微侧移后的新局部几何关系
+  EscapePlan new_plan;
+  const auto pose_2d = poseToPose2D(current_pose);
+  if (!planEscapeTrajectory(costmap, pose_2d, remaining_distance, new_plan)) {
+    return false;
+  }
+
+  active_plan_ = new_plan;
+  plan_start_pose_ = current_pose;
+  previous_plan_heading_ = active_plan_.heading;
+  has_previous_plan_heading_ = true;
+  last_replan_time_ = clock_->now();
+  RCLCPP_INFO(
+    logger_,
+    "Recovery replanned: remaining=%.2f heading=%.2fdeg score=%.2f",
+    remaining_distance, active_plan_.heading * 180.0 / M_PI, active_plan_.score);
+  return true;
+}
+
+void BackUpFreeSpace::visualizePlan(
+  const geometry_msgs::msg::Pose2D & pose, const EscapePlan & plan)
+{
+  if (!visualize_ || !marker_pub_) {
+    return;
+  }
+
+  visualization_msgs::msg::MarkerArray markers;
+
+  visualization_msgs::msg::Marker path_marker;
+  path_marker.header.frame_id = global_frame_;
+  path_marker.header.stamp = clock_->now();
+  path_marker.ns = "back_up_free_space";
+  path_marker.id = 0;
+  path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  path_marker.action = visualization_msgs::msg::Marker::ADD;
+  path_marker.scale.x = 0.05;
+  path_marker.color.r = 0.15f;
+  path_marker.color.g = 1.0f;
+  path_marker.color.b = 0.25f;
+  path_marker.color.a = 0.95f;
+
+  geometry_msgs::msg::Point start;
+  start.x = pose.x;
+  start.y = pose.y;
+  start.z = 0.0;
+  path_marker.points.push_back(start);
+  for (const auto & point : plan.centerline) {
+    path_marker.points.push_back(point);
+  }
+  markers.markers.push_back(path_marker);
+
+  visualization_msgs::msg::Marker goal_marker;
+  goal_marker.header = path_marker.header;
+  goal_marker.ns = "back_up_free_space";
+  goal_marker.id = 1;
+  goal_marker.type = visualization_msgs::msg::Marker::SPHERE;
+  goal_marker.action = visualization_msgs::msg::Marker::ADD;
+  goal_marker.pose.position = plan.goal_point;
+  goal_marker.pose.orientation.w = 1.0;
+  goal_marker.scale.x = 0.18;
+  goal_marker.scale.y = 0.18;
+  goal_marker.scale.z = 0.18;
+  goal_marker.color.r = 0.95f;
+  goal_marker.color.g = 0.85f;
+  goal_marker.color.b = 0.15f;
+  goal_marker.color.a = 0.95f;
+  markers.markers.push_back(goal_marker);
 
   marker_pub_->publish(markers);
 }

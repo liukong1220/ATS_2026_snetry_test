@@ -730,6 +730,40 @@ behavior_server:
     max_radius: 2.0
     # 高于该 cost 的膨胀区不再被当作“可脱困方向”，防止恢复动作继续贴墙试探。
     max_allowed_cost: 96
+    # 以车尾为中心的搜索半角。增大后更愿意尝试斜后退/侧后退，更适合全向舵轮。
+    search_half_span_deg: 140.0
+    # 候选方向角分辨率。越小搜索越细致，但每次恢复规划计算量略增。
+    search_angle_increment_deg: 10.0
+    # 沿恢复轨迹前进方向的采样间距。减小后更严格，增大后更快但更粗糙。
+    trajectory_sample_step: 0.08
+    # 恢复轨迹走廊半宽，等价于给底盘留出的横向安全裕量。调大后更保守。
+    corridor_half_width: 0.22
+    # 走廊横向采样间距。越小越严谨，越大越省算力。
+    corridor_lateral_step: 0.08
+    # 对上一条恢复方向的“黏性”。调大后方向更稳，调小后更灵活但更容易左右抽动。
+    heading_stickiness_weight: 6.0
+    # 两次重规划之间的最短时间。调大后更稳，调小后更敏捷。
+    replanning_cooldown_s: 0.35
+    # 连续多少拍都检测到轨迹前缀被挡住，才真正进入 BLOCKED。
+    blocked_enter_cycles: 3
+    # 连续多少拍都重新畅通，才从 BLOCKED 退出，避免边界抖动。
+    clear_exit_cycles: 2
+    # 允许的最大重规划次数，超过后恢复动作失败，交还给上层恢复链。
+    max_replan_attempts: 6
+    # 一阶低通时间常数。增大后恢复更顺滑，但响应会变慢。
+    speed_filter_tau: 0.18
+    # 恢复阶段平移加速度上限。减小可进一步保护电机，但会更肉。
+    translational_acc_limit: 0.8
+    # 恢复阶段平移减速度上限。适当大于加速度上限，便于更干净地收尾。
+    translational_decel_limit: 1.2
+    # 恢复阶段最小平移速度，防止末段在静摩擦附近抖动。
+    minimum_speed_xy: 0.08
+    # 视为“已经恢复到位”的距离容差。
+    goal_tolerance: 0.04
+    # 前视检测长度。增大后更早预判障碍，减小后动作更激进。
+    monitor_lookahead_distance: 0.35
+    # 后向搜索失败时，是否放开到全方向搜索，优先确保能脱困。
+    enable_full_circle_fallback: true
     visualize: false
 
 waypoint_follower:

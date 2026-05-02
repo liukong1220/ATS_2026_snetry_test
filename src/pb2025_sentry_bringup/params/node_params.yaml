@@ -765,6 +765,40 @@ behavior_server:
     max_radius: 2.0
     # 高于该 cost 的膨胀区不再被当作“可脱困方向”，防止恢复动作继续贴墙试探。
     max_allowed_cost: 96
+    # 以车尾方向为中心搜索恢复轨迹。舵轮底盘建议保留较大的角域，充分利用斜后退能力。
+    search_half_span_deg: 140.0
+    # 候选方向搜索分辨率。
+    search_angle_increment_deg: 10.0
+    # 沿轨迹前进方向的纵向采样步长。
+    trajectory_sample_step: 0.08
+    # 轨迹走廊半宽，等价于给底盘侧向预留的安全带宽。
+    corridor_half_width: 0.22
+    # 轨迹走廊横向采样步长。
+    corridor_lateral_step: 0.08
+    # 恢复方向黏性权重，越大越不容易左右来回换方向。
+    heading_stickiness_weight: 6.0
+    # 恢复被挡住后，两次重规划之间的最短冷却时间。
+    replanning_cooldown_s: 0.35
+    # 连续阻挡判定阈值，形成进入 BLOCKED 的滞回。
+    blocked_enter_cycles: 3
+    # 连续畅通判定阈值，形成退出 BLOCKED 的滞回。
+    clear_exit_cycles: 2
+    # 恢复期间最多允许重规划多少次。
+    max_replan_attempts: 6
+    # 速度低通时间常数。大：更平滑；小：更灵敏。
+    speed_filter_tau: 0.18
+    # 平移加速度上限。
+    translational_acc_limit: 0.8
+    # 平移减速度上限。
+    translational_decel_limit: 1.2
+    # 最小恢复速度，避免在静摩擦区间来回抖动。
+    minimum_speed_xy: 0.08
+    # 到位容差。
+    goal_tolerance: 0.04
+    # 前向 lookahead 检测长度。
+    monitor_lookahead_distance: 0.35
+    # 若后向和侧后向都不行，允许全角域兜底搜索。
+    enable_full_circle_fallback: true
     visualize: false
 
 waypoint_follower:
