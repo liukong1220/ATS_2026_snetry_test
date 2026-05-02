@@ -751,6 +751,15 @@ behavior_server:
     # 若整条恢复目标不全通，允许至少释放这么长的安全段先走出去。
     # 太小会重新引入“碎步试探”；太大则可能放行机会太少。
     minimum_release_distance: 0.18
+    # 第二阶段：是否开启“动态障碍前沿简单速度预测”。
+    # 打开后会根据安全前缀长度变化趋势，提前判断恢复走廊是否将被动态障碍重新封堵。
+    dynamic_obstacle_prediction_enabled: true
+    # 安全前缀向前预测的时间窗。
+    prediction_horizon_s: 0.45
+    # 安全前缀速度估计的低通系数。大：更灵敏；小：更稳。
+    prefix_velocity_alpha: 0.35
+    # 预测判断时保留的安全余量，防止刚好卡在阈值边界反复切换。
+    predictive_block_margin: 0.10
     # 对上一条恢复方向的“黏性”。调大后方向更稳，调小后更灵活但更容易左右抽动。
     heading_stickiness_weight: 6.0
     # 两次重规划之间的最短时间。调大后更稳，调小后更敏捷。

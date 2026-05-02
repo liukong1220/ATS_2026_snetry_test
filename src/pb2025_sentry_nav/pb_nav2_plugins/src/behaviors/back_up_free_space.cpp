@@ -65,6 +65,14 @@ void BackUpFreeSpace::onConfigure()
   nav2_util::declare_parameter_if_not_declared(
     node, "minimum_release_distance", rclcpp::ParameterValue(0.18));
   nav2_util::declare_parameter_if_not_declared(
+    node, "dynamic_obstacle_prediction_enabled", rclcpp::ParameterValue(true));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "prediction_horizon_s", rclcpp::ParameterValue(0.45));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "prefix_velocity_alpha", rclcpp::ParameterValue(0.35));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "predictive_block_margin", rclcpp::ParameterValue(0.10));
+  nav2_util::declare_parameter_if_not_declared(
     node, "heading_stickiness_weight", rclcpp::ParameterValue(6.0));
   nav2_util::declare_parameter_if_not_declared(
     node, "replanning_cooldown_s", rclcpp::ParameterValue(0.35));
@@ -109,6 +117,11 @@ void BackUpFreeSpace::onConfigure()
   node->get_parameter("corridor_lateral_step", corridor_lateral_step_);
   node->get_parameter("far_corridor_lateral_step", far_corridor_lateral_step_);
   node->get_parameter("minimum_release_distance", minimum_release_distance_);
+  node->get_parameter(
+    "dynamic_obstacle_prediction_enabled", dynamic_obstacle_prediction_enabled_);
+  node->get_parameter("prediction_horizon_s", prediction_horizon_s_);
+  node->get_parameter("prefix_velocity_alpha", prefix_velocity_alpha_);
+  node->get_parameter("predictive_block_margin", predictive_block_margin_);
   node->get_parameter("heading_stickiness_weight", heading_stickiness_weight_);
   node->get_parameter("replanning_cooldown_s", replanning_cooldown_s_);
   node->get_parameter("blocked_enter_cycles", blocked_enter_cycles_);
@@ -159,6 +172,8 @@ nav2_behaviors::Status BackUpFreeSpace::onRun(
   end_time_ = clock_->now() + command_time_allowance_;
   plan_start_pose_ = initial_pose_;
   completed_distance_before_plan_ = 0.0;
+  last_safe_prefix_distance_.reset();
+  estimated_prefix_rate_ = 0.0;
   filtered_cmd_ = geometry_msgs::msg::Twist {};
   blocked_cycles_ = 0;
   clear_cycles_ = 0;
@@ -233,7 +248,37 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
   // 不再采用“移动一个很小步长后立刻判一次”的离散方式，
   // 而是对当前恢复轨迹前向一段 lookahead 做批量采样检测。
   // 这样既能更早发现动态遮挡，也能避免每拍都因为单个采样点抖动而切状态。
-  const bool trajectory_prefix_safe = isTrajectoryPrefixSafe(current_pose_2d, remaining_distance);
+  const double safe_prefix_distance = computeSafePrefixDistance(current_pose_2d, remaining_distance);
+  bool trajectory_prefix_safe = safe_prefix_distance >= std::min(monitor_lookahead_distance_, remaining_distance);
+
+  // 第二阶段优化：
+  // 不只看“当前这一拍前方还能不能走”，还估计这个安全前缀是否在快速缩短。
+  // 如果前沿正在以较快速度向机器人逼近，就说明多半是动态障碍重新挡住了恢复走廊，
+  // 这时提前进入 BLOCKED / 重规划，比等到真正碰上再急停更平滑。
+  if (last_safe_prefix_distance_ && dt > 1e-3) {
+    const double raw_prefix_rate = (safe_prefix_distance - *last_safe_prefix_distance_) / dt;
+    const double alpha = std::clamp(prefix_velocity_alpha_, 0.0, 1.0);
+    estimated_prefix_rate_ =
+      alpha * raw_prefix_rate + (1.0 - alpha) * estimated_prefix_rate_;
+  } else {
+    estimated_prefix_rate_ = 0.0;
+  }
+  last_safe_prefix_distance_ = safe_prefix_distance;
+
+  if (dynamic_obstacle_prediction_enabled_) {
+    const double predicted_safe_prefix =
+      safe_prefix_distance + estimated_prefix_rate_ * std::max(0.0, prediction_horizon_s_);
+    const double required_prefix =
+      std::min(monitor_lookahead_distance_, remaining_distance) - predictive_block_margin_;
+    if (predicted_safe_prefix < required_prefix) {
+      trajectory_prefix_safe = false;
+      RCLCPP_DEBUG_THROTTLE(
+        logger_, *clock_, 1000,
+        "Predictive recovery block: current_prefix=%.2f predicted_prefix=%.2f prefix_rate=%.2f required_prefix=%.2f",
+        safe_prefix_distance, predicted_safe_prefix, estimated_prefix_rate_, required_prefix);
+    }
+  }
+
   if (trajectory_prefix_safe) {
     clear_cycles_++;
     blocked_cycles_ = 0;
@@ -497,13 +542,21 @@ std::optional<unsigned char> BackUpFreeSpace::sampleCost(
 bool BackUpFreeSpace::isTrajectoryPrefixSafe(
   const geometry_msgs::msg::Pose2D & pose, double remaining_distance)
 {
+  const double safe_prefix_distance = computeSafePrefixDistance(pose, remaining_distance);
+  return safe_prefix_distance >= std::min(monitor_lookahead_distance_, remaining_distance);
+}
+
+double BackUpFreeSpace::computeSafePrefixDistance(
+  const geometry_msgs::msg::Pose2D & pose, double remaining_distance) const
+{
   if (!active_plan_.valid) {
-    return false;
+    return 0.0;
   }
 
   const double check_distance = std::min(monitor_lookahead_distance_, remaining_distance);
-  const double step = std::max(trajectory_sample_step_, 0.03);
+  const double step = std::max(near_sample_step_ > 0.0 ? near_sample_step_ : trajectory_sample_step_, 0.03);
   bool fetch_data = true;
+  double safe_prefix_distance = 0.0;
 
   // 这里只监控“当前轨迹前方一小段距离”的安全性，而不是整条剩余路径都重新扫一遍。
   // 原因：
@@ -514,12 +567,13 @@ bool BackUpFreeSpace::isTrajectoryPrefixSafe(
     sample_pose.x += s * std::cos(active_plan_.heading);
     sample_pose.y += s * std::sin(active_plan_.heading);
     if (!collision_checker_->isCollisionFree(sample_pose, fetch_data)) {
-      return false;
+      return safe_prefix_distance;
     }
     fetch_data = false;
+    safe_prefix_distance = s;
   }
 
-  return true;
+  return safe_prefix_distance;
 }
 
 double BackUpFreeSpace::computeSegmentProgress(const geometry_msgs::msg::Pose2D & pose) const
@@ -602,6 +656,8 @@ void BackUpFreeSpace::resetExecutionState()
   failed_replan_attempts_ = 0;
   command_distance_abs_ = 0.0;
   command_speed_abs_ = 0.0;
+  last_safe_prefix_distance_.reset();
+  estimated_prefix_rate_ = 0.0;
 }
 
 bool BackUpFreeSpace::replanFromCurrentPose(

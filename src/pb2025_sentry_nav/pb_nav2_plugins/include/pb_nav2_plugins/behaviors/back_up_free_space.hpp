@@ -98,6 +98,10 @@ protected:
   // 返回空表示超出地图范围，这类候选方向会直接判为不可用。
   std::optional<unsigned char> sampleCost(
     const nav2_msgs::msg::Costmap & costmap, double x, double y) const;
+  // 计算当前恢复轨迹前方还能安全通行多远。
+  // 这是第二阶段“动态障碍简单速度预测”的观测量基础。
+  double computeSafePrefixDistance(
+    const geometry_msgs::msg::Pose2D & pose, double remaining_distance) const;
   // 执行阶段对当前恢复轨迹的前缀做连续前视检测。
   // 这一步用于判断“当前轨迹前方一小段是否仍可走”，而不是只看眼前一个离散点。
   bool isTrajectoryPrefixSafe(const geometry_msgs::msg::Pose2D & pose, double remaining_distance);
@@ -129,9 +133,11 @@ protected:
   RecoveryExecutionState execution_state_ = RecoveryExecutionState::PLANNING;
   std::optional<rclcpp::Time> last_cycle_time_;
   std::optional<rclcpp::Time> last_replan_time_;
+  std::optional<double> last_safe_prefix_distance_;
   double command_distance_abs_ = 0.0;
   double command_speed_abs_ = 0.0;
   double completed_distance_before_plan_ = 0.0;
+  double estimated_prefix_rate_ = 0.0;
   int blocked_cycles_ = 0;
   int clear_cycles_ = 0;
   int failed_replan_attempts_ = 0;
@@ -153,6 +159,10 @@ protected:
   double corridor_lateral_step_;      // 近距离走廊横向采样间距。小：更严谨；大：更快。
   double far_corridor_lateral_step_;  // 远距离走廊横向采样间距。可适当更粗，节省算力。
   double minimum_release_distance_;   // 允许“分段放行”的最短安全段长度。太小会导致原地碎步抖动。
+  bool dynamic_obstacle_prediction_enabled_;  // 是否开启第二阶段的动态障碍前沿速度预测。
+  double prediction_horizon_s_;               // 预测时间窗。大：更早预判；小：更保守。
+  double prefix_velocity_alpha_;              // 前沿速度估计低通系数。大：更灵敏；小：更稳。
+  double predictive_block_margin_;            // 预测后仍需保留的最小安全前缀余量。
   double heading_stickiness_weight_;  // 对上一条恢复方向的黏性权重。大：更稳；小：更灵活。
   double replanning_cooldown_s_;      // 两次重规划之间的最短间隔，防止每拍重规划。
   int blocked_enter_cycles_;          // 连续多少拍阻挡才进入 BLOCKED，形成进入滞回。

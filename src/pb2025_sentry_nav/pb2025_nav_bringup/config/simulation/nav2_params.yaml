@@ -657,6 +657,10 @@ behavior_server:
     corridor_lateral_step: 0.08
     far_corridor_lateral_step: 0.12
     minimum_release_distance: 0.18
+    dynamic_obstacle_prediction_enabled: true
+    prediction_horizon_s: 0.45
+    prefix_velocity_alpha: 0.35
+    predictive_block_margin: 0.10
     heading_stickiness_weight: 6.0
     replanning_cooldown_s: 0.35
     blocked_enter_cycles: 3

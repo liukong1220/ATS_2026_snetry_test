@@ -785,6 +785,14 @@ behavior_server:
     far_corridor_lateral_step: 0.12
     # 分段放行时允许释放的最短安全段长度。
     minimum_release_distance: 0.18
+    # 第二阶段：是否开启动态障碍简单速度预测。
+    dynamic_obstacle_prediction_enabled: true
+    # 恢复走廊安全前缀的预测时间窗。
+    prediction_horizon_s: 0.45
+    # 安全前缀变化速度估计的低通系数。
+    prefix_velocity_alpha: 0.35
+    # 预测判定时的安全裕量，避免刚到阈值就反复切换。
+    predictive_block_margin: 0.10
     # 恢复方向黏性权重，越大越不容易左右来回换方向。
     heading_stickiness_weight: 6.0
     # 恢复被挡住后，两次重规划之间的最短冷却时间。
