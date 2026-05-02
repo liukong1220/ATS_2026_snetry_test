@@ -128,10 +128,10 @@ pb2025_sentry_behavior_server:
         # 2. defend_exit_hp >= defend_enter_hp + 20
         # 3. resupply_exit_hp >= resupply_enter_hp + 20
         # 4. resupply_exit_ammo >= resupply_enter_ammo + 20
-        defend_enter_hp: 100
-        defend_exit_hp: 150
-        resupply_enter_hp: 250
-        resupply_exit_hp: 300
+        defend_enter_hp: 250
+        defend_exit_hp: 300
+        resupply_enter_hp: 100
+        resupply_exit_hp: 400
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100
 

@@ -277,11 +277,15 @@ void PublishRobotModeAction::publishModeVisualization(uint8_t active_mode)
 
   visualization_msgs::msg::Marker text_marker;
   text_marker.header.frame_id = "base_link";
-  text_marker.header.stamp = node_->now();
+  // 对实车 TF 来说，marker 使用“当前时刻”时间戳容易比 map->base_link
+  // 这条变换更靠前一点，RViz 会因此报 fixed frame 下无法变换。
+  // 这里将 stamp 置零，显式要求 RViz 使用最新可用 TF。
+  text_marker.header.stamp = builtin_interfaces::msg::Time();
   text_marker.ns = "robot_mode";
   text_marker.id = 0;
   text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
   text_marker.action = visualization_msgs::msg::Marker::ADD;
+  text_marker.frame_locked = true;
   text_marker.pose.position.x = 0.0;
   text_marker.pose.position.y = 0.0;
   text_marker.pose.position.z = 1.6;
@@ -296,6 +300,7 @@ void PublishRobotModeAction::publishModeVisualization(uint8_t active_mode)
   panel_marker.id = 1;
   panel_marker.type = visualization_msgs::msg::Marker::CUBE;
   panel_marker.action = visualization_msgs::msg::Marker::ADD;
+  panel_marker.frame_locked = true;
   panel_marker.pose.position.x = 0.0;
   panel_marker.pose.position.y = 0.0;
   panel_marker.pose.position.z = 1.3;
