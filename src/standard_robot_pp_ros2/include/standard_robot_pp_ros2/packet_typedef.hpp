@@ -366,14 +366,14 @@ struct SendRobotCmdData
       float wz;
       bool stop;
       // 上层行为树下发给下位机的姿态模式：
-      // 0=Move，1=Attack，2=Defend。
+      // 1=Attack，2=Defend，3=Move（默认）。该字段会直接写入协议数据段，发送给下位机。
       // 该字段由 standard_robot_pp_ros2 订阅 decision/robot_mode 后写入。
       // 如果后续新增第四种姿态，这里的枚举、上层行为树和文档必须同步修改。
       enum mode
       {
-        Move = 0,
         Attack = 1,
         Defend = 2,
+        Move = 3,
       } mode;
     } __attribute__((packed)) speed_vector;
 

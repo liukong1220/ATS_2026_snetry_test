@@ -200,6 +200,11 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
 {
   auto vision_target = getInput<sp_msgs::msg::VisionTargetMsg>("key_port");
   if (!vision_target) {
+    if (keepCachedPathIfAllowed("vision target is unavailable on blackboard") ==
+      BT::NodeStatus::SUCCESS)
+    {
+      return BT::NodeStatus::SUCCESS;
+    }
     resetCachedPath();
     clearVisualization();
     RCLCPP_DEBUG(logger_, "SelectVisionFollowPath did not receive a vision target");
@@ -246,6 +251,11 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
         logger_, *node_->get_clock(), 2000,
         "Vision target transform failed, reuse cached vision path in frame '%s'",
         planning_frame.c_str());
+      return BT::NodeStatus::SUCCESS;
+    }
+    if (keepCachedPathIfAllowed("vision target point is invalid or not transformable") ==
+      BT::NodeStatus::SUCCESS)
+    {
       return BT::NodeStatus::SUCCESS;
     }
     resetCachedPath();
@@ -498,6 +508,26 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
 
   setOutput("path", path);
   return BT::NodeStatus::SUCCESS;
+}
+
+BT::NodeStatus SelectVisionFollowPathAction::keepCachedPathIfAllowed(const char * reason)
+{
+  double override_hold_s = 0.0;
+  node_->get_parameter("decision.vision.override_hold_s", override_hold_s);
+
+  if (
+    override_hold_s > 0.0 && has_cached_path_ && last_plan_time_ && !last_path_.poses.empty() &&
+    (node_->now() - *last_plan_time_).seconds() <= override_hold_s)
+  {
+    setOutput("path", last_path_);
+    RCLCPP_DEBUG_THROTTLE(
+      logger_, *node_->get_clock(), 1000,
+      "Keep cached vision-follow path for %.2fs after transient invalid sample: %s",
+      override_hold_s, reason);
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  return BT::NodeStatus::FAILURE;
 }
 
 std::string SelectVisionFollowPathAction::resolvePlanningFrame(

@@ -24,6 +24,7 @@ public:
 private:
   BT::NodeStatus tickCondition();
   void resetVisionLatchState();
+  BT::NodeStatus keepLatchedTargetIfAllowed(const char * reason);
   BT::NodeStatus failWithReason(const char * reason);
 
   rclcpp::Node::SharedPtr node_;

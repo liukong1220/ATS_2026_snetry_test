@@ -31,6 +31,7 @@ private:
   std::optional<geometry_msgs::msg::PoseStamped> lookupCurrentPoseFromTf(
     const std::string & target_frame) const;
   BT::NodeStatus tick() override;
+  BT::NodeStatus keepCachedPathIfAllowed(const char * reason);
   // 解析本次视觉跟随规划应使用的坐标系：
   // 优先 costmap frame，其次决策位姿 frame，最后退回视觉目标 map frame / map。
   std::string resolvePlanningFrame(

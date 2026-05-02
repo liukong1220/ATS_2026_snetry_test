@@ -29,8 +29,31 @@ void IsVisionTargetValidCondition::resetVisionLatchState()
   pending_target_id_ = -1;
 }
 
+BT::NodeStatus IsVisionTargetValidCondition::keepLatchedTargetIfAllowed(const char * reason)
+{
+  if (
+    override_hold_s_ > 0.0 && has_latched_target_ && hold_until_ &&
+    node_->now() <= *hold_until_)
+  {
+    setOutput("gimbal_yaw", last_gimbal_yaw_);
+    setOutput("gimbal_pitch", last_gimbal_pitch_);
+    setOutput("target_id", last_target_id_);
+    RCLCPP_DEBUG_THROTTLE(
+      logger_, *node_->get_clock(), 1000,
+      "Keep vision override latched for %.2fs after transient invalid sample: %s",
+      override_hold_s_, reason);
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  return BT::NodeStatus::FAILURE;
+}
+
 BT::NodeStatus IsVisionTargetValidCondition::failWithReason(const char * reason)
 {
+  if (keepLatchedTargetIfAllowed(reason) == BT::NodeStatus::SUCCESS) {
+    return BT::NodeStatus::SUCCESS;
+  }
+
   RCLCPP_INFO_THROTTLE(
     logger_, *node_->get_clock(), 2000, "Vision override rejected: %s", reason);
   resetVisionLatchState();
