@@ -40,10 +40,6 @@ rclcpp_components_register_node(${PROJECT_NAME}
   PLUGIN standard_robot_pp_ros2::GimbalManagerNode
   EXECUTABLE gimbal_manager_node
 )
-rclcpp_components_register_node(${PROJECT_NAME}
-  PLUGIN standard_robot_pp_ros2::RobotDecisionNode
-  EXECUTABLE robot_decision_node
-)
 
 
 #############

@@ -116,18 +116,6 @@ def generate_launch_description():
                     "log_level": log_level,
                 }.items(),
             ),
-            # 在GroupAction的actions列表中添加新节点
-            # Node(
-            #     package="standard_robot_pp_ros2",
-            #     executable="robot_decision_node",  # 对应构造函数中的节点名称
-            #     name="robot_decision",
-            #     output="screen",
-            #     condition=IfCondition(launch_robot_decision),
-            #     respawn=use_respawn,
-            #     respawn_delay=2.0,
-            #     parameters=[configured_params],
-            #     arguments=["--ros-args", "--log-level", log_level],
-            # ),
             Node(
                 package="standard_robot_pp_ros2",
                 executable="standard_robot_pp_ros2_node",

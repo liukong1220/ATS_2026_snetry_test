@@ -51,9 +51,19 @@ void BackUpFreeSpace::onConfigure()
   nav2_util::declare_parameter_if_not_declared(
     node, "trajectory_sample_step", rclcpp::ParameterValue(0.08));
   nav2_util::declare_parameter_if_not_declared(
+    node, "near_sample_step", rclcpp::ParameterValue(0.05));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "far_sample_step", rclcpp::ParameterValue(0.10));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "layered_sampling_split_distance", rclcpp::ParameterValue(0.45));
+  nav2_util::declare_parameter_if_not_declared(
     node, "corridor_half_width", rclcpp::ParameterValue(0.22));
   nav2_util::declare_parameter_if_not_declared(
     node, "corridor_lateral_step", rclcpp::ParameterValue(0.08));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "far_corridor_lateral_step", rclcpp::ParameterValue(0.12));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "minimum_release_distance", rclcpp::ParameterValue(0.18));
   nav2_util::declare_parameter_if_not_declared(
     node, "heading_stickiness_weight", rclcpp::ParameterValue(6.0));
   nav2_util::declare_parameter_if_not_declared(
@@ -92,8 +102,13 @@ void BackUpFreeSpace::onConfigure()
   node->get_parameter("search_half_span_deg", search_half_span_deg_);
   node->get_parameter("search_angle_increment_deg", search_angle_increment_deg_);
   node->get_parameter("trajectory_sample_step", trajectory_sample_step_);
+  node->get_parameter("near_sample_step", near_sample_step_);
+  node->get_parameter("far_sample_step", far_sample_step_);
+  node->get_parameter("layered_sampling_split_distance", layered_sampling_split_distance_);
   node->get_parameter("corridor_half_width", corridor_half_width_);
   node->get_parameter("corridor_lateral_step", corridor_lateral_step_);
+  node->get_parameter("far_corridor_lateral_step", far_corridor_lateral_step_);
+  node->get_parameter("minimum_release_distance", minimum_release_distance_);
   node->get_parameter("heading_stickiness_weight", heading_stickiness_weight_);
   node->get_parameter("replanning_cooldown_s", replanning_cooldown_s_);
   node->get_parameter("blocked_enter_cycles", blocked_enter_cycles_);
@@ -143,6 +158,7 @@ nav2_behaviors::Status BackUpFreeSpace::onRun(
   command_time_allowance_ = command->time_allowance;
   end_time_ = clock_->now() + command_time_allowance_;
   plan_start_pose_ = initial_pose_;
+  completed_distance_before_plan_ = 0.0;
   filtered_cmd_ = geometry_msgs::msg::Twist {};
   blocked_cycles_ = 0;
   clear_cycles_ = 0;
@@ -201,10 +217,11 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
   last_cycle_time_ = now;
 
   const auto current_pose_2d = poseToPose2D(current_pose);
-  const double distance = computeProgressAlongPlan(current_pose_2d);
-  const double remaining_distance = std::max(0.0, active_plan_.distance - distance);
+  const double segment_progress = computeSegmentProgress(current_pose_2d);
+  const double total_distance_traveled = completed_distance_before_plan_ + segment_progress;
+  const double remaining_distance = std::max(0.0, command_distance_abs_ - total_distance_traveled);
 
-  feedback_->distance_traveled = distance;
+  feedback_->distance_traveled = total_distance_traveled;
   action_server_->publish_feedback(feedback_);
 
   if (remaining_distance <= goal_tolerance_) {
@@ -252,7 +269,7 @@ nav2_behaviors::Status BackUpFreeSpace::onCycleUpdate()
     // 关键优化 2：
     // 使用“连续阻塞计数 + 重规划冷却时间”形成状态滞回，
     // 避免 normal / avoid / recovery 在障碍边界附近每拍反复横跳。
-    if (replanFromCurrentPose(current_pose, remaining_distance)) {
+    if (replanFromCurrentPose(current_pose, remaining_distance, total_distance_traveled)) {
       blocked_cycles_ = 0;
       clear_cycles_ = 0;
       failed_replan_attempts_ = 0;
@@ -373,23 +390,32 @@ bool BackUpFreeSpace::evaluateCandidateTrajectory(
   candidate.score = std::numeric_limits<double>::infinity();
 
   const double resolution = static_cast<double>(costmap.metadata.resolution);
-  const double sample_step = std::max(trajectory_sample_step_, resolution);
-  const double lateral_step = std::max(corridor_lateral_step_, resolution);
+  const double near_sample_step = std::max(
+    near_sample_step_ > 0.0 ? near_sample_step_ : trajectory_sample_step_, resolution);
+  const double far_sample_step = std::max(
+    far_sample_step_ > 0.0 ? far_sample_step_ : trajectory_sample_step_, near_sample_step);
+  const double split_distance = std::max(layered_sampling_split_distance_, near_sample_step);
+  const double near_lateral_step = std::max(corridor_lateral_step_, resolution);
+  const double far_lateral_step = std::max(far_corridor_lateral_step_, near_lateral_step);
   const double nx = -std::sin(heading);
   const double ny = std::cos(heading);
   double accumulated_cost = 0.0;
   int sampled_cells = 0;
+  double safe_distance = 0.0;
 
   // 对每个候选方向，不是只检查一条“中心线”，
   // 而是构造一条带宽度的恢复走廊并做批量采样。
   // 这能显著减少因为单格点抖动引起的“能走/不能走”来回切换。
-  for (double s = sample_step; s <= target_distance + 1e-6; s += sample_step) {
+  for (double s = near_sample_step; s <= target_distance + 1e-6;) {
+    const bool use_near_sampling = s <= split_distance;
+    const double sample_step = use_near_sampling ? near_sample_step : far_sample_step;
+    const double lateral_step = use_near_sampling ? near_lateral_step : far_lateral_step;
     geometry_msgs::msg::Point center_point;
     center_point.x = pose.x + s * std::cos(heading);
     center_point.y = pose.y + s * std::sin(heading);
     center_point.z = 0.0;
-    candidate.centerline.push_back(center_point);
 
+    bool current_ring_safe = true;
     for (
       double offset = -corridor_half_width_; offset <= corridor_half_width_ + 1e-6;
       offset += lateral_step)
@@ -398,20 +424,35 @@ bool BackUpFreeSpace::evaluateCandidateTrajectory(
       const double sample_y = center_point.y + ny * offset;
       const auto cost = sampleCost(costmap, sample_x, sample_y);
       if (!cost.has_value()) {
-        return false;
+        current_ring_safe = false;
+        break;
       }
       if (*cost >= kInscribedObstacleCost || static_cast<int>(*cost) > max_allowed_cost_) {
-        return false;
+        current_ring_safe = false;
+        break;
       }
       accumulated_cost += static_cast<double>(*cost);
       sampled_cells++;
     }
+
+    if (!current_ring_safe) {
+      break;
+    }
+
+    candidate.centerline.push_back(center_point);
+    safe_distance = s;
+    s += sample_step;
   }
 
-  if (candidate.centerline.empty() || sampled_cells == 0) {
+  if (safe_distance < minimum_release_distance_ || candidate.centerline.empty() || sampled_cells == 0) {
     return false;
   }
 
+  // 第一阶段优化：分段放行
+  // 如果整条恢复目标距离不全通，不直接判整条轨迹失败，
+  // 而是允许先释放当前连续可通的最远安全段。
+  // 这样可以避免底盘“明明前面 30cm 是安全的，却因为 80cm 外有障碍就原地卡死”。
+  candidate.distance = std::min(target_distance, safe_distance);
   candidate.goal_point = candidate.centerline.back();
   candidate.valid = true;
 
@@ -481,7 +522,7 @@ bool BackUpFreeSpace::isTrajectoryPrefixSafe(
   return true;
 }
 
-double BackUpFreeSpace::computeProgressAlongPlan(const geometry_msgs::msg::Pose2D & pose) const
+double BackUpFreeSpace::computeSegmentProgress(const geometry_msgs::msg::Pose2D & pose) const
 {
   if (!active_plan_.valid) {
     return 0.0;
@@ -564,7 +605,8 @@ void BackUpFreeSpace::resetExecutionState()
 }
 
 bool BackUpFreeSpace::replanFromCurrentPose(
-  const geometry_msgs::msg::PoseStamped & current_pose, double remaining_distance)
+  const geometry_msgs::msg::PoseStamped & current_pose, double remaining_total_distance,
+  double total_distance_traveled)
 {
   nav2_msgs::msg::Costmap costmap;
   if (!fetchCostmap(costmap)) {
@@ -578,19 +620,21 @@ bool BackUpFreeSpace::replanFromCurrentPose(
   // 3. 全向底盘当前已经略微侧移后的新局部几何关系
   EscapePlan new_plan;
   const auto pose_2d = poseToPose2D(current_pose);
-  if (!planEscapeTrajectory(costmap, pose_2d, remaining_distance, new_plan)) {
+  if (!planEscapeTrajectory(costmap, pose_2d, remaining_total_distance, new_plan)) {
     return false;
   }
 
   active_plan_ = new_plan;
   plan_start_pose_ = current_pose;
+  completed_distance_before_plan_ = total_distance_traveled;
   previous_plan_heading_ = active_plan_.heading;
   has_previous_plan_heading_ = true;
   last_replan_time_ = clock_->now();
   RCLCPP_INFO(
     logger_,
-    "Recovery replanned: remaining=%.2f heading=%.2fdeg score=%.2f",
-    remaining_distance, active_plan_.heading * 180.0 / M_PI, active_plan_.score);
+    "Recovery replanned: remaining_total=%.2f released_segment=%.2f heading=%.2fdeg score=%.2f",
+    remaining_total_distance, active_plan_.distance,
+    active_plan_.heading * 180.0 / M_PI, active_plan_.score);
   return true;
 }
 

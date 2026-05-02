@@ -769,12 +769,22 @@ behavior_server:
     search_half_span_deg: 140.0
     # 候选方向搜索分辨率。
     search_angle_increment_deg: 10.0
-    # 沿轨迹前进方向的纵向采样步长。
+    # 兼容旧配置：若不单配近/远采样，则退回使用这个统一步长。
     trajectory_sample_step: 0.08
+    # 近距离密采样，用于更严格地保护底盘周边安全。
+    near_sample_step: 0.05
+    # 远距离疏采样，用于减少恢复规划算力开销。
+    far_sample_step: 0.10
+    # 近/远分层采样切换距离。
+    layered_sampling_split_distance: 0.45
     # 轨迹走廊半宽，等价于给底盘侧向预留的安全带宽。
     corridor_half_width: 0.22
     # 轨迹走廊横向采样步长。
     corridor_lateral_step: 0.08
+    # 远距离走廊横向采样步长，可比近距离更粗。
+    far_corridor_lateral_step: 0.12
+    # 分段放行时允许释放的最短安全段长度。
+    minimum_release_distance: 0.18
     # 恢复方向黏性权重，越大越不容易左右来回换方向。
     heading_stickiness_weight: 6.0
     # 恢复被挡住后，两次重规划之间的最短冷却时间。

@@ -650,8 +650,13 @@ behavior_server:
     search_half_span_deg: 140.0
     search_angle_increment_deg: 10.0
     trajectory_sample_step: 0.08
+    near_sample_step: 0.05
+    far_sample_step: 0.10
+    layered_sampling_split_distance: 0.45
     corridor_half_width: 0.22
     corridor_lateral_step: 0.08
+    far_corridor_lateral_step: 0.12
+    minimum_release_distance: 0.18
     heading_stickiness_weight: 6.0
     replanning_cooldown_s: 0.35
     blocked_enter_cycles: 3

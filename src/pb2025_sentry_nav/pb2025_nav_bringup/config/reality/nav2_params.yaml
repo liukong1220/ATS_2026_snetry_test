@@ -734,12 +734,23 @@ behavior_server:
     search_half_span_deg: 140.0
     # 候选方向角分辨率。越小搜索越细致，但每次恢复规划计算量略增。
     search_angle_increment_deg: 10.0
-    # 沿恢复轨迹前进方向的采样间距。减小后更严格，增大后更快但更粗糙。
+    # 兼容旧参数：若不单独配置近/远采样，则用它作为统一纵向采样间距。
     trajectory_sample_step: 0.08
+    # 第一阶段优化：近距离密采样、远距离疏采样。
+    # 近距离更密，优先保证底盘身边安全；远距离更疏，降低算力。
+    near_sample_step: 0.05
+    far_sample_step: 0.10
+    # 近采样和远采样的切换距离。
+    layered_sampling_split_distance: 0.45
     # 恢复轨迹走廊半宽，等价于给底盘留出的横向安全裕量。调大后更保守。
     corridor_half_width: 0.22
-    # 走廊横向采样间距。越小越严谨，越大越省算力。
+    # 近距离走廊横向采样间距。越小越严谨，越大越省算力。
     corridor_lateral_step: 0.08
+    # 远距离走廊横向采样可适当更稀疏，进一步减少计算量。
+    far_corridor_lateral_step: 0.12
+    # 若整条恢复目标不全通，允许至少释放这么长的安全段先走出去。
+    # 太小会重新引入“碎步试探”；太大则可能放行机会太少。
+    minimum_release_distance: 0.18
     # 对上一条恢复方向的“黏性”。调大后方向更稳，调小后更灵活但更容易左右抽动。
     heading_stickiness_weight: 6.0
     # 两次重规划之间的最短时间。调大后更稳，调小后更敏捷。

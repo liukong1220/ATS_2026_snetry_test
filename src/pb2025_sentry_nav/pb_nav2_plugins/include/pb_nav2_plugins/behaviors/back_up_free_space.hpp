@@ -101,9 +101,9 @@ protected:
   // 执行阶段对当前恢复轨迹的前缀做连续前视检测。
   // 这一步用于判断“当前轨迹前方一小段是否仍可走”，而不是只看眼前一个离散点。
   bool isTrajectoryPrefixSafe(const geometry_msgs::msg::Pose2D & pose, double remaining_distance);
-  // 计算机器人当前已经沿恢复主方向走了多远。
+  // 计算机器人当前已经沿当前恢复主方向走了多远。
   // 这里使用对恢复方向的投影距离，而不是简单欧式距离，避免全向侧移时进度判断失真。
-  double computeProgressAlongPlan(const geometry_msgs::msg::Pose2D & pose) const;
+  double computeSegmentProgress(const geometry_msgs::msg::Pose2D & pose) const;
   // 根据剩余距离构造期望速度。
   // 会结合制动距离自动减速，避免冲过恢复终点。
   geometry_msgs::msg::Twist buildDesiredCommand(double remaining_distance) const;
@@ -115,7 +115,8 @@ protected:
   void resetExecutionState();
   // 当前轨迹被连续阻挡后，从机器人当前位置重新规划恢复轨迹。
   bool replanFromCurrentPose(
-    const geometry_msgs::msg::PoseStamped & current_pose, double remaining_distance);
+    const geometry_msgs::msg::PoseStamped & current_pose, double remaining_total_distance,
+    double total_distance_traveled);
   // 发布恢复轨迹可视化，便于在 RViz 中观察恢复方向和终点。
   void visualizePlan(const geometry_msgs::msg::Pose2D & pose, const EscapePlan & plan);
 
@@ -130,6 +131,7 @@ protected:
   std::optional<rclcpp::Time> last_replan_time_;
   double command_distance_abs_ = 0.0;
   double command_speed_abs_ = 0.0;
+  double completed_distance_before_plan_ = 0.0;
   int blocked_cycles_ = 0;
   int clear_cycles_ = 0;
   int failed_replan_attempts_ = 0;
@@ -143,9 +145,14 @@ protected:
   bool visualize_;                    // 是否发布恢复轨迹 marker。
   double search_half_span_deg_;       // 以车尾为中心的搜索半角。大：可尝试更侧向的退让。
   double search_angle_increment_deg_; // 候选方向角分辨率。小：更细致；大：计算更省。
-  double trajectory_sample_step_;     // 沿恢复轨迹前进方向的采样间距。小：检测更细；大：更快。
+  double trajectory_sample_step_;     // 兼容旧参数：若未分层配置，则作为默认采样间距。
+  double near_sample_step_;           // 近距离纵向采样步长。近处更密，有利于防止贴近障碍时漏检。
+  double far_sample_step_;            // 远距离纵向采样步长。远处更疏，节约算力。
+  double layered_sampling_split_distance_;  // 近/远分层采样切换距离。
   double corridor_half_width_;        // 恢复轨迹走廊半宽，近似代表底盘横向占用和安全裕量。
-  double corridor_lateral_step_;      // 走廊横向采样间距。小：更严谨；大：更快。
+  double corridor_lateral_step_;      // 近距离走廊横向采样间距。小：更严谨；大：更快。
+  double far_corridor_lateral_step_;  // 远距离走廊横向采样间距。可适当更粗，节省算力。
+  double minimum_release_distance_;   // 允许“分段放行”的最短安全段长度。太小会导致原地碎步抖动。
   double heading_stickiness_weight_;  // 对上一条恢复方向的黏性权重。大：更稳；小：更灵活。
   double replanning_cooldown_s_;      // 两次重规划之间的最短间隔，防止每拍重规划。
   int blocked_enter_cycles_;          // 连续多少拍阻挡才进入 BLOCKED，形成进入滞回。
