@@ -8,6 +8,8 @@ PID_FILE="$WORKSPACE_DIR/.ros/mapping_sh.pid"
 MAP_OUTPUT_PREFIX="$WORKSPACE_DIR/src/pb2025_sentry_bringup/map/$MAP_NAME"
 PCD_OUTPUT_FILE="$WORKSPACE_DIR/src/pb2025_sentry_bringup/pcd/$MAP_NAME.pcd"
 PCD_GLOB="$WORKSPACE_DIR/src/pb2025_sentry_nav/point_lio/PCD/scans_*.pcd"
+PCD_WAIT_TIMEOUT="${PCD_WAIT_TIMEOUT:-5}"
+PCD_WAIT_INTERVAL="${PCD_WAIT_INTERVAL:-1}"
 STOP_REQUESTED=0
 
 export ROS_HOME="$WORKSPACE_DIR/.ros"
@@ -88,6 +90,25 @@ copy_latest_pcd() {
   echo "最新 PCD 已复制: $latest_pcd -> $PCD_OUTPUT_FILE"
 }
 
+wait_for_latest_pcd() {
+  local waited=0
+  local latest_pcd
+
+  while (( waited < PCD_WAIT_TIMEOUT )); do
+    latest_pcd="$(ls -t $PCD_GLOB 2>/dev/null | head -n 1)"
+    if [[ -n "$latest_pcd" ]]; then
+      echo "检测到最新 PCD: $latest_pcd"
+      return 0
+    fi
+
+    sleep "$PCD_WAIT_INTERVAL"
+    waited=$(( waited + PCD_WAIT_INTERVAL ))
+  done
+
+  echo "等待 $PCD_WAIT_TIMEOUT 秒后仍未检测到 PCD 文件"
+  return 1
+}
+
 stop_launch() {
   local pid
 
@@ -128,6 +149,7 @@ handle_shutdown() {
   stop_launch || true
 
   if confirm_yes "是否复制最新 PCD 为地图同名文件"; then
+    wait_for_latest_pcd || true
     copy_latest_pcd || true
   fi
 

@@ -1,15 +1,75 @@
 # ATS 2026 哨兵机器人工程优化路线图
 
-> 基于全工程代码分析，针对轨迹优化、点云匹配重定位、视觉-导航融合等方向的系统性优化方案
+> 基于全工程代码分析，结合当前已经实际落地的恢复链优化，重构后的工程优化路线图。
+>
+> 这份文档的目标不是一次性把所有方向都推进，而是明确：
+>
+> 1. 哪些方向适合当前阶段继续做
+> 2. 哪些方向值得后续排队推进
+> 3. 哪些方向当前不建议立即投入，但保留细节供未来参考
 
-> 当前对话已实际落地完成：
->
-> - 阶段 1：恢复轨迹分层采样 + 分段放行
-> - 阶段 2：恢复执行中的动态障碍简单速度预测
->
-> 相关实现与细节文档见：
->
-> - [omni_recovery_smoothing_optimization.md](./omni_recovery_smoothing_optimization.md)
+---
+
+## 0. 当前结论
+
+### 0.1 已完成并验证通过的优化
+
+当前已经实际完成并通过完整 `./build.sh` 编译验证的内容：
+
+1. 恢复链平滑化基础重构
+   - 恢复轨迹规划替代逐小步试探
+   - 一阶低通 + 加减速限幅
+   - 恢复内部状态滞回
+2. 第一阶段
+   - 轨迹走廊分层采样
+   - 分段放行
+3. 第二阶段
+   - 动态障碍简单速度预测
+
+详细实现说明见：
+
+- [omni_recovery_smoothing_optimization.md](./omni_recovery_smoothing_optimization.md)
+
+### 0.2 现阶段适合继续做的方向
+
+按当前工程状态和上车收益排序，建议优先级如下：
+
+1. 视觉-导航融合优化
+   - 视觉目标预测与插值
+   - 攻击圆采样优化
+2. 恢复链第三阶段
+   - 圆弧 / 样条恢复轨迹
+3. 局部层动态障碍预测扩展
+   - 把当前恢复前缀预测扩展到局部参考轨迹层
+4. MPPI 精细调优
+   - 在恢复链明显稳定后再做
+
+### 0.3 当前不建议立即投入的大项
+
+下面这些方向不是没有价值，而是当前阶段不建议优先做：
+
+1. 多分辨率点云地图
+2. 增量式地图更新
+3. 基于特征的快速重定位
+4. 端到端延迟补偿
+5. 大范围全局规划器替换
+
+原因：
+
+1. 工程改动面大
+2. 验证链更长
+3. 对当前“上车即可见效”的帮助不如恢复链和视觉-局部融合直接
+
+### 0.4 这份路线图的阅读方式
+
+从现在开始，本文中的条目分成三类：
+
+1. `A 类：现阶段适合继续做`
+   - 建议直接进入开发队列
+2. `B 类：后续可取，建议保留`
+   - 先保留详细方案，等当前阶段稳定后再推进
+3. `C 类：当前暂不建议立即投入`
+   - 仅保留思路和细节，不作为最近几轮对话的主任务
 
 ---
 
@@ -17,7 +77,7 @@
 
 ### 1.1 系统架构
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           决策层 (pb2025_sentry_behavior)                    │
 │  行为树 rmul_2026.xml                                                       │
@@ -44,7 +104,7 @@
 
 ### 1.2 核心数据流
 
-```
+```text
 Livox Mid-360 → livox_ros_driver2 → Point-LIO → loam_interface
     → sensor_scan_generation → terrain_analysis → IntensityVoxelLayer → Nav2
     → fake_vel_transform → standard_robot_pp_ros2 → 串口 → 底盘
@@ -55,6 +115,17 @@ sp_vision25 → vision/target → pb2025_sentry_behavior → SendNavThroughPoses
 ---
 
 ## 二、轨迹优化方案
+
+> 分类结论：
+>
+> - `A 类：现阶段适合继续做`
+>   - MPPI 参数精细化调优
+>   - 轨迹预测可视化增强
+> - `B 类：后续可取`
+>   - 全局路径平滑改进
+>   - 速度规划优化
+> - `C 类：当前暂不建议立即投入`
+>   - 从全局规划器层大改轨迹生成逻辑
 
 ### 2.1 当前状态分析
 
@@ -75,6 +146,8 @@ sp_vision25 → vision/target → pb2025_sentry_behavior → SendNavThroughPoses
 
 #### 2.2.1 MPPI参数精细化调优
 
+类别：`A 类：现阶段适合继续做`
+
 **问题**: 当前参数为经验值，缺乏系统性调优依据。
 
 **优化方案**:
@@ -88,6 +161,14 @@ sp_vision25 → vision/target → pb2025_sentry_behavior → SendNavThroughPoses
 | `PathAlignCritic.cost_weight` | 8.0 | 10.0-12.0 | 增强路径跟踪精度 |
 | `ObstaclesCritic.critical_weight` | 3.0 | 5.0 | 增强近距离障碍物避让 |
 
+**现阶段如何使用这部分建议**:
+
+当前更建议：
+
+1. 只做小步、可回退的参数微调
+2. 重点围绕“局部轨迹稳定性”和“全向侧移一致性”来调
+3. 不建议现在同时大改 5 个以上 MPPI 参数
+
 **调优流程**:
 1. 使用 `loopback_decision_sim.launch.py` 进行仿真测试
 2. 通过 RViz 观察 `/trajectories` topic 的采样轨迹分布
@@ -96,22 +177,25 @@ sp_vision25 → vision/target → pb2025_sentry_behavior → SendNavThroughPoses
 
 #### 2.2.2 全局路径平滑改进
 
+类别：`B 类：后续可取`
+
 **问题**: SmacPlannerHybrid 的内置平滑器迭代次数过多(1000次)，可能导致过度平滑。
 
 **优化方案**:
 ```yaml
-# 在 nav2_params.yaml 中调整
 planner_server:
   ros__parameters:
     SmacPlannerHybrid:
       smoother:
-        w_smooth: 0.25      # 降低平滑权重，保留更多原始路径特征
-        w_data: 0.3          # 增加数据权重，保持路径接近原始规划
-        num_iterations: 500  # 减少迭代次数，降低计算开销
-        do_refinement: true  # 保留细化步骤
+        w_smooth: 0.25
+        w_data: 0.3
+        num_iterations: 500
+        do_refinement: true
 ```
 
 #### 2.2.3 速度规划优化
+
+类别：`B 类：后续可取`
 
 **问题**: 当前速度平滑器参数较为保守，可能限制了机器人的机动性能。
 
@@ -119,21 +203,35 @@ planner_server:
 ```yaml
 velocity_smoother:
   ros__parameters:
-    max_velocity: [4.0, 4.0, 5.5]      # 从 [3.5, 3.5, 5.0] 提升
-    min_velocity: [-4.0, -4.0, -5.5]   # 允许更大反向速度
-    velocity_timeout: 0.5               # 缩短超时，提高响应性
+    max_velocity: [4.0, 4.0, 5.5]
+    min_velocity: [-4.0, -4.0, -5.5]
+    velocity_timeout: 0.5
 ```
 
 #### 2.2.4 轨迹预测可视化增强
 
-**新增功能**: 添加轨迹预测可视化节点
-- 发布 MPPI 预测的最优轨迹到 `/predicted_trajectory`
-- 发布各 Critic 的代价分布到 `/critic_costs`
-- 便于调试和参数调优
+类别：`A 类：现阶段适合继续做`
+
+**新增功能**:
+
+1. 发布 MPPI 预测的最优轨迹到 `/predicted_trajectory`
+2. 发布各 Critic 的代价分布到 `/critic_costs`
+3. 便于调试和参数调优
 
 ---
 
 ## 三、点云匹配重定位优化
+
+> 分类结论：
+>
+> - `A 类：现阶段适合继续做`
+>   - 动态障碍物滤波
+>   - 重定位失败检测与恢复
+> - `B 类：后续可取`
+>   - 多分辨率点云地图
+> - `C 类：当前暂不建议立即投入`
+>   - 基于特征的快速重定位
+>   - 增量式地图更新
 
 ### 3.1 当前状态分析
 
@@ -153,18 +251,16 @@ velocity_smoother:
 
 #### 3.2.1 多分辨率点云地图
 
+类别：`B 类：后续可取`
+
 **方案**: 构建多分辨率 PCD 地图，提高匹配效率和鲁棒性
 
 ```cpp
-// 伪代码示意
 class MultiResolutionPCDMap {
-    std::vector<pcl::PointCloud> maps;  // 不同分辨率
-    std::vector<float> resolutions;      // [0.1, 0.2, 0.5, 1.0]
-    
-    // 粗匹配: 使用低分辨率地图快速定位
+    std::vector<pcl::PointCloud> maps;
+    std::vector<float> resolutions;
+
     Eigen::Matrix4f coarseAlign(pcl::PointCloud& input);
-    
-    // 精匹配: 使用高分辨率地图精确对齐
     Eigen::Matrix4f fineAlign(pcl::PointCloud& input, Eigen::Matrix4f initial);
 };
 ```
@@ -176,59 +272,54 @@ class MultiResolutionPCDMap {
 
 #### 3.2.2 动态障碍物滤波
 
+类别：`A 类：现阶段适合继续做`
+
 **问题**: 比赛中其他机器人、裁判等动态物体会干扰点云匹配。
 
 **优化方案**:
 ```cpp
-// 在 terrain_analysis 中已有动态障碍物检测
-// 可以复用该逻辑进行点云预处理
-
 class DynamicObjectFilter {
-    // 基于时间的点云差异检测
-    // 移除与历史地图不一致的点
-    pcl::PointCloud filter(const pcl::PointCloud& input, 
-                          const pcl::PointCloud& map);
+    pcl::PointCloud filter(const pcl::PointCloud& input,
+                           const pcl::PointCloud& map);
 };
 ```
+
+**现阶段建议**:
+
+1. 优先做轻量动态障碍滤波
+2. 尽量复用现有 `terrain_analysis` 的动态障碍判定信息
+3. 不建议现在直接开重型点云目标跟踪
 
 **集成位置**: 在 `small_gicp_relocalization` 的输入端添加滤波器
 
 #### 3.2.3 重定位失败检测与恢复
 
+类别：`A 类：现阶段适合继续做`
+
 **当前问题**: 重定位失败时没有有效的恢复机制。
 
 **优化方案**:
 ```cpp
-// 添加重定位质量评估
 class RelocalizationQualityEstimator {
-    float fitness_score;           // GICP 匹配分数
-    float correspondence_ratio;    // 对应点比例
-    float transformation_delta;    // 变换增量
-    
+    float fitness_score;
+    float correspondence_ratio;
+    float transformation_delta;
+
     bool isRelocalizationValid();
-    
-    // 失败时的恢复策略
     void triggerRecovery();
-    // 1. 增大搜索范围
-    // 2. 降低匹配阈值
-    // 3. 使用多假设跟踪
 };
 ```
 
 #### 3.2.4 基于特征的快速重定位
 
+类别：`C 类：当前暂不建议立即投入`
+
 **方案**: 提取点云的几何特征（平面、边缘、角点），用于快速初始对齐
 
 ```cpp
-// 特征提取
 class FeatureExtractor {
-    // 平面特征: 用于地面、墙面
     std::vector<Plane> extractPlanes(pcl::PointCloud& cloud);
-    
-    // 边缘特征: 用于墙角、台阶
     std::vector<Edge> extractEdges(pcl::PointCloud& cloud);
-    
-    // 基于特征的初始对齐
     Eigen::Matrix4f featureBasedAlignment(
         const std::vector<Feature>& source,
         const std::vector<Feature>& target);
@@ -237,18 +328,15 @@ class FeatureExtractor {
 
 #### 3.2.5 增量式地图更新
 
+类别：`C 类：当前暂不建议立即投入`
+
 **方案**: 在比赛中动态更新地图，适应场地变化
 
 ```cpp
 class IncrementalMapUpdate {
-    // 将新的扫描合并到地图中
-    void updateMap(const pcl::PointCloud& new_scan, 
-                  const Eigen::Matrix4f& pose);
-    
-    // 移除过时的点（基于时间衰减）
+    void updateMap(const pcl::PointCloud& new_scan,
+                   const Eigen::Matrix4f& pose);
     void decayOldPoints(float decay_time);
-    
-    // 保存更新后的地图
     void saveUpdatedMap(const std::string& path);
 };
 ```
@@ -257,10 +345,22 @@ class IncrementalMapUpdate {
 
 ## 四、视觉-导航融合优化
 
+> 分类结论：
+>
+> - `A 类：现阶段适合继续做`
+>   - 视觉目标预测与插值
+>   - 攻击圆采样优化
+> - `B 类：后续可取`
+>   - 多目标优先级管理
+>   - 视觉丢失恢复增强
+> - `C 类：当前暂不建议立即投入`
+>   - 端到端延迟补偿
+
 ### 4.1 当前状态分析
 
 **现有架构**:
-```
+
+```text
 sp_vision25 (OpenVINO推理 + EKF跟踪 + MPC轨迹规划)
     → vision/target (VisionTargetMsg)
     → IsVisionTargetValid (9项检查 + 3层平滑)
@@ -278,54 +378,60 @@ sp_vision25 (OpenVINO推理 + EKF跟踪 + MPC轨迹规划)
 
 #### 4.2.1 视觉目标预测与插值
 
+类别：`A 类：现阶段适合继续做`
+
 **问题**: 视觉推理频率（约30Hz）低于控制频率（50Hz），导致跟踪滞后。
 
 **优化方案**:
 ```cpp
 class VisionTargetPredictor {
-    // 基于卡尔曼滤波的目标状态预测
     struct TargetState {
         Eigen::Vector3f position;
         Eigen::Vector3f velocity;
         Eigen::Vector3f acceleration;
         ros::Time timestamp;
     };
-    
-    // 预测未来时刻的目标位置
+
     TargetState predict(ros::Time future_time);
-    
-    // 在视觉帧间进行插值
     VisionTargetMsg interpolate(ros::Time query_time);
 };
 ```
 
+**现阶段建议**:
+
+1. 先做轻量级位置预测和帧间插值
+2. 先保证单目标稳定跟随
+3. 不建议现在就把视觉预测和全局导航大范围耦合
+
 **集成位置**: `IsVisionTargetValid` 节点中添加预测逻辑
 
 #### 4.2.2 攻击圆采样优化
+
+类别：`A 类：现阶段适合继续做`
 
 **问题**: 当前攻击圆采样点可能落在障碍物内或不可通行区域。
 
 **优化方案**:
 ```cpp
 class AttackCircleSampler {
-    // 当前实现: 在攻击圆上均匀采样
-    // 优化: 基于 costmap 的自适应采样
-    
     std::vector<Pose> sampleAdaptive(
         const Pose& enemy_pose,
         float attack_radius,
         const Costmap2D& costmap,
         const Pose& robot_pose);
-    
-    // 优先选择:
-    // 1. 可通行区域
-    // 2. 朝向敌人的方向
-    // 3. 距离当前位置较近的点
-    // 4. 有良好射击角度的点
 };
 ```
 
-#### 4.2.3 多目标优先级管理
+优先选择：
+
+1. 可通行区域
+2. 朝向敌人的方向
+3. 距离当前位置较近的点
+4. 有良好射击角度的点
+
+#### 4.2.3 多目标优先级管理（sp_vision25）中有多目标切换的写法且合理（忽略这个优化）
+
+类别：`B 类：后续可取`
 
 **问题**: 当前仅跟踪单个目标，缺乏多目标切换策略。
 
@@ -333,25 +439,22 @@ class AttackCircleSampler {
 ```cpp
 class MultiTargetManager {
     struct TargetPriority {
-        float distance;           // 距离权重
-        float threat_level;       // 威胁等级（基于敌人类型）
-        float visibility;         // 可见性（置信度）
-        float shooting_angle;     // 射击角度优势
+        float distance;
+        float threat_level;
+        float visibility;
+        float shooting_angle;
     };
-    
-    // 计算综合优先级
+
     float calculatePriority(const VisionTargetMsg& target);
-    
-    // 平滑切换策略
     bool shouldSwitchTarget(const VisionTargetMsg& current,
-                           const VisionTargetMsg& candidate);
-    
-    // 切换时的平滑过渡
+                            const VisionTargetMsg& candidate);
     Pose computeTransitionPath(const Pose& from, const Pose& to);
 };
 ```
 
 #### 4.2.4 视觉丢失恢复增强
+
+类别：`B 类：后续可取`
 
 **问题**: 视觉目标丢失时，机器人行为不够智能。
 
@@ -359,43 +462,39 @@ class MultiTargetManager {
 ```cpp
 class VisionLossRecovery {
     enum RecoveryStrategy {
-        HOLD_POSITION,      // 保持当前位置
-        LAST_KNOWN_SEARCH,  // 在最后已知位置附近搜索
-        PATROL_SEARCH,      // 切换到巡逻模式搜索
-        RETREAT_TO_SAFE     // 撤退到安全位置
+        HOLD_POSITION,
+        LAST_KNOWN_SEARCH,
+        PATROL_SEARCH,
+        RETREAT_TO_SAFE
     };
-    
-    // 根据上下文选择恢复策略
+
     RecoveryStrategy selectStrategy(
         float time_since_loss,
         float last_confidence,
         const Pose& robot_pose,
         const Pose& last_target_pose);
-    
-    // 执行恢复行为
+
     void executeRecovery(RecoveryStrategy strategy);
 };
 ```
 
 #### 4.2.5 视觉-导航延迟补偿
 
+类别：`C 类：当前暂不建议立即投入`
+
 **方案**: 端到端延迟测量与补偿
 
 ```cpp
 class LatencyCompensator {
-    // 测量各环节延迟
     struct LatencyBreakdown {
-        float vision_inference;    // 视觉推理延迟
-        float message_transport;   // 消息传输延迟
-        float bt_decision;         // 行为树决策延迟
-        float nav_planning;        // 导航规划延迟
-        float control_execution;   // 控制执行延迟
+        float vision_inference;
+        float message_transport;
+        float bt_decision;
+        float nav_planning;
+        float control_execution;
     };
-    
-    // 总延迟
+
     float totalLatency();
-    
-    // 基于延迟的目标位置补偿
     Pose compensateForLatency(const Pose& target, float latency);
 };
 ```
@@ -404,41 +503,70 @@ class LatencyCompensator {
 
 ## 五、其他优化建议
 
+> 分类结论：
+>
+> - `A 类：现阶段适合继续做`
+>   - TF 查找优化
+>   - 实时性能监控
+>   - 比赛数据记录
+> - `B 类：后续可取`
+>   - 行为树执行效率
+>   - Costmap 更新优化
+>   - 通信超时处理
+> - `C 类：当前暂不建议立即投入`
+>   - 完整传感器健康管理系统
+>   - 完整异常重启框架
+
 ### 5.1 性能优化
 
 #### 5.1.1 行为树执行效率
+
+类别：`B 类：后续可取`
+
 - 当前行为树每 tick 都会遍历所有节点，建议添加条件缓存
 - 对于 `IsRobotResourceMode` 等状态节点，仅在状态变化时重新评估
 
 #### 5.1.2 Costmap 更新优化
+
+类别：`B 类：后续可取`
+
 - `IntensityVoxelLayer` 的体素大小可以动态调整
 - 近距离使用高分辨率，远距离使用低分辨率
 
 #### 5.1.3 TF 查找优化
+
+类别：`A 类：现阶段适合继续做`
+
 - 当前多处使用 `tf_buffer_->lookupTransform()`，建议缓存常用变换
 - 特别是 `odom → base_footprint` 等高频变换
 
 ### 5.2 鲁棒性增强
 
 #### 5.2.1 传感器故障检测
+
+类别：`C 类：当前暂不建议立即投入`
+
 ```cpp
 class SensorHealthMonitor {
-    // 检测各传感器状态
     bool isLidarHealthy();
     bool isIMUHealthy();
     bool isVisionHealthy();
     bool isRefereeHealthy();
-    
-    // 故障时的降级策略
     void degradeToMinimalMode();
 };
 ```
 
 #### 5.2.2 通信超时处理
+
+类别：`B 类：后续可取`
+
 - 添加各 topic 的超时检测
 - 超时时触发安全行为（停止或撤退）
 
 #### 5.2.3 异常状态恢复
+
+类别：`C 类：当前暂不建议立即投入`
+
 - 行为树卡死检测与重启
 - Nav2 节点崩溃的自动恢复
 - 串口通信断开的重连机制
@@ -446,63 +574,83 @@ class SensorHealthMonitor {
 ### 5.3 调试与监控
 
 #### 5.3.1 增强日志系统
+
+类别：`B 类：后续可取`
+
 ```cpp
-// 结构化日志，便于分析
-RCLCPP_INFO_STREAM(logger, 
-    "Decision: mode=" << mode << 
+RCLCPP_INFO_STREAM(logger,
+    "Decision: mode=" << mode <<
     " target=" << target <<
     " confidence=" << confidence <<
     " latency=" << latency << "ms");
 ```
 
 #### 5.3.2 实时性能监控
+
+类别：`A 类：现阶段适合继续做`
+
 - 添加各环节耗时统计
 - 发布到 `/diagnostics` topic
 - 集成到 PlotJuggler 进行实时可视化
 
 #### 5.3.3 比赛数据记录
+
+类别：`A 类：现阶段适合继续做`
+
 - 记录完整的决策过程
 - 便于赛后分析和复盘
 
 ---
 
-## 六、实施优先级
+## 六、重构后的实施优先级
 
-### P0 (立即实施)
-1. **恢复链平滑化与脱困增强** - 已开始并已落地前两阶段
-2. **MPPI 参数调优** - 直接影响导航性能
-3. **视觉目标预测** - 减少跟踪滞后
+### 6.1 现阶段适合继续做（建议最近几轮对话优先推进）
 
-### P1 (短期实施)
-4. **攻击圆采样优化** - 提高视觉跟随质量
-5. **动态障碍物滤波 / 动态障碍预测** - 提高局部恢复与重定位质量
-6. **速度规划优化** - 提高机动性能
+1. 视觉目标预测与插值
+2. 攻击圆采样优化
+3. MPPI 小步精细调优
+4. 动态障碍物滤波（面向重定位）
+5. 重定位失败检测与恢复
+6. TF 查找优化
+7. 实时性能监控与比赛数据记录
 
-### P2 (中期实施)
-7. **多分辨率点云地图** - 提高重定位效率
-8. **多目标优先级管理** - 增强战术能力
-9. **视觉丢失恢复增强** - 提高系统鲁棒性
+### 6.2 后续可取优化（建议在现阶段稳定后排队推进）
 
-### P3 (长期实施)
-10. **增量式地图更新** - 适应场地变化
-11. **基于特征的快速重定位** - 提高重定位速度
-12. **端到端延迟补偿** - 提高跟踪精度
+1. 全局路径平滑改进
+2. 速度规划优化
+3. 多分辨率点云地图
+4. 多目标优先级管理
+5. 视觉丢失恢复增强
+6. 行为树执行效率优化
+7. Costmap 更新优化
+8. 通信超时处理
+
+### 6.3 当前暂不建议立即投入（保留方案，未来再做）
+
+1. 基于特征的快速重定位
+2. 增量式地图更新
+3. 端到端延迟补偿
+4. 完整传感器健康管理系统
+5. 完整异常重启框架
 
 ---
 
 ## 七、测试验证方案
 
 ### 7.1 仿真测试
+
 - 使用 `loopback_decision_sim.launch.py` 进行功能验证
 - 使用 `loopback_vision_test.launch.py` 进行视觉跟随测试
 - 修改 `fake_decision_sim_inputs.py` 模拟各种场景
 
 ### 7.2 实机测试
+
 - 使用 `mapping.sh` 建立测试地图
 - 使用 `NAV2.sh` 进行导航测试
 - 通过 RViz 实时监控各项指标
 
 ### 7.3 性能指标
+
 | 指标 | 目标值 | 测量方法 |
 |------|--------|----------|
 | 重定位精度 | < 0.1m | 对比 ground truth |
@@ -513,7 +661,7 @@ RCLCPP_INFO_STREAM(logger,
 
 ---
 
-## 九、恢复链专项阶段推进记录
+## 八、恢复链专项阶段推进记录
 
 ### 阶段 1：恢复轨迹分层采样 + 分段放行
 
@@ -570,24 +718,28 @@ RCLCPP_INFO_STREAM(logger,
 
 ---
 
-## 八、参考资源
+## 九、参考资源
 
-### 8.1 官方文档
+### 9.1 官方文档
+
 - [Nav2 官方文档](https://docs.nav2.org/)
 - [BehaviorTree.CPP 文档](https://www.behaviortree.dev/)
 - [MPPI Controller 文档](https://docs.nav2.org/configuration/packages/configuring-mpc.html)
 
-### 8.2 论文参考
+### 9.2 论文参考
+
 - Point-LIO: "Point-LIO: Robust High-Bandwidth Lidar-Inertial Odometry"
 - GICP: "Generalized-ICP"
 - MPPI: "Information Theoretic Model Predictive Control"
 
-### 8.3 工程文档
+### 9.3 工程文档
+
 - `docs/mppi_parameter_tuning_guide.md` - MPPI 调参指南
 - `docs/sentry_bt_decision_checklist.md` - 决策树清单
 - `docs/sentry_posture_switch_logic.md` - 姿态切换逻辑
 - `docs/实机视觉跟随优化方案.md` - 视觉跟随优化
+- `docs/omni_recovery_smoothing_optimization.md` - 恢复链平滑化专项说明
 
 ---
 
-> 本文档基于 2026-05-03 的代码分析生成，建议定期更新以反映最新进展。
+> 本文档基于 2026-05-03 之后的工程实际优化进展重构，后续建议继续按阶段更新，而不是重新生成一份全新路线图。
