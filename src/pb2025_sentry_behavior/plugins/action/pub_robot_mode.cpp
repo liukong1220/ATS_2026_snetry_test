@@ -16,7 +16,7 @@ namespace
 {
 
 // 下位机姿态枚举约定，必须与 standard_robot_pp_ros2 中的协议定义保持一致。
-constexpr uint8_t kMoveMode = 0;
+constexpr uint8_t kMoveMode = 3;
 constexpr uint8_t kAttackMode = 1;
 constexpr uint8_t kDefendMode = 2;
 constexpr double kDefaultModeSwitchCooldownSeconds = 5.0;

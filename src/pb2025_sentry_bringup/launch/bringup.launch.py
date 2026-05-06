@@ -38,6 +38,7 @@ def generate_launch_description():
     params_file = LaunchConfiguration("params_file")
     behavior_params_file = LaunchConfiguration("behavior_params_file")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
+    rviz_force_software = LaunchConfiguration("rviz_force_software")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
     use_composition = LaunchConfiguration("use_composition")
@@ -128,6 +129,12 @@ def generate_launch_description():
         "rviz_config_file",
         default_value=os.path.join(bringup_dir, "rviz", "sentry_default_view.rviz"),
         description="Full path to the RViz config file to use",
+    )
+
+    declare_rviz_force_software_cmd = DeclareLaunchArgument(
+        "rviz_force_software",
+        default_value="0",
+        description="Force RViz to use Mesa software rendering when set to 1",
     )
 
     declare_use_robot_state_pub_cmd = DeclareLaunchArgument(
@@ -225,6 +232,7 @@ def generate_launch_description():
             "namespace": namespace,
             "use_sim_time": use_sim_time,
             "rviz_config": rviz_config_file,
+            "rviz_force_software": rviz_force_software,
         }.items(),
     )
 
@@ -257,6 +265,7 @@ def generate_launch_description():
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_behavior_params_file_cmd)
     ld.add_action(declare_rviz_config_file_cmd)
+    ld.add_action(declare_rviz_force_software_cmd)
     ld.add_action(declare_use_robot_state_pub_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_composition_cmd)

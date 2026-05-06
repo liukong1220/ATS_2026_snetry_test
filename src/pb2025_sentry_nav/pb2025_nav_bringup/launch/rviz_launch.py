@@ -2,9 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
-from launch.event_handlers import OnProcessExit
-from launch.events import Shutdown
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -12,10 +10,17 @@ from launch_ros.actions import Node
 def generate_launch_description():
     # Get the launch directory
     bringup_dir = get_package_share_directory("pb2025_nav_bringup")
+    workspace_dir = os.path.abspath(
+        os.path.join(bringup_dir, os.pardir, os.pardir, os.pardir, os.pardir)
+    )
+    ros_home_dir = os.path.join(workspace_dir, ".ros")
+    ros_log_dir = os.path.join(ros_home_dir, "log")
+    rviz_home_dir = workspace_dir
 
     # Create the launch configuration variables
     namespace = LaunchConfiguration("namespace")
     rviz_config_file = LaunchConfiguration("rviz_config")
+    rviz_force_software = LaunchConfiguration("rviz_force_software")
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -33,6 +38,20 @@ def generate_launch_description():
         description="Full path to the RViz config file to use",
     )
 
+    declare_rviz_force_software_cmd = DeclareLaunchArgument(
+        "rviz_force_software",
+        default_value="0",
+        description="Force RViz to use Mesa software rendering when set to 1",
+    )
+
+    rviz_software_rendering_env = SetEnvironmentVariable(
+        "LIBGL_ALWAYS_SOFTWARE", rviz_force_software
+    )
+    rviz_dri3_env = SetEnvironmentVariable("LIBGL_DRI3_DISABLE", "1")
+    rviz_ros_home_env = SetEnvironmentVariable("ROS_HOME", ros_home_dir)
+    rviz_ros_log_dir_env = SetEnvironmentVariable("ROS_LOG_DIR", ros_log_dir)
+    rviz_home_env = SetEnvironmentVariable("HOME", rviz_home_dir)
+
     # Launch rviz
     start_rviz_cmd = Node(
         package="rviz2",
@@ -46,24 +65,20 @@ def generate_launch_description():
         ],
     )
 
-    exit_event_handler = RegisterEventHandler(
-        event_handler=OnProcessExit(
-            target_action=start_rviz_cmd,
-            on_exit=EmitEvent(event=Shutdown(reason="rviz exited")),
-        ),
-    )
-
     # Create the launch description and populate
     ld = LaunchDescription()
 
     # Declare the launch options
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_rviz_config_file_cmd)
+    ld.add_action(declare_rviz_force_software_cmd)
 
     # Add any conditioned actions
+    ld.add_action(rviz_home_env)
+    ld.add_action(rviz_ros_home_env)
+    ld.add_action(rviz_ros_log_dir_env)
+    ld.add_action(rviz_dri3_env)
+    ld.add_action(rviz_software_rendering_env)
     ld.add_action(start_rviz_cmd)
-
-    # Add other nodes and processes we need
-    ld.add_action(exit_event_handler)
 
     return ld

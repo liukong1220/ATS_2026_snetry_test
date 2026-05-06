@@ -4,19 +4,21 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_SCRIPT="$WORKSPACE_DIR/install/setup.bash"
 WORLD_NAME="${1:-rmul}"
 USE_RVIZ="${USE_RVIZ:-True}"
+RVIZ_FORCE_SOFTWARE="${RVIZ_FORCE_SOFTWARE:-0}"
 PID_FILE="$WORKSPACE_DIR/.ros/nav2_sh.pid"
 
 export ROS_HOME="$WORKSPACE_DIR/.ros"
+export ROS_LOG_DIR="$ROS_HOME/log"
 cd "$WORKSPACE_DIR" || exit 1
 
 declare -a commands=(
-  "ros2 launch pb2025_sentry_bringup bringup.launch.py world:=$WORLD_NAME slam:=False use_rviz:=$USE_RVIZ"
+  "ros2 launch pb2025_sentry_bringup bringup.launch.py world:=$WORLD_NAME slam:=False use_rviz:=$USE_RVIZ rviz_force_software:=$RVIZ_FORCE_SOFTWARE"
 )
 
 start_command() {
   local cmd="$1"
   mkdir -p "$(dirname "$PID_FILE")"
-  gnome-terminal -- bash -lc "echo \$\$ > \"$PID_FILE\"; cd \"$WORKSPACE_DIR\"; source \"$SETUP_SCRIPT\"; $cmd; rm -f \"$PID_FILE\"; exec bash"
+  gnome-terminal -- bash -lc "export ROS_HOME=\"$ROS_HOME\"; export ROS_LOG_DIR=\"$ROS_LOG_DIR\"; echo \$\$ > \"$PID_FILE\"; cd \"$WORKSPACE_DIR\"; source \"$SETUP_SCRIPT\"; $cmd; rm -f \"$PID_FILE\"; exec bash"
 }
 
 is_running() {

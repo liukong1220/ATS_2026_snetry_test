@@ -448,51 +448,6 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: trajectory_profile_markers
       Value: true
-    - Class: rviz_default_plugins/Camera
-      Enabled: false
-      Far Plane Distance: 100
-      Image Rendering: background and overlay
-      Name: Camera
-      Overlay Alpha: 0.5
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: front_industrial_camera/image
-      Value: false
-      Visibility:
-        AimingMarker: true
-        Controller:
-          Local Costmap: true
-          Local Plan: true
-          Lookahead Point: true
-          MPPI Optimal (local): true
-          MPPI Rollouts: true
-          Polygon: true
-          Transformed Global Plan: true
-          Value: true
-        GimbalYawFake: true
-        Global Planner:
-          Global Costmap: true
-          Global Plan (planner): true
-          Path: true
-          Polygon: true
-          Value: true
-        Map: true
-        Obstacle Scan: true
-        RobotModel: true
-        Sensor Scan: true
-        TF: true
-        TerrainMap: true
-        TrackerMarker: true
-        TrajectoryProfileMarkers: true
-        Value: true
-        VisionFollowMarkers: true
-        RobotModeMarkers: true
-        VisionTargetPoint: true
-        WayPoints: true
-      Zoom Factor: 1
     - Class: rviz_default_plugins/Marker
       Enabled: true
       Name: AimingMarker

@@ -105,7 +105,8 @@ void SmallGicpRelocalizationNode::loadGlobalMap(const std::string & file_name)
   while (true) {
     try {
       auto tf_stamped = tf_buffer_->lookupTransform(
-        base_frame_, lidar_frame_, this->now(), rclcpp::Duration::from_seconds(1.0));
+        base_frame_, lidar_frame_, rclcpp::Time(0, 0, this->get_clock()->get_clock_type()),
+        rclcpp::Duration::from_seconds(1.0));
       odom_to_lidar_odom = tf2::transformToEigen(tf_stamped.transform);
       RCLCPP_INFO_STREAM(
         this->get_logger(), "odom_to_lidar_odom: translation = "
@@ -113,7 +114,10 @@ void SmallGicpRelocalizationNode::loadGlobalMap(const std::string & file_name)
                               << odom_to_lidar_odom.rotation().eulerAngles(0, 1, 2).transpose());
       break;
     } catch (tf2::TransformException & ex) {
-      RCLCPP_WARN(this->get_logger(), "TF lookup failed: %s Retrying...", ex.what());
+      RCLCPP_WARN(
+        this->get_logger(),
+        "TF lookup failed while waiting for %s -> %s. Retrying with latest available TF: %s",
+        lidar_frame_.c_str(), base_frame_.c_str(), ex.what());
       rclcpp::sleep_for(std::chrono::seconds(1));
     }
   }
