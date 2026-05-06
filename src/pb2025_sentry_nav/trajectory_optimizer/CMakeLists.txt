@@ -14,6 +14,7 @@ ament_auto_add_library(${PROJECT_NAME} SHARED
   src/bspline_path_optimizer.cpp
   src/trajectory_optimizer_node.cpp
   src/nav2_bspline_smoother.cpp
+  src/trajectory_speed_governor.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -23,6 +24,11 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 rclcpp_components_register_node(${PROJECT_NAME}
   PLUGIN trajectory_optimizer::TrajectoryOptimizerNode
   EXECUTABLE ${PROJECT_NAME}_node
+)
+
+rclcpp_components_register_node(${PROJECT_NAME}
+  PLUGIN trajectory_optimizer::TrajectorySpeedGovernor
+  EXECUTABLE trajectory_speed_governor_node
 )
 
 pluginlib_export_plugin_description_file(nav2_core trajectory_optimizer_plugins.xml)

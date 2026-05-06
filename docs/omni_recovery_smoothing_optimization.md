@@ -2,242 +2,375 @@
 
 更新时间：2026-05-06
 
-这份文档记录当前三阶段优化的实际落地状态，避免后续对话把“仅可视化验证”和“已接入 controller 主链”混在一起。
-
 ## 1. 当前阶段状态
 
-### 第一阶段：`/plan -> 平滑参考路径 -> 高密度采样`
+### 第一阶段：B 样条平滑 + 高密度路径点
 
 状态：已完成
 
-已经落地的内容：
+已落地：
 
 1. 独立 B 样条风格路径优化算法
 2. 高密度路径重采样
-3. 保形约束，避免平滑后过度偏离原始走廊
-4. 可视化旁路输出
+3. 可视化旁路输出 `smoothed_path_visual`
 
-### 第二阶段：MPPI 真正跟踪平滑后的参考路径
+### 第二阶段：把平滑后的参考路径真正接入 MPPI
 
-状态：已完成第一版接入
+状态：已完成第一版，并已重新修复接入 loopback
 
-已经落地的内容：
+已落地：
 
-1. `trajectory_optimizer` 不再只是旁路节点
-2. 同一套平滑算法已经封装为 Nav2 smoother plugin
-3. BT 主链已恢复为：
-   `ComputePath -> SmoothPath -> FollowPath`
-4. `FollowPath` 现在会真正吃到 `bspline_smoother` 输出后的 path
-5. MPPI 参数已做一轮偏保守的拐角/障碍收敛调节
+1. `trajectory_optimizer` 已封装成 Nav2 smoother plugin
+2. BT 主链已恢复为 `ComputePath -> SmoothPath -> FollowPath`
+3. loopback 当前已真正跟踪平滑后的 path
+4. `trajectory_profile` 已作为正式接口发布
+5. `trajectory_speed_governor` 已基于 profile 对 controller 输出做二次限速
+6. 实车 `reality` 参数和 `navigation_launch.py` 已同步到同一套完整链
 
 ### 第三阶段：ESDF obstacle cost
 
 状态：未开始
 
-计划仍然是：
+## 2. 当前核心结论
 
-1. 在轨迹优化中加入连续障碍代价
-2. 优先形式：
-   `max(0, safe_dist - distance)^2`
-3. 让第一层参考路径本身远离障碍，而不是主要靠 MPPI 在离散 costmap 上补救
+“第二个弯进入膨胀层”不单单是 MPPI 的问题。
 
-## 2. 当前真实链路
+当前排查结论是：
 
-现在已经分成两条并行链：
+1. planner、smoother、controller 三层都会共同影响
+2. loopback 原来使用 `NavfnPlanner` 时，第一层路径更容易贴边
+3. 纯几何 B 样条会在角点进一步往内抹
+4. MPPI 会在第二个弯继续沿 shortcut 倾向切弯
 
-### 主控制链
+所以这不是单层问题，而是：
 
-`ComputePath -> SmoothPath(bspline_smoother) -> FollowPath(MPPI)`
+1. planner 可能先贴边
+2. smoother 可能再抹角
+3. controller 最后把它放大
 
-这条链会真正影响 MPPI 控制结果。
+## 3. 当前 `trajectory_optimizer` 能力
 
-### 旁路可视化链
+### 3.1 规范化三次 B 样条表示
 
-`plan_raw_visual -> smoothed_path_visual`
+现在已经有：
 
-这条链只是为了在 RViz 中继续对比：
+- `CubicBSpline2D`
+- `getPoint(s)`
+- `getFirstDerivative(s)`
+- `getSecondDerivative(s)`
+- `getCurvature(s)`
 
-1. planner 原始路径
-2. B 样条平滑后的高密度路径
-
-它不再参与 controller 输入。
-
-## 3. 已落地代码位置
-
-### 3.1 B 样条算法核心
+位置：
 
 - [bspline_path_optimizer.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/bspline_path_optimizer.hpp)
 - [bspline_path_optimizer.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/bspline_path_optimizer.cpp)
 
-当前能力：
+### 3.2 曲率约束
 
-1. 清洗过密路径点
-2. 稀疏控制点提取
-3. cubic B-spline 风格插值
-4. 高密度等弧长输出
-5. 横向偏差夹紧
+当前已加：
 
-### 3.2 可视化旁路节点
+1. `curvature_limit`
+2. `curvature_weight`
+3. `curvature_refinement_iterations`
+4. `curvature_refinement_gain`
 
-- [trajectory_optimizer_node.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/trajectory_optimizer_node.hpp)
-- [trajectory_optimizer_node.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/trajectory_optimizer_node.cpp)
+目前做法是：
 
-当前行为：
+1. 先生成 dense B 样条 path
+2. 计算离散一阶/二阶导
+3. 用曲率公式计算 `kappa`
+4. 对超出 `kappa_max` 的点做 refinement
 
-1. 订阅 `plan_raw_visual`
-2. 发布 `smoothed_path_visual`
+这已经是曲率约束雏形。
 
-### 3.3 Nav2 smoother plugin
+### 3.3 时间参数化
 
-- [nav2_bspline_smoother.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/nav2_bspline_smoother.hpp)
-- [nav2_bspline_smoother.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/nav2_bspline_smoother.cpp)
-- [trajectory_optimizer_plugins.xml](../src/pb2025_sentry_nav/trajectory_optimizer/trajectory_optimizer_plugins.xml)
+当前已加：
 
-当前行为：
+1. 曲率限速
+2. forward/backward acceleration limiting
+3. velocity smoothing
+4. `TrajectoryProfile2D`
 
-1. 被 `smoother_server` 动态加载
-2. 在 `SmoothPath` action 中直接处理 planner 输出路径
-3. 把平滑后的 path 返回给 BT blackboard，再交给 `FollowPath`
+profile 每个采样点包含：
 
-## 4. 第二阶段具体接法
+1. `s`
+2. `t`
+3. `point`
+4. `first_derivative`
+5. `second_derivative`
+6. `curvature`
+7. `speed_limit`
+8. `speed`
+9. `acceleration`
 
-### 4.1 BT 已接回 SmoothPath 主链
+## 4. `trajectory_profile` 已成为正式接口
 
-已更新：
+当前已定义消息：
 
-- [navigate_to_pose_w_replanning_and_recovery.xml](../src/pb2025_sentry_nav/pb2025_nav_bringup/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml)
-- [navigate_through_poses_w_replanning_and_recovery.xml](../src/pb2025_sentry_nav/pb2025_nav_bringup/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml)
+- [TrajectoryProfileMsg.msg](../src/pb2025_sentry_nav/sp_msgs/msg/TrajectoryProfileMsg.msg)
+- [TrajectoryProfilePoint.msg](../src/pb2025_sentry_nav/sp_msgs/msg/TrajectoryProfilePoint.msg)
 
-现在：
+当前存在两条 profile 输出链：
 
-1. `ComputePath*` 输出到 `{path_raw}`
-2. `SmoothPath` 用 `smoother_id="bspline_smoother"`
-3. 平滑结果写回 `{path}`
-4. `FollowPath` 追踪 `{path}`
+1. `trajectory_optimizer_node -> /trajectory_profile_visual`
+2. `nav2_bspline_smoother -> /trajectory_profile`
 
-### 4.2 loopback 的 smoother_server 已切到我们自己的插件
+这意味着：
 
-已更新：
+1. 在 BT / smoother server 外已经有正式 profile 接口
+2. 后续 ESDF 接入时不需要再重新定义一套轨迹结构
 
-- [loopback_sim/nav2_params.yaml](../src/loopback_sim/params/nav2_params.yaml)
+## 5. 时间参数化已经开始反哺 controller
 
-当前配置：
+现在 loopback 中存在：
 
-1. `bspline_smoother`
-2. `fallback_smoother`
+- `trajectory_speed_governor`
 
-这样即使后续我们继续试 ESDF，也只需要在 smoother 层继续扩展，不用再改 controller 接口。
+它会：
 
-### 4.3 loopback launch 已保留可视化旁路
+1. 订阅 `/trajectory_profile`
+2. 订阅 `cmd_vel_controller`
+3. 输出 `cmd_vel_controller_governed`
 
-已更新：
+然后再由：
 
-- [loopback_navigation.launch.py](../src/pb2025_sentry_bringup/launch/loopback_navigation.launch.py)
+- `velocity_smoother`
 
-当前行为：
+继续处理并输出 `cmd_vel_nav2_result`
 
-1. `trajectory_optimizer_node` 仍然启动
-2. 但它被 remap 到：
-   - `plan_raw_visual`
-   - `smoothed_path_visual`
-3. 因此不会和 Nav2 `SmoothPath` action 混 topic
+所以“时间参数化反哺 controller”这件事在 loopback 里已经不是内部 profile 变量，而是已经进入执行链。
 
-## 5. 这次发现并修掉的问题
+## 6. 本轮重新修复的内容
 
-### 5.1 之前看不到青色路径的真正原因
+### 6.1 修复了回退后 `trajectory_optimizer` 的编译断点
 
-之前你在：
+这次误回退后，主要断点是：
 
-`ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True publish_referee_inputs:=True`
+1. `trajectory_optimizer` 源码残留了未使用函数
+2. 在 `-Werror` 下直接导致构建失败
 
-看不到青线，不是 RViz 配置坏了，而是：
+目前：
 
-1. `loopback_vision_test`
-2. -> `loopback_decision_sim`
-3. -> `loopback_navigation`
+- `sp_msgs`
+- `trajectory_optimizer`
 
-这条链原本根本没起 `trajectory_optimizer`
+都已经重新编译通过。
 
-所以：
+### 6.2 loopback 链已重新接通
 
-1. RViz 里有显示项
-2. 但没有 `/smoothed_path` 发布者
+当前 loopback 里已经存在：
 
-这个问题已经修掉。
-
-### 5.2 第二阶段初次接入时的 lifecycle 卡死
-
-一开始在 `loopback_navigation.launch.py` 里把 `trajectory_optimizer` 错误地加进了 `lifecycle_nodes`。
-
-但它是普通 node，不是 lifecycle node，所以会卡在：
-
-`Waiting for service trajectory_optimizer/get_state...`
-
-这个问题也已经修掉。
-
-## 6. 本轮 MPPI 参数调整
-
-当前只先动了 loopback 仿真链，目的是减轻：
-
-1. 转角 shortcut
-2. 穿进 inflation layer
-3. 角点附近过于激进的“切弯”
-
-主要方向：
-
-1. `batch_size` 略增
-2. `temperature` 略增
-3. `gamma` 略增
-4. `vx_std / vy_std / wz_std` 降低
-5. `PathAlignCritic` 降权并缩短前视
-6. `PathFollowCritic` 略增强
-7. `PathAngleCritic` 增强并收紧最大允许夹角
-8. `ObstaclesCritic` 的 `repulsion_weight / critical_weight / collision_margin_distance` 都提高
-
-这组改动的意图不是让 MPPI “更聪明”，而是先让它在平滑参考路径接入后，不要太爱沿对角 shortcut 去切膨胀层。
-
-## 7. 当前观察重点
-
-现在最应该观察的是：
-
-1. MPPI 角点处是否比以前更少切进 inflation layer
-2. `transformed_global_plan` 是否比以前更贴近平滑参考线
-3. 是否出现新的副作用：
-   - 转弯变钝
-   - 速度下降过多
-   - 终点附近犹豫
-
-## 8. 已完成验证
-
-已完成：
-
-1. `trajectory_optimizer` 单包重新编译通过
-2. `bspline_smoother` 被 `smoother_server` 正常加载
-3. loopback 主链能够正常进入 active
-4. `controller_server` 持续收到新 path
-5. `Goal succeeded` 正常出现
-6. 旁路 topic `plan_raw_visual` / `smoothed_path_visual` 存在
+1. `/smoothed_path_visual`
+2. `/trajectory_profile_visual`
+3. `/trajectory_profile`
+4. `/cmd_vel_controller_governed`
 
 说明：
 
-第二阶段已经不是“只改了配置”，而是已经真实跑通。
+1. path 侧可视化正常
+2. profile 接口正常
+3. speed governor 链路正常
 
-## 9. 现在还没做的事
+### 6.3 loopback planner 已升级为 `SmacPlannerHybrid`
 
-1. 没有对 reality 参数做同样级别的第二阶段切换
-2. 没有系统性 sweep MPPI 参数
-3. 没有引入 ESDF obstacle cost
-4. 没有把平滑器做成“按局部代价场自适应收缩偏差”的版本
+当前 loopback 已从：
+
+- `NavfnPlanner`
+
+升级为：
+
+- `SmacPlannerHybrid`
+
+这样与实车链更接近，也更适合分析“为什么第二个弯 still 切膨胀层”。
+
+### 6.4 实车链已同步到完整版本
+
+当前已同步到实车链的内容：
+
+1. `reality/nav2_params.yaml` 的 `smoother_server` 已切到 `bspline_smoother`
+2. 曲率 / 速度 / 障碍联合优化参数已同步到实车 `trajectory_optimizer`
+3. `trajectory_speed_governor` 已接入实车 `navigation_launch.py`
+4. `velocity_smoother` 已改为吃 `cmd_vel_controller_governed`
+5. 实车旁路可视化仍保留：
+   - `smoothed_path_visual`
+   - `trajectory_profile_visual`
+
+这意味着“最新这套曲线 + 规划 + 速度约束”已经不再只停留在 loopback，而是已经完整接入实车链的配置和 launch 层。
+
+### 6.5 `bringup.launch.py` 已是最终实车入口
+
+当前最终实车入口是：
+
+- [bringup.launch.py](../src/pb2025_sentry_bringup/launch/bringup.launch.py)
+
+它会继续包含：
+
+1. `rm_navigation_reality_launch.py`
+2. `navigation_launch.py`
+3. 当前这套：
+   - `trajectory_optimizer`
+   - `bspline_smoother`
+   - `trajectory_speed_governor`
+   - `velocity_smoother`
+
+所以后续所有“上车前检查”和“RViz 观察”都应以这条入口为准，而不是以 loopback 或单独 nav bringup 为准。
+
+## 7. 当前 loopback 初始参数
+
+### `trajectory_optimizer`
+
+1. `control_point_spacing: 0.36`
+2. `output_path_spacing: 0.05`
+3. `max_lateral_deviation: 0.28`
+4. `curvature_limit: 0.85`
+5. `curvature_weight: 40.0`
+6. `curvature_refinement_iterations: 10`
+7. `curvature_refinement_gain: 0.05`
+8. `global_speed_limit: 1.20`
+9. `lateral_accel_limit: 1.0`
+10. `longitudinal_accel_limit: 0.5`
+11. `velocity_smoothing_gain: 0.3`
+12. `derivative_step: 0.02`
+13. `obstacle_safe_cost: 64`
+14. `obstacle_weight: 35.0`
+15. `obstacle_refinement_iterations: 3`
+16. `obstacle_refinement_gain: 0.04`
+
+### `bspline_smoother`
+
+1. `max_path_cost: 64`
+2. `pullback_samples: 8`
+
+### `trajectory_speed_governor`
+
+1. `min_speed_scale: 0.18`
+2. `curvature_brake_gain: 1.35`
+
+## 8. 当前仍然存在的限制
+
+虽然现在已经有：
+
+1. `J_curvature`
+2. `J_velocity`
+3. 时间参数化
+4. profile 接口
+5. speed governor
+
+虽然现在已经有：
+
+1. `J_curvature`
+2. `J_velocity`
+3. `J_obs`
+4. 时间参数化
+5. profile 接口
+6. speed governor
+
+并且它们已经进入同一套 `BSplinePathOptimizer::optimizeDetailed()` 框架，
+
+但还没有做到：
+
+1. 用 ESDF / distance field 作为 obstacle term 的连续梯度来源
+2. 做真正的连续优化器求解（当前仍是 refinement-based unified optimizer）
+3. 让 obstacle cost 在狭窄通道里更智能地区分“可贴边但可通行”和“必然卡死”
+
+## 9. 当前对“为什么规划会靠近膨胀层”的理解
+
+当前理解比之前更清楚：
+
+1. 并不是每次 `/plan` 静态就直接踩进高 cost
+2. 更常见的是第二个弯时：
+   - planner 给的走廊已经不够保守
+   - smoother 有内抹倾向
+   - controller 再沿 shortcut 切进去
+3. 一旦切进 inflation layer，就容易造成卡死或抖动
+
+## 10. 最近一轮曲率收紧结果
+
+针对“第二个弯还是太急”的问题，最近一轮主要做了两类调整：
+
+1. 给样条更多几何自由度去把弯圆开：
+   - 更大的 `control_point_spacing`
+   - 更大的 `max_lateral_deviation`
+   - 更多的 `curvature_refinement_iterations`
+   - 更大的 `curvature_refinement_gain`
+2. 让高曲率段更早减速：
+   - 更低的 `global_speed_limit`
+   - 更低的 `longitudinal_accel_limit`
+   - 更强的 `curvature_brake_gain`
+
+这轮抓到的 profile 指标变化：
+
+1. `max_abs_curvature` 已从约 `4.89` 降到约 `2.83`
+2. `curvature_penalty` 已从约 `912` 降到约 `598`
+3. `velocity_smoothness_cost` 进一步下降
+4. `obstacle_cost` 仍为 `0.0`
+
+当前含义：
+
+1. 第二个弯的几何形状已经明显变圆
+2. 速度 profile 也更平顺
+3. 当前主导问题仍然更像“高曲率段 + shortcut 跟踪”，而不是 obstacle term 先触发
+
+## 11. bringup.launch.py 上车前检查清单
+
+在真正上车前，建议按下面顺序确认：
+
+1. **参数入口确认**
+   - `params_file` 指向 [node_params.yaml](../src/pb2025_sentry_bringup/params/node_params.yaml)
+   - `trajectory_optimizer` 段存在
+   - `smoother_server.bspline_smoother` 段存在
+   - `trajectory_speed_governor` 段存在
+
+2. **launch 链确认**
+   - `bringup.launch.py` 会包含 `rm_navigation_reality_launch.py`
+   - `rm_navigation_reality_launch.py` 会包含 `navigation_launch.py`
+   - `navigation_launch.py` 会启动：
+     - `trajectory_optimizer_node`
+     - `trajectory_speed_governor_node`
+     - `controller_server`
+     - `smoother_server`
+     - `planner_server`
+     - `velocity_smoother`
+
+3. **关键 topic 确认**
+   - `/plan`
+   - `/smoothed_path_visual`
+   - `/trajectory_profile_visual`
+   - `/trajectory_profile`
+   - `/cmd_vel_controller`
+   - `/cmd_vel_controller_governed`
+   - `/cmd_vel_nav2_result`
+
+4. **RViz 观测确认**
+   当前 [sentry_default_view.rviz](../src/pb2025_sentry_bringup/rviz/sentry_default_view.rviz) 里应能看到：
+   - 红色 `Global Plan (planner)`
+   - 青色 `Smoothed Path (viz)`
+   - `TrajectoryProfileMarkers`
+   - 绿色/橙色 MPPI 局部链
+
+5. **实车现象确认**
+   - 第一个弯不应明显变差
+   - 第二个弯应优先观察：
+     - 是否还会主动切进 inflation layer
+     - `TrajectoryProfileMarkers` 是否在高曲率段明显变色
+     - `cmd_vel_controller_governed` 是否比 `cmd_vel_controller` 更平顺
+
+所以“真正问题”不是一个孤立参数，而是：
+
+- 第一层参考路径离障安全裕量不够
+- 第二层在高曲率段的速度和 shortcut 倾向还过强
 
 ## 10. 下一步建议
 
-最推荐的下一步是：
+现在最合理的下一步是继续推进真正的联合优化器：
 
-1. 继续在 loopback 下观察第二阶段效果
-2. 再做一轮 MPPI 参数收敛
-3. 等“不会明显切进 inflation layer”之后，再开第三阶段 ESDF obstacle cost
+1. 在 `TrajectoryProfile2D` / B 样条表示上加入 `J_obs`
+2. 用连续 obstacle cost 把第一层路径本身从膨胀层外推开
+3. 再让 `trajectory_speed_governor` 利用新的 profile 限速
 
-如果下一轮继续，我建议直接做：
+具体优先级：
 
-1. 对 `PathAlign / PathAngle / ObstaclesCritic` 做更细一轮 sweep
-2. 或者开始给 `bspline_smoother` 加第二阶段 ESDF obstacle term
+1. 先把 `J_obs` 作为统一 optimizer 的第三项接入
+2. 再观察第二个弯的 `max_abs_curvature`、`speed_limit`、`obstacle_cost`
+3. 再决定是否继续调 MPPI critic

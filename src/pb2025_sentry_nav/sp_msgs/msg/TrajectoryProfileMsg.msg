@@ -1,0 +1,10 @@
+std_msgs/Header header
+string source
+float64 total_length
+float64 total_time
+float64 curvature_penalty
+float64 velocity_smoothness_cost
+float64 obstacle_cost
+float64 total_cost
+float64 max_abs_curvature
+TrajectoryProfilePoint[] points

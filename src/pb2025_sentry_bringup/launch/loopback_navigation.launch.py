@@ -49,12 +49,24 @@ def generate_launch_description():
         "behavior_server",
         "bt_navigator",
         "waypoint_follower",
+        "velocity_smoother",
     ]
 
     controller_server_cmd = Node(
         package="nav2_controller",
         executable="controller_server",
         name="controller_server",
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
+        arguments=["--ros-args", "--log-level", log_level],
+    )
+
+    trajectory_speed_governor_cmd = Node(
+        package="trajectory_optimizer",
+        executable="trajectory_speed_governor_node",
+        name="trajectory_speed_governor",
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
@@ -128,6 +140,21 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", log_level],
     )
 
+    velocity_smoother_cmd = Node(
+        package="nav2_velocity_smoother",
+        executable="velocity_smoother",
+        name="velocity_smoother",
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
+        arguments=["--ros-args", "--log-level", log_level],
+        remappings=[
+            ("cmd_vel", "cmd_vel_controller_governed"),
+            ("cmd_vel_smoothed", "cmd_vel_nav2_result"),
+        ],
+    )
+
     lifecycle_manager_cmd = Node(
         package="nav2_lifecycle_manager",
         executable="lifecycle_manager",
@@ -152,12 +179,14 @@ def generate_launch_description():
     ld.add_action(declare_log_level_cmd)
 
     ld.add_action(trajectory_optimizer_cmd)
+    ld.add_action(trajectory_speed_governor_cmd)
     ld.add_action(controller_server_cmd)
     ld.add_action(smoother_server_cmd)
     ld.add_action(planner_server_cmd)
     ld.add_action(behavior_server_cmd)
     ld.add_action(bt_navigator_cmd)
     ld.add_action(waypoint_follower_cmd)
+    ld.add_action(velocity_smoother_cmd)
     ld.add_action(lifecycle_manager_cmd)
 
     return ld

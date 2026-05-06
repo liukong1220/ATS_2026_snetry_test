@@ -73,11 +73,25 @@ trajectory_optimizer:
     use_sim_time: True
     input_path_topic: "plan"
     output_path_topic: "smoothed_path_visual"
-    control_point_spacing: 0.30
+    output_profile_topic: "trajectory_profile_visual"
+    control_point_spacing: 0.36
     output_path_spacing: 0.05
     min_input_point_spacing: 0.02
-    max_lateral_deviation: 0.20
+    max_lateral_deviation: 0.28
     min_control_points: 5
+    curvature_limit: 0.85
+    curvature_weight: 40.0
+    curvature_refinement_iterations: 10
+    curvature_refinement_gain: 0.05
+    global_speed_limit: 1.20
+    lateral_accel_limit: 1.0
+    longitudinal_accel_limit: 0.5
+    velocity_smoothing_gain: 0.3
+    derivative_step: 0.02
+    obstacle_safe_cost: 64
+    obstacle_weight: 35.0
+    obstacle_refinement_iterations: 3
+    obstacle_refinement_gain: 0.04
 
 controller_server:
   ros__parameters:
@@ -141,16 +155,16 @@ controller_server:
       # 每周期采样多少条轨迹。官方经验值大致为：
       # 50Hz 时约 1000，30Hz 时约 2000；本项目需结合算力和频率折中。
       # 更大通常更稳，但更吃算力；过小会让最佳轨迹抖动明显。
-      batch_size: 900
+      batch_size: 1000
       # Parameter `temperature`
       # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
       # 小：更激进，只盯最优样本，容易抖。
       # 大：更平滑，但也可能变钝。
-      temperature: 0.20
+      temperature: 0.24
       # Parameter `gamma`
       # 官方说明：这是控制能量/平滑正则项，通常不需要偏离默认值太多。
       # 小：更愿意急打急停；大：更平滑，但可能转角收得慢。
-      gamma: 0.020
+      gamma: 0.024
       # Parameter `iteration_count`
       # 官方建议通常保持为 1，优先通过增加 `batch_size` 而不是增加迭代次数来提效果。
       iteration_count: 1
@@ -178,9 +192,9 @@ controller_server:
       # std 决定每周期围绕当前控制序列“抖多大”。
       # 过大：rollout 像扇形散开，中途和终点附近都容易左右试探。
       # 过小：会变得保守，局部最优卡住时不容易跳出来。
-      vx_std: 0.16
-      vy_std: 0.16
-      wz_std: 0.28
+      vx_std: 0.13
+      vy_std: 0.13
+      wz_std: 0.22
 
       # --- Critics ---
       # critics 是代价项列表。MPPI 会综合这些 critic 给每条采样轨迹打分。
@@ -203,14 +217,14 @@ controller_server:
         # Parameter `PathAlignCritic.cost_weight`
         # 惩罚轨迹偏离路径中心线。
         # 大了会更“贴线”，但转角和障碍附近容易僵硬、来回修正。
-        cost_weight: 5.0
+        cost_weight: 4.0
         # Parameter `PathAlignCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         # 在本项目中可将它理解为：路径贴合项在终段还要不要继续强势介入。
         threshold_to_consider: 0.4
         # Parameter `PathAlignCritic.offset_from_furthest`
         # 用路径前方多远的位置做贴线参考。大了看得更远，容易切弯；小了更保守。
-        offset_from_furthest: 6
+        offset_from_furthest: 4
         # Parameter `PathAlignCritic.trajectory_point_step`
         # rollout 取样步长，越大越粗略但更省计算。
         trajectory_point_step: 4
@@ -226,30 +240,30 @@ controller_server:
         # Parameter `PathFollowCritic.cost_weight`
         # 鼓励沿路径整体往前推进，而不是只盯着贴中心线。
         # 它比 PathAlign 更“宽松”，更像“顺着大方向走”。
-        cost_weight: 7.5
+        cost_weight: 8.5
         # Parameter `PathFollowCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         # 在本项目中可理解为：终段时 PathFollow 还要不要继续主导推进。
         threshold_to_consider: 1.4
         # Parameter `PathFollowCritic.offset_from_furthest`
         # 越大越倾向追逐更远的 follow 点，速度会快，但转角更容易 shortcut。
-        offset_from_furthest: 4
+        offset_from_furthest: 3
       PathAngleCritic:
         enabled: true
         cost_power: 1
         # Parameter `PathAngleCritic.cost_weight`
         # 处理“轨迹朝向与路径前进方向严重不一致”的情况。
         # 它通常是抑制反向试探、横着切弯的重要项。
-        cost_weight: 5.0
+        cost_weight: 6.5
         # Parameter `PathAngleCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 0.5
+        threshold_to_consider: 0.4
         # Parameter `PathAngleCritic.offset_from_furthest`
-        offset_from_furthest: 3
+        offset_from_furthest: 2
         # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 允许的最大夹角，越小越严格。
         # 太小可能导致拐弯发僵；太大则反向/横漂更容易出现。
-        max_angle_to_furthest: 0.65
+        max_angle_to_furthest: 0.50
         # Parameter `PathAngleCritic.forward_preference`
         # loopback 仿真阶段优先减少“先反一下再转”的试探，因此打开前向偏好。
         forward_preference: true
@@ -283,20 +297,20 @@ controller_server:
         # Parameter `ObstaclesCritic.repulsion_weight`
         # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
         # 越大越早躲障，但也更容易把可视化 trajectories 顶得离路径很远。
-        repulsion_weight: 2.6
+        repulsion_weight: 3.0
         # Parameter `ObstaclesCritic.critical_weight`
         # 近碰撞区域的重惩罚，通常保持远大于一般路径 critic。
-        critical_weight: 30.0
+        critical_weight: 35.0
         # Parameter `ObstaclesCritic.collision_margin_distance`
         # 在真实碰撞边界外再加一层“心理安全距离”。
-        collision_margin_distance: 0.16
+        collision_margin_distance: 0.20
         # Parameter `ObstaclesCritic.near_goal_distance`
         # 终点附近降低障碍回避敏感度，避免“最后贴点时被微小代价场推开”。
         near_goal_distance: 0.4
         # Parameter `ObstaclesCritic.inflation_radius`
         # 官方文档明确要求：这里要与 costmap inflation layer 一致，否则 critic 语义会错位。
         inflation_radius: 0.40
-        cost_scaling_factor: 10.0
+        cost_scaling_factor: 12.0
       ConstraintCritic:
         enabled: true
         cost_power: 1
@@ -432,10 +446,36 @@ planner_server:
     use_sim_time: True
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
-      use_astar: false
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      tolerance: 0.3
       allow_unknown: true
+      downsample_costmap: false
+      downsampling_factor: 1
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 2.5
+      cost_travel_multiplier: 2.4
+      motion_model_for_search: "DUBIN"
+      angle_quantization_bins: 64
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 3.2
+      minimum_turning_radius: 0.08
+      retrospective_penalty: 0.06
+      reverse_penalty: 1.0
+      change_penalty: 0.0
+      non_straight_penalty: 1.20
+      cost_penalty: 2.5
+      rotation_penalty: 5.0
+      lookup_table_size: 20.0
+      cache_obstacle_heuristic: True
+      allow_reverse_expansion: False
+      smooth_path: True
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
 
 smoother_server:
   ros__parameters:
@@ -443,11 +483,27 @@ smoother_server:
     smoother_plugins: ["bspline_smoother", "fallback_smoother"]
     bspline_smoother:
       plugin: "trajectory_optimizer/Nav2BSplineSmoother"
-      control_point_spacing: 0.30
+      control_point_spacing: 0.36
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
-      max_lateral_deviation: 0.18
+      max_lateral_deviation: 0.28
       min_control_points: 5
+      curvature_limit: 0.85
+      curvature_weight: 40.0
+      curvature_refinement_iterations: 10
+      curvature_refinement_gain: 0.05
+      global_speed_limit: 1.20
+      lateral_accel_limit: 1.0
+      longitudinal_accel_limit: 0.5
+      velocity_smoothing_gain: 0.3
+      derivative_step: 0.02
+      profile_topic: "trajectory_profile"
+      obstacle_safe_cost: 64
+      obstacle_weight: 35.0
+      obstacle_refinement_iterations: 3
+      obstacle_refinement_gain: 0.04
+      max_path_cost: 64
+      pullback_samples: 8
     fallback_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
       tolerance: 1.0e-10
@@ -527,6 +583,16 @@ waypoint_follower:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
       enabled: True
       waypoint_pause_duration: 200
+
+trajectory_speed_governor:
+  ros__parameters:
+    use_sim_time: True
+    profile_topic: "trajectory_profile"
+    input_cmd_vel_topic: "cmd_vel_controller"
+    output_cmd_vel_topic: "cmd_vel_controller_governed"
+    marker_topic: "trajectory_profile_markers"
+    min_speed_scale: 0.18
+    curvature_brake_gain: 1.35
 
 velocity_smoother:
   ros__parameters:

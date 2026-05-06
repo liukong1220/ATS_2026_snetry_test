@@ -436,6 +436,18 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: back_up_free_space_markers
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: TrajectoryProfileMarkers
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: trajectory_profile_markers
+      Value: true
     - Class: rviz_default_plugins/Camera
       Enabled: false
       Far Plane Distance: 100
@@ -474,6 +486,7 @@ Visualization Manager:
         TF: true
         TerrainMap: true
         TrackerMarker: true
+        TrajectoryProfileMarkers: true
         Value: true
         VisionFollowMarkers: true
         RobotModeMarkers: true

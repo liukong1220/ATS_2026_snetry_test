@@ -371,11 +371,25 @@ trajectory_optimizer:
     use_sim_time: false
     input_path_topic: "plan"
     output_path_topic: "smoothed_path_visual"
-    control_point_spacing: 0.30
+    output_profile_topic: "trajectory_profile_visual"
+    control_point_spacing: 0.36
     output_path_spacing: 0.05
     min_input_point_spacing: 0.02
-    max_lateral_deviation: 0.20
+    max_lateral_deviation: 0.28
     min_control_points: 5
+    curvature_limit: 0.85
+    curvature_weight: 40.0
+    curvature_refinement_iterations: 10
+    curvature_refinement_gain: 0.05
+    global_speed_limit: 1.20
+    lateral_accel_limit: 1.0
+    longitudinal_accel_limit: 0.5
+    velocity_smoothing_gain: 0.3
+    derivative_step: 0.02
+    obstacle_safe_cost: 64
+    obstacle_weight: 35.0
+    obstacle_refinement_iterations: 3
+    obstacle_refinement_gain: 0.04
 
 controller_server:
   ros__parameters:
@@ -737,8 +751,31 @@ planner_server:
 smoother_server:
   ros__parameters:
     use_sim_time: false
-    smoother_plugins: ["simple_smoother"]
-    simple_smoother:
+    smoother_plugins: ["bspline_smoother", "fallback_smoother"]
+    bspline_smoother:
+      plugin: "trajectory_optimizer/Nav2BSplineSmoother"
+      control_point_spacing: 0.36
+      output_path_spacing: 0.05
+      min_input_point_spacing: 0.02
+      max_lateral_deviation: 0.28
+      min_control_points: 5
+      curvature_limit: 0.85
+      curvature_weight: 40.0
+      curvature_refinement_iterations: 10
+      curvature_refinement_gain: 0.05
+      global_speed_limit: 1.20
+      lateral_accel_limit: 1.0
+      longitudinal_accel_limit: 0.5
+      velocity_smoothing_gain: 0.3
+      derivative_step: 0.02
+      profile_topic: "trajectory_profile"
+      obstacle_safe_cost: 64
+      obstacle_weight: 35.0
+      obstacle_refinement_iterations: 3
+      obstacle_refinement_gain: 0.04
+      max_path_cost: 64
+      pullback_samples: 8
+    fallback_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
       tolerance: 1.0e-10
       max_its: 1000
@@ -840,6 +877,16 @@ waypoint_follower:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
       enabled: True
       waypoint_pause_duration: 200
+
+trajectory_speed_governor:
+  ros__parameters:
+    use_sim_time: false
+    profile_topic: "trajectory_profile"
+    input_cmd_vel_topic: "cmd_vel_controller"
+    output_cmd_vel_topic: "cmd_vel_controller_governed"
+    marker_topic: "trajectory_profile_markers"
+    min_speed_scale: 0.18
+    curvature_brake_gain: 1.35
 
 velocity_smoother:
   ros__parameters:

@@ -166,6 +166,16 @@ def generate_launch_description():
                 arguments=["--ros-args", "--log-level", log_level],
             ),
             Node(
+                package="trajectory_optimizer",
+                executable="trajectory_speed_governor_node",
+                name="trajectory_speed_governor",
+                output="screen",
+                respawn=use_respawn,
+                respawn_delay=2.0,
+                parameters=[configured_params],
+                arguments=["--ros-args", "--log-level", log_level],
+            ),
+            Node(
                 package="nav2_controller",
                 executable="controller_server",
                 name="controller_server",
@@ -239,7 +249,7 @@ def generate_launch_description():
                 parameters=[configured_params],
                 arguments=["--ros-args", "--log-level", log_level],
                 remappings=[
-                    ("cmd_vel", "cmd_vel_controller"),  # remap input
+                    ("cmd_vel", "cmd_vel_controller_governed"),  # remap input
                     ("cmd_vel_smoothed", "cmd_vel_nav2_result"),  # remap output
                 ],
             ),
@@ -284,6 +294,12 @@ def generate_launch_description():
                 package="trajectory_optimizer",
                 plugin="trajectory_optimizer::TrajectoryOptimizerNode",
                 name="trajectory_optimizer",
+                parameters=[configured_params],
+            ),
+            ComposableNode(
+                package="trajectory_optimizer",
+                plugin="trajectory_optimizer::TrajectorySpeedGovernor",
+                name="trajectory_speed_governor",
                 parameters=[configured_params],
             ),
             ComposableNode(
@@ -332,7 +348,7 @@ def generate_launch_description():
                 name="velocity_smoother",
                 parameters=[configured_params],
                 remappings=[
-                    ("cmd_vel", "cmd_vel_controller"),  # remap input
+                    ("cmd_vel", "cmd_vel_controller_governed"),  # remap input
                     ("cmd_vel_smoothed", "cmd_vel_nav2_result"),  # remap output
                 ],
             ),
