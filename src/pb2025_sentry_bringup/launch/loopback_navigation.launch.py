@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterFile
 
 
 def generate_launch_description():
@@ -16,6 +17,7 @@ def generate_launch_description():
     stdout_linebuf_envvar = SetEnvironmentVariable(
         "RCUTILS_LOGGING_BUFFERED_STREAM", "1"
     )
+    configured_params = ParameterFile(params_file, allow_substs=True)
 
     declare_params_file_cmd = DeclareLaunchArgument(
         "params_file",
@@ -56,7 +58,18 @@ def generate_launch_description():
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
-        parameters=[params_file],
+        parameters=[configured_params],
+        arguments=["--ros-args", "--log-level", log_level],
+    )
+
+    trajectory_optimizer_cmd = Node(
+        package="trajectory_optimizer",
+        executable="trajectory_optimizer_node",
+        name="trajectory_optimizer",
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
     )
 
@@ -67,7 +80,7 @@ def generate_launch_description():
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
-        parameters=[params_file],
+        parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
     )
 
@@ -78,7 +91,7 @@ def generate_launch_description():
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
-        parameters=[params_file],
+        parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
     )
 
@@ -89,7 +102,7 @@ def generate_launch_description():
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
-        parameters=[params_file],
+        parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
     )
 
@@ -100,7 +113,7 @@ def generate_launch_description():
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
-        parameters=[params_file],
+        parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
     )
 
@@ -111,7 +124,7 @@ def generate_launch_description():
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
-        parameters=[params_file],
+        parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
     )
 
@@ -121,7 +134,7 @@ def generate_launch_description():
         name="lifecycle_manager_navigation",
         output="screen",
         parameters=[
-            params_file,
+            configured_params,
             {"use_sim_time": True},
             {"autostart": autostart},
             {"node_names": lifecycle_nodes},
@@ -138,6 +151,7 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
 
+    ld.add_action(trajectory_optimizer_cmd)
     ld.add_action(controller_server_cmd)
     ld.add_action(smoother_server_cmd)
     ld.add_action(planner_server_cmd)

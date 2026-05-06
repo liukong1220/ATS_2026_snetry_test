@@ -726,6 +726,60 @@ void BackUpFreeSpace::visualizePlan(
   }
   markers.markers.push_back(path_marker);
 
+  // 可视化恢复走廊左右边界：
+  // 1. 方便在 RViz 里直接看出“恢复动作实际认为哪里是可通走廊”
+  // 2. 便于验证分层采样 / 分段放行是否沿着预期走廊工作
+  const double nx = -std::sin(plan.heading);
+  const double ny = std::cos(plan.heading);
+
+  visualization_msgs::msg::Marker left_boundary_marker;
+  left_boundary_marker.header = path_marker.header;
+  left_boundary_marker.ns = "back_up_free_space";
+  left_boundary_marker.id = 2;
+  left_boundary_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  left_boundary_marker.action = visualization_msgs::msg::Marker::ADD;
+  left_boundary_marker.scale.x = 0.03;
+  left_boundary_marker.color.r = 0.1f;
+  left_boundary_marker.color.g = 0.75f;
+  left_boundary_marker.color.b = 1.0f;
+  left_boundary_marker.color.a = 0.9f;
+
+  geometry_msgs::msg::Point start_left = start;
+  start_left.x += nx * corridor_half_width_;
+  start_left.y += ny * corridor_half_width_;
+  left_boundary_marker.points.push_back(start_left);
+  for (const auto & point : plan.centerline) {
+    geometry_msgs::msg::Point left_point = point;
+    left_point.x += nx * corridor_half_width_;
+    left_point.y += ny * corridor_half_width_;
+    left_boundary_marker.points.push_back(left_point);
+  }
+  markers.markers.push_back(left_boundary_marker);
+
+  visualization_msgs::msg::Marker right_boundary_marker;
+  right_boundary_marker.header = path_marker.header;
+  right_boundary_marker.ns = "back_up_free_space";
+  right_boundary_marker.id = 3;
+  right_boundary_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  right_boundary_marker.action = visualization_msgs::msg::Marker::ADD;
+  right_boundary_marker.scale.x = 0.03;
+  right_boundary_marker.color.r = 0.1f;
+  right_boundary_marker.color.g = 0.75f;
+  right_boundary_marker.color.b = 1.0f;
+  right_boundary_marker.color.a = 0.9f;
+
+  geometry_msgs::msg::Point start_right = start;
+  start_right.x -= nx * corridor_half_width_;
+  start_right.y -= ny * corridor_half_width_;
+  right_boundary_marker.points.push_back(start_right);
+  for (const auto & point : plan.centerline) {
+    geometry_msgs::msg::Point right_point = point;
+    right_point.x -= nx * corridor_half_width_;
+    right_point.y -= ny * corridor_half_width_;
+    right_boundary_marker.points.push_back(right_point);
+  }
+  markers.markers.push_back(right_boundary_marker);
+
   visualization_msgs::msg::Marker goal_marker;
   goal_marker.header = path_marker.header;
   goal_marker.ns = "back_up_free_space";

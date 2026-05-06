@@ -68,6 +68,17 @@ bt_navigator_navigate_to_pose_rclcpp_node:
   ros__parameters:
     use_sim_time: True
 
+trajectory_optimizer:
+  ros__parameters:
+    use_sim_time: True
+    input_path_topic: "plan"
+    output_path_topic: "smoothed_path_visual"
+    control_point_spacing: 0.30
+    output_path_spacing: 0.05
+    min_input_point_spacing: 0.02
+    max_lateral_deviation: 0.20
+    min_control_points: 5
+
 controller_server:
   ros__parameters:
     use_sim_time: True
@@ -130,16 +141,16 @@ controller_server:
       # 每周期采样多少条轨迹。官方经验值大致为：
       # 50Hz 时约 1000，30Hz 时约 2000；本项目需结合算力和频率折中。
       # 更大通常更稳，但更吃算力；过小会让最佳轨迹抖动明显。
-      batch_size: 750
+      batch_size: 900
       # Parameter `temperature`
       # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
       # 小：更激进，只盯最优样本，容易抖。
       # 大：更平滑，但也可能变钝。
-      temperature: 0.15
+      temperature: 0.20
       # Parameter `gamma`
       # 官方说明：这是控制能量/平滑正则项，通常不需要偏离默认值太多。
       # 小：更愿意急打急停；大：更平滑，但可能转角收得慢。
-      gamma: 0.015
+      gamma: 0.020
       # Parameter `iteration_count`
       # 官方建议通常保持为 1，优先通过增加 `batch_size` 而不是增加迭代次数来提效果。
       iteration_count: 1
@@ -167,9 +178,9 @@ controller_server:
       # std 决定每周期围绕当前控制序列“抖多大”。
       # 过大：rollout 像扇形散开，中途和终点附近都容易左右试探。
       # 过小：会变得保守，局部最优卡住时不容易跳出来。
-      vx_std: 0.20
-      vy_std: 0.20
-      wz_std: 0.35
+      vx_std: 0.16
+      vy_std: 0.16
+      wz_std: 0.28
 
       # --- Critics ---
       # critics 是代价项列表。MPPI 会综合这些 critic 给每条采样轨迹打分。
@@ -192,14 +203,14 @@ controller_server:
         # Parameter `PathAlignCritic.cost_weight`
         # 惩罚轨迹偏离路径中心线。
         # 大了会更“贴线”，但转角和障碍附近容易僵硬、来回修正。
-        cost_weight: 8.0
+        cost_weight: 5.0
         # Parameter `PathAlignCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         # 在本项目中可将它理解为：路径贴合项在终段还要不要继续强势介入。
-        threshold_to_consider: 0.5
+        threshold_to_consider: 0.4
         # Parameter `PathAlignCritic.offset_from_furthest`
         # 用路径前方多远的位置做贴线参考。大了看得更远，容易切弯；小了更保守。
-        offset_from_furthest: 10
+        offset_from_furthest: 6
         # Parameter `PathAlignCritic.trajectory_point_step`
         # rollout 取样步长，越大越粗略但更省计算。
         trajectory_point_step: 4
@@ -215,30 +226,30 @@ controller_server:
         # Parameter `PathFollowCritic.cost_weight`
         # 鼓励沿路径整体往前推进，而不是只盯着贴中心线。
         # 它比 PathAlign 更“宽松”，更像“顺着大方向走”。
-        cost_weight: 6.0
+        cost_weight: 7.5
         # Parameter `PathFollowCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         # 在本项目中可理解为：终段时 PathFollow 还要不要继续主导推进。
         threshold_to_consider: 1.4
         # Parameter `PathFollowCritic.offset_from_furthest`
         # 越大越倾向追逐更远的 follow 点，速度会快，但转角更容易 shortcut。
-        offset_from_furthest: 5
+        offset_from_furthest: 4
       PathAngleCritic:
         enabled: true
         cost_power: 1
         # Parameter `PathAngleCritic.cost_weight`
         # 处理“轨迹朝向与路径前进方向严重不一致”的情况。
         # 它通常是抑制反向试探、横着切弯的重要项。
-        cost_weight: 3.5
+        cost_weight: 5.0
         # Parameter `PathAngleCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 0.5
         # Parameter `PathAngleCritic.offset_from_furthest`
-        offset_from_furthest: 4
+        offset_from_furthest: 3
         # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 允许的最大夹角，越小越严格。
         # 太小可能导致拐弯发僵；太大则反向/横漂更容易出现。
-        max_angle_to_furthest: 0.85
+        max_angle_to_furthest: 0.65
         # Parameter `PathAngleCritic.forward_preference`
         # loopback 仿真阶段优先减少“先反一下再转”的试探，因此打开前向偏好。
         forward_preference: true
@@ -272,20 +283,20 @@ controller_server:
         # Parameter `ObstaclesCritic.repulsion_weight`
         # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
         # 越大越早躲障，但也更容易把可视化 trajectories 顶得离路径很远。
-        repulsion_weight: 1.8
+        repulsion_weight: 2.6
         # Parameter `ObstaclesCritic.critical_weight`
         # 近碰撞区域的重惩罚，通常保持远大于一般路径 critic。
-        critical_weight: 20.0
+        critical_weight: 30.0
         # Parameter `ObstaclesCritic.collision_margin_distance`
         # 在真实碰撞边界外再加一层“心理安全距离”。
-        collision_margin_distance: 0.1
+        collision_margin_distance: 0.16
         # Parameter `ObstaclesCritic.near_goal_distance`
         # 终点附近降低障碍回避敏感度，避免“最后贴点时被微小代价场推开”。
-        near_goal_distance: 0.5
+        near_goal_distance: 0.4
         # Parameter `ObstaclesCritic.inflation_radius`
         # 官方文档明确要求：这里要与 costmap inflation layer 一致，否则 critic 语义会错位。
         inflation_radius: 0.40
-        cost_scaling_factor: 8.0
+        cost_scaling_factor: 10.0
       ConstraintCritic:
         enabled: true
         cost_power: 1
@@ -429,8 +440,15 @@ planner_server:
 smoother_server:
   ros__parameters:
     use_sim_time: True
-    smoother_plugins: ["simple_smoother"]
-    simple_smoother:
+    smoother_plugins: ["bspline_smoother", "fallback_smoother"]
+    bspline_smoother:
+      plugin: "trajectory_optimizer/Nav2BSplineSmoother"
+      control_point_spacing: 0.30
+      output_path_spacing: 0.05
+      min_input_point_spacing: 0.02
+      max_lateral_deviation: 0.18
+      min_control_points: 5
+    fallback_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
       tolerance: 1.0e-10
       max_its: 1000
@@ -438,28 +456,62 @@ smoother_server:
 
 behavior_server:
   ros__parameters:
-    costmap_topic: local_costmap/costmap_raw
-    footprint_topic: local_costmap/published_footprint
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
     cycle_frequency: 10.0
     behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
     spin:
       plugin: "nav2_behaviors/Spin"
     backup:
-      plugin: "nav2_behaviors/BackUp"
+      plugin: "pb_nav2_behaviors/BackUpFreeSpace"
     drive_on_heading:
       plugin: "nav2_behaviors/DriveOnHeading"
     wait:
       plugin: "nav2_behaviors/Wait"
     assisted_teleop:
       plugin: "nav2_behaviors/AssistedTeleop"
-    global_frame: odom
-    robot_base_frame: base_footprint
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: gimbal_yaw_fake
     transform_tolerance: 0.1
     use_sim_time: true
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
     rotational_acc_lim: 3.2
+    # params for pb_nav2_behaviors/BackUpFreeSpace
+    service_name: "global_costmap/get_costmap"
+    max_radius: 2.0
+    max_allowed_cost: 96
+    search_half_span_deg: 140.0
+    search_angle_increment_deg: 10.0
+    trajectory_sample_step: 0.08
+    near_sample_step: 0.05
+    far_sample_step: 0.10
+    layered_sampling_split_distance: 0.45
+    corridor_half_width: 0.22
+    corridor_lateral_step: 0.08
+    far_corridor_lateral_step: 0.12
+    minimum_release_distance: 0.18
+    dynamic_obstacle_prediction_enabled: true
+    prediction_horizon_s: 0.45
+    prefix_velocity_alpha: 0.35
+    predictive_block_margin: 0.10
+    heading_stickiness_weight: 6.0
+    replanning_cooldown_s: 0.35
+    blocked_enter_cycles: 3
+    clear_exit_cycles: 2
+    max_replan_attempts: 6
+    speed_filter_tau: 0.18
+    translational_acc_limit: 0.8
+    translational_decel_limit: 1.2
+    minimum_speed_xy: 0.08
+    goal_tolerance: 0.04
+    monitor_lookahead_distance: 0.35
+    enable_full_circle_fallback: true
+    visualize: true
 
 robot_state_publisher:
   ros__parameters:

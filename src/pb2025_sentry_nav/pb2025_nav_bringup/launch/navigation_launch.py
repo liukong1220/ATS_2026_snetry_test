@@ -156,6 +156,16 @@ def generate_launch_description():
                 arguments=["--ros-args", "--log-level", log_level],
             ),
             Node(
+                package="trajectory_optimizer",
+                executable="trajectory_optimizer_node",
+                name="trajectory_optimizer",
+                output="screen",
+                respawn=use_respawn,
+                respawn_delay=2.0,
+                parameters=[configured_params],
+                arguments=["--ros-args", "--log-level", log_level],
+            ),
+            Node(
                 package="nav2_controller",
                 executable="controller_server",
                 name="controller_server",
@@ -268,6 +278,12 @@ def generate_launch_description():
                 package="fake_vel_transform",
                 plugin="fake_vel_transform::FakeVelTransform",
                 name="fake_vel_transform",
+                parameters=[configured_params],
+            ),
+            ComposableNode(
+                package="trajectory_optimizer",
+                plugin="trajectory_optimizer::TrajectoryOptimizerNode",
+                name="trajectory_optimizer",
                 parameters=[configured_params],
             ),
             ComposableNode(

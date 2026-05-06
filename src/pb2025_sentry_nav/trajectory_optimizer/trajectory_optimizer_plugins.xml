@@ -1,0 +1,10 @@
+<class_libraries>
+  <library path="trajectory_optimizer">
+    <class
+      name="trajectory_optimizer/Nav2BSplineSmoother"
+      type="trajectory_optimizer::Nav2BSplineSmoother"
+      base_class_type="nav2_core::Smoother">
+      <description>B-spline-style path smoother with dense resampling for omni trajectory references.</description>
+    </class>
+  </library>
+</class_libraries>

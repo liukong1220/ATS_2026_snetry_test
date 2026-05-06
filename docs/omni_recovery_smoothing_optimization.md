@@ -1,699 +1,243 @@
-# 全向舵轮脱困与避障平滑优化说明
+# 全向导航优化接力文档
 
-## 1. 问题背景
+更新时间：2026-05-06
 
-当前项目中的恢复行为主要由：
+这份文档记录当前三阶段优化的实际落地状态，避免后续对话把“仅可视化验证”和“已接入 controller 主链”混在一起。
 
-- [src/pb2025_sentry_nav/pb_nav2_plugins/src/behaviors/back_up_free_space.cpp](../src/pb2025_sentry_nav/pb_nav2_plugins/src/behaviors/back_up_free_space.cpp)
+## 1. 当前阶段状态
 
-负责。
+### 第一阶段：`/plan -> 平滑参考路径 -> 高密度采样`
 
-原实现的核心问题是：
+状态：已完成
 
-1. 每个控制周期只发一个固定方向的小步速度
-2. 紧接着立刻用单步前向碰撞检测判断是否还能继续
-3. 一旦局部 costmap 或膨胀层边界有轻微变化，就立即停下 / 失败 / 切恢复状态
+已经落地的内容：
 
-这在全向舵轮底盘上会放大成三个问题：
+1. 独立 B 样条风格路径优化算法
+2. 高密度路径重采样
+3. 保形约束，避免平滑后过度偏离原始走廊
+4. 可视化旁路输出
 
-1. 底盘表现为“挪一点、停一下、再挪一点”
-2. 电机与舵轮不断经历高频启停和方向突变，容易抖动、发热、磨损
-3. 正常导航 / 避障 / 脱困状态在边界附近频繁跳变，整体控制观感卡顿
+### 第二阶段：MPPI 真正跟踪平滑后的参考路径
 
----
+状态：已完成第一版接入
 
-## 2. 优化目标
+已经落地的内容：
 
-本次优化不是简单调参数，而是重新设计恢复动作的局部控制策略，目标是：
+1. `trajectory_optimizer` 不再只是旁路节点
+2. 同一套平滑算法已经封装为 Nav2 smoother plugin
+3. BT 主链已恢复为：
+   `ComputePath -> SmoothPath -> FollowPath`
+4. `FollowPath` 现在会真正吃到 `bspline_smoother` 输出后的 path
+5. MPPI 参数已做一轮偏保守的拐角/障碍收敛调节
 
-1. 提高脱困成功率
-2. 让全向舵轮底盘在恢复和避障时保持连续、平滑
-3. 降低电机与舵轮机构的高频冲击
-4. 避免正常 / 避障 / 脱困之间的抖动切换
+### 第三阶段：ESDF obstacle cost
 
----
+状态：未开始
 
-## 3. 新算法设计
+计划仍然是：
 
-### 3.1 从“逐小步试探”改为“恢复轨迹规划 + 批量采样检测”
+1. 在轨迹优化中加入连续障碍代价
+2. 优先形式：
+   `max(0, safe_dist - distance)^2`
+3. 让第一层参考路径本身远离障碍，而不是主要靠 MPPI 在离散 costmap 上补救
 
-原逻辑是：
+## 2. 当前真实链路
 
-1. 找一个方向
-2. 每拍沿这个方向发一个速度
-3. 每拍只检查很近的一点是否碰撞
+现在已经分成两条并行链：
 
-新逻辑改为：
+### 主控制链
 
-1. 先基于当前 costmap 规划一条短时恢复轨迹
-2. 轨迹不是单点，而是一条带宽度的“通行走廊”
-3. 对整条走廊做批量采样检测
-4. 选择平均代价更低、贴近车尾主后退方向、且与上一次方向更连续的恢复方向
+`ComputePath -> SmoothPath(bspline_smoother) -> FollowPath(MPPI)`
 
-这样做的好处：
+这条链会真正影响 MPPI 控制结果。
 
-1. 不再因为单个局部采样点抖动而频繁停启
-2. 恢复动作对膨胀层边界和动态障碍扰动更稳
-3. 更符合全向舵轮“可以向斜后方 / 侧后方柔性退让”的运动优势
+### 旁路可视化链
 
-对应代码：
+`plan_raw_visual -> smoothed_path_visual`
 
-- [back_up_free_space.cpp](../src/pb2025_sentry_nav/pb_nav2_plugins/src/behaviors/back_up_free_space.cpp)
-  中的 `planEscapeTrajectory()`
-- `evaluateCandidateTrajectory()`
-- `sampleCost()`
+这条链只是为了在 RViz 中继续对比：
 
-### 3.1.1 第一阶段新增：分层采样
+1. planner 原始路径
+2. B 样条平滑后的高密度路径
 
-在本次第一阶段中，恢复轨迹采样已经进一步改成：
+它不再参与 controller 输入。
 
-1. 近距离密采样
-2. 远距离疏采样
+## 3. 已落地代码位置
 
-新增参数：
+### 3.1 B 样条算法核心
 
-- `near_sample_step`
-- `far_sample_step`
-- `layered_sampling_split_distance`
-- `far_corridor_lateral_step`
+- [bspline_path_optimizer.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/bspline_path_optimizer.hpp)
+- [bspline_path_optimizer.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/bspline_path_optimizer.cpp)
 
-设计原因：
+当前能力：
 
-1. 机器人附近的碰撞风险最高，必须更密集采样
-2. 远处只需要判断大方向是否大致通畅，不需要和近处一样高分辨率
-3. 这样能在不明显牺牲安全性的情况下，把恢复规划算力压下来
+1. 清洗过密路径点
+2. 稀疏控制点提取
+3. cubic B-spline 风格插值
+4. 高密度等弧长输出
+5. 横向偏差夹紧
 
-### 3.1.2 第一阶段新增：分段放行
+### 3.2 可视化旁路节点
 
-本次第一阶段还新增了“分段放行”能力：
+- [trajectory_optimizer_node.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/trajectory_optimizer_node.hpp)
+- [trajectory_optimizer_node.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/trajectory_optimizer_node.cpp)
 
-1. 若整条恢复目标距离都可通，则整条执行
-2. 若中途被障碍或膨胀层截断，不直接宣告失败
-3. 而是先释放当前连续可通的最远安全段
+当前行为：
 
-新增参数：
+1. 订阅 `plan_raw_visual`
+2. 发布 `smoothed_path_visual`
 
-- `minimum_release_distance`
+### 3.3 Nav2 smoother plugin
 
-设计原因：
+- [nav2_bspline_smoother.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/nav2_bspline_smoother.hpp)
+- [nav2_bspline_smoother.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/nav2_bspline_smoother.cpp)
+- [trajectory_optimizer_plugins.xml](../src/pb2025_sentry_nav/trajectory_optimizer/trajectory_optimizer_plugins.xml)
 
-1. 现实里经常出现“前方 20~40cm 明明能退，但更远一点不通”的情况
-2. 原实现会因为远处不通而完全不走，导致原地卡死
-3. 分段放行能先把车身从最危险的局部几何关系里解出来，再触发下一次重规划
+当前行为：
 
-这对于：
+1. 被 `smoother_server` 动态加载
+2. 在 `SmoothPath` action 中直接处理 planner 输出路径
+3. 把平滑后的 path 返回给 BT blackboard，再交给 `FollowPath`
 
-1. 卡在膨胀层边缘
-2. 被动态障碍物短时挡住
-3. 车身姿态需要先略微侧出才能继续恢复
+## 4. 第二阶段具体接法
 
-尤其有效
+### 4.1 BT 已接回 SmoothPath 主链
 
-### 3.1.3 第二阶段新增：动态障碍简单速度预测
+已更新：
 
-第二阶段没有直接上重型动态目标跟踪，而是先做一个更轻量、更适合当前恢复链的预测：
+- [navigate_to_pose_w_replanning_and_recovery.xml](../src/pb2025_sentry_nav/pb2025_nav_bringup/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml)
+- [navigate_through_poses_w_replanning_and_recovery.xml](../src/pb2025_sentry_nav/pb2025_nav_bringup/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml)
 
-1. 沿当前恢复轨迹前方计算“安全前缀距离”
-2. 观察这个安全前缀在连续两拍之间是变长还是变短
-3. 用一个低通后的前缀速度估计做短时匀速外推
-4. 如果预测到前方恢复走廊很快会被重新封堵，就提前进入 `BLOCKED`
+现在：
 
-新增参数：
+1. `ComputePath*` 输出到 `{path_raw}`
+2. `SmoothPath` 用 `smoother_id="bspline_smoother"`
+3. 平滑结果写回 `{path}`
+4. `FollowPath` 追踪 `{path}`
 
-- `dynamic_obstacle_prediction_enabled`
-- `prediction_horizon_s`
-- `prefix_velocity_alpha`
-- `predictive_block_margin`
+### 4.2 loopback 的 smoother_server 已切到我们自己的插件
 
-设计原因：
+已更新：
 
-1. 当前帧可走，不代表下一拍还可走
-2. 比赛中动态障碍往往不是静止地“突然出现”，而是逐渐逼近恢复走廊
-3. 如果等碰到才急停，舵轮底盘会出现更明显的顿挫和高频停启
-4. 提前一点点预测并进入重规划，会更像连续避让，而不是撞到边界再反应
+- [loopback_sim/nav2_params.yaml](../src/loopback_sim/params/nav2_params.yaml)
 
-### 3.2 面向全向舵轮的恢复方向搜索
+当前配置：
 
-全向舵轮不应该只会“纯 x 轴后退”。
+1. `bspline_smoother`
+2. `fallback_smoother`
 
-本次恢复方向搜索以机器人车尾方向为中心，在一个可配置的角域内搜索：
+这样即使后续我们继续试 ESDF，也只需要在 smoother 层继续扩展，不用再改 controller 接口。
 
-- `search_half_span_deg`
-- `search_angle_increment_deg`
+### 4.3 loopback launch 已保留可视化旁路
 
-优先搜索后向和后侧向的连续可行方向，必要时再放开到全角域：
+已更新：
 
-- `enable_full_circle_fallback`
+- [loopback_navigation.launch.py](../src/pb2025_sentry_bringup/launch/loopback_navigation.launch.py)
 
-这样做的原因：
+当前行为：
 
-1. 全向舵轮在狭窄区域常常“正后退不通，但斜后退可通”
-2. 若仍坚持刚性纯后退，会反复卡在膨胀层边缘
-3. 斜后退对脱离动态障碍遮挡也更高效
+1. `trajectory_optimizer_node` 仍然启动
+2. 但它被 remap 到：
+   - `plan_raw_visual`
+   - `smoothed_path_visual`
+3. 因此不会和 Nav2 `SmoothPath` action 混 topic
 
-### 3.3 速度输出改为一阶低通 + 加减速限幅
+## 5. 这次发现并修掉的问题
 
-原逻辑直接把目标速度一步跳到输出：
+### 5.1 之前看不到青色路径的真正原因
 
-1. 本拍 `0`
-2. 下一拍 `0.25`
-3. 再下一拍可能又变成 `0`
+之前你在：
 
-这正是电机抖动和舵轮机械冲击的重要来源。
+`ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True publish_referee_inputs:=True`
 
-新逻辑在恢复动作内部加入两层平滑：
+看不到青线，不是 RViz 配置坏了，而是：
 
-1. 一阶低通滤波
-2. 每轴加减速限幅
+1. `loopback_vision_test`
+2. -> `loopback_decision_sim`
+3. -> `loopback_navigation`
 
-对应参数：
+这条链原本根本没起 `trajectory_optimizer`
 
-- `speed_filter_tau`
-- `translational_acc_limit`
-- `translational_decel_limit`
-- `minimum_speed_xy`
+所以：
 
-对应代码：
+1. RViz 里有显示项
+2. 但没有 `/smoothed_path` 发布者
 
-- `buildDesiredCommand()`
-- `smoothCommand()`
+这个问题已经修掉。
 
-这样做的好处：
+### 5.2 第二阶段初次接入时的 lifecycle 卡死
 
-1. 速度不再突变
-2. 斜向恢复时 `vx / vy` 会连续过渡
-3. 对舵轮转向执行器和驱动电机更友好
-4. 明显减少“卡顿 + 抖一下”的观感
+一开始在 `loopback_navigation.launch.py` 里把 `trajectory_optimizer` 错误地加进了 `lifecycle_nodes`。
 
-### 3.4 加入状态滞回，抑制频繁切状态
+但它是普通 node，不是 lifecycle node，所以会卡在：
 
-原实现只有“当前可走 / 当前不可走”的瞬时判断，没有滞回。
+`Waiting for service trajectory_optimizer/get_state...`
 
-所以只要障碍边界或膨胀层有一点抖动，就可能出现：
+这个问题也已经修掉。
 
-1. 一拍可走
-2. 下一拍不可走
-3. 再下一拍又可走
+## 6. 本轮 MPPI 参数调整
 
-这会直接导致：
+当前只先动了 loopback 仿真链，目的是减轻：
 
-1. 恢复行为反复停启
-2. BT 在恢复分支里表现得像“抽搐”
-3. 上层看起来像导航 / 脱困状态在抢控制权
+1. 转角 shortcut
+2. 穿进 inflation layer
+3. 角点附近过于激进的“切弯”
 
-新逻辑引入恢复内部状态机：
+主要方向：
 
-- `PLANNING`
-- `EXECUTING`
-- `BLOCKED`
+1. `batch_size` 略增
+2. `temperature` 略增
+3. `gamma` 略增
+4. `vx_std / vy_std / wz_std` 降低
+5. `PathAlignCritic` 降权并缩短前视
+6. `PathFollowCritic` 略增强
+7. `PathAngleCritic` 增强并收紧最大允许夹角
+8. `ObstaclesCritic` 的 `repulsion_weight / critical_weight / collision_margin_distance` 都提高
 
-并加入滞回参数：
+这组改动的意图不是让 MPPI “更聪明”，而是先让它在平滑参考路径接入后，不要太爱沿对角 shortcut 去切膨胀层。
 
-- `blocked_enter_cycles`
-- `clear_exit_cycles`
-- `replanning_cooldown_s`
-- `max_replan_attempts`
+## 7. 当前观察重点
 
-语义：
+现在最应该观察的是：
 
-1. 连续若干拍都检测到轨迹前缀被阻挡，才进入 `BLOCKED`
-2. 连续若干拍都恢复清空，才退出 `BLOCKED`
-3. 进入 `BLOCKED` 后不会立刻每拍都重规划，而是有冷却时间
+1. MPPI 角点处是否比以前更少切进 inflation layer
+2. `transformed_global_plan` 是否比以前更贴近平滑参考线
+3. 是否出现新的副作用：
+   - 转弯变钝
+   - 速度下降过多
+   - 终点附近犹豫
 
-对应代码：
-
-- `onCycleUpdate()`
-- `replanFromCurrentPose()`
-
-这样做的好处：
-
-1. 避免边界噪声触发高频切状态
-2. 让恢复动作更像“连续控制过程”而不是“离散开关”
-3. 对动态障碍物穿行和局部 costmap 抖动更稳
-
-### 3.5 前向批量 lookahead 监控，而不是每步立刻失败
-
-本次新增：
-
-- `monitor_lookahead_distance`
-
-在恢复执行阶段，不是只检查“眼前那一步”，而是对当前恢复方向前方一小段距离做连续批量检查。
-
-对应代码：
-
-- `isTrajectoryPrefixSafe()`
-
-这样做的好处：
-
-1. 更早感知恢复轨迹前缀是否被动态障碍重新封堵
-2. 不会因为脚下单个格点 cost 抖动而立即失败
-3. 更接近连续运动控制，而不是栅格级振荡
-
----
-
-## 4. 为什么这样改能解决卡顿
-
-卡顿的本质，不是“底盘动力不够”，而是控制策略过于离散：
-
-1. 检测离散
-2. 状态切换离散
-3. 速度输出离散
-
-### 4.1 旧实现为什么卡
-
-旧实现中：
-
-1. 每拍输出固定速度
-2. 每拍立即做短距离碰撞检测
-3. 单次检测失败就立刻停
-
-于是控制链会变成：
-
-```text
-发速度 -> 移动一点 -> 检测 -> 停 -> 再发速度 -> 再停
-```
-
-这在全向舵轮底盘上会表现为：
-
-1. `vx / vy` 一直跳变
-2. 舵轮转角不断修正
-3. 电机频繁启停
-
-### 4.2 新实现为什么更稳
-
-新实现把整个恢复链改成：
-
-```text
-先选一条短时恢复轨迹
--> 连续监控轨迹前缀是否仍可走
--> 在可走时持续执行
--> 速度经过低通滤波和加减速约束
--> 只有连续阻塞后才重规划
-```
-
-因此：
-
-1. 恢复方向不会每拍乱跳
-2. 输出速度不会每拍突变
-3. 状态不会在阈值边界附近来回抽动
-
-最终效果就是：
-
-1. 脱困动作更连续
-2. 避障动作更平滑
-3. 舵轮电机寿命更友好
-
----
-
-## 5. 本次具体修改的代码文件
-
-### 5.1 核心恢复行为重构
-
-- [src/pb2025_sentry_nav/pb_nav2_plugins/include/pb_nav2_plugins/behaviors/back_up_free_space.hpp](../src/pb2025_sentry_nav/pb_nav2_plugins/include/pb_nav2_plugins/behaviors/back_up_free_space.hpp)
-- [src/pb2025_sentry_nav/pb_nav2_plugins/src/behaviors/back_up_free_space.cpp](../src/pb2025_sentry_nav/pb_nav2_plugins/src/behaviors/back_up_free_space.cpp)
-
-新增的核心能力：
-
-1. 恢复轨迹规划 `planEscapeTrajectory`
-2. 候选轨迹批量采样 `evaluateCandidateTrajectory`
-3. 速度平滑 `smoothCommand`
-4. 轨迹前缀监控 `isTrajectoryPrefixSafe`
-5. 恢复状态滞回 `PLANNING / EXECUTING / BLOCKED`
-6. 被阻挡后的冷却重规划 `replanFromCurrentPose`
-
-### 5.2 参数扩展
-
-已同步更新：
-
-- [src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml](../src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)
-- [src/pb2025_sentry_nav/pb2025_nav_bringup/config/simulation/nav2_params.yaml](../src/pb2025_sentry_nav/pb2025_nav_bringup/config/simulation/nav2_params.yaml)
-- [src/pb2025_sentry_bringup/params/node_params.yaml](../src/pb2025_sentry_bringup/params/node_params.yaml)
-
-新增参数分组：
-
-1. 方向搜索参数
-2. 轨迹采样参数
-3. 状态滞回参数
-4. 速度滤波参数
-5. 轨迹监控参数
-
----
-
-## 6. 关键参数理解
-
-### 6.1 搜索与轨迹参数
-
-- `search_half_span_deg`
-  以车尾为中心搜索恢复方向的半角范围
-
-- `search_angle_increment_deg`
-  候选方向离散步长
-
-- `trajectory_sample_step`
-  沿恢复轨迹前进方向的采样步长
-
-- `near_sample_step`
-  近距离纵向采样步长
-
-- `far_sample_step`
-  远距离纵向采样步长
-
-- `layered_sampling_split_distance`
-  近采样与远采样的切换距离
-
-- `corridor_half_width`
-  轨迹走廊半宽，反映底盘横向占用
-
-- `corridor_lateral_step`
-  轨迹走廊横向采样分辨率
-
-- `far_corridor_lateral_step`
-  远距离轨迹走廊横向采样分辨率
-
-- `minimum_release_distance`
-  当整条恢复轨迹不全通时，允许放行的最短安全段长度
-
-- `dynamic_obstacle_prediction_enabled`
-  是否启用动态障碍前沿简单预测
-
-- `prediction_horizon_s`
-  安全前缀向前外推的预测时间窗
-
-- `prefix_velocity_alpha`
-  安全前缀速度估计低通系数
-
-- `predictive_block_margin`
-  预测判定时额外保留的安全余量
-
-### 6.2 平滑与执行参数
-
-- `speed_filter_tau`
-  一阶低通时间常数，越大越平滑，响应越慢
-
-- `translational_acc_limit`
-  平移加速度上限
-
-- `translational_decel_limit`
-  平移减速度上限
-
-- `minimum_speed_xy`
-  为避免恢复末段由于限速太小导致底盘发抖，保留一个最小平移速度
-
-### 6.3 状态滞回参数
-
-- `blocked_enter_cycles`
-  连续多少拍阻挡才认定真正 blocked
-
-- `clear_exit_cycles`
-  连续多少拍通畅才从 blocked 恢复执行
-
-- `replanning_cooldown_s`
-  两次重规划之间的最小间隔
-
-- `max_replan_attempts`
-  允许的最大重规划次数
-
----
-
-## 7. 建议的实车调参顺序
-
-建议按这个顺序调：
-
-1. 先固定 `backup_dist` 和 `backup_speed`
-2. 调 `max_allowed_cost`
-3. 调 `corridor_half_width`
-4. 调 `speed_filter_tau`
-5. 调 `blocked_enter_cycles / clear_exit_cycles`
-6. 最后再调 `search_half_span_deg`
-
-推荐经验：
-
-1. 如果还是抖：
-   - 先增大 `speed_filter_tau`
-   - 再增大 `blocked_enter_cycles`
-2. 如果恢复太慢：
-   - 先减小 `speed_filter_tau`
-   - 再减小 `replanning_cooldown_s`
-3. 如果仍然容易贴墙来回磨：
-   - 适当降低 `max_allowed_cost`
-   - 适当增大 `corridor_half_width`
-
----
-
-## 8. 本次优化的适用边界
-
-这次优化重点作用于：
-
-1. 膨胀层边界卡住
-2. 动态障碍导致恢复方向短时被封
-3. 全向舵轮在狭窄空间中的侧后退让
-
-它不是用来替代：
-
-1. 全局路径规划
-2. MPPI 主控制器
-3. 正常导航过程中的高层策略判断
-
-换句话说：
-
-这次改的是“恢复动作的局部执行质量”，不是把整个 Nav2 控制器替换掉。
-
----
-
-## 9. 已完成的验证
+## 8. 已完成验证
 
 已完成：
 
-1. `pb_nav2_plugins` 定点编译通过
+1. `trajectory_optimizer` 单包重新编译通过
+2. `bspline_smoother` 被 `smoother_server` 正常加载
+3. loopback 主链能够正常进入 active
+4. `controller_server` 持续收到新 path
+5. `Goal succeeded` 正常出现
+6. 旁路 topic `plan_raw_visual` / `smoothed_path_visual` 存在
 
-建议后续实车重点观察：
+说明：
 
-1. `/cmd_vel`
-2. `back_up_free_space_markers`
-3. 恢复过程中底盘是否仍有高频启停
-4. 卡在膨胀层边界时是否能连续斜后退脱离
+第二阶段已经不是“只改了配置”，而是已经真实跑通。
 
----
+## 9. 现在还没做的事
 
-## 10. 实车调参速查表
+1. 没有对 reality 参数做同样级别的第二阶段切换
+2. 没有系统性 sweep MPPI 参数
+3. 没有引入 ESDF obstacle cost
+4. 没有把平滑器做成“按局部代价场自适应收缩偏差”的版本
 
-这一节专门给现场调试使用。
+## 10. 下一步建议
 
-建议调参顺序始终遵守一条原则：
+最推荐的下一步是：
 
-1. 先解决“抖不抖”
-2. 再解决“脱不脱得出来”
-3. 最后再解决“脱困是否足够快”
+1. 继续在 loopback 下观察第二阶段效果
+2. 再做一轮 MPPI 参数收敛
+3. 等“不会明显切进 inflation layer”之后，再开第三阶段 ESDF obstacle cost
 
-不要一开始就只追求恢复动作更快，否则很容易重新把电机抖动和边界抽动带回来。
+如果下一轮继续，我建议直接做：
 
-### 10.1 现象：底盘恢复时还是一顿一顿，电机有高频抖动
-
-优先调整：
-
-- `speed_filter_tau`
-- `translational_acc_limit`
-- `blocked_enter_cycles`
-
-建议方向：
-
-1. 先增大 `speed_filter_tau`
-   - 例如从 `0.18 -> 0.22 / 0.26`
-   - 效果：速度更平滑，但响应会慢一点
-2. 再减小 `translational_acc_limit`
-   - 例如从 `0.8 -> 0.6`
-   - 效果：起步更柔和，电机负担更小
-3. 若仍有“走一下停一下”的感觉，再增大 `blocked_enter_cycles`
-   - 例如从 `3 -> 4`
-   - 效果：不会因为 1~2 拍的局部障碍抖动就立刻进入阻塞态
-
-不建议先动：
-
-- `max_allowed_cost`
-- `search_half_span_deg`
-
-因为这两个主要影响“往哪退”，不是“退得顺不顺”。
-
-### 10.2 现象：恢复方向左右来回换，像在犹豫
-
-优先调整：
-
-- `heading_stickiness_weight`
-- `replanning_cooldown_s`
-- `clear_exit_cycles`
-
-建议方向：
-
-1. 增大 `heading_stickiness_weight`
-   - 例如 `6.0 -> 8.0`
-   - 效果：更愿意保持上一条恢复方向
-2. 增大 `replanning_cooldown_s`
-   - 例如 `0.35 -> 0.45`
-   - 效果：减少短时间内连续重规划
-3. 增大 `clear_exit_cycles`
-   - 例如 `2 -> 3`
-   - 效果：从 `BLOCKED` 回到 `EXECUTING` 更稳，不会刚清一点又马上切回来
-
-### 10.3 现象：恢复很稳，但是脱困太慢
-
-优先调整：
-
-- `speed_filter_tau`
-- `translational_acc_limit`
-- `monitor_lookahead_distance`
-
-建议方向：
-
-1. 适当减小 `speed_filter_tau`
-   - 例如 `0.18 -> 0.14`
-   - 效果：响应更快，但不要一次减太多
-2. 适当增大 `translational_acc_limit`
-   - 例如 `0.8 -> 1.0`
-   - 效果：起步更果断
-3. 若感觉太早因为前方风险停下，可以小幅减小 `monitor_lookahead_distance`
-   - 例如 `0.35 -> 0.28`
-   - 效果：动作更激进
-
-注意：
-
-1. 一次只改一个主参数
-2. 每次调整后至少重复测试 3 次
-3. 如果变快的同时又开始抖，就回退上一档
-
-### 10.4 现象：底盘总是贴着墙边或膨胀层边缘磨，不愿意真正退开
-
-优先调整：
-
-- `max_allowed_cost`
-- `corridor_half_width`
-- `trajectory_sample_step`
-
-建议方向：
-
-1. 先减小 `max_allowed_cost`
-   - 例如 `96 -> 88`
-   - 效果：恢复动作更不愿意走高代价边缘区域
-2. 增大 `corridor_half_width`
-   - 例如 `0.22 -> 0.26`
-   - 效果：把底盘看得更“胖”，轨迹会自动更保守
-3. 若地图分辨率足够高，可减小 `trajectory_sample_step`
-   - 例如 `0.08 -> 0.06`
-   - 效果：更早发现贴边风险
-
-### 10.5 现象：正后方不通时，机器人还是不愿意侧后退
-
-优先调整：
-
-- `search_half_span_deg`
-- `search_angle_increment_deg`
-- `enable_full_circle_fallback`
-
-建议方向：
-
-1. 增大 `search_half_span_deg`
-   - 例如 `140 -> 160`
-   - 效果：允许搜索更靠近侧向的恢复方向
-2. 减小 `search_angle_increment_deg`
-   - 例如 `10 -> 6`
-   - 效果：更容易找到狭窄但真实可走的方向
-3. 确认 `enable_full_circle_fallback=true`
-   - 若后向和侧后向都找不到，允许全角域兜底搜索
-
-### 10.6 现象：动态障碍一靠近，恢复动作就频繁停掉
-
-优先调整：
-
-- `blocked_enter_cycles`
-- `replanning_cooldown_s`
-- `monitor_lookahead_distance`
-
-建议方向：
-
-1. 增大 `blocked_enter_cycles`
-   - 例如 `3 -> 5`
-   - 效果：短时动态遮挡不会立刻触发阻塞
-2. 增大 `replanning_cooldown_s`
-   - 例如 `0.35 -> 0.5`
-   - 效果：不给动态障碍抖动每拍触发一次重规划
-3. 适当减小 `monitor_lookahead_distance`
-   - 例如 `0.35 -> 0.25`
-   - 效果：降低“过早把远处短时动态障碍当成眼前阻挡”的概率
-
-### 10.7 现象：恢复动作经常直接失败，重规划次数很快耗尽
-
-优先调整：
-
-- `max_replan_attempts`
-- `search_half_span_deg`
-- `max_allowed_cost`
-
-建议方向：
-
-1. 先增大 `max_replan_attempts`
-   - 例如 `6 -> 8`
-   - 效果：给恢复动作更多重新尝试空间
-2. 再增大 `search_half_span_deg`
-   - 效果：扩大候选方向搜索范围
-3. 若环境确实比较挤，再略微增大 `max_allowed_cost`
-   - 例如 `96 -> 104`
-   - 效果：允许通过更高代价的膨胀边缘
-
-但注意：
-
-1. `max_allowed_cost` 调太大后，可能重新出现贴墙和磨边
-2. 这个参数宁可小步加，也不要一次加很多
-
-### 10.8 现象：快到脱困终点时反复抖，不像真正停住
-
-优先调整：
-
-- `goal_tolerance`
-- `minimum_speed_xy`
-- `translational_decel_limit`
-
-建议方向：
-
-1. 增大 `goal_tolerance`
-   - 例如 `0.04 -> 0.06`
-   - 效果：更早判定恢复到位，减少末端反复修正
-2. 若末端还是有“将停未停”的粘滞感，可略增 `translational_decel_limit`
-   - 例如 `1.2 -> 1.4`
-3. 如果是极低速时来回抖，适当减小 `minimum_speed_xy`
-   - 例如 `0.08 -> 0.06`
-
-### 10.9 一组推荐调试流程
-
-现场建议这样做：
-
-1. 第一轮只看是否抖动
-   - 重点改：`speed_filter_tau`、`translational_acc_limit`
-2. 第二轮看是否能稳定脱离膨胀层
-   - 重点改：`max_allowed_cost`、`corridor_half_width`
-3. 第三轮看是否能灵活利用全向底盘斜退
-   - 重点改：`search_half_span_deg`、`search_angle_increment_deg`
-4. 第四轮看动态障碍下是否还会抽动
-   - 重点改：`blocked_enter_cycles`、`replanning_cooldown_s`
-
----
-
-## 11. 推荐记录方式
-
-每次实车调试时建议记录四项：
-
-1. 当前参数改了什么
-2. 触发恢复的场景是什么
-3. 现象变好了还是变坏了
-4. 是否出现新的副作用
-
-推荐用下面这种格式：
-
-```md
-日期：
-场景：
-修改参数：
-现象改善：
-副作用：
-最终是否保留：
-```
-
-这样你后面回看时，不会只记得“好像那天调过”，但不知道到底是哪一个参数起作用。
+1. 对 `PathAlign / PathAngle / ObstaclesCritic` 做更细一轮 sweep
+2. 或者开始给 `bspline_smoother` 加第二阶段 ESDF obstacle term
