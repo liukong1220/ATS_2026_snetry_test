@@ -3,6 +3,7 @@
 #include "trajectory_optimizer/nav2_bspline_smoother.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_util/node_utils.hpp"
@@ -113,6 +114,18 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".derivative_step",
     rclcpp::ParameterValue(params.derivative_step));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_safe_cost",
+    rclcpp::ParameterValue(static_cast<int>(params.obstacle_safe_cost)));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_weight",
+    rclcpp::ParameterValue(params.obstacle_weight));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_refinement_iterations",
+    rclcpp::ParameterValue(params.obstacle_refinement_iterations));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_refinement_gain",
+    rclcpp::ParameterValue(params.obstacle_refinement_gain));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".profile_topic",
     rclcpp::ParameterValue(profile_topic_));
   nav2_util::declare_parameter_if_not_declared(
@@ -144,6 +157,17 @@ void Nav2BSplineSmoother::configure(
     plugin_name_ + ".velocity_smoothing_gain",
     params.velocity_smoothing_gain);
   node->get_parameter(plugin_name_ + ".derivative_step", params.derivative_step);
+  int configured_safe_cost = static_cast<int>(params.obstacle_safe_cost);
+  node->get_parameter(plugin_name_ + ".obstacle_safe_cost", configured_safe_cost);
+  node->get_parameter(plugin_name_ + ".obstacle_weight", params.obstacle_weight);
+  node->get_parameter(
+    plugin_name_ + ".obstacle_refinement_iterations",
+    params.obstacle_refinement_iterations);
+  node->get_parameter(
+    plugin_name_ + ".obstacle_refinement_gain",
+    params.obstacle_refinement_gain);
+  params.obstacle_safe_cost = static_cast<unsigned char>(
+    std::max(0, std::min(255, configured_safe_cost)));
   node->get_parameter(plugin_name_ + ".profile_topic", profile_topic_);
   int configured_max_cost = static_cast<int>(max_path_cost_);
   node->get_parameter(plugin_name_ + ".max_path_cost", configured_max_cost);
@@ -153,6 +177,7 @@ void Nav2BSplineSmoother::configure(
   optimizer_.setParams(params);
   costmap_sub_ = costmap_sub;
   logger_ = node->get_logger();
+  clock_ = node->get_clock();
   profile_pub_ =
     node->create_publisher<sp_msgs::msg::TrajectoryProfileMsg>(profile_topic_, 10);
   RCLCPP_INFO(logger_, "Configured Nav2BSplineSmoother plugin: %s", plugin_name_.c_str());
@@ -164,10 +189,16 @@ void Nav2BSplineSmoother::cleanup()
 
 void Nav2BSplineSmoother::activate()
 {
+  if (profile_pub_) {
+    profile_pub_->on_activate();
+  }
 }
 
 void Nav2BSplineSmoother::deactivate()
 {
+  if (profile_pub_) {
+    profile_pub_->on_deactivate();
+  }
 }
 
 bool Nav2BSplineSmoother::smooth(
@@ -176,13 +207,23 @@ bool Nav2BSplineSmoother::smooth(
 {
   const nav_msgs::msg::Path reference_path = path;
   if (costmap_sub_) {
-    optimizer_.setObstacleCostmap(costmap_sub_->getCostmap());
+    try {
+      optimizer_.setObstacleCostmap(costmap_sub_->getCostmap());
+    } catch (const std::exception & ex) {
+      optimizer_.clearObstacleCostmap();
+      RCLCPP_WARN_THROTTLE(
+        logger_, *clock_, 2000,
+        "Costmap unavailable for bspline smoother, using geometry-only smoothing: %s",
+        ex.what());
+    }
   } else {
     optimizer_.clearObstacleCostmap();
   }
   auto result = optimizer_.optimizeDetailed(path);
   path = result.path;
   enforceCostmapClearance(path, reference_path);
+  updatePathOrientations(path);
+  result.profile = optimizer_.evaluateProfile(path);
   if (profile_pub_) {
     profile_pub_->publish(
       toProfileMsg(path.header, "nav2_bspline_smoother", result.profile));
@@ -198,7 +239,16 @@ void Nav2BSplineSmoother::enforceCostmapClearance(
     return;
   }
 
-  auto costmap = costmap_sub_->getCostmap();
+  std::shared_ptr<nav2_costmap_2d::Costmap2D> costmap;
+  try {
+    costmap = costmap_sub_->getCostmap();
+  } catch (const std::exception & ex) {
+    RCLCPP_WARN_THROTTLE(
+      logger_, *clock_, 2000,
+      "Costmap unavailable for bspline clearance enforcement, skipping pullback: %s",
+      ex.what());
+    return;
+  }
   if (!costmap) {
     RCLCPP_WARN(logger_, "No costmap available for bspline smoother clearance enforcement.");
     return;
@@ -263,6 +313,24 @@ bool Nav2BSplineSmoother::samplePathCost(
   }
   cost = costmap.getCost(mx, my);
   return true;
+}
+
+void Nav2BSplineSmoother::updatePathOrientations(nav_msgs::msg::Path & path) const
+{
+  if (path.poses.size() < 2) {
+    return;
+  }
+
+  double yaw = 0.0;
+  for (size_t i = 0; i < path.poses.size(); ++i) {
+    if (i + 1 < path.poses.size()) {
+      yaw = std::atan2(
+        path.poses[i + 1].pose.position.y - path.poses[i].pose.position.y,
+        path.poses[i + 1].pose.position.x - path.poses[i].pose.position.x);
+    }
+    path.poses[i].pose.orientation.z = std::sin(0.5 * yaw);
+    path.poses[i].pose.orientation.w = std::cos(0.5 * yaw);
+  }
 }
 
 }  // namespace trajectory_optimizer

@@ -2,6 +2,8 @@
 
 #include "trajectory_optimizer/trajectory_optimizer_node.hpp"
 
+#include <algorithm>
+
 #include "geometry_msgs/msg/vector3.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 
@@ -61,6 +63,7 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<std::string>("input_path_topic", "plan");
   declare_parameter<std::string>("output_path_topic", "smoothed_path");
   declare_parameter<std::string>("output_profile_topic", "trajectory_profile_visual");
+  declare_parameter<std::string>("costmap_topic", "global_costmap/costmap_raw");
   declare_parameter<double>("control_point_spacing", params.control_point_spacing);
   declare_parameter<double>("output_path_spacing", params.output_path_spacing);
   declare_parameter<double>("min_input_point_spacing", params.min_input_point_spacing);
@@ -76,10 +79,16 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<double>("longitudinal_accel_limit", params.longitudinal_accel_limit);
   declare_parameter<double>("velocity_smoothing_gain", params.velocity_smoothing_gain);
   declare_parameter<double>("derivative_step", params.derivative_step);
+  declare_parameter<int>("obstacle_safe_cost", static_cast<int>(params.obstacle_safe_cost));
+  declare_parameter<double>("obstacle_weight", params.obstacle_weight);
+  declare_parameter<int>(
+    "obstacle_refinement_iterations", params.obstacle_refinement_iterations);
+  declare_parameter<double>("obstacle_refinement_gain", params.obstacle_refinement_gain);
 
   get_parameter("input_path_topic", input_path_topic_);
   get_parameter("output_path_topic", output_path_topic_);
   get_parameter("output_profile_topic", output_profile_topic_);
+  get_parameter("costmap_topic", costmap_topic_);
   get_parameter("control_point_spacing", params.control_point_spacing);
   get_parameter("output_path_spacing", params.output_path_spacing);
   get_parameter("min_input_point_spacing", params.min_input_point_spacing);
@@ -94,6 +103,13 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   get_parameter("longitudinal_accel_limit", params.longitudinal_accel_limit);
   get_parameter("velocity_smoothing_gain", params.velocity_smoothing_gain);
   get_parameter("derivative_step", params.derivative_step);
+  int configured_safe_cost = static_cast<int>(params.obstacle_safe_cost);
+  get_parameter("obstacle_safe_cost", configured_safe_cost);
+  get_parameter("obstacle_weight", params.obstacle_weight);
+  get_parameter("obstacle_refinement_iterations", params.obstacle_refinement_iterations);
+  get_parameter("obstacle_refinement_gain", params.obstacle_refinement_gain);
+  params.obstacle_safe_cost = static_cast<unsigned char>(
+    std::max(0, std::min(255, configured_safe_cost)));
   optimizer_.setParams(params);
 
   smoothed_path_pub_ = create_publisher<nav_msgs::msg::Path>(output_path_topic_, 10);
@@ -111,6 +127,21 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
 
 void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
 {
+  if (!costmap_sub_) {
+    costmap_sub_ =
+      std::make_shared<nav2_costmap_2d::CostmapSubscriber>(shared_from_this(), costmap_topic_);
+  }
+  if (costmap_sub_) {
+    try {
+      optimizer_.setObstacleCostmap(costmap_sub_->getCostmap());
+    } catch (const std::exception & ex) {
+      optimizer_.clearObstacleCostmap();
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Costmap unavailable for visual trajectory optimizer, using geometry-only path: %s",
+        ex.what());
+    }
+  }
   const auto result = optimizer_.optimizeDetailed(*msg);
   smoothed_path_pub_->publish(result.path);
   profile_pub_->publish(toProfileMsg(msg->header, "trajectory_optimizer_node", result.profile));

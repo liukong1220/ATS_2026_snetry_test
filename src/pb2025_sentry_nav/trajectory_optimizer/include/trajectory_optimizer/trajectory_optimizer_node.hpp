@@ -5,6 +5,7 @@
 
 #include <string>
 
+#include "nav2_costmap_2d/costmap_subscriber.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sp_msgs/msg/trajectory_profile_msg.hpp"
@@ -25,10 +26,12 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr smoothed_path_pub_;
   rclcpp::Publisher<sp_msgs::msg::TrajectoryProfileMsg>::SharedPtr profile_pub_;
+  std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub_;
 
   std::string input_path_topic_;
   std::string output_path_topic_;
   std::string output_profile_topic_;
+  std::string costmap_topic_;
 };
 
 }  // namespace trajectory_optimizer

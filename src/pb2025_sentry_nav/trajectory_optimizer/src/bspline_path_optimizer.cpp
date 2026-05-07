@@ -285,6 +285,12 @@ nav_msgs::msg::Path BSplinePathOptimizer::optimize(const nav_msgs::msg::Path & i
   return optimizeDetailed(input_path).path;
 }
 
+TrajectoryProfile2D BSplinePathOptimizer::evaluateProfile(
+  const nav_msgs::msg::Path & path) const
+{
+  return buildTrajectoryProfile(filterClosePoints(extractPolyline(path)));
+}
+
 std::vector<Point2D> BSplinePathOptimizer::extractPolyline(const nav_msgs::msg::Path & path) const
 {
   std::vector<Point2D> points;
@@ -755,7 +761,9 @@ double BSplinePathOptimizer::computeObstaclePenalty(unsigned char cost) const
   if (cost <= params_.obstacle_safe_cost) {
     return 0.0;
   }
-  const double violation = static_cast<double>(cost - params_.obstacle_safe_cost);
+  const double violation =
+    static_cast<double>(cost - params_.obstacle_safe_cost) /
+    static_cast<double>(std::max(1, 255 - static_cast<int>(params_.obstacle_safe_cost)));
   return violation * violation;
 }
 

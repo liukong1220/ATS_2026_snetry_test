@@ -123,6 +123,7 @@ public:
 
   OptimizationResult optimizeDetailed(const nav_msgs::msg::Path & input_path) const;
   nav_msgs::msg::Path optimize(const nav_msgs::msg::Path & input_path) const;
+  TrajectoryProfile2D evaluateProfile(const nav_msgs::msg::Path & path) const;
 
 private:
   std::vector<Point2D> extractPolyline(const nav_msgs::msg::Path & path) const;

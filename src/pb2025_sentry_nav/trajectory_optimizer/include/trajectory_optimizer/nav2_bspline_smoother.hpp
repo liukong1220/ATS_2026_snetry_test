@@ -40,6 +40,7 @@ private:
   void enforceCostmapClearance(
     nav_msgs::msg::Path & smoothed_path,
     const nav_msgs::msg::Path & reference_path) const;
+  void updatePathOrientations(nav_msgs::msg::Path & path) const;
   bool samplePathCost(
     const nav2_costmap_2d::Costmap2D & costmap,
     const geometry_msgs::msg::PoseStamped & pose,
@@ -47,6 +48,7 @@ private:
 
   std::string plugin_name_;
   rclcpp::Logger logger_{rclcpp::get_logger("Nav2BSplineSmoother")};
+  rclcpp::Clock::SharedPtr clock_;
   BSplinePathOptimizer optimizer_;
   std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub_;
   rclcpp_lifecycle::LifecyclePublisher<sp_msgs::msg::TrajectoryProfileMsg>::SharedPtr profile_pub_;
