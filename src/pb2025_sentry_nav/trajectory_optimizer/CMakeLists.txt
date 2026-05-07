@@ -32,6 +32,9 @@ rclcpp_components_register_node(${PROJECT_NAME}
 )
 
 pluginlib_export_plugin_description_file(nav2_core trajectory_optimizer_plugins.xml)
+install(FILES trajectory_optimizer_plugins.xml
+  DESTINATION share/${PROJECT_NAME}
+)
 
 if(BUILD_TESTING)
   set(ament_cmake_clang_format_CONFIG_FILE "${CMAKE_SOURCE_DIR}/.clang-format")
@@ -43,7 +46,4 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_auto_package(
-  INSTALL_TO_SHARE
-  trajectory_optimizer_plugins.xml
-)
+ament_auto_package()

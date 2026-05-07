@@ -292,7 +292,7 @@ controller_server:
         symmetric_yaw_tolerance: true
       ObstaclesCritic:
         enabled: true
-        consider_footprint: true
+        consider_footprint: false
         cost_power: 1
         # Parameter `ObstaclesCritic.repulsion_weight`
         # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。

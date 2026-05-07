@@ -3,6 +3,8 @@ build/
 install/
 log/
 logs/
+tmp/
+
 
 # Compiled files
 *.so
@@ -27,6 +29,7 @@ CTestTestfile.cmake
 *.suo
 *.user
 *.sln.docstates
+.cache/
 
 # Temporary and backup files
 *~
