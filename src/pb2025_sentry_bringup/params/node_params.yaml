@@ -822,29 +822,29 @@ behavior_server:
     rotational_acc_lim: 3.2
     # params for pb_nav2_behaviors/BackUpFreeSpace
     service_name: "global_costmap/get_costmap"
-    max_radius: 2.0
+    max_radius: 1.6
     # 高于该 cost 的膨胀区不再被当作“可脱困方向”，防止恢复动作继续贴墙试探。
     max_allowed_cost: 96
     # 以车尾方向为中心搜索恢复轨迹。舵轮底盘建议保留较大的角域，充分利用斜后退能力。
-    search_half_span_deg: 140.0
+    search_half_span_deg: 120.0
     # 候选方向搜索分辨率。
     search_angle_increment_deg: 10.0
     # 兼容旧配置：若不单配近/远采样，则退回使用这个统一步长。
-    trajectory_sample_step: 0.08
+    trajectory_sample_step: 0.06
     # 近距离密采样，用于更严格地保护底盘周边安全。
-    near_sample_step: 0.05
+    near_sample_step: 0.04
     # 远距离疏采样，用于减少恢复规划算力开销。
-    far_sample_step: 0.10
+    far_sample_step: 0.08
     # 近/远分层采样切换距离。
-    layered_sampling_split_distance: 0.45
+    layered_sampling_split_distance: 0.40
     # 轨迹走廊半宽，等价于给底盘侧向预留的安全带宽。
-    corridor_half_width: 0.22
+    corridor_half_width: 0.18
     # 轨迹走廊横向采样步长。
-    corridor_lateral_step: 0.08
+    corridor_lateral_step: 0.06
     # 远距离走廊横向采样步长，可比近距离更粗。
-    far_corridor_lateral_step: 0.12
+    far_corridor_lateral_step: 0.10
     # 分段放行时允许释放的最短安全段长度。
-    minimum_release_distance: 0.18
+    minimum_release_distance: 0.14
     # 第二阶段：是否开启动态障碍简单速度预测。
     dynamic_obstacle_prediction_enabled: true
     # 恢复走廊安全前缀的预测时间窗。

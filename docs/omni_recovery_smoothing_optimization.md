@@ -546,6 +546,27 @@ loopback 没有实车上的完整 fake base TF 链时，`behavior_server` 会因
 2. 行为层少为微小变化重发新目标
 3. 降低视觉分支在墙角和边界附近把 Nav2 打乱的概率
 
+#### `BackUpFreeSpace` recovery 参数
+
+已同步到 `loopback`、`node_params.yaml`、`reality/nav2_params.yaml`：
+
+1. `max_radius: 1.6`
+2. `search_half_span_deg: 120.0`
+3. `trajectory_sample_step: 0.06`
+4. `near_sample_step: 0.04`
+5. `far_sample_step: 0.08`
+6. `layered_sampling_split_distance: 0.40`
+7. `corridor_half_width: 0.18`
+8. `corridor_lateral_step: 0.06`
+9. `far_corridor_lateral_step: 0.10`
+10. `minimum_release_distance: 0.14`
+
+方向是：
+
+1. 恢复搜索半径更短，少去追太远的极限脱困方向
+2. 走廊更窄但采样更密，避免因为“安全带画得过宽”把本可通过的短恢复段判死
+3. 分段放行距离更短，允许 smoother fallback 到 raw path 后 recovery 先释放一段可走前缀
+
 ### 16.5 当前仍未完全解决的问题
 
 虽然本轮已经把失败模式从“完全不动 / 直接 abort”推进到“能继续执行 raw path fallback”，但以下问题仍存在：
@@ -559,4 +580,3 @@ loopback 没有实车上的完整 fake base TF 链时，`behavior_server` 会因
 1. 为 `SelectVisionFollowPath` 增加更强的“目标点可达性兜底”，必要时显式避开 planner 已知死角
 2. 继续细化 smoother 的局部退化窗口，而不是频繁整条回 raw path
 3. 在 RViz 中同时看 `/plan`、`/smoothed_path_visual`、local/global costmap 和 `decision/vision_follow_markers`
-4. 区分“纯导航基线”与“视觉接管场景”，不要混用结论

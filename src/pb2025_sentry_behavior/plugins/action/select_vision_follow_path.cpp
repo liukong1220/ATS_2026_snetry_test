@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <queue>
 #include <vector>
 
 #include "geometry_msgs/msg/point.hpp"
@@ -206,6 +207,167 @@ bool hasSegmentClearance(
   return true;
 }
 
+struct FollowCandidate
+{
+  geometry_msgs::msg::Point point;
+  double score = std::numeric_limits<double>::max();
+  double radius = 0.0;
+  double border_clearance = 0.0;
+};
+
+struct GridNode
+{
+  int x = 0;
+  int y = 0;
+  double f = 0.0;
+  double g = 0.0;
+};
+
+struct GridNodeCompare
+{
+  bool operator()(const GridNode & lhs, const GridNode & rhs) const
+  {
+    return lhs.f > rhs.f;
+  }
+};
+
+bool worldToGridCell(
+  const nav_msgs::msg::OccupancyGrid & costmap,
+  const geometry_msgs::msg::Point & point,
+  int & mx,
+  int & my)
+{
+  if (costmap.info.width == 0 || costmap.info.height == 0 || costmap.info.resolution <= 0.0) {
+    return false;
+  }
+
+  const double origin_x = costmap.info.origin.position.x;
+  const double origin_y = costmap.info.origin.position.y;
+  const double resolution = static_cast<double>(costmap.info.resolution);
+  mx = static_cast<int>(std::floor((point.x - origin_x) / resolution));
+  my = static_cast<int>(std::floor((point.y - origin_y) / resolution));
+  return mx >= 0 && my >= 0 &&
+    mx < static_cast<int>(costmap.info.width) &&
+    my < static_cast<int>(costmap.info.height);
+}
+
+geometry_msgs::msg::Point gridCellToWorld(
+  const nav_msgs::msg::OccupancyGrid & costmap,
+  int mx,
+  int my)
+{
+  geometry_msgs::msg::Point point;
+  const double resolution = static_cast<double>(costmap.info.resolution);
+  point.x =
+    costmap.info.origin.position.x + (static_cast<double>(mx) + 0.5) * resolution;
+  point.y =
+    costmap.info.origin.position.y + (static_cast<double>(my) + 0.5) * resolution;
+  point.z = 0.0;
+  return point;
+}
+
+std::optional<double> estimateReachablePathLength(
+  const nav_msgs::msg::OccupancyGrid & costmap,
+  const geometry_msgs::msg::Point & start,
+  const geometry_msgs::msg::Point & goal,
+  int occupied_threshold,
+  double clearance_radius,
+  std::size_t max_expansions)
+{
+  int start_x = 0;
+  int start_y = 0;
+  int goal_x = 0;
+  int goal_y = 0;
+  if (!worldToGridCell(costmap, start, start_x, start_y) ||
+    !worldToGridCell(costmap, goal, goal_x, goal_y))
+  {
+    return std::nullopt;
+  }
+
+  const auto start_world = gridCellToWorld(costmap, start_x, start_y);
+  const auto goal_world = gridCellToWorld(costmap, goal_x, goal_y);
+  if (!hasCircularClearance(costmap, start_world, clearance_radius, occupied_threshold) ||
+    !hasCircularClearance(costmap, goal_world, clearance_radius, occupied_threshold))
+  {
+    return std::nullopt;
+  }
+
+  const int width = static_cast<int>(costmap.info.width);
+  const int height = static_cast<int>(costmap.info.height);
+  const std::size_t cell_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  std::vector<double> g_score(cell_count, std::numeric_limits<double>::infinity());
+  std::vector<bool> closed(cell_count, false);
+  auto index_of = [width](int x, int y) -> std::size_t {
+    return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+      static_cast<std::size_t>(x);
+  };
+
+  auto heuristic = [&costmap](int x0, int y0, int x1, int y1) -> double {
+    const double resolution = static_cast<double>(costmap.info.resolution);
+    const double dx = static_cast<double>(x1 - x0) * resolution;
+    const double dy = static_cast<double>(y1 - y0) * resolution;
+    return std::sqrt(dx * dx + dy * dy);
+  };
+
+  std::priority_queue<GridNode, std::vector<GridNode>, GridNodeCompare> open;
+  const auto start_index = index_of(start_x, start_y);
+  g_score[start_index] = 0.0;
+  open.push(GridNode {start_x, start_y, heuristic(start_x, start_y, goal_x, goal_y), 0.0});
+
+  static constexpr std::array<int, 8> kDx{{1, 1, 0, -1, -1, -1, 0, 1}};
+  static constexpr std::array<int, 8> kDy{{0, 1, 1, 1, 0, -1, -1, -1}};
+  std::size_t expansions = 0;
+  while (!open.empty() && expansions < max_expansions) {
+    const auto current = open.top();
+    open.pop();
+    const auto current_index = index_of(current.x, current.y);
+    if (closed[current_index]) {
+      continue;
+    }
+    closed[current_index] = true;
+    ++expansions;
+
+    if (current.x == goal_x && current.y == goal_y) {
+      return current.g;
+    }
+
+    for (std::size_t dir = 0; dir < kDx.size(); ++dir) {
+      const int nx = current.x + kDx[dir];
+      const int ny = current.y + kDy[dir];
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+        continue;
+      }
+
+      const auto neighbor_index = index_of(nx, ny);
+      if (closed[neighbor_index]) {
+        continue;
+      }
+
+      const auto neighbor_world = gridCellToWorld(costmap, nx, ny);
+      if (!hasCircularClearance(costmap, neighbor_world, clearance_radius, occupied_threshold)) {
+        continue;
+      }
+
+      const double step_cost =
+        (kDx[dir] == 0 || kDy[dir] == 0) ? static_cast<double>(costmap.info.resolution) :
+        static_cast<double>(costmap.info.resolution) * std::sqrt(2.0);
+      const double tentative_g = current.g + step_cost;
+      if (tentative_g + 1e-9 >= g_score[neighbor_index]) {
+        continue;
+      }
+
+      g_score[neighbor_index] = tentative_g;
+      open.push(GridNode {
+        nx,
+        ny,
+        tentative_g + heuristic(nx, ny, goal_x, goal_y),
+        tentative_g});
+    }
+  }
+
+  return std::nullopt;
+}
+
 double distanceToCostmapBorder(
   const nav_msgs::msg::OccupancyGrid & costmap, const geometry_msgs::msg::Point & point)
 {
@@ -373,6 +535,9 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   double pose_jump_reset_distance_m = 0.8;
   double pose_jump_reset_angle_deg = 55.0;
   double follow_candidate_clearance_radius_m = 0.45;
+  double follow_max_path_length_ratio = 1.8;
+  int follow_reachability_max_expansions = 5000;
+  int follow_reachability_top_candidates = 6;
   node_->get_parameter("decision.vision.attack_radius", attack_radius);
   node_->get_parameter("decision.vision.follow_occupied_threshold", occupied_threshold);
   node_->get_parameter("decision.vision.follow_sample_count", sample_count);
@@ -384,6 +549,15 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   node_->get_parameter(
     "decision.vision.follow_candidate_clearance_radius_m",
     follow_candidate_clearance_radius_m);
+  node_->get_parameter(
+    "decision.vision.follow_max_path_length_ratio",
+    follow_max_path_length_ratio);
+  node_->get_parameter(
+    "decision.vision.follow_reachability_max_expansions",
+    follow_reachability_max_expansions);
+  node_->get_parameter(
+    "decision.vision.follow_reachability_top_candidates",
+    follow_reachability_top_candidates);
   node_->get_parameter(
     "decision.vision.pose_jump_reset_distance_m", pose_jump_reset_distance_m);
   node_->get_parameter(
@@ -399,6 +573,9 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   min_replan_interval_s = std::max(0.0, min_replan_interval_s);
   min_goal_shift_m = std::max(0.0, min_goal_shift_m);
   follow_candidate_clearance_radius_m = std::max(0.0, follow_candidate_clearance_radius_m);
+  follow_max_path_length_ratio = std::max(1.0, follow_max_path_length_ratio);
+  follow_reachability_max_expansions = std::max(200, follow_reachability_max_expansions);
+  follow_reachability_top_candidates = std::max(1, follow_reachability_top_candidates);
   pose_jump_reset_distance_m = std::max(0.0, pose_jump_reset_distance_m);
   pose_jump_reset_angle_deg = std::clamp(pose_jump_reset_angle_deg, 0.0, 180.0);
   const double arc_half_angle = std::clamp(
@@ -486,11 +663,10 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
       std::max(
       std::max(0.25, follow_candidate_clearance_radius_m),
       static_cast<double>(costmap->info.resolution) * 2.0);
+    std::vector<FollowCandidate> feasible_candidates;
 
     auto evaluate_candidates =
       [&](const std::vector<double> & offsets, bool require_line_of_sight) -> bool {
-        bool found_candidate = false;
-        double best_candidate_score = std::numeric_limits<double>::max();
         for (const auto radius_scale : kRadiusScales) {
           const double radius = attack_radius * radius_scale;
           for (const auto angle_offset : offsets) {
@@ -525,14 +701,11 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
               candidate_distance_to_robot +
               candidate_distance_to_ring * 0.6 -
               candidate_border_clearance * 0.2;
-            if (!found_candidate || candidate_score < best_candidate_score) {
-              best_candidate_score = candidate_score;
-              selected_point = candidate;
-              found_candidate = true;
-            }
+            feasible_candidates.push_back(FollowCandidate {
+                candidate, candidate_score, radius, candidate_border_clearance});
           }
         }
-        return found_candidate;
+        return !feasible_candidates.empty();
       };
 
     bool found_candidate = evaluate_candidates(angle_offsets, true);
@@ -547,6 +720,43 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
       RCLCPP_WARN_THROTTLE(
         logger_, *node_->get_clock(), 2000,
         "No free candidate found near the nearest vision-follow ring point, fallback to the raw nearest point");
+    } else {
+      std::sort(
+        feasible_candidates.begin(), feasible_candidates.end(),
+        [](const FollowCandidate & lhs, const FollowCandidate & rhs) {
+          return lhs.score < rhs.score;
+        });
+
+      bool found_reachable_candidate = false;
+      const std::size_t candidate_limit = std::min<std::size_t>(
+        feasible_candidates.size(),
+        static_cast<std::size_t>(follow_reachability_top_candidates));
+      if (has_current_position) {
+        for (std::size_t i = 0; i < candidate_limit; ++i) {
+          const auto & candidate = feasible_candidates[i];
+          const double euclidean_distance =
+            std::max(planarDistance(current_position, candidate.point), 1e-3);
+          const auto reachable_length = estimateReachablePathLength(
+            *costmap,
+            current_position,
+            candidate.point,
+            occupied_threshold,
+            follow_candidate_clearance_radius_m,
+            static_cast<std::size_t>(follow_reachability_max_expansions));
+          if (!reachable_length) {
+            continue;
+          }
+          if (*reachable_length <= euclidean_distance * follow_max_path_length_ratio) {
+            selected_point = candidate.point;
+            found_reachable_candidate = true;
+            break;
+          }
+        }
+      }
+
+      if (!found_reachable_candidate) {
+        selected_point = feasible_candidates.front().point;
+      }
     }
   }
 

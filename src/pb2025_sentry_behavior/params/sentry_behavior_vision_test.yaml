@@ -82,6 +82,9 @@ pb2025_sentry_behavior_server:
         follow_sample_count: 16
         follow_arc_half_angle_deg: 90.0
         follow_candidate_clearance_radius_m: 0.45
+        follow_max_path_length_ratio: 1.8
+        follow_reachability_max_expansions: 5000
+        follow_reachability_top_candidates: 6
         min_replan_interval_s: 0.4
         min_goal_shift_m: 0.45
         # 是否优先保持上一帧已经选定的跟随侧，避免专用视觉测试里出现无意义的左右翻边。
