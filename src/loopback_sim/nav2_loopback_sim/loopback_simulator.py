@@ -84,6 +84,13 @@ class LoopbackSimulator(Node):
         self.declare_parameter('body_frame_id', 'base_link')
         self.body_frame_id = self.get_parameter('body_frame_id').get_parameter_value().string_value
 
+        # 实车链里不少节点会查询 gimbal_yaw_fake 作为“导航主底盘”坐标系。
+        # loopback 没有真实云台链路时，也持续补一条 base_footprint -> gimbal_yaw_fake
+        # 的辅助 TF，避免 recovery / behavior / RViz 因 frame 缺失直接失败。
+        self.declare_parameter('auxiliary_frame_id', 'gimbal_yaw_fake')
+        self.auxiliary_frame_id = self.get_parameter(
+            'auxiliary_frame_id').get_parameter_value().string_value
+
         self.declare_parameter('map_frame_id', 'map')
         self.map_frame_id = self.get_parameter('map_frame_id').get_parameter_value().string_value
 
@@ -150,6 +157,13 @@ class LoopbackSimulator(Node):
             self.t_base_to_body.header.frame_id = self.base_frame_id
             self.t_base_to_body.child_frame_id = self.body_frame_id
             self.t_base_to_body.transform.rotation.w = 1.0
+
+        self.t_base_to_aux = None
+        if self.auxiliary_frame_id not in ('', self.base_frame_id, self.body_frame_id):
+            self.t_base_to_aux = TransformStamped()
+            self.t_base_to_aux.header.frame_id = self.base_frame_id
+            self.t_base_to_aux.child_frame_id = self.auxiliary_frame_id
+            self.t_base_to_aux.transform.rotation.w = 1.0
 
         self.scan_parent_frame_id = self.body_frame_id \
             if self.t_base_to_body is not None else self.base_frame_id
@@ -367,6 +381,9 @@ class LoopbackSimulator(Node):
         if self.publish_map_odom_tf:
             self.tf_broadcaster.sendTransform(map_to_odom)
         self.tf_broadcaster.sendTransform(odom_to_base_link)
+        if self.t_base_to_aux is not None:
+            self.t_base_to_aux.header.stamp = stamp
+            self.tf_broadcaster.sendTransform(self.t_base_to_aux)
         if self.t_base_to_body is not None:
             self.t_base_to_body.header.stamp = stamp
             self.tf_broadcaster.sendTransform(self.t_base_to_body)

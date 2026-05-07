@@ -30,6 +30,9 @@ def generate_launch_description() -> LaunchDescription:
         name='loopback_simulator',
         output='screen',
         parameters=[params_file, {'scan_frame_id': scan_frame_id}],
+        remappings=[
+            ('cmd_vel', 'cmd_vel_nav2_result'),
+        ],
     )
 
     ld = LaunchDescription()

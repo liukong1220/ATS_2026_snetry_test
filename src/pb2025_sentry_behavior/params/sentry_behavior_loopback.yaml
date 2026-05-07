@@ -87,7 +87,7 @@ pb2025_sentry_behavior_server:
         attack_radius: 2.0
         # costmap 栅格大于等于该值就视为不可走。
         # 调小会更保守，离墙更远；调大则更激进，更愿意贴边通过。
-        follow_occupied_threshold: 50
+        follow_occupied_threshold: 40
         # 候选采样点数量。
         # 调大通常能提高在复杂转角附近找到可行点的概率，但也会更频繁换点。
         follow_sample_count: 16
@@ -95,12 +95,13 @@ pb2025_sentry_behavior_server:
         # 90 度代表主要在目标两侧和正后方找点；
         # 再调大更容易绕开障碍，但也更可能选到“反向侧”的点。
         follow_arc_half_angle_deg: 90.0
+        follow_candidate_clearance_radius_m: 0.45
         # 两次重规划的最小时间间隔。
         # 这是抑制 RViz 里轨迹乱飘、MPPI 被高频改目标打乱的第一道节流。
         min_replan_interval_s: 0.4
         # 新跟随点相对旧跟随点至少要偏移这么多，才值得重发新导航目标。
         # 这是抑制“目标轻微抖动就左右反复试探”的第二道节流。
-        min_goal_shift_m: 0.35
+        min_goal_shift_m: 0.45
         # 是否优先保持上一帧已经选定的跟随侧。
         # 建议保持 true。它主要用来抑制“快到攻击半径边界时突然翻到目标另一侧”。
         prefer_previous_goal_side: true
@@ -189,8 +190,8 @@ pb2025_sentry_behavior_server:
         active_goal_min_resend_interval_s: 0.8
         # 视觉实时跟随专用抢占阈值：
         # 当机器人或敌方发生变化时，需要比普通巡逻更快接受新的最近圆周点。
-        vision_active_goal_hold_tolerance: 0.18
-        vision_active_goal_min_resend_interval_s: 0.25
+        vision_active_goal_hold_tolerance: 0.24
+        vision_active_goal_min_resend_interval_s: 0.40
         waypoint_stop_duration_s: 0.3
         patrol_preview_points: 1
         action_server_wait_timeout_s: 0.5

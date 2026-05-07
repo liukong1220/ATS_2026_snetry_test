@@ -8,6 +8,7 @@
 #include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_util/node_utils.hpp"
 #include "pluginlib/class_list_macros.hpp"
+#include "tf2/utils.h"
 
 namespace trajectory_optimizer
 {
@@ -61,7 +62,7 @@ void Nav2BSplineSmoother::configure(
   const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,
   std::string name, std::shared_ptr<tf2_ros::Buffer>,
   std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub,
-  std::shared_ptr<nav2_costmap_2d::FootprintSubscriber>)
+  std::shared_ptr<nav2_costmap_2d::FootprintSubscriber> footprint_sub)
 {
   auto node = parent.lock();
   if (!node) {
@@ -176,6 +177,7 @@ void Nav2BSplineSmoother::configure(
 
   optimizer_.setParams(params);
   costmap_sub_ = costmap_sub;
+  footprint_sub_ = footprint_sub;
   logger_ = node->get_logger();
   clock_ = node->get_clock();
   profile_pub_ =
@@ -219,10 +221,33 @@ bool Nav2BSplineSmoother::smooth(
   } else {
     optimizer_.clearObstacleCostmap();
   }
+  std::shared_ptr<nav2_costmap_2d::Costmap2D> costmap;
+  if (costmap_sub_) {
+    try {
+      costmap = costmap_sub_->getCostmap();
+    } catch (const std::exception &) {
+      costmap.reset();
+    }
+  }
   auto result = optimizer_.optimizeDetailed(path);
   path = result.path;
   enforceCostmapClearance(path, reference_path);
   updatePathOrientations(path);
+  if (costmap && pathHasCollision(*costmap, path)) {
+    const bool repaired = locallyDegradeCollidingSegments(*costmap, path, reference_path);
+    updatePathOrientations(path);
+    if (repaired) {
+      enforceCostmapClearance(path, reference_path);
+      updatePathOrientations(path);
+    }
+    if (pathHasCollision(*costmap, path)) {
+      RCLCPP_WARN_THROTTLE(
+        logger_, *clock_, 2000,
+        "Smoothed path still collides after local degradation, falling back to raw planner path.");
+      path = reference_path;
+      updatePathOrientations(path);
+    }
+  }
   result.profile = optimizer_.evaluateProfile(path);
   if (profile_pub_) {
     profile_pub_->publish(
@@ -257,10 +282,13 @@ void Nav2BSplineSmoother::enforceCostmapClearance(
   const size_t last_reference_idx = reference_path.poses.size() - 1;
   for (size_t i = 1; i + 1 < smoothed_path.poses.size(); ++i) {
     unsigned char cost = nav2_costmap_2d::NO_INFORMATION;
-    if (!samplePathCost(*costmap, smoothed_path.poses[i], cost)) {
+    const bool sampled_center_cost = samplePathCost(*costmap, smoothed_path.poses[i], cost);
+    const double footprint_cost = sampleFootprintCost(*costmap, smoothed_path, i);
+    const bool footprint_collision = footprint_cost > nav2_costmap_2d::MAX_NON_OBSTACLE;
+    if (!sampled_center_cost && footprint_cost < 0.0) {
       continue;
     }
-    if (cost <= max_path_cost_) {
+    if (!footprint_collision && sampled_center_cost && cost <= max_path_cost_) {
       continue;
     }
 
@@ -273,22 +301,37 @@ void Nav2BSplineSmoother::enforceCostmapClearance(
     const auto current_pose = smoothed_path.poses[i];
 
     bool repaired = false;
+    auto best_candidate = current_pose;
+    unsigned char best_center_cost = sampled_center_cost ? cost : nav2_costmap_2d::NO_INFORMATION;
+    double best_footprint_cost = footprint_cost;
     for (int step = 1; step <= pullback_samples_; ++step) {
       const double alpha = static_cast<double>(step) / static_cast<double>(pullback_samples_);
-      auto candidate = current_pose;
-      candidate.pose.position.x =
-        current_pose.pose.position.x +
-        (original_pose.pose.position.x - current_pose.pose.position.x) * alpha;
-      candidate.pose.position.y =
-        current_pose.pose.position.y +
-        (original_pose.pose.position.y - current_pose.pose.position.y) * alpha;
+      auto candidate = projectTowardReference(current_pose, original_pose, alpha);
 
       unsigned char candidate_cost = nav2_costmap_2d::NO_INFORMATION;
-      if (!samplePathCost(*costmap, candidate, candidate_cost)) {
+      const bool sampled_candidate_cost = samplePathCost(*costmap, candidate, candidate_cost);
+      const double candidate_footprint_cost =
+        sampleFootprintCost(*costmap, smoothed_path, i, &candidate);
+      const bool candidate_footprint_collision =
+        candidate_footprint_cost > nav2_costmap_2d::MAX_NON_OBSTACLE;
+      if (!sampled_candidate_cost && candidate_footprint_cost < 0.0) {
         continue;
       }
 
-      if (candidate_cost <= max_path_cost_) {
+      const bool better_footprint =
+        candidate_footprint_cost >= 0.0 &&
+        (best_footprint_cost < 0.0 || candidate_footprint_cost < best_footprint_cost);
+      const bool same_footprint_better_center =
+        candidate_footprint_cost == best_footprint_cost &&
+        sampled_candidate_cost &&
+        (!sampled_center_cost || candidate_cost < best_center_cost);
+      if (better_footprint || same_footprint_better_center) {
+        best_footprint_cost = candidate_footprint_cost;
+        best_center_cost = candidate_cost;
+        best_candidate = candidate;
+      }
+
+      if (!candidate_footprint_collision && sampled_candidate_cost && candidate_cost <= max_path_cost_) {
         smoothed_path.poses[i] = candidate;
         repaired = true;
         break;
@@ -296,7 +339,7 @@ void Nav2BSplineSmoother::enforceCostmapClearance(
     }
 
     if (!repaired) {
-      smoothed_path.poses[i] = original_pose;
+      smoothed_path.poses[i] = best_candidate;
     }
   }
 }
@@ -312,6 +355,127 @@ bool Nav2BSplineSmoother::samplePathCost(
     return false;
   }
   cost = costmap.getCost(mx, my);
+  return true;
+}
+
+double Nav2BSplineSmoother::estimatePoseYaw(
+  const nav_msgs::msg::Path & path,
+  size_t index,
+  const geometry_msgs::msg::PoseStamped * override_pose) const
+{
+  const auto & current_pose = override_pose ? *override_pose : path.poses[index];
+  if (path.poses.size() < 2) {
+    return tf2::getYaw(current_pose.pose.orientation);
+  }
+
+  geometry_msgs::msg::Point previous_point;
+  geometry_msgs::msg::Point next_point;
+  if (index == 0) {
+    previous_point = current_pose.pose.position;
+    next_point = path.poses[1].pose.position;
+  } else if (index + 1 >= path.poses.size()) {
+    previous_point = path.poses[index - 1].pose.position;
+    next_point = current_pose.pose.position;
+  } else {
+    previous_point = path.poses[index - 1].pose.position;
+    next_point = path.poses[index + 1].pose.position;
+  }
+
+  const double dx = next_point.x - previous_point.x;
+  const double dy = next_point.y - previous_point.y;
+  if (std::abs(dx) <= 1e-9 && std::abs(dy) <= 1e-9) {
+    return tf2::getYaw(current_pose.pose.orientation);
+  }
+  return std::atan2(dy, dx);
+}
+
+bool Nav2BSplineSmoother::getRobotFootprint(nav2_costmap_2d::Footprint & footprint) const
+{
+  if (!footprint_sub_) {
+    return false;
+  }
+
+  std_msgs::msg::Header footprint_header;
+  return footprint_sub_->getFootprintInRobotFrame(footprint, footprint_header);
+}
+
+double Nav2BSplineSmoother::sampleFootprintCost(
+  nav2_costmap_2d::Costmap2D & costmap,
+  const nav_msgs::msg::Path & path,
+  size_t index,
+  const geometry_msgs::msg::PoseStamped * override_pose) const
+{
+  nav2_costmap_2d::Footprint footprint;
+  if (!getRobotFootprint(footprint) || footprint.size() < 3) {
+    return -1.0;
+  }
+
+  nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *> checker(&costmap);
+  const auto & pose = override_pose ? *override_pose : path.poses[index];
+  return checker.footprintCostAtPose(
+    pose.pose.position.x,
+    pose.pose.position.y,
+    estimatePoseYaw(path, index, override_pose),
+    footprint);
+}
+
+void Nav2BSplineSmoother::collectCollidingIndices(
+  nav2_costmap_2d::Costmap2D & costmap,
+  const nav_msgs::msg::Path & path,
+  std::vector<size_t> & indices) const
+{
+  indices.clear();
+  for (size_t i = 0; i < path.poses.size(); ++i) {
+    const double footprint_cost = sampleFootprintCost(costmap, path, i);
+    if (footprint_cost > nav2_costmap_2d::MAX_NON_OBSTACLE) {
+      indices.push_back(i);
+    }
+  }
+}
+
+bool Nav2BSplineSmoother::pathHasCollision(
+  nav2_costmap_2d::Costmap2D & costmap,
+  const nav_msgs::msg::Path & path) const
+{
+  std::vector<size_t> indices;
+  collectCollidingIndices(costmap, path, indices);
+  return !indices.empty();
+}
+
+bool Nav2BSplineSmoother::locallyDegradeCollidingSegments(
+  nav2_costmap_2d::Costmap2D & costmap,
+  nav_msgs::msg::Path & path,
+  const nav_msgs::msg::Path & reference_path) const
+{
+  if (path.poses.size() < 3 || reference_path.poses.size() < 3) {
+    return false;
+  }
+
+  std::vector<size_t> collision_indices;
+  collectCollidingIndices(costmap, path, collision_indices);
+  if (collision_indices.empty()) {
+    return false;
+  }
+
+  const size_t path_last = path.poses.size() - 1;
+  const size_t ref_last = reference_path.poses.size() - 1;
+  const size_t window_radius = std::max<size_t>(2, static_cast<size_t>(pullback_samples_ / 2));
+
+  for (const size_t collision_index : collision_indices) {
+    const size_t window_start = (collision_index > window_radius) ?
+      (collision_index - window_radius) : 0;
+    const size_t window_end = std::min(path_last, collision_index + window_radius);
+
+    for (size_t i = window_start; i <= window_end; ++i) {
+      const double ratio =
+        static_cast<double>(i) / static_cast<double>(std::max<size_t>(1, path_last));
+      const size_t ref_idx = std::min(
+        ref_last,
+        static_cast<size_t>(std::round(ratio * static_cast<double>(ref_last))));
+      path.poses[i].pose.position = reference_path.poses[ref_idx].pose.position;
+    }
+  }
+
   return true;
 }
 
@@ -331,6 +495,22 @@ void Nav2BSplineSmoother::updatePathOrientations(nav_msgs::msg::Path & path) con
     path.poses[i].pose.orientation.z = std::sin(0.5 * yaw);
     path.poses[i].pose.orientation.w = std::cos(0.5 * yaw);
   }
+}
+
+geometry_msgs::msg::PoseStamped Nav2BSplineSmoother::projectTowardReference(
+  const geometry_msgs::msg::PoseStamped & current_pose,
+  const geometry_msgs::msg::PoseStamped & reference_pose,
+  double step_ratio) const
+{
+  auto candidate = current_pose;
+  const double clamped_ratio = std::max(0.0, std::min(1.0, step_ratio));
+  candidate.pose.position.x =
+    current_pose.pose.position.x +
+    (reference_pose.pose.position.x - current_pose.pose.position.x) * clamped_ratio;
+  candidate.pose.position.y =
+    current_pose.pose.position.y +
+    (reference_pose.pose.position.y - current_pose.pose.position.y) * clamped_ratio;
+  return candidate;
 }
 
 }  // namespace trajectory_optimizer

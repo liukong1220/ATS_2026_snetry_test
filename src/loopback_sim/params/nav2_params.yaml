@@ -7,10 +7,8 @@ bt_navigator:
     bt_loop_duration: 10
     default_server_timeout: 20
     wait_for_service_timeout: 1000
-    # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
-    # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
-    # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
-    # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
+    default_nav_to_pose_bt_xml: $(find-pkg-share pb2025_nav_bringup)/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml
+    default_nav_through_poses_bt_xml: $(find-pkg-share pb2025_nav_bringup)/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_compute_path_through_poses_action_bt_node
@@ -78,14 +76,14 @@ trajectory_optimizer:
     costmap_topic: "global_costmap/costmap_raw"
     # 控制点间距：越大，样条越“平”，越容易把拐角抹掉。
     # 当前缩小到 0.24，是为了减少弯角处 B 样条内切。
-    control_point_spacing: 0.24
+    control_point_spacing: 0.20
     # 输出路径采样间距：越小曲线越密，controller 看到的参考线越细。
     output_path_spacing: 0.05
     # 过滤过近输入点，避免控制点过多导致样条抖动。
     min_input_point_spacing: 0.02
     # 平滑结果允许偏离原始路径的最大横向距离。
     # 该值越大，越容易把路径抹进膨胀层；越小则更保形但更不平滑。
-    max_lateral_deviation: 0.12
+    max_lateral_deviation: 0.08
     # 最少控制点数，太少会失去样条表达能力。
     min_control_points: 5
     # 曲率上限：越小越强调“转弯不要太急”。
@@ -98,7 +96,7 @@ trajectory_optimizer:
     # 曲率 refinement 迭代次数：越多越容易把局部急弯磨平。
     curvature_refinement_iterations: 2
     # 每次曲率修正的步长：越大修正越激进。
-    curvature_refinement_gain: 0.015
+    curvature_refinement_gain: 0.010
     # 全局速度上限：整条路径的基础巡航速度。
     # 拐角过慢容易造成控制收敛到一起并抖动，过快又容易切弯。
     global_speed_limit: 1.20
@@ -116,11 +114,11 @@ trajectory_optimizer:
     # 障碍代价权重：决定离障碍太近时修正力度。
     # 过大容易把轨迹推得过远，过小则拦不住切进膨胀层的趋势。
     # 当前提高到 55，让样条先离开高代价边缘，再交给 MPPI 跟踪。
-    obstacle_weight: 55.0
+    obstacle_weight: 40.0
     # 障碍 refinement 迭代次数：对太贴边的点进行回拉。
-    obstacle_refinement_iterations: 5
+    obstacle_refinement_iterations: 3
     # 每次障碍修正的步长。
-    obstacle_refinement_gain: 0.04
+    obstacle_refinement_gain: 0.02
 
 controller_server:
   ros__parameters:
@@ -527,10 +525,10 @@ smoother_server:
       plugin: "trajectory_optimizer/Nav2BSplineSmoother"
       # 与 trajectory_optimizer 保持一致的曲线参数，确保 BT 平滑和旁路可视化看到的是同一类轨迹。
       # 注意：这里的目标是“保形且可跟随”，不是把角全磨圆。
-      control_point_spacing: 0.24
+      control_point_spacing: 0.20
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
-      max_lateral_deviation: 0.12
+      max_lateral_deviation: 0.08
       min_control_points: 5
       # 曲率上限：越小越强调“转弯不要太急”。
       curvature_limit: 1.60
@@ -539,7 +537,7 @@ smoother_server:
       # 曲率 refinement 次数：用于把急弯磨圆。
       curvature_refinement_iterations: 2
       # 单次曲率修正步长：越大越激进。
-      curvature_refinement_gain: 0.015
+      curvature_refinement_gain: 0.010
       # 全局速度上限：整条路径的基础巡航速度。
       # 当前略保守，避免弯前冲得太快导致 controller 过度收敛。
       global_speed_limit: 1.20
@@ -557,13 +555,13 @@ smoother_server:
       obstacle_safe_cost: 48
       # 障碍代价权重：越大越不愿意贴近高代价边缘。
       # 这里和 optimizer 保持一致，避免平滑器和主链对“安全距离”的理解打架。
-      obstacle_weight: 55.0
+      obstacle_weight: 40.0
       # 障碍 refinement 次数：对太贴边的点进行回拉。
-      obstacle_refinement_iterations: 5
+      obstacle_refinement_iterations: 3
       # 每次障碍修正步长。
-      obstacle_refinement_gain: 0.04
+      obstacle_refinement_gain: 0.02
       max_path_cost: 48
-      pullback_samples: 12
+      pullback_samples: 8
     fallback_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
       tolerance: 1.0e-10

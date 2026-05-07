@@ -574,8 +574,9 @@ std::vector<Point2D> BSplinePathOptimizer::refinePathUnified(
           const double obstacle_penalty = computeObstaclePenalty(obstacle_cost);
           if (obstacle_penalty > 0.0) {
             const Point2D gradient = estimateObstacleGradient(candidate);
-            const double gain = params_.obstacle_refinement_gain *
-              params_.obstacle_weight * obstacle_penalty;
+            const double gain = std::min(
+              params_.max_lateral_deviation * 0.35,
+              params_.obstacle_refinement_gain * obstacle_penalty);
             candidate.x += gradient.x * gain;
             candidate.y += gradient.y * gain;
           }

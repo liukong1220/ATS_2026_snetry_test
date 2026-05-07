@@ -1,6 +1,6 @@
 # 全向导航优化接力文档
 
-更新时间：2026-05-07
+更新时间：2026-05-08
 
 ## 1. 当前阶段状态
 
@@ -430,3 +430,133 @@ loopback、`reality/nav2_params.yaml`、实车入口 `pb2025_sentry_bringup/para
 4. 如果弯前明显爬行并抽动，先把 `curvature_brake_gain` 从 `0.60` 往 `0.45` 试
 5. 如果还会靠近膨胀层，再把 `obstacle_safe_cost` 和 `collision_margin_distance` 继续收紧
 6. 下一阶段再把 ESDF distance field 接到 `J_obs`，替换当前基于 costmap cost 的离散梯度
+
+## 16. 2026-05-08 新增排查结论
+
+### 16.1 `loopback_vision_test.launch.py` 默认不是“纯导航无视觉”
+
+如果直接运行：
+
+`ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True`
+
+则默认会带上这些参数：
+
+1. `publish_vision_target: True`
+2. `vision_nav_hold: True`
+3. `behavior_params_file: sentry_behavior_vision_test.yaml`
+
+因此它本质上是“视觉接管链路测试入口”，不是普通巡逻导航入口。
+
+如果要做纯导航 loopback，请优先使用：
+
+1. `loopback_decision_sim.launch.py`
+2. 或显式传 `publish_vision_target:=False vision_nav_hold:=False`
+
+### 16.2 本轮已确认的三类根因
+
+#### A. loopback 执行链一度断在 `cmd_vel`
+
+之前 Nav2 最终输出已经走到 `cmd_vel_nav2_result`，但 `loopback_simulator` 还在订阅旧的 `cmd_vel`。
+
+现已修复：
+
+1. `loopback_simulator` 改为吃 `cmd_vel_nav2_result`
+2. `loopback_navigation.launch.py` 中 controller / governor / velocity_smoother remap 已对齐
+
+#### B. `gimbal_yaw_fake` 缺失会让 recovery / behavior 直接失败
+
+loopback 没有实车上的完整 fake base TF 链时，`behavior_server` 会因为查不到 `gimbal_yaw_fake` 而在 backup 前置检查失败。
+
+现已修复：
+
+1. loopback simulator 持续补发 `base_footprint -> gimbal_yaw_fake` 辅助 TF
+
+#### C. `bspline_smoother` 的安全判据与 Nav2 最终碰撞判据不一致
+
+之前 smoother 内部主要按“路径中心点 cost”做 pullback，
+但 Nav2 `SmoothPath` 行为树节点在 `check_for_collisions=true` 下会按 robot footprint 做真正的路径碰撞校验。
+
+这会导致：
+
+1. smoother 自己认为 path 已安全
+2. `smoother_server` 最终仍报：
+   `Smoothed path leads to a collision ...`
+
+现已修复为：
+
+1. `Nav2BSplineSmoother` 内部接入 footprint collision checker
+2. pullback 时优先按 footprint cost 回拉，而不是只看中心点 cost
+3. 若平滑后仍局部碰撞，先尝试“局部退化”为原始 polyline 段
+4. 局部退化后仍碰撞，再退回 raw planner path
+
+### 16.3 本轮新增的两类优化
+
+#### `SelectVisionFollowPath`：planner-friendly 候选筛选
+
+本轮不是只检查“候选点本身是否落在 free cell”，而是加了更接近 planner 可达性的筛选：
+
+1. 候选点周围必须满足圆形 clearance
+2. 当前车位到候选点的连线路径也必须满足 corridor clearance
+3. 候选评分里增加了边界安全裕度
+
+这类检查的目标不是代替 planner，而是在行为层就先过滤掉“看起来可走，但对 planner / footprint 不友好”的点。
+
+#### `Nav2BSplineSmoother`：局部退化模式
+
+现在不再一旦某处擦边就整条回 raw path，而是：
+
+1. 先找出 footprint 碰撞的采样点
+2. 只把碰撞附近窗口段退回原始 planner polyline
+3. 再重新做 clearance pullback
+4. 仅当局部修复仍失败时，才回退整条 raw planner path
+
+这样可以保留大部分可用平滑收益，同时减少 `SmoothPath` action 直接 abort。
+
+### 16.4 当前同步到 loopback 与实车的最新参数方向
+
+#### `trajectory_optimizer` / `bspline_smoother`
+
+1. `control_point_spacing: 0.20`
+2. `max_lateral_deviation: 0.08`
+3. `curvature_refinement_gain: 0.010`
+4. `obstacle_weight: 40.0`
+5. `obstacle_refinement_iterations: 3`
+6. `obstacle_refinement_gain: 0.02`
+7. `pullback_samples: 8`
+
+方向是：
+
+1. 少切角
+2. 少大步障碍推挤
+3. 优先保形
+
+#### 视觉跟随参数
+
+已同步到 `sentry_behavior.yaml`、`sentry_behavior_loopback.yaml`、`sentry_behavior_vision_test.yaml`：
+
+1. `follow_occupied_threshold: 40`
+2. `follow_candidate_clearance_radius_m: 0.45`
+3. `min_goal_shift_m: 0.45`
+4. `vision_active_goal_hold_tolerance: 0.24`
+5. `vision_active_goal_min_resend_interval_s: 0.40`
+
+方向是：
+
+1. 候选跟随点离障碍更远
+2. 行为层少为微小变化重发新目标
+3. 降低视觉分支在墙角和边界附近把 Nav2 打乱的概率
+
+### 16.5 当前仍未完全解决的问题
+
+虽然本轮已经把失败模式从“完全不动 / 直接 abort”推进到“能继续执行 raw path fallback”，但以下问题仍存在：
+
+1. 某些视觉跟随目标仍会把 raw planner path 本身带到碰撞边界
+2. 某些目标点虽然通过了行为层筛选，Smac/footprint 级别仍可能认为不可达或不可执行
+3. 当前 `loopback_vision_test` 的默认视觉目标位置仍可能持续把 robot 拉到贴边极限状态
+
+### 16.6 下一轮建议优先级
+
+1. 为 `SelectVisionFollowPath` 增加更强的“目标点可达性兜底”，必要时显式避开 planner 已知死角
+2. 继续细化 smoother 的局部退化窗口，而不是频繁整条回 raw path
+3. 在 RViz 中同时看 `/plan`、`/smoothed_path_visual`、local/global costmap 和 `decision/vision_follow_markers`
+4. 区分“纯导航基线”与“视觉接管场景”，不要混用结论

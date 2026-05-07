@@ -140,6 +140,72 @@ bool isLineTraversable(
   return true;
 }
 
+bool hasCircularClearance(
+  const nav_msgs::msg::OccupancyGrid & costmap, const geometry_msgs::msg::Point & center,
+  double clearance_radius, int occupied_threshold)
+{
+  if (clearance_radius <= 1e-6) {
+    return isTraversable(costmap, center, occupied_threshold);
+  }
+
+  const double resolution = static_cast<double>(costmap.info.resolution);
+  if (resolution <= 0.0) {
+    return true;
+  }
+
+  const int steps = std::max(1, static_cast<int>(std::ceil(clearance_radius / resolution)));
+  for (int ix = -steps; ix <= steps; ++ix) {
+    for (int iy = -steps; iy <= steps; ++iy) {
+      const double offset_x = static_cast<double>(ix) * resolution;
+      const double offset_y = static_cast<double>(iy) * resolution;
+      if ((offset_x * offset_x + offset_y * offset_y) > clearance_radius * clearance_radius) {
+        continue;
+      }
+
+      geometry_msgs::msg::Point sample = center;
+      sample.x += offset_x;
+      sample.y += offset_y;
+      if (!isTraversable(costmap, sample, occupied_threshold)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool hasSegmentClearance(
+  const nav_msgs::msg::OccupancyGrid & costmap,
+  const geometry_msgs::msg::Point & start,
+  const geometry_msgs::msg::Point & end,
+  double clearance_radius,
+  int occupied_threshold)
+{
+  if (clearance_radius <= 1e-6) {
+    return isLineTraversable(costmap, start, end, occupied_threshold);
+  }
+
+  const double resolution = static_cast<double>(costmap.info.resolution);
+  if (resolution <= 0.0) {
+    return true;
+  }
+
+  const double distance = planarDistance(start, end);
+  const int steps = std::max(1, static_cast<int>(std::ceil(distance / resolution)));
+  for (int i = 0; i <= steps; ++i) {
+    const double t = static_cast<double>(i) / static_cast<double>(steps);
+    geometry_msgs::msg::Point sample;
+    sample.x = start.x + (end.x - start.x) * t;
+    sample.y = start.y + (end.y - start.y) * t;
+    sample.z = start.z + (end.z - start.z) * t;
+    if (!hasCircularClearance(costmap, sample, clearance_radius, occupied_threshold)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 double distanceToCostmapBorder(
   const nav_msgs::msg::OccupancyGrid & costmap, const geometry_msgs::msg::Point & point)
 {
@@ -306,6 +372,7 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   double max_goal_angle_step_deg = 18.0;
   double pose_jump_reset_distance_m = 0.8;
   double pose_jump_reset_angle_deg = 55.0;
+  double follow_candidate_clearance_radius_m = 0.45;
   node_->get_parameter("decision.vision.attack_radius", attack_radius);
   node_->get_parameter("decision.vision.follow_occupied_threshold", occupied_threshold);
   node_->get_parameter("decision.vision.follow_sample_count", sample_count);
@@ -314,6 +381,9 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   node_->get_parameter("decision.vision.min_goal_shift_m", min_goal_shift_m);
   node_->get_parameter(
     "decision.vision.max_goal_angle_step_deg", max_goal_angle_step_deg);
+  node_->get_parameter(
+    "decision.vision.follow_candidate_clearance_radius_m",
+    follow_candidate_clearance_radius_m);
   node_->get_parameter(
     "decision.vision.pose_jump_reset_distance_m", pose_jump_reset_distance_m);
   node_->get_parameter(
@@ -328,6 +398,7 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   sample_count = std::max(4, sample_count);
   min_replan_interval_s = std::max(0.0, min_replan_interval_s);
   min_goal_shift_m = std::max(0.0, min_goal_shift_m);
+  follow_candidate_clearance_radius_m = std::max(0.0, follow_candidate_clearance_radius_m);
   pose_jump_reset_distance_m = std::max(0.0, pose_jump_reset_distance_m);
   pose_jump_reset_angle_deg = std::clamp(pose_jump_reset_angle_deg, 0.0, 180.0);
   const double arc_half_angle = std::clamp(
@@ -412,7 +483,9 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
     const auto angle_offsets = buildAngleOffsets(sample_count, arc_half_angle);
     const auto fallback_angle_offsets = buildAngleOffsets(sample_count * 2, M_PI);
     const double min_border_clearance =
-      std::max(0.25, static_cast<double>(costmap->info.resolution) * 2.0);
+      std::max(
+      std::max(0.25, follow_candidate_clearance_radius_m),
+      static_cast<double>(costmap->info.resolution) * 2.0);
 
     auto evaluate_candidates =
       [&](const std::vector<double> & offsets, bool require_line_of_sight) -> bool {
@@ -426,21 +499,32 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
             if (!isTraversable(*costmap, candidate, occupied_threshold)) {
               continue;
             }
+            if (!hasCircularClearance(
+                *costmap, candidate, follow_candidate_clearance_radius_m, occupied_threshold))
+            {
+              continue;
+            }
             const double border_clearance = distanceToCostmapBorder(*costmap, candidate);
             if (border_clearance < min_border_clearance) {
               continue;
             }
             if (
               require_line_of_sight && has_current_position &&
-              !isLineTraversable(*costmap, current_position, candidate, occupied_threshold))
+              !hasSegmentClearance(
+                *costmap, current_position, candidate,
+                follow_candidate_clearance_radius_m, occupied_threshold))
             {
               continue;
             }
             const double candidate_distance_to_robot =
               has_current_position ? planarDistance(candidate, current_position) : 0.0;
             const double candidate_distance_to_ring = planarDistance(candidate, nearest_goal_point);
+            const double candidate_border_clearance =
+              distanceToCostmapBorder(*costmap, candidate);
             const double candidate_score =
-              candidate_distance_to_robot + candidate_distance_to_ring * 0.6;
+              candidate_distance_to_robot +
+              candidate_distance_to_ring * 0.6 -
+              candidate_border_clearance * 0.2;
             if (!found_candidate || candidate_score < best_candidate_score) {
               best_candidate_score = candidate_score;
               selected_point = candidate;

@@ -376,18 +376,18 @@ trajectory_optimizer:
     costmap_topic: "global_costmap/costmap_raw"
     # 控制点间距：越大越平滑，但越容易在拐角内侧切进膨胀层。
     # 当前用 0.24 保形，优先解决“转弯不跟线、抄近道”。
-    control_point_spacing: 0.24
+    control_point_spacing: 0.20
     output_path_spacing: 0.05
     min_input_point_spacing: 0.02
     # 最大横向偏移：限制 B 样条离原始全局路径的距离。
     # 当前压到 0.12，避免平滑器把路径抹进障碍膨胀层。
-    max_lateral_deviation: 0.12
+    max_lateral_deviation: 0.08
     min_control_points: 5
     # 曲率上限：当前不是追求极圆，而是避免曲率约束过硬导致路径贴墙。
     curvature_limit: 1.60
     curvature_weight: 10.0
     curvature_refinement_iterations: 2
-    curvature_refinement_gain: 0.015
+    curvature_refinement_gain: 0.010
     global_speed_limit: 1.15
     lateral_accel_limit: 0.75
     longitudinal_accel_limit: 0.55
@@ -395,9 +395,9 @@ trajectory_optimizer:
     derivative_step: 0.02
     # J_obs 参数：cost 超过 48 就开始推离障碍，权重比之前更强。
     obstacle_safe_cost: 48
-    obstacle_weight: 55.0
-    obstacle_refinement_iterations: 5
-    obstacle_refinement_gain: 0.04
+    obstacle_weight: 40.0
+    obstacle_refinement_iterations: 3
+    obstacle_refinement_gain: 0.02
 
 controller_server:
   ros__parameters:
@@ -765,15 +765,15 @@ smoother_server:
     bspline_smoother:
       plugin: "trajectory_optimizer/Nav2BSplineSmoother"
       # 与 trajectory_optimizer 保持同一组参数；BT 主链真正跟踪的是这里输出的路径。
-      control_point_spacing: 0.24
+      control_point_spacing: 0.20
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
-      max_lateral_deviation: 0.12
+      max_lateral_deviation: 0.08
       min_control_points: 5
       curvature_limit: 1.60
       curvature_weight: 10.0
       curvature_refinement_iterations: 2
-      curvature_refinement_gain: 0.015
+      curvature_refinement_gain: 0.010
       global_speed_limit: 1.15
       lateral_accel_limit: 0.75
       longitudinal_accel_limit: 0.55
@@ -782,11 +782,11 @@ smoother_server:
       profile_topic: "trajectory_profile"
       # cost 超过 48 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
       obstacle_safe_cost: 48
-      obstacle_weight: 55.0
-      obstacle_refinement_iterations: 5
-      obstacle_refinement_gain: 0.04
+      obstacle_weight: 40.0
+      obstacle_refinement_iterations: 3
+      obstacle_refinement_gain: 0.02
       max_path_cost: 48
-      pullback_samples: 12
+      pullback_samples: 8
     fallback_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
       tolerance: 1.0e-10

@@ -61,6 +61,7 @@ def generate_launch_description():
         respawn_delay=2.0,
         parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
+        remappings=[("cmd_vel", "cmd_vel_controller")],
     )
 
     trajectory_speed_governor_cmd = Node(
@@ -116,6 +117,7 @@ def generate_launch_description():
         respawn_delay=2.0,
         parameters=[configured_params],
         arguments=["--ros-args", "--log-level", log_level],
+        remappings=[("cmd_vel", "cmd_vel_nav2_result")],
     )
 
     bt_navigator_cmd = Node(

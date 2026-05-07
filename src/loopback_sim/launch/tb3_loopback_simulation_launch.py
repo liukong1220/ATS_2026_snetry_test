@@ -16,7 +16,7 @@ from nav2_common.launch import RewrittenYaml
 
 def generate_launch_description() -> LaunchDescription:
     # Get the launch directory
-    bringup_dir = get_package_share_directory('nav2_loopback_sim')
+    bringup_dir = get_package_share_directory('pb2025_sentry_bringup')
     loopback_sim_dir = get_package_share_directory('nav2_loopback_sim')
     sim_dir = get_package_share_directory('nav2_minimal_tb3_sim')
 
@@ -129,19 +129,13 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     bringup_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(bringup_dir, 'bringup_launch.py')),
+        PythonLaunchDescriptionSource(
+            os.path.join(bringup_dir, 'launch', 'loopback_navigation.launch.py')
+        ),
         launch_arguments={
-            'namespace': namespace,
-            'map': map_yaml_file,
-            'graph': graph_filepath,
-            'use_sim_time': 'True',
             'params_file': params_file,
             'autostart': autostart,
-            'use_composition': use_composition,
             'use_respawn': use_respawn,
-            'use_localization': 'False',  # Don't use SLAM, AMCL
-            'use_keepout_zones': 'False',
-            'use_speed_zones': 'False',
         }.items(),
     )
 
