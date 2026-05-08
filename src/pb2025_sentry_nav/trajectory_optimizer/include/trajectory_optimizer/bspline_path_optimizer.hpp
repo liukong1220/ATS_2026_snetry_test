@@ -144,6 +144,9 @@ private:
   std::vector<Point2D> refinePathUnified(
     const std::vector<Point2D> & dense_points,
     const std::vector<Point2D> & reference) const;
+  std::vector<Point2D> refinePathSecondStageEsdf(
+    const std::vector<Point2D> & dense_points,
+    const std::vector<Point2D> & reference) const;
   std::vector<Point2D> buildSmoothedPolyline(const std::vector<Point2D> & points) const;
   TrajectoryProfile2D buildTrajectoryProfile(const std::vector<Point2D> & points) const;
   void applyCurvatureSpeedLimits(TrajectoryProfile2D & profile) const;
@@ -166,6 +169,8 @@ private:
     const Point2D & point) const;
   Point2D estimateEsdfGradient(
     const Point2D & point) const;
+  static Point2D normalizeVector(const Point2D & vector);
+  static double dot(const Point2D & a, const Point2D & b);
   double computeObstaclePenalty(
     unsigned char cost) const;
   double computeObstaclePenaltyFromDistance(

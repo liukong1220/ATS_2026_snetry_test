@@ -21,6 +21,9 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     log_level = LaunchConfiguration("log_level")
+    initial_x = LaunchConfiguration("initial_x")
+    initial_y = LaunchConfiguration("initial_y")
+    initial_yaw = LaunchConfiguration("initial_yaw")
 
     declare_map_yaml_cmd = DeclareLaunchArgument(
         "map",
@@ -62,6 +65,24 @@ def generate_launch_description():
         "log_level",
         default_value="info",
         description="Log level for launched nodes.",
+    )
+
+    declare_initial_x_cmd = DeclareLaunchArgument(
+        "initial_x",
+        default_value="0.0",
+        description="Default loopback initial x in map frame.",
+    )
+
+    declare_initial_y_cmd = DeclareLaunchArgument(
+        "initial_y",
+        default_value="0.0",
+        description="Default loopback initial y in map frame.",
+    )
+
+    declare_initial_yaw_cmd = DeclareLaunchArgument(
+        "initial_yaw",
+        default_value="0.0",
+        description="Default loopback initial yaw in map frame.",
     )
 
     map_server_cmd = Node(
@@ -108,6 +129,25 @@ def generate_launch_description():
         }.items(),
     )
 
+    fake_inputs_cmd = Node(
+        package="pb2025_sentry_bringup",
+        executable="fake_decision_sim_inputs.py",
+        name="fake_decision_sim_inputs",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": True,
+                "initial_x": initial_x,
+                "initial_y": initial_y,
+                "initial_yaw": initial_yaw,
+                "initial_pose_repeats": 1,
+                "initial_pose_period": 0.5,
+                "publish_decision_mode": False,
+                "publish_referee_inputs": False,
+            }
+        ],
+    )
+
     rviz_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(nav_bringup_dir, "launch", "rviz_launch.py")
@@ -135,9 +175,13 @@ def generate_launch_description():
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_rviz_config_file_cmd)
     ld.add_action(declare_log_level_cmd)
+    ld.add_action(declare_initial_x_cmd)
+    ld.add_action(declare_initial_y_cmd)
+    ld.add_action(declare_initial_yaw_cmd)
     ld.add_action(map_server_cmd)
     ld.add_action(map_server_lifecycle_cmd)
     ld.add_action(loopback_sim_cmd)
     ld.add_action(nav2_bringup_cmd)
+    ld.add_action(fake_inputs_cmd)
     ld.add_action(rviz_cmd)
     return ld

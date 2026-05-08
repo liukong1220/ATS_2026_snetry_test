@@ -107,14 +107,14 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "initial_x",
-            default_value="0.0",
+            default_value="0.3",
             description="loopback 机器人初始 x 坐标。",
         )
     )
     ld.add_action(
         DeclareLaunchArgument(
             "initial_y",
-            default_value="0.0",
+            default_value="0.3",
             description="loopback 机器人初始 y 坐标。",
         )
     )

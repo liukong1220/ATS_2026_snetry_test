@@ -39,6 +39,7 @@ void FakeCostmapEsdfProvider::updateCostmap(
   costmap_ = costmap;
   available_ = false;
   distance_field_.clear();
+  smoothed_distance_field_.clear();
 
   if (!costmap_) {
     return;
@@ -47,6 +48,8 @@ void FakeCostmapEsdfProvider::updateCostmap(
   width_ = costmap_->getSizeInCellsX();
   height_ = costmap_->getSizeInCellsY();
   resolution_ = costmap_->getResolution();
+  origin_x_ = costmap_->getOriginX();
+  origin_y_ = costmap_->getOriginY();
   if (width_ == 0 || height_ == 0 || resolution_ <= 0.0) {
     return;
   }
@@ -55,6 +58,7 @@ void FakeCostmapEsdfProvider::updateCostmap(
   distance_field_.assign(cell_count, std::numeric_limits<double>::infinity());
 
   std::priority_queue<GridNode, std::vector<GridNode>, GridNodeCompare> open;
+  bool has_obstacle_seed = false;
   for (unsigned int my = 0; my < height_; ++my) {
     for (unsigned int mx = 0; mx < width_; ++mx) {
       const unsigned char cost = costmap_->getCost(mx, my);
@@ -71,7 +75,12 @@ void FakeCostmapEsdfProvider::updateCostmap(
       const auto idx = indexOf(mx, my);
       distance_field_[idx] = 0.0;
       open.push(GridNode {mx, my, 0.0});
+      has_obstacle_seed = true;
     }
+  }
+
+  if (!has_obstacle_seed) {
+    return;
   }
 
   static constexpr int kDx[8] = {1, 1, 0, -1, -1, -1, 0, 1};
@@ -107,6 +116,7 @@ void FakeCostmapEsdfProvider::updateCostmap(
     }
   }
 
+  rebuildSmoothedDistanceField();
   available_ = true;
 }
 
@@ -117,32 +127,23 @@ bool FakeCostmapEsdfProvider::available() const
 
 double FakeCostmapEsdfProvider::getDistance(double x, double y) const
 {
-  unsigned int mx = 0;
-  unsigned int my = 0;
-  if (!available() || !worldToMap(x, y, mx, my)) {
+  double gx = 0.0;
+  double gy = 0.0;
+  if (!available() || !worldToGrid(x, y, gx, gy)) {
     return -1.0;
   }
-  return distance_field_[indexOf(mx, my)];
+  return bilinearDistanceAt(distance_field_, gx, gy);
 }
 
 Eigen::Vector2d FakeCostmapEsdfProvider::getGradient(double x, double y) const
 {
-  unsigned int mx = 0;
-  unsigned int my = 0;
-  if (!available() || !worldToMap(x, y, mx, my)) {
+  double gx = 0.0;
+  double gy = 0.0;
+  if (!available() || !worldToGrid(x, y, gx, gy)) {
     return Eigen::Vector2d::Zero();
   }
-
-  const int ix = static_cast<int>(mx);
-  const int iy = static_cast<int>(my);
-  const double left = distanceAt(ix - 1, iy);
-  const double right = distanceAt(ix + 1, iy);
-  const double down = distanceAt(ix, iy - 1);
-  const double up = distanceAt(ix, iy + 1);
-  const double denom = std::max(resolution_, 1e-6);
-  return Eigen::Vector2d {
-    (right - left) / (2.0 * denom),
-    (up - down) / (2.0 * denom)};
+  const auto & field = smoothed_distance_field_.empty() ? distance_field_ : smoothed_distance_field_;
+  return bilinearGradientAt(field, gx, gy);
 }
 
 bool FakeCostmapEsdfProvider::worldToMap(double wx, double wy, unsigned int & mx, unsigned int & my) const
@@ -153,6 +154,21 @@ bool FakeCostmapEsdfProvider::worldToMap(double wx, double wy, unsigned int & mx
   return costmap_->worldToMap(wx, wy, mx, my);
 }
 
+bool FakeCostmapEsdfProvider::worldToGrid(double wx, double wy, double & gx, double & gy) const
+{
+  unsigned int mx = 0;
+  unsigned int my = 0;
+  if (!worldToMap(wx, wy, mx, my)) {
+    return false;
+  }
+
+  gx = ((wx - origin_x_) / resolution_) - 0.5;
+  gy = ((wy - origin_y_) / resolution_) - 0.5;
+  gx = std::max(0.0, std::min(gx, static_cast<double>(width_ - 1)));
+  gy = std::max(0.0, std::min(gy, static_cast<double>(height_ - 1)));
+  return true;
+}
+
 std::size_t FakeCostmapEsdfProvider::indexOf(unsigned int mx, unsigned int my) const
 {
   return static_cast<std::size_t>(my) * static_cast<std::size_t>(width_) +
@@ -161,10 +177,110 @@ std::size_t FakeCostmapEsdfProvider::indexOf(unsigned int mx, unsigned int my) c
 
 double FakeCostmapEsdfProvider::distanceAt(int mx, int my) const
 {
-  if (mx < 0 || my < 0 || mx >= static_cast<int>(width_) || my >= static_cast<int>(height_)) {
+  if (distance_field_.empty()) {
     return 0.0;
   }
-  return distance_field_[indexOf(static_cast<unsigned int>(mx), static_cast<unsigned int>(my))];
+
+  const int clamped_x = std::max(0, std::min(mx, static_cast<int>(width_) - 1));
+  const int clamped_y = std::max(0, std::min(my, static_cast<int>(height_) - 1));
+  return distance_field_[indexOf(static_cast<unsigned int>(clamped_x), static_cast<unsigned int>(clamped_y))];
+}
+
+double FakeCostmapEsdfProvider::bilinearDistanceAt(
+  const std::vector<double> & field,
+  double gx,
+  double gy) const
+{
+  if (field.empty()) {
+    return -1.0;
+  }
+
+  const int x0 = static_cast<int>(std::floor(gx));
+  const int y0 = static_cast<int>(std::floor(gy));
+  const int x1 = std::min(x0 + 1, static_cast<int>(width_) - 1);
+  const int y1 = std::min(y0 + 1, static_cast<int>(height_) - 1);
+  const double tx = gx - static_cast<double>(x0);
+  const double ty = gy - static_cast<double>(y0);
+
+  const auto sample = [&](int x, int y) {
+      const int clamped_x = std::max(0, std::min(x, static_cast<int>(width_) - 1));
+      const int clamped_y = std::max(0, std::min(y, static_cast<int>(height_) - 1));
+      return field[indexOf(static_cast<unsigned int>(clamped_x), static_cast<unsigned int>(clamped_y))];
+    };
+
+  const double d00 = sample(x0, y0);
+  const double d10 = sample(x1, y0);
+  const double d01 = sample(x0, y1);
+  const double d11 = sample(x1, y1);
+  return
+    (1.0 - tx) * (1.0 - ty) * d00 +
+    tx * (1.0 - ty) * d10 +
+    (1.0 - tx) * ty * d01 +
+    tx * ty * d11;
+}
+
+Eigen::Vector2d FakeCostmapEsdfProvider::bilinearGradientAt(
+  const std::vector<double> & field,
+  double gx,
+  double gy) const
+{
+  if (field.empty()) {
+    return Eigen::Vector2d::Zero();
+  }
+
+  const int x0 = static_cast<int>(std::floor(gx));
+  const int y0 = static_cast<int>(std::floor(gy));
+  const int x1 = std::min(x0 + 1, static_cast<int>(width_) - 1);
+  const int y1 = std::min(y0 + 1, static_cast<int>(height_) - 1);
+  const double tx = gx - static_cast<double>(x0);
+  const double ty = gy - static_cast<double>(y0);
+
+  const auto sample = [&](int x, int y) {
+      const int clamped_x = std::max(0, std::min(x, static_cast<int>(width_) - 1));
+      const int clamped_y = std::max(0, std::min(y, static_cast<int>(height_) - 1));
+      return field[indexOf(static_cast<unsigned int>(clamped_x), static_cast<unsigned int>(clamped_y))];
+    };
+
+  const double d00 = sample(x0, y0);
+  const double d10 = sample(x1, y0);
+  const double d01 = sample(x0, y1);
+  const double d11 = sample(x1, y1);
+  const double denom = std::max(resolution_, 1e-6);
+
+  const double grad_x =
+    ((1.0 - ty) * (d10 - d00) + ty * (d11 - d01)) / denom;
+  const double grad_y =
+    ((1.0 - tx) * (d01 - d00) + tx * (d11 - d10)) / denom;
+  return Eigen::Vector2d {grad_x, grad_y};
+}
+
+void FakeCostmapEsdfProvider::rebuildSmoothedDistanceField()
+{
+  smoothed_distance_field_ = distance_field_;
+  if (distance_field_.empty()) {
+    return;
+  }
+
+  static constexpr double kKernel[3] = {1.0, 2.0, 1.0};
+  for (unsigned int my = 0; my < height_; ++my) {
+    for (unsigned int mx = 0; mx < width_; ++mx) {
+      double weighted_sum = 0.0;
+      double weight_total = 0.0;
+      for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+          const int sx = std::max(0, std::min(static_cast<int>(mx) + dx, static_cast<int>(width_) - 1));
+          const int sy = std::max(0, std::min(static_cast<int>(my) + dy, static_cast<int>(height_) - 1));
+          const double weight = kKernel[dx + 1] * kKernel[dy + 1];
+          weighted_sum += weight * distance_field_[indexOf(
+            static_cast<unsigned int>(sx),
+            static_cast<unsigned int>(sy))];
+          weight_total += weight;
+        }
+      }
+      smoothed_distance_field_[indexOf(mx, my)] =
+        (weight_total > 0.0) ? (weighted_sum / weight_total) : distance_field_[indexOf(mx, my)];
+    }
+  }
 }
 
 }  // namespace trajectory_optimizer

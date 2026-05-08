@@ -121,19 +121,19 @@ def generate_launch_description():
 
     declare_initial_x_cmd = DeclareLaunchArgument(
         "initial_x",
-        default_value="0.0",
+        default_value="-0.0",
         description="Initial robot x position in map frame.",
     )
 
     declare_initial_y_cmd = DeclareLaunchArgument(
         "initial_y",
-        default_value="0.0",
+        default_value="-0.0",
         description="Initial robot y position in map frame.",
     )
 
     declare_initial_yaw_cmd = DeclareLaunchArgument(
         "initial_yaw",
-        default_value="0.0",
+        default_value="-0.3",
         description="Initial robot yaw in map frame.",
     )
 

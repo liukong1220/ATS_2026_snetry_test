@@ -361,6 +361,8 @@ trajectory_optimizer:
     derivative_step: 0.02
     # J_obs 参数：cost 超过 48 就开始推离障碍，权重比之前更强。
     obstacle_safe_cost: 48
+    use_esdf_obstacle_cost: true
+    obstacle_safe_distance: 0.30
     obstacle_weight: 40.0
     obstacle_refinement_iterations: 3
     obstacle_refinement_gain: 0.02
@@ -385,8 +387,8 @@ controller_server:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
       # Parameter `xy_goal_tolerance`
-      # 终点位置容差。实车上太小会导致贴点时反复修正，太大则会提前判定到点。
-      xy_goal_tolerance: 0.15
+      # 终点位置容差。实车贴点试探过强时可略增，过大则会提前结束导航。
+      xy_goal_tolerance: 0.20
       # Parameter `yaw_goal_tolerance`
       # 当前巡逻/导航任务默认不强约束最终朝向，因此保持 2*pi。
       yaw_goal_tolerance: 6.28
@@ -748,6 +750,8 @@ smoother_server:
       profile_topic: "trajectory_profile"
       # cost 超过 48 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
       obstacle_safe_cost: 48
+      use_esdf_obstacle_cost: true
+      obstacle_safe_distance: 0.30
       obstacle_weight: 40.0
       obstacle_refinement_iterations: 3
       obstacle_refinement_gain: 0.02

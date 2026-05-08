@@ -608,6 +608,68 @@ std::vector<Point2D> BSplinePathOptimizer::refinePathUnified(
     refined.swap(next);
   }
 
+  if (params_.use_esdf_obstacle_cost && esdf_provider_ && esdf_provider_->available()) {
+    refined = refinePathSecondStageEsdf(refined, reference);
+  }
+
+  return refined;
+}
+
+std::vector<Point2D> BSplinePathOptimizer::refinePathSecondStageEsdf(
+  const std::vector<Point2D> & dense_points,
+  const std::vector<Point2D> & reference) const
+{
+  if (dense_points.size() < 3) {
+    return dense_points;
+  }
+
+  static constexpr int kSecondStageIterations = 2;
+  static constexpr double kTangentialRetention = 0.15;
+  std::vector<Point2D> refined = dense_points;
+
+  for (int iter = 0; iter < kSecondStageIterations; ++iter) {
+    std::vector<Point2D> next = refined;
+    for (size_t i = 1; i + 1 < refined.size(); ++i) {
+      Point2D candidate = refined[i];
+      double esdf_distance = 0.0;
+      if (!sampleEsdfDistance(candidate, esdf_distance)) {
+        continue;
+      }
+
+      const double obstacle_penalty = computeObstaclePenaltyFromDistance(esdf_distance);
+      const Point2D gradient = estimateEsdfGradient(candidate);
+      const Point2D tangent = normalizeVector(Point2D {
+          refined[i + 1].x - refined[i - 1].x,
+          refined[i + 1].y - refined[i - 1].y});
+      Point2D filtered_gradient = gradient;
+      if (std::abs(tangent.x) > kEpsilon || std::abs(tangent.y) > kEpsilon) {
+        const double tangential_component = dot(gradient, tangent);
+        filtered_gradient.x -= tangential_component * tangent.x * (1.0 - kTangentialRetention);
+        filtered_gradient.y -= tangential_component * tangent.y * (1.0 - kTangentialRetention);
+      }
+      filtered_gradient = normalizeVector(filtered_gradient);
+
+      Point2D midpoint_pull {
+        0.5 * (refined[i - 1].x + refined[i + 1].x) - candidate.x,
+        0.5 * (refined[i - 1].y + refined[i + 1].y) - candidate.y};
+
+      const double obstacle_gain = std::min(
+        params_.max_lateral_deviation * 0.20,
+        params_.obstacle_refinement_gain * 0.50 * obstacle_penalty);
+      const double shape_gain = params_.curvature_refinement_gain * 0.35;
+
+      if (obstacle_penalty > 0.0) {
+        candidate.x += filtered_gradient.x * obstacle_gain;
+        candidate.y += filtered_gradient.y * obstacle_gain;
+      }
+      candidate.x += midpoint_pull.x * shape_gain;
+      candidate.y += midpoint_pull.y * shape_gain;
+
+      next[i] = clampToCorridor(candidate, reference);
+    }
+    refined.swap(next);
+  }
+
   return refined;
 }
 
@@ -803,6 +865,20 @@ Point2D BSplinePathOptimizer::estimateEsdfGradient(
 
   const double norm = std::max(kEpsilon, gradient.norm());
   return Point2D {gradient.x() / norm, gradient.y() / norm};
+}
+
+Point2D BSplinePathOptimizer::normalizeVector(const Point2D & vector)
+{
+  const double norm = std::sqrt(vector.x * vector.x + vector.y * vector.y);
+  if (norm <= kEpsilon) {
+    return {};
+  }
+  return Point2D {vector.x / norm, vector.y / norm};
+}
+
+double BSplinePathOptimizer::dot(const Point2D & a, const Point2D & b)
+{
+  return a.x * b.x + a.y * b.y;
 }
 
 double BSplinePathOptimizer::computeObstaclePenalty(unsigned char cost) const

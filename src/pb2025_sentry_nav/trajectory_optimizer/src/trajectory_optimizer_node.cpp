@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 
 #include "geometry_msgs/msg/vector3.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
@@ -62,6 +65,30 @@ std_msgs::msg::ColorRGBA makeColor(float r, float g, float b, float a)
   color.b = b;
   color.a = a;
   return color;
+}
+
+std::string formatDouble(double value)
+{
+  if (!std::isfinite(value)) {
+    return "n/a";
+  }
+
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(2) << value;
+  return stream.str();
+}
+
+geometry_msgs::msg::Point offsetPoint(
+  const geometry_msgs::msg::Point & origin,
+  double dx,
+  double dy,
+  double dz)
+{
+  geometry_msgs::msg::Point shifted = origin;
+  shifted.x += dx;
+  shifted.y += dy;
+  shifted.z += dz;
+  return shifted;
 }
 
 }  // namespace
@@ -225,7 +252,10 @@ void TrajectoryOptimizerNode::publishEsdfDebugMarkers(const nav_msgs::msg::Path 
   text.pose.orientation.w = 1.0;
 
   double min_distance = std::numeric_limits<double>::infinity();
+  double avg_distance = 0.0;
   double avg_gradient_norm = 0.0;
+  std::size_t valid_distance_count = 0;
+  std::size_t danger_count = 0;
   std::size_t gradient_count = 0;
   for (const auto & pose : path.poses) {
     const double distance = fake_esdf_provider_->getDistance(
@@ -260,22 +290,63 @@ void TrajectoryOptimizerNode::publishEsdfDebugMarkers(const nav_msgs::msg::Path 
       0.80f);
     markers.markers.push_back(gradient_arrows);
 
-    min_distance = std::min(min_distance, distance);
-    avg_gradient_norm += gradient_norm;
-    ++gradient_count;
+    if (std::isfinite(distance) && distance >= 0.0) {
+      min_distance = std::min(min_distance, distance);
+      avg_distance += distance;
+      ++valid_distance_count;
+      if (distance < params_.obstacle_safe_distance) {
+        ++danger_count;
+      }
+    }
+    if (std::isfinite(gradient_norm)) {
+      avg_gradient_norm += gradient_norm;
+      ++gradient_count;
+    }
   }
 
+  avg_distance = valid_distance_count > 0 ?
+    (avg_distance / static_cast<double>(valid_distance_count)) : 0.0;
   avg_gradient_norm = gradient_count > 0 ?
     (avg_gradient_norm / static_cast<double>(gradient_count)) : 0.0;
-  text.pose.position = path.poses.back().pose.position;
-  text.pose.position.z += 0.30;
+  const auto & tail = path.poses.back().pose.position;
+  double text_dx = 0.0;
+  double text_dy = 0.0;
+  if (path.poses.size() >= 2) {
+    const auto & prev = path.poses[path.poses.size() - 2].pose.position;
+    const double tangent_x = tail.x - prev.x;
+    const double tangent_y = tail.y - prev.y;
+    const double tangent_norm = std::hypot(tangent_x, tangent_y);
+    if (tangent_norm > 1e-6) {
+      const double normal_x = -tangent_y / tangent_norm;
+      const double normal_y = tangent_x / tangent_norm;
+      text_dx = normal_x * 0.28;
+      text_dy = normal_y * 0.28;
+    } else {
+      text_dx = -0.18;
+      text_dy = 0.18;
+    }
+  } else {
+    text_dx = -0.18;
+    text_dy = 0.18;
+  }
+  text.pose.position = offsetPoint(tail, text_dx, text_dy, 0.46);
   text.text =
-    "d_min=" + std::to_string(min_distance).substr(0, 5) +
-    " |grad|_avg=" + std::to_string(avg_gradient_norm).substr(0, 5);
+    "d_min=" + formatDouble(min_distance) +
+    " d_avg=" + formatDouble(avg_distance) +
+    " |g|=" + formatDouble(avg_gradient_norm) +
+    " risk=" + std::to_string(danger_count) + "/" + std::to_string(valid_distance_count);
 
   markers.markers.push_back(distance_points);
   markers.markers.push_back(text);
   esdf_marker_pub_->publish(markers);
+  RCLCPP_INFO_THROTTLE(
+    get_logger(), *get_clock(), 3000,
+    "ESDF debug stats: valid=%zu danger=%zu d_min=%s d_avg=%s |grad|_avg=%s",
+    valid_distance_count,
+    danger_count,
+    formatDouble(min_distance).c_str(),
+    formatDouble(avg_distance).c_str(),
+    formatDouble(avg_gradient_norm).c_str());
 }
 
 }  // namespace trajectory_optimizer

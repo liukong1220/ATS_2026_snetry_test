@@ -61,6 +61,133 @@ pb2025_sentry_bringup/bringup.launch.py
 这和早期“当前点 + 下一点”的段式预发送思路已经不一样了。
 
 ---
+### 4.1 现在为什么不会和行为树 `halt()` 冲突
+
+这次方案里，`NavigateThroughPoses` 能稳定工作，还有一个很重要的原因：
+
+- 我们不是直接用 `BehaviorTree.ROS2` 的 `RosActionNode`
+- 而是自己实现了一个自定义节点 `SendNavThroughPoses`
+
+对应实现位置：
+
+- `src/pb2025_sentry_behavior/include/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.hpp`
+- `src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp`
+
+这样做的核心目的，是绕开 `RosActionNode` 在 `cancel during halt()` 这条链路上的已知问题。
+
+你可以把当前方案理解成：
+
+- 行为树负责“决定什么时候应该发一条路径”
+- `SendNavThroughPoses` 负责“把这条路径异步送给 Nav2，并自己维护 goal 状态”
+- 行为树本身不去长期持有一个 `RUNNING` 的 action 节点等待它结束
+
+当前规避冲突的设计有 4 个关键点。
+
+#### 4.1.1 `SendNavThroughPoses` 是 `SyncActionNode`
+
+`SendNavThroughPosesAction` 继承的是：
+
+- `BT::SyncActionNode`
+
+而不是：
+
+- `BT::RosActionNode`
+- `BT::StatefulActionNode`
+
+这意味着它在一次 `tick()` 里就会返回，不会长时间停留在 `RUNNING` 状态等待 Nav2 action 完成。
+
+直接结果是：
+
+- 上层行为树通常不需要对它执行 `halt()`
+- 自然也就不会落入“halt 时顺带 cancel action”那条容易冲突的路径
+
+#### 4.1.2 真正的 Nav2 action 由节点内部异步管理
+
+在 `tick()` 里，这个节点会自己创建并使用：
+
+- `rclcpp_action::Client<NavigateThroughPoses>`
+
+然后调用：
+
+- `async_send_goal(...)`
+
+也就是说：
+
+- BT 节点同步返回
+- Nav2 action 在节点内部异步继续跑
+- feedback 和 result 通过回调更新内部状态
+
+这相当于把“BT 生命周期”和“ROS action 生命周期”解耦了。
+
+#### 4.1.3 同一路径不重发，新路径才手动 cancel
+
+当前实现不会每个 tick 都重发目标。
+
+它先比较当前输入路径和正在执行的 `active_path_` 是否等价：
+
+- 如果是同一路径，而且目标还在执行，就直接返回成功，不重发
+- 如果是同一路径，而且已经成功完成，就直接设置 `goal_succeeded`
+- 只有路径真的变了，才会先 `cancelCurrentGoal()` 再发新 goal
+
+这点非常关键，因为它避免了两类常见问题：
+
+- 行为树高频 tick 导致的重复发目标
+- 每次重 tick 都 cancel 一次，最终把 Nav2 和 BT 状态搅乱
+
+所以现在的取消逻辑不是由 `halt()` 触发的，而是由“路径切换”主动触发的。
+
+#### 4.1.4 用 `goal_request_id_` 屏蔽旧回调串线
+
+当前实现里还有一个小但很重要的保护：
+
+- 每次发新 goal 都会递增 `goal_request_id_`
+- feedback / goal response / result 回调都会先检查 request id
+
+这样做的效果是：
+
+- 旧 goal 即使晚到反馈，也不会污染新 goal 的状态
+- 取消旧目标后，不容易发生“旧回调把当前状态写乱”的问题
+
+这对 Reactive 行为树场景尤其重要，因为分支切换时目标替换会比较频繁。
+
+### 4.2 从行为树视角看它的执行方式
+
+当前 `rmul_2026.xml` 里，对每种决策路径基本都用了同一个模式：
+
+1. 先生成 `decision_path`
+2. 先用 `IsPathGoalReached` 判断当前路径是不是已经完成
+3. 只有未完成时，才执行 `SendNavThroughPoses`
+
+也就是说行为树不是“卡在导航 action 上等它返回”，而是每次 tick 都做一次：
+
+- 这条路径还要不要继续
+- 如果要继续，当前 goal 是否已经在跑
+- 如果已经在跑且路径没变，就什么都不做
+
+因此整个模式更像：
+
+- “路径命令派发器”
+
+而不是：
+
+- “BT 内部阻塞等待的 action 节点”
+
+这也是它和 `halt()` 不容易冲突的根本原因。
+
+### 4.3 一句话总结
+
+当前项目避免 `NavigateThroughPoses` 与行为树 `halt()` 冲突的方法，不是去修 `halt()`，而是从架构上绕开它：
+
+- 用自定义 `SyncActionNode`
+- 在节点内部异步维护 Nav2 action
+- 同路径不重发
+- 仅在路径切换时主动 cancel
+- 用 request id 防止旧回调串线
+
+所以你现在这套方案的本质是：
+
+- `NavigateThroughPoses` 仍然是真执行接口
+- 但它不再受 `BehaviorTree.ROS2` 默认 action/halt 生命周期的直接约束
 
 ## 4. 仓库里保留的旧 `robot_decision` 节点是什么状态
 

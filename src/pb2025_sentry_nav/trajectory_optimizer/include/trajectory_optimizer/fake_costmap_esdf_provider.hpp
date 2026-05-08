@@ -30,14 +30,21 @@ public:
 
 private:
   bool worldToMap(double wx, double wy, unsigned int & mx, unsigned int & my) const;
+  bool worldToGrid(double wx, double wy, double & gx, double & gy) const;
   std::size_t indexOf(unsigned int mx, unsigned int my) const;
   double distanceAt(int mx, int my) const;
+  double bilinearDistanceAt(const std::vector<double> & field, double gx, double gy) const;
+  Eigen::Vector2d bilinearGradientAt(const std::vector<double> & field, double gx, double gy) const;
+  void rebuildSmoothedDistanceField();
 
   std::shared_ptr<nav2_costmap_2d::Costmap2D> costmap_;
   std::vector<double> distance_field_;
+  std::vector<double> smoothed_distance_field_;
   unsigned int width_ = 0;
   unsigned int height_ = 0;
   double resolution_ = 0.0;
+  double origin_x_ = 0.0;
+  double origin_y_ = 0.0;
   bool available_ = false;
 };
 

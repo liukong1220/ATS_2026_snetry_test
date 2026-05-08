@@ -2,6 +2,7 @@
 
 #include "trajectory_optimizer/nav2_bspline_smoother.hpp"
 
+#include <array>
 #include <algorithm>
 #include <cmath>
 
@@ -15,6 +16,9 @@ namespace trajectory_optimizer
 
 namespace
 {
+
+constexpr double kHalfPi = 1.5707963267948966;
+constexpr double kPi = 3.1415926535897932;
 
 sp_msgs::msg::TrajectoryProfileMsg toProfileMsg(
   const std_msgs::msg::Header & header,
@@ -262,6 +266,24 @@ bool Nav2BSplineSmoother::smooth(
   enforceCostmapClearance(path, reference_path);
   updatePathOrientations(path);
   if (costmap && pathHasCollision(*costmap, path)) {
+    std::vector<size_t> smoothed_collision_indices;
+    collectCollidingIndices(*costmap, path, smoothed_collision_indices);
+    if (!smoothed_collision_indices.empty()) {
+      const size_t first_idx = smoothed_collision_indices.front();
+      unsigned char center_cost = nav2_costmap_2d::NO_INFORMATION;
+      const bool has_center_cost = samplePathCost(*costmap, path.poses[first_idx], center_cost);
+      const double footprint_cost = sampleFootprintCost(*costmap, path, first_idx);
+      const double yaw = estimatePoseYaw(path, first_idx);
+      RCLCPP_WARN_THROTTLE(
+        logger_, *clock_, 1500,
+        "Bspline smoother collision before degradation: count=%zu first_idx=%zu center_cost=%d footprint_cost=%.2f yaw=%.2f",
+        smoothed_collision_indices.size(),
+        first_idx,
+        has_center_cost ? static_cast<int>(center_cost) : -1,
+        footprint_cost,
+        yaw);
+    }
+
     const bool repaired = locallyDegradeCollidingSegments(*costmap, path, reference_path);
     updatePathOrientations(path);
     if (repaired) {
@@ -269,6 +291,26 @@ bool Nav2BSplineSmoother::smooth(
       updatePathOrientations(path);
     }
     if (pathHasCollision(*costmap, path)) {
+      std::vector<size_t> degraded_collision_indices;
+      std::vector<size_t> raw_collision_indices;
+      collectCollidingIndices(*costmap, path, degraded_collision_indices);
+      collectCollidingIndices(*costmap, reference_path, raw_collision_indices);
+      if (!degraded_collision_indices.empty()) {
+        const size_t first_idx = degraded_collision_indices.front();
+        unsigned char center_cost = nav2_costmap_2d::NO_INFORMATION;
+        const bool has_center_cost = samplePathCost(*costmap, path.poses[first_idx], center_cost);
+        const double footprint_cost = sampleFootprintCost(*costmap, path, first_idx);
+        const double yaw = estimatePoseYaw(path, first_idx);
+        RCLCPP_WARN_THROTTLE(
+          logger_, *clock_, 1500,
+          "Bspline smoother fallback details: degraded_collisions=%zu raw_reference_collisions=%zu first_idx=%zu center_cost=%d footprint_cost=%.2f yaw=%.2f",
+          degraded_collision_indices.size(),
+          raw_collision_indices.size(),
+          first_idx,
+          has_center_cost ? static_cast<int>(center_cost) : -1,
+          footprint_cost,
+          yaw);
+      }
       RCLCPP_WARN_THROTTLE(
         logger_, *clock_, 2000,
         "Smoothed path still collides after local degradation, falling back to raw planner path.");
@@ -440,11 +482,35 @@ double Nav2BSplineSmoother::sampleFootprintCost(
 
   nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *> checker(&costmap);
   const auto & pose = override_pose ? *override_pose : path.poses[index];
-  return checker.footprintCostAtPose(
-    pose.pose.position.x,
-    pose.pose.position.y,
-    estimatePoseYaw(path, index, override_pose),
-    footprint);
+  const double tangent_yaw = estimatePoseYaw(path, index, override_pose);
+  const double pose_yaw = tf2::getYaw(pose.pose.orientation);
+
+  // For the omni sentry chain, path tangent is not the only feasible body yaw.
+  // Checking a few equivalent candidate headings reduces false collisions where
+  // position is valid but a tangent-aligned square footprint clips a corner.
+  const std::array<double, 5> candidate_yaws = {
+    tangent_yaw,
+    pose_yaw,
+    tangent_yaw + kHalfPi,
+    tangent_yaw - kHalfPi,
+    tangent_yaw + kPi};
+
+  double best_cost = -1.0;
+  for (const double yaw : candidate_yaws) {
+    const double cost = checker.footprintCostAtPose(
+      pose.pose.position.x,
+      pose.pose.position.y,
+      yaw,
+      footprint);
+    if (cost < 0.0) {
+      continue;
+    }
+    if (best_cost < 0.0 || cost < best_cost) {
+      best_cost = cost;
+    }
+  }
+
+  return best_cost;
 }
 
 void Nav2BSplineSmoother::collectCollidingIndices(
