@@ -311,11 +311,19 @@ bool Nav2BSplineSmoother::smooth(
           footprint_cost,
           yaw);
       }
-      RCLCPP_WARN_THROTTLE(
-        logger_, *clock_, 2000,
-        "Smoothed path still collides after local degradation, falling back to raw planner path.");
-      path = reference_path;
-      updatePathOrientations(path);
+      if (raw_collision_indices.size() < degraded_collision_indices.size()) {
+        RCLCPP_WARN_THROTTLE(
+          logger_, *clock_, 2000,
+          "Smoothed path still collides after local degradation, falling back to raw planner path.");
+        path = reference_path;
+        updatePathOrientations(path);
+      } else {
+        RCLCPP_WARN_THROTTLE(
+          logger_, *clock_, 2000,
+          "Smoothed path still collides after local degradation, but raw planner path is not safer (raw=%zu degraded=%zu). Keep degraded path to avoid reintroducing sharper corners.",
+          raw_collision_indices.size(),
+          degraded_collision_indices.size());
+      }
     }
   }
   result.profile = optimizer_.evaluateProfile(path);
