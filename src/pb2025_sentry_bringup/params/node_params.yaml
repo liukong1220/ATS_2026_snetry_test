@@ -381,7 +381,7 @@ trajectory_optimizer:
     min_input_point_spacing: 0.02
     # 最大横向偏移：限制 B 样条离原始全局路径的距离。
     # 当前压到 0.12，避免平滑器把路径抹进障碍膨胀层。
-    max_lateral_deviation: 0.08
+    max_lateral_deviation: 0.16
     min_control_points: 5
     # 曲率上限：当前不是追求极圆，而是避免曲率约束过硬导致路径贴墙。
     curvature_limit: 1.60
@@ -742,7 +742,7 @@ planner_server:
       angle_quantization_bins: 64         # For Hybrid nodes: 搜索的角度桶数，对于2D节点必须为1（无角度搜索）
       analytic_expansion_ratio: 2.2       # 终端解析扩展降激进，减少最后一段被拉成直线。
       analytic_expansion_max_length: 1.8  # 缩短终端解析直连长度，优先保留真实转角而不是大步终端接入。
-      minimum_turning_radius: 0.22        # 与 0.60m 级底盘 footprint 更一致，减少过于理想化的小半径接近。
+      minimum_turning_radius: 0.60        # 与 omni 底盘空旷区的实际可行走几何更接近，进一步减少近起点的尖锐 Dubin 弯。
       retrospective_penalty: 0.07        # For Hybrid/Lattice nodes: 优先考虑路径上较晚的机动而不是较早的机动。节省搜索时间，因为较早的节点不会被扩展，直到有必要。必须 >= 0.0且 <= 1.0
       reverse_penalty: 1.0                # For Reeds-Shepp model: 应用于倒车的惩罚，必须 >= 1
       change_penalty: 0.0                 # For Hybrid nodes: 应用于改变方向的惩罚，必须 >= 0
@@ -770,7 +770,7 @@ smoother_server:
       control_point_spacing: 0.20
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
-      max_lateral_deviation: 0.08
+      max_lateral_deviation: 0.16
       min_control_points: 5
       curvature_limit: 1.60
       curvature_weight: 10.0
@@ -790,6 +790,7 @@ smoother_server:
       obstacle_refinement_iterations: 3
       obstacle_refinement_gain: 0.02
       max_path_cost: 48
+      footprint_collision_cost_threshold: 253
       pullback_samples: 8
     fallback_smoother:
       plugin: "nav2_smoother::SimpleSmoother"

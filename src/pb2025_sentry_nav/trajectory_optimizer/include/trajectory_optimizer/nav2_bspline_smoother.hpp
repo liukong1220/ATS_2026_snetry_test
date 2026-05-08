@@ -84,6 +84,7 @@ private:
   rclcpp_lifecycle::LifecyclePublisher<sp_msgs::msg::TrajectoryProfileMsg>::SharedPtr profile_pub_;
   std::string profile_topic_{"trajectory_profile"};
   unsigned char max_path_cost_{96};
+  unsigned char footprint_collision_cost_threshold_{253};
   int pullback_samples_{6};
 };
 

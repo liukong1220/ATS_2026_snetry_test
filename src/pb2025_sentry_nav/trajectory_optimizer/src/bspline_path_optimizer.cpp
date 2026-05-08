@@ -909,15 +909,25 @@ Point2D BSplinePathOptimizer::clampToCorridor(
     return candidate;
   }
 
+  double allowed_deviation = params_.max_lateral_deviation;
+  if (params_.use_esdf_obstacle_cost && esdf_provider_ && esdf_provider_->available()) {
+    const double distance = esdf_provider_->getDistance(candidate.x, candidate.y);
+    if (std::isfinite(distance) && distance > params_.obstacle_safe_distance) {
+      const double clearance_bonus =
+        std::max(0.0, distance - params_.obstacle_safe_distance);
+      allowed_deviation += std::min(0.10, clearance_bonus * 0.30);
+    }
+  }
+
   const auto closest_result = closestPointOnPolyline(candidate, reference);
-  if (closest_result.second <= params_.max_lateral_deviation) {
+  if (closest_result.second <= allowed_deviation) {
     return candidate;
   }
 
   const double dx = candidate.x - closest_result.first.x;
   const double dy = candidate.y - closest_result.first.y;
   const double norm = std::max(kEpsilon, std::sqrt(dx * dx + dy * dy));
-  const double scale = params_.max_lateral_deviation / norm;
+  const double scale = allowed_deviation / norm;
   return Point2D {
     closest_result.first.x + dx * scale,
     closest_result.first.y + dy * scale};

@@ -143,6 +143,9 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".max_path_cost",
     rclcpp::ParameterValue(static_cast<int>(max_path_cost_)));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".footprint_collision_cost_threshold",
+    rclcpp::ParameterValue(static_cast<int>(footprint_collision_cost_threshold_)));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".pullback_samples",
     rclcpp::ParameterValue(pullback_samples_));
 
@@ -188,8 +191,15 @@ void Nav2BSplineSmoother::configure(
   node->get_parameter(plugin_name_ + ".profile_topic", profile_topic_);
   int configured_max_cost = static_cast<int>(max_path_cost_);
   node->get_parameter(plugin_name_ + ".max_path_cost", configured_max_cost);
+  int configured_footprint_collision_threshold =
+    static_cast<int>(footprint_collision_cost_threshold_);
+  node->get_parameter(
+    plugin_name_ + ".footprint_collision_cost_threshold",
+    configured_footprint_collision_threshold);
   node->get_parameter(plugin_name_ + ".pullback_samples", pullback_samples_);
   max_path_cost_ = static_cast<unsigned char>(std::max(0, configured_max_cost));
+  footprint_collision_cost_threshold_ = static_cast<unsigned char>(
+    std::max(0, std::min(255, configured_footprint_collision_threshold)));
 
   optimizer_.setParams(params);
   optimizer_.clearEsdfProvider();
@@ -362,7 +372,7 @@ void Nav2BSplineSmoother::enforceCostmapClearance(
     unsigned char cost = nav2_costmap_2d::NO_INFORMATION;
     const bool sampled_center_cost = samplePathCost(*costmap, smoothed_path.poses[i], cost);
     const double footprint_cost = sampleFootprintCost(*costmap, smoothed_path, i);
-    const bool footprint_collision = footprint_cost > nav2_costmap_2d::MAX_NON_OBSTACLE;
+    const bool footprint_collision = footprint_cost > footprint_collision_cost_threshold_;
     if (!sampled_center_cost && footprint_cost < 0.0) {
       continue;
     }
@@ -391,7 +401,7 @@ void Nav2BSplineSmoother::enforceCostmapClearance(
       const double candidate_footprint_cost =
         sampleFootprintCost(*costmap, smoothed_path, i, &candidate);
       const bool candidate_footprint_collision =
-        candidate_footprint_cost > nav2_costmap_2d::MAX_NON_OBSTACLE;
+        candidate_footprint_cost > footprint_collision_cost_threshold_;
       if (!sampled_candidate_cost && candidate_footprint_cost < 0.0) {
         continue;
       }
@@ -529,7 +539,7 @@ void Nav2BSplineSmoother::collectCollidingIndices(
   indices.clear();
   for (size_t i = 0; i < path.poses.size(); ++i) {
     const double footprint_cost = sampleFootprintCost(costmap, path, i);
-    if (footprint_cost > nav2_costmap_2d::MAX_NON_OBSTACLE) {
+    if (footprint_cost > footprint_collision_cost_threshold_) {
       indices.push_back(i);
     }
   }

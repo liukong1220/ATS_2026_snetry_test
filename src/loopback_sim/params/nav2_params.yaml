@@ -83,7 +83,7 @@ trajectory_optimizer:
     min_input_point_spacing: 0.02
     # 平滑结果允许偏离原始路径的最大横向距离。
     # 该值越大，越容易把路径抹进膨胀层；越小则更保形但更不平滑。
-    max_lateral_deviation: 0.08
+    max_lateral_deviation: 0.16
     # 最少控制点数，太少会失去样条表达能力。
     min_control_points: 5
     # 曲率上限：越小越强调“转弯不要太急”。
@@ -501,7 +501,7 @@ planner_server:
       angle_quantization_bins: 64
       analytic_expansion_ratio: 2.0
       analytic_expansion_max_length: 1.2
-      minimum_turning_radius: 0.16
+      minimum_turning_radius: 0.50
       retrospective_penalty: 0.06
       reverse_penalty: 1.0
       change_penalty: 0.0
@@ -530,7 +530,7 @@ smoother_server:
       control_point_spacing: 0.20
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
-      max_lateral_deviation: 0.08
+      max_lateral_deviation: 0.16
       min_control_points: 5
       # 曲率上限：越小越强调“转弯不要太急”。
       curvature_limit: 1.60
@@ -565,6 +565,7 @@ smoother_server:
       # 每次障碍修正步长。
       obstacle_refinement_gain: 0.02
       max_path_cost: 48
+      footprint_collision_cost_threshold: 253
       pullback_samples: 8
     fallback_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
