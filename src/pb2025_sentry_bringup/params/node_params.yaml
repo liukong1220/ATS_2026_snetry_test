@@ -904,6 +904,8 @@ trajectory_speed_governor:
     # 不把速度压得太低，避免弯前 MPPI 控制序列缩成一团。
     min_speed_scale: 0.40
     curvature_brake_gain: 0.60
+    curvature_window_points: 12
+    speed_scale_filter_gain: 0.25
 
 velocity_smoother:
   ros__parameters:

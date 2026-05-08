@@ -37,6 +37,8 @@ private:
   std::string marker_topic_{"trajectory_profile_markers"};
   double min_speed_scale_ = 0.35;
   double curvature_brake_gain_ = 0.7;
+  int curvature_window_points_ = 12;
+  double speed_scale_filter_gain_ = 0.25;
   double current_speed_scale_ = 1.0;
   geometry_msgs::msg::Twist latest_cmd_vel_;
   bool has_cmd_vel_ = false;
