@@ -297,7 +297,7 @@ def generate_launch_description():
 
     loopback_sim_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(loopback_dir, "loopback_simulation.launch.py")
+            os.path.join(loopback_dir, "launch", "loopback_simulation.launch.py")
         ),
         launch_arguments={
             "params_file": nav2_params_file,

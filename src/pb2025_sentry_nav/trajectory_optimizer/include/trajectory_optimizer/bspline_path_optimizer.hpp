@@ -9,9 +9,11 @@
 #include <utility>
 #include <vector>
 
+#include <Eigen/Core>
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/header.hpp"
+#include "trajectory_optimizer/esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {
@@ -42,6 +44,8 @@ struct OptimizerParams
   double obstacle_weight = 25.0;
   int obstacle_refinement_iterations = 3;
   double obstacle_refinement_gain = 0.03;
+  bool use_esdf_obstacle_cost = false;
+  double obstacle_safe_distance = 0.30;
 };
 
 struct TrajectorySample2D
@@ -120,6 +124,8 @@ public:
   const OptimizerParams & getParams() const;
   void setObstacleCostmap(const std::shared_ptr<nav2_costmap_2d::Costmap2D> & costmap);
   void clearObstacleCostmap();
+  void setEsdfProvider(const EsdfProviderPtr & provider);
+  void clearEsdfProvider();
 
   OptimizationResult optimizeDetailed(const nav_msgs::msg::Path & input_path) const;
   nav_msgs::msg::Path optimize(const nav_msgs::msg::Path & input_path) const;
@@ -153,10 +159,17 @@ private:
   bool sampleObstacleCost(
     const Point2D & point,
     unsigned char & cost) const;
+  bool sampleEsdfDistance(
+    const Point2D & point,
+    double & distance) const;
   Point2D estimateObstacleGradient(
+    const Point2D & point) const;
+  Point2D estimateEsdfGradient(
     const Point2D & point) const;
   double computeObstaclePenalty(
     unsigned char cost) const;
+  double computeObstaclePenaltyFromDistance(
+    double distance) const;
   Point2D clampToCorridor(
     const Point2D & candidate, const std::vector<Point2D> & reference) const;
   std::pair<Point2D, double> closestPointOnPolyline(
@@ -171,6 +184,7 @@ private:
 
   OptimizerParams params_;
   std::shared_ptr<nav2_costmap_2d::Costmap2D> obstacle_costmap_;
+  EsdfProviderPtr esdf_provider_;
 };
 
 }  // namespace trajectory_optimizer

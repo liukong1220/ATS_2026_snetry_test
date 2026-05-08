@@ -14,6 +14,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sp_msgs/msg/trajectory_profile_msg.hpp"
 #include "trajectory_optimizer/bspline_path_optimizer.hpp"
+#include "trajectory_optimizer/fake_costmap_esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {
@@ -79,6 +80,7 @@ private:
   BSplinePathOptimizer optimizer_;
   std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub_;
   std::shared_ptr<nav2_costmap_2d::FootprintSubscriber> footprint_sub_;
+  std::shared_ptr<FakeCostmapEsdfProvider> fake_esdf_provider_;
   rclcpp_lifecycle::LifecyclePublisher<sp_msgs::msg::TrajectoryProfileMsg>::SharedPtr profile_pub_;
   std::string profile_topic_{"trajectory_profile"};
   unsigned char max_path_cost_{96};

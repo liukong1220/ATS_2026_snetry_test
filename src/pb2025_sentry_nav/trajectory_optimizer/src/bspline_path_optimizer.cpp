@@ -261,6 +261,16 @@ void BSplinePathOptimizer::clearObstacleCostmap()
   obstacle_costmap_.reset();
 }
 
+void BSplinePathOptimizer::setEsdfProvider(const EsdfProviderPtr & provider)
+{
+  esdf_provider_ = provider;
+}
+
+void BSplinePathOptimizer::clearEsdfProvider()
+{
+  esdf_provider_.reset();
+}
+
 OptimizationResult BSplinePathOptimizer::optimizeDetailed(
   const nav_msgs::msg::Path & input_path) const
 {
@@ -507,8 +517,11 @@ TrajectoryProfile2D BSplinePathOptimizer::buildTrajectoryProfile(
 
   profile.obstacle_cost = 0.0;
   for (auto & sample : profile.samples) {
+    double esdf_distance = 0.0;
     unsigned char obstacle_cost = 0;
-    if (sampleObstacleCost(sample.point, obstacle_cost)) {
+    if (params_.use_esdf_obstacle_cost && sampleEsdfDistance(sample.point, esdf_distance)) {
+      profile.obstacle_cost += computeObstaclePenaltyFromDistance(esdf_distance);
+    } else if (sampleObstacleCost(sample.point, obstacle_cost)) {
       profile.obstacle_cost += computeObstaclePenalty(obstacle_cost);
     }
   }
@@ -569,17 +582,24 @@ std::vector<Point2D> BSplinePathOptimizer::refinePathUnified(
       }
 
       if (iter < params_.obstacle_refinement_iterations) {
+        double obstacle_penalty = 0.0;
+        Point2D gradient;
+        double esdf_distance = 0.0;
         unsigned char obstacle_cost = 0;
-        if (sampleObstacleCost(candidate, obstacle_cost)) {
-          const double obstacle_penalty = computeObstaclePenalty(obstacle_cost);
-          if (obstacle_penalty > 0.0) {
-            const Point2D gradient = estimateObstacleGradient(candidate);
-            const double gain = std::min(
-              params_.max_lateral_deviation * 0.35,
-              params_.obstacle_refinement_gain * obstacle_penalty);
-            candidate.x += gradient.x * gain;
-            candidate.y += gradient.y * gain;
-          }
+        if (params_.use_esdf_obstacle_cost && sampleEsdfDistance(candidate, esdf_distance)) {
+          obstacle_penalty = computeObstaclePenaltyFromDistance(esdf_distance);
+          gradient = estimateEsdfGradient(candidate);
+        } else if (sampleObstacleCost(candidate, obstacle_cost)) {
+          obstacle_penalty = computeObstaclePenalty(obstacle_cost);
+          gradient = estimateObstacleGradient(candidate);
+        }
+
+        if (obstacle_penalty > 0.0) {
+          const double gain = std::min(
+            params_.max_lateral_deviation * 0.35,
+            params_.obstacle_refinement_gain * obstacle_penalty);
+          candidate.x += gradient.x * gain;
+          candidate.y += gradient.y * gain;
         }
       }
 
@@ -729,6 +749,18 @@ bool BSplinePathOptimizer::sampleObstacleCost(
   return true;
 }
 
+bool BSplinePathOptimizer::sampleEsdfDistance(
+  const Point2D & point,
+  double & distance) const
+{
+  if (!esdf_provider_ || !esdf_provider_->available()) {
+    return false;
+  }
+
+  distance = esdf_provider_->getDistance(point.x, point.y);
+  return std::isfinite(distance) && distance >= 0.0;
+}
+
 Point2D BSplinePathOptimizer::estimateObstacleGradient(
   const Point2D & point) const
 {
@@ -757,6 +789,22 @@ Point2D BSplinePathOptimizer::estimateObstacleGradient(
   return gradient;
 }
 
+Point2D BSplinePathOptimizer::estimateEsdfGradient(
+  const Point2D & point) const
+{
+  if (!esdf_provider_ || !esdf_provider_->available()) {
+    return {};
+  }
+
+  const Eigen::Vector2d gradient = esdf_provider_->getGradient(point.x, point.y);
+  if (!std::isfinite(gradient.x()) || !std::isfinite(gradient.y())) {
+    return {};
+  }
+
+  const double norm = std::max(kEpsilon, gradient.norm());
+  return Point2D {gradient.x() / norm, gradient.y() / norm};
+}
+
 double BSplinePathOptimizer::computeObstaclePenalty(unsigned char cost) const
 {
   if (cost <= params_.obstacle_safe_cost) {
@@ -765,6 +813,16 @@ double BSplinePathOptimizer::computeObstaclePenalty(unsigned char cost) const
   const double violation =
     static_cast<double>(cost - params_.obstacle_safe_cost) /
     static_cast<double>(std::max(1, 255 - static_cast<int>(params_.obstacle_safe_cost)));
+  return violation * violation;
+}
+
+double BSplinePathOptimizer::computeObstaclePenaltyFromDistance(double distance) const
+{
+  if (distance >= params_.obstacle_safe_distance) {
+    return 0.0;
+  }
+
+  const double violation = std::max(0.0, params_.obstacle_safe_distance - distance);
   return violation * violation;
 }
 

@@ -127,6 +127,12 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".obstacle_refinement_gain",
     rclcpp::ParameterValue(params.obstacle_refinement_gain));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".use_esdf_obstacle_cost",
+    rclcpp::ParameterValue(params.use_esdf_obstacle_cost));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_safe_distance",
+    rclcpp::ParameterValue(params.obstacle_safe_distance));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".profile_topic",
     rclcpp::ParameterValue(profile_topic_));
   nav2_util::declare_parameter_if_not_declared(
@@ -167,6 +173,12 @@ void Nav2BSplineSmoother::configure(
   node->get_parameter(
     plugin_name_ + ".obstacle_refinement_gain",
     params.obstacle_refinement_gain);
+  node->get_parameter(
+    plugin_name_ + ".use_esdf_obstacle_cost",
+    params.use_esdf_obstacle_cost);
+  node->get_parameter(
+    plugin_name_ + ".obstacle_safe_distance",
+    params.obstacle_safe_distance);
   params.obstacle_safe_cost = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_safe_cost)));
   node->get_parameter(plugin_name_ + ".profile_topic", profile_topic_);
@@ -176,6 +188,8 @@ void Nav2BSplineSmoother::configure(
   max_path_cost_ = static_cast<unsigned char>(std::max(0, configured_max_cost));
 
   optimizer_.setParams(params);
+  optimizer_.clearEsdfProvider();
+  fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   costmap_sub_ = costmap_sub;
   footprint_sub_ = footprint_sub;
   logger_ = node->get_logger();
@@ -210,9 +224,22 @@ bool Nav2BSplineSmoother::smooth(
   const nav_msgs::msg::Path reference_path = path;
   if (costmap_sub_) {
     try {
-      optimizer_.setObstacleCostmap(costmap_sub_->getCostmap());
+      const auto costmap = costmap_sub_->getCostmap();
+      optimizer_.setObstacleCostmap(costmap);
+      const auto params = optimizer_.getParams();
+      if (params.use_esdf_obstacle_cost && fake_esdf_provider_) {
+        fake_esdf_provider_->updateCostmap(costmap, params.obstacle_safe_cost, true);
+        optimizer_.setEsdfProvider(fake_esdf_provider_);
+        RCLCPP_INFO_THROTTLE(
+          logger_, *clock_, 5000,
+          "Fake ESDF active in Nav2BSplineSmoother: d_safe=%.3f cost_threshold=%d",
+          params.obstacle_safe_distance, static_cast<int>(params.obstacle_safe_cost));
+      } else {
+        optimizer_.clearEsdfProvider();
+      }
     } catch (const std::exception & ex) {
       optimizer_.clearObstacleCostmap();
+      optimizer_.clearEsdfProvider();
       RCLCPP_WARN_THROTTLE(
         logger_, *clock_, 2000,
         "Costmap unavailable for bspline smoother, using geometry-only smoothing: %s",
@@ -220,6 +247,7 @@ bool Nav2BSplineSmoother::smooth(
     }
   } else {
     optimizer_.clearObstacleCostmap();
+    optimizer_.clearEsdfProvider();
   }
   std::shared_ptr<nav2_costmap_2d::Costmap2D> costmap;
   if (costmap_sub_) {

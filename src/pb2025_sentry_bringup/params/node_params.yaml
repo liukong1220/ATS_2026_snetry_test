@@ -420,7 +420,7 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       # Parameter `xy_goal_tolerance`
       # 终点位置容差。实车贴点试探过强时可略增，过大则会提前结束导航。
-      xy_goal_tolerance: 0.35
+      xy_goal_tolerance: 0.20
       # Parameter `yaw_goal_tolerance`
       # 当前巡逻任务不强调终点朝向，因此保持 2*pi，相当于不约束最终 yaw。
       yaw_goal_tolerance: 6.28
@@ -566,13 +566,13 @@ controller_server:
         # Parameter `ObstaclesCritic.critical_weight`
         critical_weight: 90.0
         # Parameter `ObstaclesCritic.collision_margin_distance`
-        collision_margin_distance: 0.20
+        collision_margin_distance: 0.24
         # Parameter `ObstaclesCritic.near_goal_distance`
         # 终点附近适度放松障碍回避敏感度，方便最终贴点。
         near_goal_distance: 0.35
         # Parameter `ObstaclesCritic.inflation_radius`
         # 官方文档明确要求：这里应与 costmap inflation layer 保持一致。
-        inflation_radius: 0.45
+        inflation_radius: 0.50
         cost_scaling_factor: 5.0
       ConstraintCritic:
         enabled: true
@@ -617,7 +617,7 @@ local_costmap:
       height: 5
       resolution: 0.05
       footprint: "[[0.30, 0.30], [0.30, -0.30], [-0.30, -0.30], [-0.30, 0.30]]"
-      footprint_padding: 0.03
+      footprint_padding: 0.04
       plugins: ["static_layer", "intensity_voxel_layer", "inflation_layer"]
       intensity_voxel_layer:
         plugin: pb_nav2_costmap_2d::IntensityVoxelLayer
@@ -653,7 +653,7 @@ local_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         # 局部层与 MPPI ObstaclesCritic 保持一致，避免 critic 对 inflation 语义判断错位。
         cost_scaling_factor: 5.0
-        inflation_radius: 0.45
+        inflation_radius: 0.50
       always_send_full_costmap: False
 
 global_costmap:
@@ -665,7 +665,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: gimbal_yaw_fake
       footprint: "[[0.30, 0.30], [0.30, -0.30], [-0.30, -0.30], [-0.30, 0.30]]"
-      footprint_padding: 0.03
+      footprint_padding: 0.04
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "intensity_voxel_layer", "inflation_layer"]
@@ -728,7 +728,7 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
-      tolerance: 0.3                      # 如果无法到达精确位置的规划容差，单位：米
+      tolerance: 0.18                     # 如果无法到达精确位置的规划容差，单位：米
       allow_unknown: true                 # 允许在未知空间中行驶
       downsample_costmap: false           # 是否对地图进行下采样
       downsampling_factor: 1              # 代价地图层分辨率的倍数 (e.g. 2 on a 5cm costmap would be 10cm)
@@ -738,9 +738,9 @@ planner_server:
       cost_travel_multiplier: 2.9         # For 2D: 官方说明数值越大越会贴近通道中心，代价是搜索稍慢。这里提高它，减少全局路径沿墙激进穿行。
       motion_model_for_search: "DUBIN"    # For Hybrid Dubin, Redds-Shepp
       angle_quantization_bins: 64         # For Hybrid nodes: 搜索的角度桶数，对于2D节点必须为1（无角度搜索）
-      analytic_expansion_ratio: 3.5       # For Hybrid/Lattice nodes: 在搜索过程中尝试解析扩展的比例，用于最终接近。
-      analytic_expansion_max_length: 3.6  # For Hybrid/Lattice nodes: 解析扩展被认为有效的最大长度，以防止不安全的捷径（单位：米）。这应该与最小转弯半径成比例，不应小于最小半径的4-5倍。
-      minimum_turning_radius: 0.07        # For Hybrid/Lattice nodes: 路径/车辆的最小转弯半径，单位：米
+      analytic_expansion_ratio: 2.2       # 终端解析扩展降激进，减少最后一段被拉成直线。
+      analytic_expansion_max_length: 1.8  # 缩短终端解析直连长度，优先保留真实转角而不是大步终端接入。
+      minimum_turning_radius: 0.22        # 与 0.60m 级底盘 footprint 更一致，减少过于理想化的小半径接近。
       retrospective_penalty: 0.07        # For Hybrid/Lattice nodes: 优先考虑路径上较晚的机动而不是较早的机动。节省搜索时间，因为较早的节点不会被扩展，直到有必要。必须 >= 0.0且 <= 1.0
       reverse_penalty: 1.0                # For Reeds-Shepp model: 应用于倒车的惩罚，必须 >= 1
       change_penalty: 0.0                 # For Hybrid nodes: 应用于改变方向的惩罚，必须 >= 0

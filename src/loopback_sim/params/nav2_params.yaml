@@ -111,6 +111,8 @@ trajectory_optimizer:
     derivative_step: 0.02
     # obstacle_safe_cost 以下视为安全区，超过后会逐步触发 obstacle refinement。
     obstacle_safe_cost: 48
+    use_esdf_obstacle_cost: true
+    obstacle_safe_distance: 0.30
     # 障碍代价权重：决定离障碍太近时修正力度。
     # 过大容易把轨迹推得过远，过小则拦不住切进膨胀层的趋势。
     # 当前提高到 55，让样条先离开高代价边缘，再交给 MPPI 跟踪。
@@ -487,7 +489,7 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
-      tolerance: 0.3
+      tolerance: 0.20
       allow_unknown: true
       downsample_costmap: false
       downsampling_factor: 1
@@ -497,9 +499,9 @@ planner_server:
       cost_travel_multiplier: 2.9
       motion_model_for_search: "DUBIN"
       angle_quantization_bins: 64
-      analytic_expansion_ratio: 3.5
-      analytic_expansion_max_length: 3.2
-      minimum_turning_radius: 0.08
+      analytic_expansion_ratio: 2.0
+      analytic_expansion_max_length: 1.2
+      minimum_turning_radius: 0.16
       retrospective_penalty: 0.06
       reverse_penalty: 1.0
       change_penalty: 0.0
@@ -553,6 +555,8 @@ smoother_server:
       profile_topic: "trajectory_profile"
       # 障碍安全 cost 阈值：低于它的格子认为是安全区。
       obstacle_safe_cost: 48
+      use_esdf_obstacle_cost: true
+      obstacle_safe_distance: 0.30
       # 障碍代价权重：越大越不愿意贴近高代价边缘。
       # 这里和 optimizer 保持一致，避免平滑器和主链对“安全距离”的理解打架。
       obstacle_weight: 40.0

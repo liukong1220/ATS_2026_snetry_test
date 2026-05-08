@@ -58,59 +58,63 @@ sp_msgs::msg::TrajectoryProfileMsg toProfileMsg(
 TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & options)
 : Node("trajectory_optimizer", options)
 {
-  OptimizerParams params;
-
   declare_parameter<std::string>("input_path_topic", "plan");
   declare_parameter<std::string>("output_path_topic", "smoothed_path");
   declare_parameter<std::string>("output_profile_topic", "trajectory_profile_visual");
   declare_parameter<std::string>("costmap_topic", "global_costmap/costmap_raw");
-  declare_parameter<double>("control_point_spacing", params.control_point_spacing);
-  declare_parameter<double>("output_path_spacing", params.output_path_spacing);
-  declare_parameter<double>("min_input_point_spacing", params.min_input_point_spacing);
-  declare_parameter<double>("max_lateral_deviation", params.max_lateral_deviation);
-  declare_parameter<int>("min_control_points", params.min_control_points);
-  declare_parameter<double>("curvature_limit", params.curvature_limit);
-  declare_parameter<double>("curvature_weight", params.curvature_weight);
+  declare_parameter<double>("control_point_spacing", params_.control_point_spacing);
+  declare_parameter<double>("output_path_spacing", params_.output_path_spacing);
+  declare_parameter<double>("min_input_point_spacing", params_.min_input_point_spacing);
+  declare_parameter<double>("max_lateral_deviation", params_.max_lateral_deviation);
+  declare_parameter<int>("min_control_points", params_.min_control_points);
+  declare_parameter<double>("curvature_limit", params_.curvature_limit);
+  declare_parameter<double>("curvature_weight", params_.curvature_weight);
   declare_parameter<int>(
-    "curvature_refinement_iterations", params.curvature_refinement_iterations);
-  declare_parameter<double>("curvature_refinement_gain", params.curvature_refinement_gain);
-  declare_parameter<double>("global_speed_limit", params.global_speed_limit);
-  declare_parameter<double>("lateral_accel_limit", params.lateral_accel_limit);
-  declare_parameter<double>("longitudinal_accel_limit", params.longitudinal_accel_limit);
-  declare_parameter<double>("velocity_smoothing_gain", params.velocity_smoothing_gain);
-  declare_parameter<double>("derivative_step", params.derivative_step);
-  declare_parameter<int>("obstacle_safe_cost", static_cast<int>(params.obstacle_safe_cost));
-  declare_parameter<double>("obstacle_weight", params.obstacle_weight);
+    "curvature_refinement_iterations", params_.curvature_refinement_iterations);
+  declare_parameter<double>("curvature_refinement_gain", params_.curvature_refinement_gain);
+  declare_parameter<double>("global_speed_limit", params_.global_speed_limit);
+  declare_parameter<double>("lateral_accel_limit", params_.lateral_accel_limit);
+  declare_parameter<double>("longitudinal_accel_limit", params_.longitudinal_accel_limit);
+  declare_parameter<double>("velocity_smoothing_gain", params_.velocity_smoothing_gain);
+  declare_parameter<double>("derivative_step", params_.derivative_step);
+  declare_parameter<int>("obstacle_safe_cost", static_cast<int>(params_.obstacle_safe_cost));
+  declare_parameter<double>("obstacle_weight", params_.obstacle_weight);
   declare_parameter<int>(
-    "obstacle_refinement_iterations", params.obstacle_refinement_iterations);
-  declare_parameter<double>("obstacle_refinement_gain", params.obstacle_refinement_gain);
+    "obstacle_refinement_iterations", params_.obstacle_refinement_iterations);
+  declare_parameter<double>("obstacle_refinement_gain", params_.obstacle_refinement_gain);
+  declare_parameter<bool>("use_esdf_obstacle_cost", params_.use_esdf_obstacle_cost);
+  declare_parameter<double>("obstacle_safe_distance", params_.obstacle_safe_distance);
 
   get_parameter("input_path_topic", input_path_topic_);
   get_parameter("output_path_topic", output_path_topic_);
   get_parameter("output_profile_topic", output_profile_topic_);
   get_parameter("costmap_topic", costmap_topic_);
-  get_parameter("control_point_spacing", params.control_point_spacing);
-  get_parameter("output_path_spacing", params.output_path_spacing);
-  get_parameter("min_input_point_spacing", params.min_input_point_spacing);
-  get_parameter("max_lateral_deviation", params.max_lateral_deviation);
-  get_parameter("min_control_points", params.min_control_points);
-  get_parameter("curvature_limit", params.curvature_limit);
-  get_parameter("curvature_weight", params.curvature_weight);
-  get_parameter("curvature_refinement_iterations", params.curvature_refinement_iterations);
-  get_parameter("curvature_refinement_gain", params.curvature_refinement_gain);
-  get_parameter("global_speed_limit", params.global_speed_limit);
-  get_parameter("lateral_accel_limit", params.lateral_accel_limit);
-  get_parameter("longitudinal_accel_limit", params.longitudinal_accel_limit);
-  get_parameter("velocity_smoothing_gain", params.velocity_smoothing_gain);
-  get_parameter("derivative_step", params.derivative_step);
-  int configured_safe_cost = static_cast<int>(params.obstacle_safe_cost);
+  get_parameter("control_point_spacing", params_.control_point_spacing);
+  get_parameter("output_path_spacing", params_.output_path_spacing);
+  get_parameter("min_input_point_spacing", params_.min_input_point_spacing);
+  get_parameter("max_lateral_deviation", params_.max_lateral_deviation);
+  get_parameter("min_control_points", params_.min_control_points);
+  get_parameter("curvature_limit", params_.curvature_limit);
+  get_parameter("curvature_weight", params_.curvature_weight);
+  get_parameter("curvature_refinement_iterations", params_.curvature_refinement_iterations);
+  get_parameter("curvature_refinement_gain", params_.curvature_refinement_gain);
+  get_parameter("global_speed_limit", params_.global_speed_limit);
+  get_parameter("lateral_accel_limit", params_.lateral_accel_limit);
+  get_parameter("longitudinal_accel_limit", params_.longitudinal_accel_limit);
+  get_parameter("velocity_smoothing_gain", params_.velocity_smoothing_gain);
+  get_parameter("derivative_step", params_.derivative_step);
+  int configured_safe_cost = static_cast<int>(params_.obstacle_safe_cost);
   get_parameter("obstacle_safe_cost", configured_safe_cost);
-  get_parameter("obstacle_weight", params.obstacle_weight);
-  get_parameter("obstacle_refinement_iterations", params.obstacle_refinement_iterations);
-  get_parameter("obstacle_refinement_gain", params.obstacle_refinement_gain);
-  params.obstacle_safe_cost = static_cast<unsigned char>(
+  get_parameter("obstacle_weight", params_.obstacle_weight);
+  get_parameter("obstacle_refinement_iterations", params_.obstacle_refinement_iterations);
+  get_parameter("obstacle_refinement_gain", params_.obstacle_refinement_gain);
+  get_parameter("use_esdf_obstacle_cost", params_.use_esdf_obstacle_cost);
+  get_parameter("obstacle_safe_distance", params_.obstacle_safe_distance);
+  params_.obstacle_safe_cost = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_safe_cost)));
-  optimizer_.setParams(params);
+  optimizer_.setParams(params_);
+  fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
+  optimizer_.clearEsdfProvider();
 
   smoothed_path_pub_ = create_publisher<nav_msgs::msg::Path>(output_path_topic_, 10);
   profile_pub_ =
@@ -133,9 +137,21 @@ void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr 
   }
   if (costmap_sub_) {
     try {
-      optimizer_.setObstacleCostmap(costmap_sub_->getCostmap());
+      const auto costmap = costmap_sub_->getCostmap();
+      optimizer_.setObstacleCostmap(costmap);
+      if (params_.use_esdf_obstacle_cost && fake_esdf_provider_) {
+        fake_esdf_provider_->updateCostmap(costmap, params_.obstacle_safe_cost, true);
+        optimizer_.setEsdfProvider(fake_esdf_provider_);
+        RCLCPP_INFO_THROTTLE(
+          get_logger(), *get_clock(), 5000,
+          "Fake ESDF active in trajectory_optimizer_node: d_safe=%.3f cost_threshold=%d",
+          params_.obstacle_safe_distance, static_cast<int>(params_.obstacle_safe_cost));
+      } else {
+        optimizer_.clearEsdfProvider();
+      }
     } catch (const std::exception & ex) {
       optimizer_.clearObstacleCostmap();
+      optimizer_.clearEsdfProvider();
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
         "Costmap unavailable for visual trajectory optimizer, using geometry-only path: %s",

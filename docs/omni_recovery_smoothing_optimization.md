@@ -580,3 +580,159 @@ loopback 没有实车上的完整 fake base TF 链时，`behavior_server` 会因
 1. 为 `SelectVisionFollowPath` 增加更强的“目标点可达性兜底”，必要时显式避开 planner 已知死角
 2. 继续细化 smoother 的局部退化窗口，而不是频繁整条回 raw path
 3. 在 RViz 中同时看 `/plan`、`/smoothed_path_visual`、local/global costmap 和 `decision/vision_follow_markers`
+
+## 17. 第三阶段 ESDF 接口 Stub
+
+### 17.1 当前目标
+
+第三阶段当前先不绑定任何具体 ESDF 库，只先把接口和优化器接入点搭起来。
+
+目标是为后续这类连续 obstacle cost 做准备：
+
+`J_obstacle = Σ max(0, d_safe - d(x))^2`
+
+其中：
+
+1. `d(x)` 是轨迹点到最近障碍的距离
+2. `d_safe` 是期望安全距离
+3. `∇d(x)` 用于把 obstacle cost 转成 refinement 方向
+
+### 17.2 已落地的抽象接口
+
+新增头文件：
+
+- [esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/esdf_provider.hpp)
+
+当前抽象接口为：
+
+1. `double getDistance(double x, double y);`
+2. `Eigen::Vector2d getGradient(double x, double y);`
+
+设计原则：
+
+1. 不绑定具体库
+2. 不绑定具体 topic / msg
+3. 不假设后端一定是二维 costmap、三维 voxel 或某个特定地图实现
+
+### 17.3 默认 Stub 行为
+
+当前提供：
+
+1. `EsdfProvider`
+2. `NullEsdfProvider`
+
+默认情况下：
+
+1. `use_esdf_obstacle_cost = false`
+2. optimizer 不使用 ESDF 分支
+3. 仍保持当前基于 costmap cost 的 obstacle penalty / refinement
+
+这意味着：
+
+1. 现在合入这套接口不会改变现有导航行为
+2. 后续只要注入一个真正可用的 provider，就能切到 ESDF 逻辑
+
+### 17.4 已接入的优化器位置
+
+#### `BSplinePathOptimizer`
+
+已新增：
+
+1. `setEsdfProvider(...)`
+2. `clearEsdfProvider()`
+3. `sampleEsdfDistance(...)`
+4. `estimateEsdfGradient(...)`
+5. `computeObstaclePenaltyFromDistance(...)`
+
+当前分流逻辑是：
+
+1. 若 `use_esdf_obstacle_cost=true` 且 provider 可用，则优先使用
+   - `d(x)` 计算 `J_obstacle`
+   - `∇d(x)` 计算 obstacle refinement 方向
+2. 否则退回当前 costmap-cost 逻辑
+
+#### 参数入口
+
+当前主链和旁路都已预留：
+
+1. `use_esdf_obstacle_cost`
+2. `obstacle_safe_distance`
+
+对应接入点：
+
+1. [bspline_path_optimizer.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/bspline_path_optimizer.hpp)
+2. [bspline_path_optimizer.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/bspline_path_optimizer.cpp)
+3. [trajectory_optimizer_node.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/trajectory_optimizer_node.cpp)
+4. [nav2_bspline_smoother.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/nav2_bspline_smoother.cpp)
+
+### 17.5 当前接口约束
+
+为了让后续真正接任意 ESDF 后端时不返工，当前约束建议保持：
+
+1. `getDistance(x, y)` 返回值单位为米
+2. provider 不可用时通过 `available()` 或无效距离值显式表达
+3. `getGradient(x, y)` 返回世界坐标系下二维梯度
+4. 梯度不要求单位长度，optimizer 内部会归一化
+5. 若后端可提供连续插值梯度，优先直接返回连续梯度
+
+### 17.6 参考两份文档得到的结构性结论
+
+#### `中科大哨兵2025技术报告.pdf`
+
+与本项目第三阶段直接相关的结论是：
+
+1. 感知前端建议输出连续距离场，而不是只靠 occupancy / inflation cost
+2. 轨迹优化应直接消费距离与梯度，而不是只做离散 cost 差分
+3. 狭窄区域中，连续距离场 + 连续梯度更适合做稳定优化
+
+#### `Batch-LIWO.pdf`
+
+这份文档本身主要讲里程计，但其“先搭抽象结构，再逐步替换观测后端”的思路对第三阶段是有启发的：
+
+1. 先保证框架接口稳定
+2. 让后端观测源以低耦合方式接入
+3. 在不破坏现有链路的前提下逐步替换单一观测模型
+
+所以第三阶段当前的正确做法就是：
+
+1. 先搭 ESDF provider 抽象
+2. 先把 `J_obstacle` 的数学接口接进去
+3. 最后再决定具体用哪个 ESDF 后端
+
+### 17.7 下一步建议
+
+当准备正式进入第三阶段实现时，建议按这个顺序：
+
+1. 先增加一个最简单的二维 grid-based provider 适配层
+2. 再决定是否接 ROG-Map / 自建 ESDF / 外部服务
+3. 再把 obstacle refinement 从当前“单点推开”升级成真正的连续 `J_obstacle` 梯度下降
+4. 最后再考虑与实车感知链的刷新频率、线程模型和缓存同步
+
+### 17.8 当前 fake ESDF 进度
+
+本轮已经不是只有接口 stub，而是已经推进到：
+
+1. 基于 costmap 的 fake 2D distance transform provider 可运行
+2. `trajectory_optimizer_node` 可调用
+3. `Nav2BSplineSmoother` 主链可调用
+4. loopback 中已验证日志会打印：
+   - `Fake ESDF active in Nav2BSplineSmoother`
+   - `Fake ESDF active in trajectory_optimizer_node`
+
+当前实现位置：
+
+1. [fake_costmap_esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/fake_costmap_esdf_provider.hpp)
+2. [fake_costmap_esdf_provider.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/fake_costmap_esdf_provider.cpp)
+
+当前 fake provider 的性质：
+
+1. 输入仍然是 `global_costmap/costmap_raw`
+2. 内部对高代价值格子做二维 distance transform
+3. `getDistance(x, y)` 返回距离最近障碍的近似欧氏距离
+4. `getGradient(x, y)` 返回基于距离场中心差分的梯度
+
+因此它的作用是：
+
+1. 先验证第三阶段优化器分支是否真正“可调用、可观测”
+2. 先验证参数和 refinement 方向是否稳定
+3. 之后再替换成真正连续、更新效率更高的 ESDF 后端
