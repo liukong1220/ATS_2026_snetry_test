@@ -28,10 +28,10 @@ std_msgs::msg::ColorRGBA colorFromSpeedRatio(double ratio)
 {
   const double clamped = std::max(0.0, std::min(1.0, ratio));
   return makeColor(
-    static_cast<float>(1.0 - clamped),
-    static_cast<float>(clamped),
-    0.15f,
-    0.95f);
+    static_cast<float>(0.85 - 0.35 * clamped),
+    static_cast<float>(0.55 + 0.25 * clamped),
+    static_cast<float>(0.25 + 0.15 * clamped),
+    0.88f);
 }
 
 }  // namespace
@@ -127,8 +127,8 @@ void TrajectorySpeedGovernor::publishProfileMarkers(
   line.id = 0;
   line.type = visualization_msgs::msg::Marker::LINE_STRIP;
   line.action = visualization_msgs::msg::Marker::ADD;
-  line.scale.x = 0.03;
-  line.color = makeColor(0.15f, 0.8f, 1.0f, 0.95f);
+  line.scale.x = 0.022;
+  line.color = makeColor(0.28f, 0.72f, 0.78f, 0.86f);
 
   visualization_msgs::msg::Marker points;
   points.header = msg.header;
@@ -136,9 +136,9 @@ void TrajectorySpeedGovernor::publishProfileMarkers(
   points.id = 1;
   points.type = visualization_msgs::msg::Marker::SPHERE_LIST;
   points.action = visualization_msgs::msg::Marker::ADD;
-  points.scale.x = 0.07;
-  points.scale.y = 0.07;
-  points.scale.z = 0.07;
+  points.scale.x = 0.055;
+  points.scale.y = 0.055;
+  points.scale.z = 0.055;
 
   visualization_msgs::msg::Marker text;
   text.header = msg.header;
@@ -146,8 +146,8 @@ void TrajectorySpeedGovernor::publishProfileMarkers(
   text.id = 2;
   text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
   text.action = visualization_msgs::msg::Marker::ADD;
-  text.scale.z = 0.18;
-  text.color = makeColor(1.0f, 1.0f, 1.0f, 0.95f);
+  text.scale.z = 0.15;
+  text.color = makeColor(0.92f, 0.92f, 0.88f, 0.90f);
   text.pose.position = msg.points.back().point;
   text.pose.position.z += 0.35;
   text.text =

@@ -3,6 +3,7 @@
 #include "trajectory_optimizer/trajectory_optimizer_node.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "geometry_msgs/msg/vector3.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
@@ -53,6 +54,16 @@ sp_msgs::msg::TrajectoryProfileMsg toProfileMsg(
   return msg;
 }
 
+std_msgs::msg::ColorRGBA makeColor(float r, float g, float b, float a)
+{
+  std_msgs::msg::ColorRGBA color;
+  color.r = r;
+  color.g = g;
+  color.b = b;
+  color.a = a;
+  return color;
+}
+
 }  // namespace
 
 TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & options)
@@ -84,6 +95,7 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<double>("obstacle_refinement_gain", params_.obstacle_refinement_gain);
   declare_parameter<bool>("use_esdf_obstacle_cost", params_.use_esdf_obstacle_cost);
   declare_parameter<double>("obstacle_safe_distance", params_.obstacle_safe_distance);
+  declare_parameter<std::string>("esdf_debug_topic", esdf_debug_topic_);
 
   get_parameter("input_path_topic", input_path_topic_);
   get_parameter("output_path_topic", output_path_topic_);
@@ -110,6 +122,7 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   get_parameter("obstacle_refinement_gain", params_.obstacle_refinement_gain);
   get_parameter("use_esdf_obstacle_cost", params_.use_esdf_obstacle_cost);
   get_parameter("obstacle_safe_distance", params_.obstacle_safe_distance);
+  get_parameter("esdf_debug_topic", esdf_debug_topic_);
   params_.obstacle_safe_cost = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_safe_cost)));
   optimizer_.setParams(params_);
@@ -119,6 +132,8 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   smoothed_path_pub_ = create_publisher<nav_msgs::msg::Path>(output_path_topic_, 10);
   profile_pub_ =
     create_publisher<sp_msgs::msg::TrajectoryProfileMsg>(output_profile_topic_, 10);
+  esdf_marker_pub_ =
+    create_publisher<visualization_msgs::msg::MarkerArray>(esdf_debug_topic_, 10);
   path_sub_ = create_subscription<nav_msgs::msg::Path>(
     input_path_topic_, 10,
     std::bind(&TrajectoryOptimizerNode::pathCallback, this, std::placeholders::_1));
@@ -161,6 +176,106 @@ void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr 
   const auto result = optimizer_.optimizeDetailed(*msg);
   smoothed_path_pub_->publish(result.path);
   profile_pub_->publish(toProfileMsg(msg->header, "trajectory_optimizer_node", result.profile));
+  publishEsdfDebugMarkers(result.path);
+}
+
+void TrajectoryOptimizerNode::publishEsdfDebugMarkers(const nav_msgs::msg::Path & path)
+{
+  if (!esdf_marker_pub_ || !fake_esdf_provider_ || !params_.use_esdf_obstacle_cost ||
+    !fake_esdf_provider_->available() || path.poses.empty())
+  {
+    return;
+  }
+
+  visualization_msgs::msg::MarkerArray markers;
+
+  visualization_msgs::msg::Marker clear;
+  clear.header = path.header;
+  clear.action = visualization_msgs::msg::Marker::DELETEALL;
+  markers.markers.push_back(clear);
+
+  visualization_msgs::msg::Marker distance_points;
+  distance_points.header = path.header;
+  distance_points.ns = "trajectory_esdf";
+  distance_points.id = 0;
+  distance_points.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+  distance_points.action = visualization_msgs::msg::Marker::ADD;
+  distance_points.scale.x = 0.045;
+  distance_points.scale.y = 0.045;
+  distance_points.scale.z = 0.045;
+
+  visualization_msgs::msg::Marker gradient_arrows;
+  gradient_arrows.header = path.header;
+  gradient_arrows.ns = "trajectory_esdf";
+  gradient_arrows.id = 1;
+  gradient_arrows.type = visualization_msgs::msg::Marker::ARROW;
+  gradient_arrows.action = visualization_msgs::msg::Marker::ADD;
+  gradient_arrows.scale.x = 0.016;
+  gradient_arrows.scale.y = 0.028;
+  gradient_arrows.scale.z = 0.038;
+
+  visualization_msgs::msg::Marker text;
+  text.header = path.header;
+  text.ns = "trajectory_esdf";
+  text.id = 2;
+  text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+  text.action = visualization_msgs::msg::Marker::ADD;
+  text.scale.z = 0.14;
+  text.color = makeColor(0.90f, 0.90f, 0.86f, 0.88f);
+  text.pose.orientation.w = 1.0;
+
+  double min_distance = std::numeric_limits<double>::infinity();
+  double avg_gradient_norm = 0.0;
+  std::size_t gradient_count = 0;
+  for (const auto & pose : path.poses) {
+    const double distance = fake_esdf_provider_->getDistance(
+      pose.pose.position.x, pose.pose.position.y);
+    const Eigen::Vector2d gradient = fake_esdf_provider_->getGradient(
+      pose.pose.position.x, pose.pose.position.y);
+    const double gradient_norm = gradient.norm();
+
+    distance_points.points.push_back(pose.pose.position);
+    const double ratio = std::max(0.0, std::min(1.0, distance / std::max(0.05, params_.obstacle_safe_distance)));
+    distance_points.colors.push_back(
+      makeColor(
+        static_cast<float>(0.78 - 0.38 * ratio),
+        static_cast<float>(0.32 + 0.42 * ratio),
+        static_cast<float>(0.26 + 0.08 * ratio),
+        0.82f));
+
+    geometry_msgs::msg::Point start = pose.pose.position;
+    geometry_msgs::msg::Point end = start;
+    end.x += gradient.x() * 0.12;
+    end.y += gradient.y() * 0.12;
+    gradient_arrows.points.clear();
+    gradient_arrows.colors.clear();
+    gradient_arrows.id = static_cast<int>(10 + gradient_count);
+    gradient_arrows.points.push_back(start);
+    gradient_arrows.points.push_back(end);
+    const double grad_ratio = std::max(0.0, std::min(1.0, gradient_norm / 2.0));
+    gradient_arrows.color = makeColor(
+      static_cast<float>(0.86),
+      static_cast<float>(0.70 - 0.22 * grad_ratio),
+      static_cast<float>(0.30),
+      0.80f);
+    markers.markers.push_back(gradient_arrows);
+
+    min_distance = std::min(min_distance, distance);
+    avg_gradient_norm += gradient_norm;
+    ++gradient_count;
+  }
+
+  avg_gradient_norm = gradient_count > 0 ?
+    (avg_gradient_norm / static_cast<double>(gradient_count)) : 0.0;
+  text.pose.position = path.poses.back().pose.position;
+  text.pose.position.z += 0.30;
+  text.text =
+    "d_min=" + std::to_string(min_distance).substr(0, 5) +
+    " |grad|_avg=" + std::to_string(avg_gradient_norm).substr(0, 5);
+
+  markers.markers.push_back(distance_points);
+  markers.markers.push_back(text);
+  esdf_marker_pub_->publish(markers);
 }
 
 }  // namespace trajectory_optimizer

@@ -736,3 +736,917 @@ loopback 没有实车上的完整 fake base TF 链时，`behavior_server` 会因
 1. 先验证第三阶段优化器分支是否真正“可调用、可观测”
 2. 先验证参数和 refinement 方向是否稳定
 3. 之后再替换成真正连续、更新效率更高的 ESDF 后端
+
+### 17.9 loopback 中 fake ESDF 开关前后的当前观察结论
+
+本轮对比方式：
+
+1. 使用同一组 `loopback_vision_test.launch.py` 固定假目标
+2. 关闭 `use_esdf_obstacle_cost` 跑一轮
+3. 开启 `use_esdf_obstacle_cost` 再跑一轮
+4. 对比：
+   - `selected_goal`
+   - planner failure 日志
+   - smoother fallback 日志
+
+当前结论：
+
+1. fake ESDF 分支已经明确被调用，日志可见：
+   - `Fake ESDF active in Nav2BSplineSmoother`
+   - `Fake ESDF active in trajectory_optimizer_node`
+2. 但在当前固定视觉场景下，`selected_goal` 没有出现“显著跳到另一类区域”的变化
+3. 原因并不奇怪：
+   - 视觉跟随点的主要决策仍发生在 `SelectVisionFollowPath`
+   - fake ESDF 当前影响的是 smoother / optimizer 的 obstacle refinement
+   - 它不会直接改行为层的圆周选点策略
+4. 因此当前 fake ESDF 更像是：
+   - 已接通优化器第三阶段接口
+   - 已能进入主链计算
+   - 但其效果需要通过路径几何和 debug markers 来观察，而不能只看行为层 `selected_goal`
+
+### 17.10 当前新增的 ESDF 观察入口
+
+`trajectory_optimizer_node` 现在已新增旁路 debug topic：
+
+1. `trajectory_esdf_debug`
+
+当前 marker 含义：
+
+1. `SPHERE_LIST`
+   - 每个采样点一颗球
+   - 颜色表示 `d(x)` 大小
+   - 越偏红表示离障碍越近
+   - 越偏绿表示离障碍越远
+2. `LINE_LIST`
+   - 每个采样点一个梯度箭头
+   - 表示 `∇d(x)` 方向
+   - 也就是“离障碍更远”的局部推开方向
+3. `TEXT_VIEW_FACING`
+   - 当前路径的 `d_min`
+   - 当前路径的平均梯度强度
+
+建议在 RViz 中同时观察：
+
+1. `/plan`
+2. `/smoothed_path_visual`
+3. `/trajectory_profile_visual`
+4. `/trajectory_esdf_debug`
+5. global / local costmap
+
+这样你可以直观看到：
+
+1. 红色危险点是否集中在弯角内侧
+2. 梯度箭头是否确实把曲线往通道中心推
+3. 开启 fake ESDF 后，样条路径的“贴边段”是否比纯 costmap penalty 更早被回拉
+
+### 17.11 当前 RViz 风格与读取说明
+
+本轮已对 `trajectory_esdf_debug` 和轨迹规划相关显示做一轮风格统一：
+
+1. 旧 ESDF 梯度黄线已改成小尺寸箭头 marker
+2. 每次路径更新前会先 `DELETEALL`，避免旧箭头残留
+3. 轨迹优化相关主色已统一成低饱和、低攻击性的配色
+4. 视觉目标、姿态模式切换、瞄准、tracker 等无关层保持不删不关
+
+当前建议把这些显示视为主分析层：
+
+1. `/plan`
+2. `/smoothed_path_visual`
+3. `/trajectory_profile_markers`
+4. `/trajectory_esdf_debug`
+5. `global_costmap/costmap`
+6. `local_costmap/costmap`
+
+读取规则：
+
+1. 红棕色 `Global Plan`
+   - 看 planner 原始终端段是否被拉直
+2. 青蓝色 `Smoothed Path`
+   - 看 optimizer 是否在贴边段更早回拉
+3. 红绿 ESDF 点
+   - 红点集中区 = 当前最危险贴边段
+4. 黄色 ESDF 箭头
+   - 箭头方向 = 优化器局部希望把路径推开的方向
+5. 白色 ESDF 文本
+   - `d_min` 近似反映本条路径最小安全余量
+
+当前人工观察结论已经明确：
+
+1. 红色 ESDF 点主要集中在弯角内侧或贴墙段
+2. 黄色箭头方向可读，且便于判断“是否朝通道中心推”
+3. 青色 `smoothed_path_visual` 在贴边段相比此前已表现出更早回拉
+
+这说明：
+
+1. fake ESDF 的危险区域识别方向基本正确
+2. fake ESDF 的梯度方向目前可解释
+3. 当前下一步不应再先优化可视化，而应开始增强 ESDF obstacle 项的实际作用强度
+
+### 17.11 当前阶段结论
+
+基于当前 loopback 观察，现阶段可以给出一个比较明确的结论：
+
+1. fake ESDF 已经达到“阶段性可用”的目标
+2. 它不再只是 stub，而是已经真正进入了 optimizer 主链
+3. 在 RViz 中可以稳定看到：
+   - 红色距离点主要集中在弯角内侧 / 贴墙段
+   - 黄色梯度箭头方向基本指向通道中心或远离障碍的一侧
+   - 青色 `smoothed_path_visual` 在贴边段相较于纯 costmap penalty 已更早回拉
+
+因此当前判断是：
+
+1. fake ESDF 的方向性是对的
+2. fake ESDF 的可视化已经足够支撑后续优化
+3. 下一步不需要再怀疑“这条分支有没有真正工作”
+4. 后续工作重点应转向“增强作用强度”和“提高连续性”
+
+### 17.12 参考技术报告后的后续优化路线
+
+结合 `中科大哨兵2025技术报告.pdf` 第 5.5 节中关于 ESDF / Minco / 两步优化的经验，当前项目下一阶段建议这样推进：
+
+#### 第一层：继续把 fake ESDF 做成 trajectory-grade ESDF-lite
+
+技术报告中对 ESDF 方案的判断可以直接借用到当前项目：
+
+1. ESDF 的优势在于能够持续提供距离与梯度，而不只是“出安全走廊后才给惩罚”
+2. ESDF 的主要问题在于：
+   - 梯度震荡
+   - 梯度无效化
+   - 优化器在狭窄区域不稳定
+
+对当前项目而言，这意味着下一步最该优化的不是“接更多模块”，而是：
+
+1. `getDistance(x, y)` 的连续性
+2. `getGradient(x, y)` 的平滑性
+3. obstacle refinement 对轨迹的实际作用强度
+
+优先顺序建议：
+
+1. bilinear interpolation
+2. gradient smoothing
+3. signed distance
+4. inflation-aware distance shaping
+
+#### 第二层：让 ESDF 更像“优化器真正愿意吃的观测”
+
+技术报告中对狭窄区域的经验非常关键：
+
+1. 双线性插值下会出现梯度无效化
+2. 需要通过更高阶插值或更平滑的距离表示来减轻峡谷区域震荡
+3. 优化目标不应只是“把点推离障碍”，还应兼顾速度 / 加速度 / 时间一致性
+
+对应到当前项目，建议按下面顺序推进：
+
+1. 把 fake costmap ESDF 从“离散 DT + 中心差分”升级到“插值距离 + 平滑梯度”
+2. 保留现有 `BSplinePathOptimizer` 框架不变，只替换 provider 内部实现
+3. 在 `trajectory_profile_visual` 和 `trajectory_esdf_debug` 中继续观察：
+   - `d_min`
+   - 平均梯度强度
+   - 样条在狭窄区域的回拉连续性
+
+#### 第三层：后续再考虑真正 ESDF 后端
+
+当前不建议马上切真实大模块，原因很简单：
+
+1. 现有 fake ESDF 已经证明主链是通的
+2. 当前最大瓶颈已不是“有没有 ESDF”，而是“ESDF 够不够连续、够不够稳定”
+3. 在没把 ESDF-lite 调顺之前，直接接更复杂后端只会增加变量
+
+因此第三阶段后续建议是：
+
+1. 先把 fake ESDF 调到 trajectory-grade
+2. 再考虑增量更新
+3. 再考虑 signed distance
+4. 最后再考虑更复杂的 voxel / FIESTA / ROG-Map 对接
+
+### 17.13 结合当前项目现状的具体后续任务
+
+如果下一轮继续做优化，建议按这个顺序：
+
+1. 增强 ESDF obstacle 项对 `refinePathUnified()` 的实际影响强度
+2. 给 fake ESDF provider 增加 bilinear interpolation
+3. 对梯度做平滑，减少弯角和峡谷区域跳变
+4. 再考虑把 `obstacle_cost` 从“后验统计”进一步变成更强的优化主导项
+
+### 17.14 本文档交接建议
+
+当前可以把第三阶段状态定义为：
+
+1. `ESDF interface`: 已完成
+2. `fake ESDF provider`: 已完成并可观测
+3. `trajectory-grade fake ESDF`: 下一步核心
+4. `real ESDF backend`: 暂未进入
+
+如果在新对话中继续推进，建议直接以上面第 17.13 节的顺序为主线，而不要再回到“是否需要 ESDF / 是否已经接通”这种已经解决的问题上。
+
+
+你现在已经不是在“做一个导航功能”，而是在逐步构建：
+
+> ✅ 一套 RoboMaster 顶级哨兵/全向机器人导航与控制系统
+
+而你当前的系统已经具备了：
+
+* Point-LIO
+* Nav2 + MPPI
+* trajectory optimizer
+* fake ESDF
+* terrain analysis
+* 自定义恢复行为
+* 行为树决策
+
+所以你下一步不应该再“堆模块”，而应该：
+
+> ❗按“轨迹 → 控制 → 环境约束 → 控制耦合”的顺序进化
+
+下面我帮你完整总结：
+
+---
+
+# 一、你当前系统阶段（很准确）
+
+你现在已经：
+
+```text id="phase0"
+Point-LIO
+→ Nav2 Planner
+→ B-Spline trajectory
+→ fake ESDF
+→ MPPI
+```
+
+这已经属于：
+
+> 🟡 中高级自主导航系统
+
+---
+
+但还不是：
+
+> 🔴 控制感知型（Control-aware）轨迹系统
+
+---
+
+# 二、完整优化路线（非常重要）
+
+---
+
+# 🟢 第一阶段：几何轨迹平滑（你已完成）
+
+---
+
+# 目标
+
+解决：
+
+* planner折线
+* MPPI抖动
+* 急拐弯
+
+---
+
+# 算法
+
+## ✅ 三次 B-Spline
+
+轨迹：
+
+x(t)=\sum_i B_i(t)P_i
+
+---
+
+# 关键优化
+
+## 1️⃣ 弧长参数化
+
+将：
+
+```text id="phase1a"
+x(s), y(s)
+```
+
+标准化。
+
+---
+
+## 2️⃣ 高密度采样
+
+避免 MPPI 跟踪离散跳变。
+
+---
+
+# 这一阶段你已经完成：
+
+| 模块       | 状态 |
+| -------- | -- |
+| B-Spline | ✅  |
+| 弧长参数化    | ✅  |
+| MPPI接入   | ✅  |
+
+---
+
+# 🟡 第二阶段：动力学约束（你正在进入）
+
+这是你当前最关键阶段。
+
+---
+
+# 核心思想
+
+从：
+
+```text id="phase2a"
+“路径长什么样”
+```
+
+升级为：
+
+```text id="phase2b"
+“机器人能不能跟”
+```
+
+---
+
+# 算法
+
+---
+
+## ✅ 1️⃣ 曲率约束
+
+曲率：
+
+\kappa = \frac{x'y''-y'x''}{(x'^2+y'^2)^{3/2}}
+
+---
+
+## 曲率代价
+
+J_{curvature}=\sum \max(0,|\kappa|-\kappa_{max})^2
+
+---
+
+# 作用
+
+避免：
+
+* 急转弯
+* MPPI横摆
+* 全向漂移
+
+---
+
+## ✅ 2️⃣ 横向加速度约束（更重要）
+
+真正重要的不是：
+
+```text id="phase2c"
+κ
+```
+
+而是：
+
+a_{lat}=v^2\kappa
+
+---
+
+# 限速公式
+
+v_{max}=\sqrt{\frac{a_{lat,max}}{|\kappa|}}
+
+---
+
+# 这是：
+
+> ❗几何轨迹 → 动力学轨迹
+
+的关键。
+
+---
+
+## ✅ 3️⃣ 时间参数化（必须）
+
+你必须从：
+
+```text id="phase2d"
+x(s)
+```
+
+升级到：
+
+```text id="phase2e"
+x(t)
+```
+
+---
+
+# 算法
+
+## Forward-backward pass
+
+---
+
+### 前向传播
+
+v_i^2\le v_{i-1}^2+2a_{max}ds
+
+---
+
+### 后向传播
+
+v_i^2\le v_{i+1}^2+2a_{brake}ds
+
+---
+
+# 作用
+
+生成：
+
+* 连续速度
+* 连续加速度
+* 平滑控制
+
+---
+
+# 🟠 第三阶段：fake ESDF（你已完成基础）
+
+---
+
+# 当前算法
+
+你现在：
+
+```text id="phase3a"
+costmap
+→ Distance Transform
+→ distance field
+```
+
+已经是：
+
+> 🟢 fake ESDF
+
+---
+
+# 但还不是：
+
+> 🔴 trajectory-grade ESDF
+
+---
+
+# 你下一步必须优化的算法
+
+---
+
+## ✅ 1️⃣ Bilinear interpolation
+
+不要：
+
+```text id="phase3b"
+nearest grid
+```
+
+而是：
+
+```text id="phase3c"
+双线性插值
+```
+
+---
+
+# 收益巨大
+
+提升：
+
+* gradient连续性
+* MPPI稳定性
+* 轨迹自然度
+
+---
+
+## ✅ 2️⃣ Gradient smoothing（最重要）
+
+对：
+
+```text id="phase3d"
+distance field
+```
+
+做：
+
+```text id="phase3e"
+Gaussian smoothing
+```
+
+---
+
+# 作用
+
+避免：
+
+* 梯度跳变
+* 轨迹抖动
+* 左右横跳
+
+---
+
+## ✅ 3️⃣ Signed Distance
+
+真正 ESDF：
+
+```text id="phase3f"
+障碍内 < 0
+自由空间 > 0
+```
+
+---
+
+# 作用
+
+优化器能知道：
+
+```text id="phase3g"
+“已经撞进去”
+```
+
+---
+
+## ✅ 4️⃣ Inflation-aware ESDF
+
+不要：
+
+```text id="phase3h"
+真实障碍距离
+```
+
+而是：
+
+```text id="phase3i"
+安全边界距离
+```
+
+---
+
+# 方法
+
+d_{safe}=d_{real}-r_{robot}
+
+---
+
+# 🔵 第四阶段：真正轨迹优化（你下一步核心）
+
+---
+
+# 核心思想
+
+从：
+
+```text id="phase4a"
+path smoothing
+```
+
+升级为：
+
+```text id="phase4b"
+trajectory optimization
+```
+
+---
+
+# 目标函数
+
+---
+
+## 总代价：
+
+J=J_{smooth}+J_{curvature}+J_{velocity}+J_{obstacle}
+
+---
+
+# 具体项
+
+---
+
+## 平滑项
+
+最小化：
+
+* jerk
+* snap
+
+---
+
+## 曲率项
+
+避免急转弯。
+
+---
+
+## obstacle项
+
+J_{obs}=\sum \max(0,d_{safe}-d(x))^2
+
+---
+
+# 梯度更新
+
+轨迹点：
+
+```text id="phase4c"
+沿 gradient 推离障碍
+```
+
+---
+
+# 推荐优化器
+
+---
+
+## ✅ LBFGS
+
+你当前最适合。
+
+---
+
+# 为什么
+
+相比：
+
+| 算法               | 问题 |
+| ---------------- | -- |
+| Gradient Descent | 慢  |
+| SQP              | 太重 |
+| MPC              | 复杂 |
+
+LBFGS：
+
+* 快
+* 稳
+* CPU友好
+
+---
+
+# 🔴 第五阶段：Control-aware trajectory（真正比赛级）
+
+这一步非常关键。
+
+---
+
+# 中科大真正强的地方是什么
+
+不是：
+
+```text id="phase5a"
+planner
+```
+
+而是：
+
+```text id="phase5b"
+轨迹与控制深度耦合
+```
+
+
+
+---
+
+# 他们做了：
+
+---
+
+## ✅ MPC/QP
+
+不是单纯跟踪：
+
+```text id="phase5c"
+path
+```
+
+而是：
+
+```text id="phase5d"
+未来轨迹状态
+```
+
+---
+
+# 他们核心优化：
+
+---
+
+## 1️⃣ 轨迹投影
+
+机器人：
+
+```text id="phase5e"
+投影到轨迹时间轴
+```
+
+---
+
+## 2️⃣ 前瞻轨迹生成
+
+动态选择：
+
+```text id="phase5f"
+未来参考点
+```
+
+---
+
+## 3️⃣ 横向误差优先
+
+这是很高级的思想。
+
+他们发现：
+
+```text id="phase5g"
+ecross 比 ealong 更重要
+```
+
+尤其：
+
+* 隧道
+* 狭窄通道
+
+---
+
+# 他们的优化：
+
+主动：
+
+* 缩短前瞻
+* 减少纵向速度
+* 提高横向精度
+
+---
+
+# 这非常值得你学习
+
+---
+
+# 六、你下一步最值得做的优化（优先级）
+
+---
+
+# 🟢 第一优先级（马上做）
+
+## trajectory-grade fake ESDF
+
+实现：
+
+* bilinear interpolation
+* gradient smoothing
+* signed distance
+* inflation-aware
+
+---
+
+# 🟡 第二优先级
+
+## velocity profile
+
+实现：
+
+* 时间参数化
+* acceleration constraint
+* lateral acceleration constraint
+
+---
+
+# 🔵 第三优先级
+
+## trajectory optimization
+
+引入：
+
+* LBFGS
+* obstacle gradient
+
+---
+
+# 🔴 第四优先级（真正质变）
+
+## tracking-aware trajectory
+
+也就是：
+
+> MPPI/MPC 跟踪误差反向影响 trajectory optimizer
+
+---
+
+# 七、如何转化成“真正 ESDF”
+
+你现在：
+
+```text id="real1"
+Distance Transform
+```
+
+已经是：
+
+> 🟡 ESDF-lite
+
+---
+
+# 真正 ESDF 还差：
+
+---
+
+## 1️⃣ 增量更新
+
+现在你可能：
+
+```text id="real2"
+全图重算
+```
+
+真正 ESDF：
+
+```text id="real3"
+incremental update
+```
+
+---
+
+# 推荐
+
+## FIESTA
+
+---
+
+# 2️⃣ Signed Distance
+
+---
+
+# 3️⃣ 稀疏体素结构
+
+你现在：
+
+```text id="real4"
+2D grid
+```
+
+真正高级：
+
+```text id="real5"
+voxel ESDF
+```
+
+---
+
+# 推荐
+
+* Voxblox
+* FIESTA
+
+---
+
+# 4️⃣ 多层地图
+
+结合：
+
+* terrain
+* traversability
+* intensity
+
+---
+
+# 八、你系统现在最大的提升空间（最真实）
+
+你现在不是缺：
+
+```text id="real6"
+更多模块
+```
+
+而是：
+
+```text id="real7"
+连续性
+稳定性
+控制耦合
+```
+
+---
+
+# 九、我对你当前系统的评价（客观）
+
+| 模块            | 水平     |
+| ------------- | ------ |
+| SLAM          | 很高     |
+| Terrain       | 很高     |
+| Navigation    | 高      |
+| Recovery      | 很高     |
+| Trajectory    | 中高级    |
+| Control-aware | 下一阶段核心 |
+
+---
+
+# 十、一句话总结
+
+你现在已经完成：
+
+> “机器人知道去哪”
+
+下一阶段真正要完成的是：
+
+> ❗“机器人如何稳定、自然、极限地过去”
