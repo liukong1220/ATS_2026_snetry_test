@@ -35,6 +35,7 @@ private:
   std::string input_cmd_vel_topic_;
   std::string output_cmd_vel_topic_;
   std::string marker_topic_{"trajectory_profile_markers"};
+  bool enabled_ = true;
   double min_speed_scale_ = 0.35;
   double curvature_brake_gain_ = 0.7;
   int curvature_window_points_ = 12;

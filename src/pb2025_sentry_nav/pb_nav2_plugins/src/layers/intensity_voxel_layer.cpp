@@ -1,7 +1,7 @@
- 
-
 #include "pb_nav2_plugins/layers/intensity_voxel_layer.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "sensor_msgs/point_cloud2_iterator.hpp"
@@ -33,6 +33,7 @@ void IntensityVoxelLayer::onInitialize()
   origin_z_ = node->declare_parameter(name_ + ".origin_z", 16.0);
   min_obstacle_intensity_ = node->declare_parameter(name_ + ".min_obstacle_intensity", 0.1);
   max_obstacle_intensity_ = node->declare_parameter(name_ + ".max_obstacle_intensity", 2.0);
+  self_filter_radius_ = node->declare_parameter(name_ + ".self_filter_radius", 0.0);
   z_resolution_ = node->declare_parameter(name_ + ".z_resolution", 0.05);
   unknown_threshold_ =
     node->declare_parameter(name_ + ".unknown_threshold", 15) + (VOXEL_BITS - size_z_);
@@ -116,6 +117,7 @@ void IntensityVoxelLayer::updateBounds(
   for (const auto & obs : observations) {
     double sq_obstacle_max_range = obs.obstacle_max_range_ * obs.obstacle_max_range_;
     double sq_obstacle_min_range = obs.obstacle_min_range_ * obs.obstacle_min_range_;
+    const double sq_self_filter_radius = self_filter_radius_ * self_filter_radius_;
 
     sensor_msgs::PointCloud2ConstIterator<float> it_x(*obs.cloud_, "x");
     sensor_msgs::PointCloud2ConstIterator<float> it_y(*obs.cloud_, "y");
@@ -123,6 +125,12 @@ void IntensityVoxelLayer::updateBounds(
     sensor_msgs::PointCloud2ConstIterator<float> it_i(*obs.cloud_, "intensity");
     for (; it_x != it_x.end(); ++it_x, ++it_y, ++it_z, ++it_i) {
       double px = *it_x, py = *it_y, pz = *it_z;
+
+      const double sq_robot_dist =
+        (px - robot_x) * (px - robot_x) + (py - robot_y) * (py - robot_y);
+      if (self_filter_radius_ > 0.0 && sq_robot_dist <= sq_self_filter_radius) {
+        continue;
+      }
 
       // if the obstacle is too low/high, we won't add it
       if (pz < min_obstacle_height_ || pz > max_obstacle_height_) {
@@ -136,8 +144,8 @@ void IntensityVoxelLayer::updateBounds(
 
       // compute the squared distance from the hitpoint to the pointcloud's origin
       double sq_dist = (px - obs.origin_.x) * (px - obs.origin_.x) +
-                       (py - obs.origin_.y) * (py - obs.origin_.y) +
-                       (pz - obs.origin_.z) * (pz - obs.origin_.z);
+        (py - obs.origin_.y) * (py - obs.origin_.y) +
+        (pz - obs.origin_.z) * (pz - obs.origin_.z);
 
       // if the point is far/close enough away... we won't consider it
       if (sq_dist <= sq_obstacle_min_range || sq_dist >= sq_obstacle_max_range) {
@@ -185,7 +193,52 @@ void IntensityVoxelLayer::updateBounds(
     voxel_pub_->publish(grid_msg);
   }
 
+  clearSelfFilterRadius(robot_x, robot_y, min_x, min_y, max_x, max_y);
   updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+}
+
+void IntensityVoxelLayer::clearSelfFilterRadius(
+  double robot_x, double robot_y, double * min_x, double * min_y, double * max_x,
+  double * max_y)
+{
+  if (self_filter_radius_ <= 0.0) {
+    return;
+  }
+
+  unsigned int center_mx = 0;
+  unsigned int center_my = 0;
+  if (!worldToMap(robot_x, robot_y, center_mx, center_my)) {
+    return;
+  }
+
+  const int radius_cells =
+    std::max(1, static_cast<int>(std::ceil(self_filter_radius_ / resolution_)));
+  const int min_cell_x = std::max(0, static_cast<int>(center_mx) - radius_cells);
+  const int min_cell_y = std::max(0, static_cast<int>(center_my) - radius_cells);
+  const int max_cell_x = std::min(
+    static_cast<int>(size_x_) - 1,
+    static_cast<int>(center_mx) + radius_cells);
+  const int max_cell_y = std::min(
+    static_cast<int>(size_y_) - 1,
+    static_cast<int>(center_my) + radius_cells);
+  const double sq_radius = self_filter_radius_ * self_filter_radius_;
+
+  for (int my = min_cell_y; my <= max_cell_y; ++my) {
+    for (int mx = min_cell_x; mx <= max_cell_x; ++mx) {
+      double wx = 0.0;
+      double wy = 0.0;
+      mapToWorld(static_cast<unsigned int>(mx), static_cast<unsigned int>(my), wx, wy);
+      const double dx = wx - robot_x;
+      const double dy = wy - robot_y;
+      if (dx * dx + dy * dy <= sq_radius) {
+        costmap_[getIndex(static_cast<unsigned int>(mx), static_cast<unsigned int>(my))] =
+          nav2_costmap_2d::FREE_SPACE;
+      }
+    }
+  }
+
+  touch(robot_x - self_filter_radius_, robot_y - self_filter_radius_, min_x, min_y, max_x, max_y);
+  touch(robot_x + self_filter_radius_, robot_y + self_filter_radius_, min_x, min_y, max_x, max_y);
 }
 
 void IntensityVoxelLayer::updateOrigin(double new_origin_x, double new_origin_y)

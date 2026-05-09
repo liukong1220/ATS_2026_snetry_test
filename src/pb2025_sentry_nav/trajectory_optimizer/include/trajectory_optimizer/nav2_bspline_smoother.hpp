@@ -62,7 +62,7 @@ private:
     nav2_costmap_2d::Costmap2D & costmap,
     const nav_msgs::msg::Path & path,
     std::vector<size_t> & indices) const;
-  bool pathHasCollision(
+  bool pathHasBlockingCollision(
     nav2_costmap_2d::Costmap2D & costmap,
     const nav_msgs::msg::Path & path) const;
   bool locallyDegradeCollidingSegments(
@@ -86,6 +86,8 @@ private:
   unsigned char max_path_cost_{96};
   unsigned char footprint_collision_cost_threshold_{253};
   int pullback_samples_{6};
+  int collision_skip_initial_points_{4};
+  double collision_skip_initial_distance_{0.25};
 };
 
 }  // namespace trajectory_optimizer

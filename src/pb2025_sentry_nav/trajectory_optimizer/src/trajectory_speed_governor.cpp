@@ -43,6 +43,7 @@ TrajectorySpeedGovernor::TrajectorySpeedGovernor(const rclcpp::NodeOptions & opt
   declare_parameter<std::string>("input_cmd_vel_topic", "cmd_vel_controller");
   declare_parameter<std::string>("output_cmd_vel_topic", "cmd_vel_controller_governed");
   declare_parameter<std::string>("marker_topic", marker_topic_);
+  declare_parameter<bool>("enabled", enabled_);
   declare_parameter<double>("min_speed_scale", min_speed_scale_);
   declare_parameter<double>("curvature_brake_gain", curvature_brake_gain_);
   declare_parameter<int>("curvature_window_points", curvature_window_points_);
@@ -52,6 +53,7 @@ TrajectorySpeedGovernor::TrajectorySpeedGovernor(const rclcpp::NodeOptions & opt
   get_parameter("input_cmd_vel_topic", input_cmd_vel_topic_);
   get_parameter("output_cmd_vel_topic", output_cmd_vel_topic_);
   get_parameter("marker_topic", marker_topic_);
+  get_parameter("enabled", enabled_);
   get_parameter("min_speed_scale", min_speed_scale_);
   get_parameter("curvature_brake_gain", curvature_brake_gain_);
   get_parameter("curvature_window_points", curvature_window_points_);
@@ -86,23 +88,32 @@ void TrajectorySpeedGovernor::profileCallback(
       static_cast<std::size_t>(std::max(1, curvature_window_points_))));
 
   double window_max_abs_curvature = 0.0;
+  double profile_speed_scale = 1.0;
   for (std::size_t i = 0; i < window_points; ++i) {
     window_max_abs_curvature = std::max(
       window_max_abs_curvature, std::abs(msg->points[i].curvature));
+    const double speed_limit = msg->points[i].speed_limit;
+    if (speed_limit > 1e-3) {
+      const double point_speed_scale =
+        std::max(0.0, std::min(1.0, msg->points[i].speed / speed_limit));
+      profile_speed_scale = std::min(profile_speed_scale, point_speed_scale);
+    }
   }
 
   const double curvature_scale =
     1.0 / (1.0 + curvature_brake_gain_ * window_max_abs_curvature);
   const double target_speed_scale = std::max(
-    min_speed_scale_, std::min(1.0, curvature_scale));
+    min_speed_scale_, std::min(1.0, std::min(curvature_scale, profile_speed_scale)));
   const double filter_gain = std::max(0.0, std::min(1.0, speed_scale_filter_gain_));
   current_speed_scale_ += (target_speed_scale - current_speed_scale_) * filter_gain;
 
   RCLCPP_INFO_THROTTLE(
     get_logger(), *get_clock(), 1000,
-    "Speed governor scale: target=%.3f filtered=%.3f kappa_window_max=%.3f window_points=%zu",
+    "Speed governor scale: target=%.3f filtered=%.3f profile=%.3f curvature=%.3f kappa_window_max=%.3f window_points=%zu",
     target_speed_scale,
     current_speed_scale_,
+    profile_speed_scale,
+    curvature_scale,
     window_max_abs_curvature,
     window_points);
 
@@ -123,6 +134,11 @@ void TrajectorySpeedGovernor::publishGovernedCmd()
   }
 
   geometry_msgs::msg::Twist governed = latest_cmd_vel_;
+  if (!enabled_) {
+    governed_cmd_pub_->publish(governed);
+    return;
+  }
+
   governed.linear.x *= current_speed_scale_;
   governed.linear.y *= current_speed_scale_;
   governed.angular.z *= std::sqrt(current_speed_scale_);

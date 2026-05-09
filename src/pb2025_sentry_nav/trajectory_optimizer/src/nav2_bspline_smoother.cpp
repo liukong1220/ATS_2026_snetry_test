@@ -148,6 +148,12 @@ void Nav2BSplineSmoother::configure(
   nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".pullback_samples",
     rclcpp::ParameterValue(pullback_samples_));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".collision_skip_initial_points",
+    rclcpp::ParameterValue(collision_skip_initial_points_));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".collision_skip_initial_distance",
+    rclcpp::ParameterValue(collision_skip_initial_distance_));
 
   node->get_parameter(plugin_name_ + ".control_point_spacing", params.control_point_spacing);
   node->get_parameter(plugin_name_ + ".output_path_spacing", params.output_path_spacing);
@@ -197,9 +203,15 @@ void Nav2BSplineSmoother::configure(
     plugin_name_ + ".footprint_collision_cost_threshold",
     configured_footprint_collision_threshold);
   node->get_parameter(plugin_name_ + ".pullback_samples", pullback_samples_);
+  node->get_parameter(
+    plugin_name_ + ".collision_skip_initial_points", collision_skip_initial_points_);
+  node->get_parameter(
+    plugin_name_ + ".collision_skip_initial_distance", collision_skip_initial_distance_);
   max_path_cost_ = static_cast<unsigned char>(std::max(0, configured_max_cost));
   footprint_collision_cost_threshold_ = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_footprint_collision_threshold)));
+  collision_skip_initial_points_ = std::max(0, collision_skip_initial_points_);
+  collision_skip_initial_distance_ = std::max(0.0, collision_skip_initial_distance_);
 
   optimizer_.setParams(params);
   optimizer_.clearEsdfProvider();
@@ -275,7 +287,7 @@ bool Nav2BSplineSmoother::smooth(
   path = result.path;
   enforceCostmapClearance(path, reference_path);
   updatePathOrientations(path);
-  if (costmap && pathHasCollision(*costmap, path)) {
+  if (costmap && pathHasBlockingCollision(*costmap, path)) {
     std::vector<size_t> smoothed_collision_indices;
     collectCollidingIndices(*costmap, path, smoothed_collision_indices);
     if (!smoothed_collision_indices.empty()) {
@@ -300,7 +312,7 @@ bool Nav2BSplineSmoother::smooth(
       enforceCostmapClearance(path, reference_path);
       updatePathOrientations(path);
     }
-    if (pathHasCollision(*costmap, path)) {
+    if (pathHasBlockingCollision(*costmap, path)) {
       std::vector<size_t> degraded_collision_indices;
       std::vector<size_t> raw_collision_indices;
       collectCollidingIndices(*costmap, path, degraded_collision_indices);
@@ -419,7 +431,9 @@ void Nav2BSplineSmoother::enforceCostmapClearance(
         best_candidate = candidate;
       }
 
-      if (!candidate_footprint_collision && sampled_candidate_cost && candidate_cost <= max_path_cost_) {
+      if (!candidate_footprint_collision && sampled_candidate_cost &&
+        candidate_cost <= max_path_cost_)
+      {
         smoothed_path.poses[i] = candidate;
         repaired = true;
         break;
@@ -545,13 +559,38 @@ void Nav2BSplineSmoother::collectCollidingIndices(
   }
 }
 
-bool Nav2BSplineSmoother::pathHasCollision(
+bool Nav2BSplineSmoother::pathHasBlockingCollision(
   nav2_costmap_2d::Costmap2D & costmap,
   const nav_msgs::msg::Path & path) const
 {
   std::vector<size_t> indices;
   collectCollidingIndices(costmap, path, indices);
-  return !indices.empty();
+  if (indices.empty()) {
+    return false;
+  }
+
+  const auto & start = path.poses.front().pose.position;
+  for (const size_t index : indices) {
+    const auto & point = path.poses[index].pose.position;
+    const double dx = point.x - start.x;
+    const double dy = point.y - start.y;
+    const double distance_from_start = std::hypot(dx, dy);
+    const bool within_startup_index =
+      index < static_cast<size_t>(collision_skip_initial_points_);
+    const bool within_startup_distance =
+      distance_from_start <= collision_skip_initial_distance_;
+    if (!within_startup_index && !within_startup_distance) {
+      return true;
+    }
+  }
+
+  RCLCPP_WARN_THROTTLE(
+    logger_, *clock_, 1500,
+    "Ignoring %zu startup footprint collision samples within %.2fm / %d points; keep controller active for MPPI to move out of local self-cost.",
+    indices.size(),
+    collision_skip_initial_distance_,
+    collision_skip_initial_points_);
+  return false;
 }
 
 bool Nav2BSplineSmoother::locallyDegradeCollidingSegments(

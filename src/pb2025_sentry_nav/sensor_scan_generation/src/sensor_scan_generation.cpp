@@ -115,31 +115,39 @@ void SensorScanGenerationNode::publishOdometry(
   out.pose.pose.position.z = origin.z();
   out.pose.pose.orientation = tf2::toMsg(transform.getRotation());
 
-  static tf2::Transform previous_transform;
-  static auto previous_time = std::chrono::steady_clock::now();
-  const auto current_time = std::chrono::steady_clock::now();
+  if (has_previous_odometry_) {
+    const double dt = (stamp - previous_odom_stamp_).seconds();
+    if (dt > 1e-6) {
+      const tf2::Vector3 delta_world =
+        transform.getOrigin() - previous_odom_to_robot_base_.getOrigin();
+      const tf2::Vector3 linear_velocity_world = delta_world / dt;
 
-  const double dt =
-    std::chrono::duration_cast<std::chrono::nanoseconds>(current_time - previous_time).count() *
-    1e-9;
+      const tf2::Matrix3x3 world_to_base(transform.getRotation().inverse());
+      const tf2::Vector3 linear_velocity_base = world_to_base * linear_velocity_world;
 
-  if (dt > 0) {
-    const auto linear_velocity = (transform.getOrigin() - previous_transform.getOrigin()) / dt;
+      const tf2::Quaternion q_diff =
+        transform.getRotation() * previous_odom_to_robot_base_.getRotation().inverse();
+      tf2::Vector3 angular_axis = q_diff.getAxis();
+      if (!std::isfinite(angular_axis.x()) || !std::isfinite(angular_axis.y()) ||
+        !std::isfinite(angular_axis.z()))
+      {
+        angular_axis = tf2::Vector3(0.0, 0.0, 0.0);
+      }
+      const tf2::Vector3 angular_velocity_world = angular_axis * (q_diff.getAngle() / dt);
+      const tf2::Vector3 angular_velocity_base = world_to_base * angular_velocity_world;
 
-    const tf2::Quaternion q_diff =
-      transform.getRotation() * previous_transform.getRotation().inverse();
-    const auto angular_velocity = q_diff.getAxis() * q_diff.getAngle() / dt;
-
-    out.twist.twist.linear.x = linear_velocity.x();
-    out.twist.twist.linear.y = linear_velocity.y();
-    out.twist.twist.linear.z = linear_velocity.z();
-    out.twist.twist.angular.x = angular_velocity.x();
-    out.twist.twist.angular.y = angular_velocity.y();
-    out.twist.twist.angular.z = angular_velocity.z();
+      out.twist.twist.linear.x = linear_velocity_base.x();
+      out.twist.twist.linear.y = linear_velocity_base.y();
+      out.twist.twist.linear.z = linear_velocity_base.z();
+      out.twist.twist.angular.x = angular_velocity_base.x();
+      out.twist.twist.angular.y = angular_velocity_base.y();
+      out.twist.twist.angular.z = angular_velocity_base.z();
+    }
   }
 
-  previous_transform = transform;
-  previous_time = current_time;
+  previous_odom_to_robot_base_ = transform;
+  previous_odom_stamp_ = stamp;
+  has_previous_odometry_ = true;
 
   pub_chassis_odometry_->publish(out);
 }

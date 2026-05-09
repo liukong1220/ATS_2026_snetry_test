@@ -34,6 +34,8 @@ FakeVelTransform::FakeVelTransform(const rclcpp::NodeOptions & options)
   this->get_parameter("output_cmd_vel_topic", output_cmd_vel_topic_);
   this->get_parameter("init_spin_speed", spin_speed_);
 
+  current_robot_base_angle_ = 0.0;
+
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
   cmd_vel_chassis_pub_ =
@@ -81,7 +83,6 @@ void FakeVelTransform::odometryCallback(const nav_msgs::msg::Odometry::ConstShar
 void FakeVelTransform::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
 {
   std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
-  last_cmd_vel_time_ = rclcpp::Clock().now();
   const bool is_zero_vel = std::abs(msg->linear.x) < EPSILON && std::abs(msg->linear.y) < EPSILON &&
                            std::abs(msg->angular.z) < EPSILON;
   const bool controller_timeout =
@@ -134,25 +135,6 @@ void FakeVelTransform::publishTransform()
   q.setRPY(0, 0, -current_robot_base_angle_);
   t.transform.rotation = tf2::toMsg(q);
   tf_broadcaster_->sendTransform(t);
-
-  std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
-  if (!latest_cmd_vel_) {
-    return;
-  }
-
-  const auto now = rclcpp::Clock().now();
-  const bool cmd_fresh = (now - last_cmd_vel_time_).seconds() <= CONTROLLER_TIMEOUT;
-  const bool controller_active = (now - last_controller_activate_time_).seconds() <= CONTROLLER_TIMEOUT;
-
-  geometry_msgs::msg::Twist::SharedPtr cmd_to_publish = latest_cmd_vel_;
-  geometry_msgs::msg::Twist zero_cmd;
-  if (!cmd_fresh || !controller_active) {
-    zero_cmd = geometry_msgs::msg::Twist();
-    cmd_to_publish = std::make_shared<geometry_msgs::msg::Twist>(zero_cmd);
-  }
-
-  auto aft_tf_vel = transformVelocity(cmd_to_publish, current_robot_base_angle_);
-  cmd_vel_chassis_pub_->publish(aft_tf_vel);
 }
 
 geometry_msgs::msg::Twist FakeVelTransform::transformVelocity(

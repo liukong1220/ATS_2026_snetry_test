@@ -1,5 +1,3 @@
- 
-
 #ifndef PB_NAV2_PLUGINS__LAYERS__INTENSITY_VOXEL_LAYER_HPP_
 #define PB_NAV2_PLUGINS__LAYERS__INTENSITY_VOXEL_LAYER_HPP_
 
@@ -24,7 +22,8 @@ namespace pb_nav2_costmap_2d
 class IntensityVoxelLayer : public nav2_costmap_2d::ObstacleLayer
 {
 public:
-  IntensityVoxelLayer() : voxel_grid_(0, 0, 0)
+  IntensityVoxelLayer()
+  : voxel_grid_(0, 0, 0)
   {
     costmap_ = NULL;  // this is the unsigned char* member of parent class's parent class Costmap2D.
   }
@@ -37,16 +36,19 @@ public:
     double * max_x, double * max_y);
 
   void updateOrigin(double new_origin_x, double new_origin_y);
-  bool isDiscretized() { return true; }
+  bool isDiscretized() {return true;}
   virtual void matchSize();
   virtual void reset();
-  virtual bool isClearable() { return false; }
+  virtual bool isClearable() {return false;}
 
 protected:
   virtual void resetMaps();
   void updateFootprint(
     double robot_x, double robot_y, double robot_yaw, double * min_x, double * min_y,
     double * max_x, double * max_y);
+  void clearSelfFilterRadius(
+    double robot_x, double robot_y, double * min_x, double * min_y, double * max_x,
+    double * max_y);
 
 private:
   bool publish_voxel_;
@@ -54,6 +56,7 @@ private:
   nav2_voxel_grid::VoxelGrid voxel_grid_;
   double z_resolution_, origin_z_;
   double min_obstacle_intensity_, max_obstacle_intensity_;
+  double self_filter_radius_;
   unsigned int unknown_threshold_, mark_threshold_, size_z_;
   rclcpp::Clock::SharedPtr clock_;
 

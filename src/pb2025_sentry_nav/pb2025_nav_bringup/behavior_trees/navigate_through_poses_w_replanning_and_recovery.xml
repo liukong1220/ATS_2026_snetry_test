@@ -26,7 +26,7 @@
                           smoothed_path="{path}"
                           smoother_id="bspline_smoother"
                           max_smoothing_duration="0.15"
-                          check_for_collisions="true"/>
+                          check_for_collisions="false"/>
               <ClearEntireCostmap name="ClearGlobalCostmap-PostSmooth"
                                   service_name="global_costmap/clear_entirely_global_costmap"/>
             </RecoveryNode>
