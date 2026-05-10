@@ -28,11 +28,11 @@ https://github.com/user-attachments/assets/ae4c19a0-4c73-46a0-95bd-909734da2a42
 
 - 关于路径规划：
 
-    使用 NAV2 默认的 Global Planner 作为全局路径规划器，`nav2_mppi_controller::MPPIController` 作为局部控制器。
+    当前整车主链使用 `SmacPlannerHybrid -> Nav2BSplineSmoother -> MPPI -> trajectory_speed_governor -> velocity_smoother`。其中 MPPI 通过采样和滚动优化实现预测性控制，B 样条 smoother 负责受限平滑与 `trajectory_profile` 发布，governor 再根据近端曲率窗口做二次限速。
 
 - namespace：
 
-    为了后续拓展多机器人，本项目引入 namespace 的设计，与 ROS 相关的 node, topic, action 等都加入了 namespace 前缀。如需查看 tf tree，请使用命令 `ros2 run rqt_tf_tree rqt_tf_tree --ros-args -r /tf:=tf -r /tf_static:=tf_static -r  __ns:=/red_standard_robot1`
+    为了后续拓展多机器人，本项目保留了 namespace 设计。但当前整车工作区默认以空 namespace 运行，也就是大多数实车/loopback 调试都直接使用全局话题名。只有在你显式传入 `namespace:=<robot_name>` 时，才需要给 node、topic、action 加对应前缀。
 
 - LiDAR:
 
@@ -156,7 +156,7 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py \
 slam:=True
 ```
 
-保存栅格地图：`ros2 run nav2_map_server map_saver_cli -f <YOUR_MAP_NAME>  --ros-args -r __ns:=/red_standard_robot1`
+保存栅格地图：`ros2 run nav2_map_server map_saver_cli -f <YOUR_MAP_NAME>`
 
 多机器人 (实验性功能) :
 
@@ -173,6 +173,17 @@ blue_standard_robot1={x: 5.6, y: 1.4, yaw: 3.14}; \
 
 #### 2.3.2 实车
 
+在当前整车工作区中，实车联调优先使用总入口：
+
+```bash
+ros2 launch pb2025_sentry_bringup bringup.launch.py \
+world:=<YOUR_WORLD_NAME> \
+slam:=False \
+use_rviz:=True
+```
+
+它会同时补齐串口、TF、行为树、`fake_vel_transform` 和 `node_params.yaml` 中的整车参数。下面的 `pb2025_nav_bringup` 命令仅适合导航子系统单独排查。
+
 建图模式：
 
 ```bash
@@ -181,7 +192,13 @@ slam:=True \
 use_robot_state_pub:=True
 ```
 
-保存栅格地图：`ros2 run nav2_map_server map_saver_cli -f <YOUR_MAP_NAME>  --ros-args -r __ns:=/red_standard_robot1`
+保存栅格地图：`ros2 run nav2_map_server map_saver_cli -f <YOUR_MAP_NAME>`
+
+如果你这次不是用整车总入口，而是单独用 `rm_navigation_reality_launch.py` 且显式传了 `namespace:=<robot_name>`，再额外补上：
+
+```bash
+--ros-args -r __ns:=/<robot_name>
+```
 
 导航模式：
 
@@ -205,7 +222,7 @@ use_robot_state_pub:=True
 
 | 可用性 | 参数 | 描述 | 类型  | 默认值 |
 |-|-|-|-|-|
-| 🤖 🖥️ | `namespace` | 顶级命名空间 | string | "red_standard_robot1" |
+| 🤖 🖥️ | `namespace` | 顶级命名空间 | string | "" |
 | 🤖🖥️ | `use_sim_time` | 如果为 True，则使用仿真（Gazebo）时钟 | bool | 仿真: True; 实车: False |
 | 🤖 🖥️ | `slam` | 是否启用建图模式。如果为 True，则禁用 small_gicp 并发送静态 tf（map->odom）。然后自动保存 pcd 文件到 [./point_lio/PCD/](./point_lio/PCD/)| bool | False |
 | 🤖 🖥️ | `world` | 在仿真模式，可用选项为 `rmul_2024` 或 `rmuc_2024` 或 `rmul_2025` 或 `rmuc_2025` | string | "rmuc_2025" |

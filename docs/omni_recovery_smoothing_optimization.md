@@ -1,12 +1,12 @@
 # 全向导航、平滑与 ESDF 优化交接文档
 
-更新时间：2026-05-08
+更新时间：2026-05-10
 
-本文档用于交接当前 `loopback_sim` 与实车导航链路的轨迹优化进度。下一轮对话可以直接从本文档继续，不需要再重新确认 ESDF 是否接通、MPPI 是否跟踪平滑路径、RViz 是否能观察到 fake ESDF。
+本文档用于交接当前 `loopback_sim` 与实车导航链路的轨迹优化进度。下一轮对话可以直接从本文档继续，不需要再重新确认 ESDF 是否接通、MPPI 是否跟踪平滑路径、RViz 是否能观察到 fake ESDF、实车主参数是否已经接入 ESDF。
 
 ## 1. 当前结论
 
-当前系统已经从“能规划但跟踪不稳定”推进到“平滑路径进入 Nav2 主链，fake ESDF 可调用、可观测，loopback 中效果方向正确”的阶段。
+当前系统已经从“能规划但跟踪不稳定”推进到“平滑路径进入 Nav2 主链，fake ESDF 可调用、可观测，loopback 与实车主链均已接入，实车可稳定导航”的阶段。
 
 阶段状态：
 
@@ -14,14 +14,17 @@
 2. MPPI 当前跟随的是 `SmoothPath` 后输出给 controller 的路径，不再只是 RViz 中旁路青色线。
 3. `trajectory_profile` 已成为正式接口，`trajectory_speed_governor` 已基于该 profile 对 controller 输出做二次限速。
 4. fake ESDF 已经不是单纯 stub，当前基于 costmap 做 2D distance transform，并接入 optimizer 与 Nav2 smoother。
-5. loopback 中 fake ESDF 已达到当前目标：RViz 可稳定看到贴墙/弯角处红色近障碍采样点，梯度箭头方向可解释，青色路径在贴边段比之前更早回拉。
-6. 按当前观察，暂时不增强 fake ESDF 作用强度，避免在已可用状态下继续堆参数导致行为不可控。
+5. loopback 与实车主参数 `node_params.yaml` 都已开启 `use_esdf_obstacle_cost: true`，`obstacle_safe_distance: 0.30`。
+6. loopback 中 fake ESDF 已达到当前目标：RViz 可稳定看到贴墙/弯角处红色近障碍采样点，梯度箭头方向可解释，青色路径在贴边段比之前更早回拉。
+7. 实车已完成一轮“速度过慢 / cmd_vel 过小”排查，当前基线把曲率源、近端曲率限速、速度平滑和全向底盘转弯半径重新对齐。
+8. 按当前观察，暂时不增强 fake ESDF 作用强度，避免在已可用状态下继续堆参数导致行为不可控。
 
 当前需要保留的判断：
 
 1. 现阶段主要问题已经不是“链路没接通”，而是“轨迹连续性、控制耦合、实车调试一致性”。
 2. 后续不要优先继续把 B 样条磨圆；过度平滑会让弯角内切、终端段拉直、MPPI 跟踪变慢。
-3. fake ESDF 的作用已经可见，下一步应先稳定接口和文档，再进入更高质量 ESDF-lite，而不是马上接复杂后端库。
+3. 速度过慢时先看 `/trajectory_profile.max_abs_curvature` 和 `/cmd_vel_controller`，不要只看最终 `/cmd_vel`。
+4. fake ESDF 的作用已经可见，下一步应先稳定接口、观测和上车记录，再考虑真实 ESDF 后端。
 
 ## 2. 关键代码与配置索引
 
@@ -154,28 +157,31 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py
 
 当前实车链路已同步的内容：
 
-1. `SmacPlannerHybrid` 终端直连参数已调低激进程度。
-2. `smooth_path: False`，避免 Smac 自带 smoother 与 B 样条重复平滑。
+1. `SmacPlannerHybrid` 按全向底盘重新整理，`minimum_turning_radius: 0.07`，避免把全向底盘当成大转弯半径车辆。
+2. 实车当前保留 `smooth_path: True` 的旧实车基线，再由 B 样条做受限二次平滑和速度剖面。
 3. `bspline_smoother` 与旁路 `trajectory_optimizer` 使用同一组保形参数。
 4. `trajectory_speed_governor` 已接入 controller 与 velocity smoother 中间。
 5. `BackUpFreeSpace` recovery 搜索半径与走廊参数已收紧。
 6. 视觉跟随候选点筛选已同步 loopback 与实车行为参数。
+7. fake ESDF 已接入实车 `trajectory_optimizer` 与 `smoother_server.bspline_smoother`。
+8. velocity smoother 实车上限已打开到 `[4.5, 4.5, 5.0]`，避免速度链后段把 MPPI 输出过度夹小。
 
-当前实车链路没有开启的内容：
+当前实车速度过慢排查结论：
 
-1. fake ESDF 当前只在 loopback `src/loopback_sim/params/nav2_params.yaml` 中开启。
-2. `node_params.yaml` 与 `reality/nav2_params.yaml` 目前仍保持 costmap obstacle penalty 基线。
-3. 这个取舍是为了避免在实车调试前同时引入 ESDF 作用强度、传感器噪声、定位误差三个变量。
+1. 用户实测曾出现 `/cmd_vel_controller`、`/cmd_vel_controller_governed`、`/cmd_vel` 都只有 `0.0x~0.x` 的情况。
+2. 当时 `/trajectory_profile.max_abs_curvature` 约 `4.7`，`curvature_penalty` 明显主导，因此根因更偏向上游轨迹曲率和 profile 限速，不是下位机串口发送频率本身。
+3. 当前基线已把实车 `lateral_accel_limit` / `longitudinal_accel_limit` 提到 `1.8`，并把 governor 改为近端曲率窗口限速，避免整条路径远端急弯拖慢当前速度。
+4. 若再次出现慢速，优先记录 `/trajectory_profile` 前几项、`/cmd_vel_controller`、`/cmd_vel_controller_governed`、`/cmd_vel_nav2_result`、`/cmd_vel`，看速度在哪一级开始变小。
 
 实车调试建议：
 
 1. 先验证 `SmacPlannerHybrid + bspline_smoother + MPPI + speed_governor` 的稳定性。
 2. 再观察 `smoothed_path_visual` 和 `trajectory_profile_markers` 是否与 loopback 趋势一致。
-3. 最后才考虑把 fake ESDF 分支迁入实车参数。
+3. 最后才考虑调大 ESDF 权重或改 MPPI critic，否则变量会重新变多。
 
 ## 5. 当前参数基线
 
-loopback 中 fake ESDF 已开启：
+loopback 与实车中 fake ESDF 均已开启：
 
 ```yaml
 trajectory_optimizer:
@@ -188,63 +194,47 @@ smoother_server:
     obstacle_safe_distance: 0.30
 ```
 
-实车当前仍未开启 fake ESDF：
-
-```yaml
-trajectory_optimizer:
-  obstacle_safe_cost: 48
-  obstacle_weight: 40.0
-  obstacle_refinement_iterations: 3
-  obstacle_refinement_gain: 0.02
-
-smoother_server:
-  bspline_smoother:
-    obstacle_safe_cost: 48
-    obstacle_weight: 40.0
-    obstacle_refinement_iterations: 3
-    obstacle_refinement_gain: 0.02
-```
-
 B 样条与速度 profile 当前方向：
 
 1. `control_point_spacing: 0.20`
 2. `output_path_spacing: 0.05`
-3. `max_lateral_deviation: 0.08`
+3. `max_lateral_deviation: 0.16`
 4. `curvature_limit: 1.60`
 5. `curvature_weight: 10.0`
 6. `curvature_refinement_iterations: 2`
 7. `curvature_refinement_gain: 0.010`
-8. `lateral_accel_limit: 0.75`
-9. `longitudinal_accel_limit: 0.55`
+8. loopback `lateral_accel_limit: 0.75`，`longitudinal_accel_limit: 0.55`
+9. real `lateral_accel_limit: 1.8`，`longitudinal_accel_limit: 1.8`
 10. `velocity_smoothing_gain: 0.18`
 
 参数含义：
 
 1. 当前不是追求极致平滑，而是优先保形、少内切、少贴障。
-2. `max_lateral_deviation` 已压到 `0.08`，用于限制 B 样条离原始全局路径太远。
+2. `max_lateral_deviation: 0.16` 给 B 样条保留有限回拉空间，但仍限制其离原始全局路径太远。
 3. `control_point_spacing` 已收小到 `0.20`，用于减少转角被大步控制点抹成直线。
 4. `curvature_refinement_gain` 已保守，避免曲率修正本身把线推进膨胀层。
+5. 实车速度 profile 当前比 loopback 更激进，因为实车已验证可稳定导航，且需要避免 `0.0x` 级低速。
 
 SmacPlannerHybrid 当前方向：
 
 1. loopback `tolerance: 0.20`
-2. real `tolerance: 0.18`
+2. real `tolerance: 0.30`
 3. loopback `analytic_expansion_ratio: 2.0`
-4. real `analytic_expansion_ratio: 2.2`
+4. real `analytic_expansion_ratio: 3.5`
 5. loopback `analytic_expansion_max_length: 1.2`
-6. real `analytic_expansion_max_length: 1.8`
-7. loopback `minimum_turning_radius: 0.16`
-8. real `minimum_turning_radius: 0.22`
-9. `cost_travel_multiplier: 2.9`
-10. `cost_penalty: 3.0`
-11. `smooth_path: False`
+6. real `analytic_expansion_max_length: 3.6`
+7. loopback `minimum_turning_radius: 0.50`
+8. real `minimum_turning_radius: 0.07`
+9. loopback `cost_travel_multiplier: 2.9`，real `cost_travel_multiplier: 2.2`
+10. loopback `cost_penalty: 3.0`，real `cost_penalty: 2.3`
+11. loopback `smooth_path: False`，real `smooth_path: True`
 
 实车 footprint / 安全边界方向：
 
-1. footprint 仍为约 `0.60m x 0.60m` 的方形近似。
-2. `footprint_padding: 0.04`
-3. `inflation_radius: 0.50`
-4. MPPI `collision_margin_distance: 0.24`
+1. 实车主参数 footprint 当前为约 `0.40m x 0.40m` 的方形近似。
+2. `footprint_padding: 0.02`
+3. local inflation `0.50`，global inflation `0.55`
+4. MPPI `collision_margin_distance: 0.08`
 5. `xy_goal_tolerance: 0.20`
 
 Recovery 当前同步参数：
@@ -282,8 +272,9 @@ Eigen::Vector2d getGradient(double x, double y);
 1. 输入 `global_costmap/costmap_raw`。
 2. 将高代价值栅格视为障碍。
 3. 在二维 costmap 上做 distance transform。
-4. `getDistance(x, y)` 返回到最近障碍的近似欧氏距离。
-5. `getGradient(x, y)` 返回距离场中心差分梯度。
+4. `getDistance(x, y)` 使用 bilinear interpolation 返回到最近障碍的近似欧氏距离。
+5. `getGradient(x, y)` 在平滑后的距离场上取插值梯度，减少中心差分跳变。
+6. debug marker 会统计 `d_min`、`d_avg`、`|g|avg`、`risk=a/b`。
 
 optimizer 当前分支逻辑：
 
@@ -303,7 +294,8 @@ J_obstacle = sum(max(0, d_safe - d(x))^2)
 2. 红色近障碍点主要集中在弯角内侧或贴墙段。
 3. 黄色梯度箭头方向基本可解释，用于判断路径应被推向哪侧。
 4. 青色 `smoothed_path_visual` 在贴边段相较之前更早回拉。
-5. 暂时不增强作用强度，避免把一个已可观察、可调试的基线打乱。
+5. 实车已接入 fake ESDF，但仍按保守强度运行。
+6. 暂时不增强作用强度，避免把一个已可观察、可调试的基线打乱。
 
 ## 7. RViz 观察说明
 
@@ -327,6 +319,7 @@ J_obstacle = sum(max(0, d_safe - d(x))^2)
 4. `/trajectory_esdf_debug` 红/绿点：红点表示离障碍近，绿点表示离障碍远。
 5. `/trajectory_esdf_debug` 黄色箭头：表示 `grad d(x)`，也就是局部远离障碍的方向。
 6. costmap：确认红点是否确实对应膨胀层、墙角或局部高代价区域。
+7. `trajectory_profile_markers` 文字 `kappa_max / cost` 与 `trajectory_esdf_debug` 文字 `d_min / d_avg / |g|avg / risk` 已错开显示，避免 RViz 尾部文字重叠。
 
 当前 RViz 已修复：
 
@@ -350,6 +343,13 @@ J_obstacle = sum(max(0, d_safe - d(x))^2)
 3. smoother 支持 footprint-aware collision / pullback。
 4. smoother 支持局部退化为 raw polyline 段。
 5. fallback 后重新评估最终路径 profile。
+6. fallback 策略已避免在 raw path 不更安全时盲目整条退回 raw planner path。
+
+速度链：
+
+1. `trajectory_speed_governor` 已从“整条路径最大曲率限速”改为“近端窗口曲率限速”。
+2. governor 增加 `curvature_window_points` 和 `speed_scale_filter_gain`，减少远端急弯导致当前速度塌陷。
+3. 实车 velocity smoother 速度/加速度上限已打开，避免后段把全向速度夹成 `0.0x`。
 
 视觉跟随：
 
@@ -363,7 +363,9 @@ ESDF：
 1. `EsdfProvider` 抽象接口完成。
 2. fake costmap ESDF provider 完成。
 3. optimizer 与 smoother 都可调用 fake ESDF。
-4. loopback 已验证 fake ESDF 可观测。
+4. loopback 与实车参数均已开启 fake ESDF。
+5. bilinear distance interpolation、gradient smoothing、ESDF debug statistics 已完成。
+6. `trajectory_esdf_debug` 文本与 profile 文本已错开显示。
 
 ## 9. 仍需关注的问题
 
@@ -380,7 +382,7 @@ ESDF：
 1. 不要继续单纯提高 ESDF obstacle weight。
 2. 不要继续无节制减小 `output_path_spacing`。
 3. 不要同时修改 planner、smoother、MPPI 和 governor 多组参数。
-4. 不要在实车上直接开启 fake ESDF 后再同时调 MPPI，否则变量过多。
+4. 不要在实车已稳定的情况下同时加 ESDF 强度和改 MPPI critic，否则变量过多。
 
 ## 10. 参考技术报告后的优化路线
 
@@ -398,8 +400,8 @@ ESDF：
 
 1. 当前 B 样条 + profile 已经承担了“轨迹表示 + 时间参数化”的角色。
 2. fake ESDF 已经承担了“距离与梯度观测”的入口角色。
-3. 下一步最重要的是让 fake ESDF 更连续，而不是马上换库。
-4. 后续 optimizer 应逐步从单点 obstacle push，演进到更稳定的二阶段 refinement。
+3. fake ESDF-lite 第一版已经完成 bilinear distance、平滑梯度和统计输出。
+4. 后续重点是继续观察二阶段 refinement 与速度 profile 的耦合，而不是马上换真实 ESDF 库。
 
 ### 10.2 从 `Batch-LIWO.pdf` 得到的实车链路启发
 
@@ -434,6 +436,7 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 2. 检查 `trajectory_profile_markers` 是否跟随 `/trajectory_profile` 正常刷新。
 3. 检查实车终端转角是否仍被拉直。
 4. 若实车比 loopback 抖，优先排查 odom / TF / 下位机响应延迟。
+5. 若实车速度再次只有 `0.0x`，按 `/trajectory_profile -> /cmd_vel_controller -> /cmd_vel_controller_governed -> /cmd_vel_nav2_result -> /cmd_vel` 顺序定位速度在哪一级被压低。
 
 第三优先级：trajectory-grade fake ESDF-lite
 
@@ -464,7 +467,8 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 请先阅读 docs/omni_recovery_smoothing_optimization.md。
 当前 fake ESDF 在 loopback 已达到阶段目标，先不要增强 obstacle 强度。
 实车主参数是 src/pb2025_sentry_bringup/params/node_params.yaml。
-目前 loopback 与实车主链一致性、fake ESDF-lite 第一版、二阶段 optimizer refinement 第一版都已经完成。
+目前 loopback 与实车主链一致性、实车 ESDF 接入、fake ESDF-lite 第一版、二阶段 optimizer refinement 第一版都已经完成。
+实车已能稳定导航；如果出现速度慢，优先看 trajectory_profile 曲率和速度链分级 topic。
 请下一步优先做：
 1. loopback 运行时观察是否稳定
 2. 实车链路一致性验证
@@ -477,8 +481,9 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 1. `ESDF interface`: 已完成。
 2. `fake ESDF provider`: 已完成并可观测。
 3. `loopback fake ESDF`: 当前效果达到阶段目标，暂不加权。
-4. `real chain ESDF`: 暂未开启，应先做实车主链稳定性验证。
+4. `real chain ESDF`: 已接入 `node_params.yaml` 与 reality 备份参数。
 5. `fake ESDF-lite`: 已完成第一轮连续性升级，包括 bilinear distance、平滑梯度、debug statistics。
 6. `optimizer refinement`: 已完成第一轮二阶段化，当前版本重点是抑制沿轨迹切向的 ESDF 推动。
 7. `RViz debug`: 已修正 ESDF 统计文本与 `trajectory_profile_markers` 的尾部文字重叠，改为沿终点局部法向偏移显示。
-8. `next core`: loopback 运行时观察、实车一致性、控制耦合。
+8. `real speed baseline`: 已针对曲率过大导致的 `cmd_vel` 过小做过一轮修正。
+9. `next core`: loopback 运行时观察、实车一致性、控制耦合。

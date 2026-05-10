@@ -25,7 +25,11 @@
   -> 输出姿态模式 / 自旋速度 / 云台指令 / decision_path
   -> SendNavThroughPoses
   -> /navigate_through_poses
-  -> Nav2 Planner + MPPI
+  -> SmacPlannerHybrid
+  -> Nav2BSplineSmoother
+  -> MPPI
+  -> trajectory_speed_governor
+  -> velocity_smoother
   -> cmd_vel_nav2_result
   -> fake_vel_transform
   -> /cmd_vel

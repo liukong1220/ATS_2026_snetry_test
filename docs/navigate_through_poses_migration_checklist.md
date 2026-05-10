@@ -9,8 +9,9 @@
 
 如果你要看当前真正在线运行的主线，请优先看：
 
+- [`./总览.md`](./总览.md)
 - [`./sentry_bt_decision_checklist.md`](./sentry_bt_decision_checklist.md)
-- [`./移植.md`](./移植.md)
+- [`./omni_recovery_smoothing_optimization.md`](./omni_recovery_smoothing_optimization.md)
 
 ---
 
@@ -23,7 +24,14 @@ pb2025_sentry_bringup/bringup.launch.py
   -> pb2025_sentry_behavior
   -> SendNavThroughPoses
   -> /navigate_through_poses
-  -> Nav2 + MPPI
+  -> SmacPlannerHybrid
+  -> Nav2BSplineSmoother
+  -> MPPI
+  -> trajectory_speed_governor
+  -> velocity_smoother
+  -> cmd_vel_nav2_result
+  -> fake_vel_transform
+  -> /cmd_vel
 ```
 
 关键事实：

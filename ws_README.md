@@ -66,18 +66,19 @@ colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release --paralle
 
 ### 2.4 Running
 
-将会运行串口通信、视觉、导航、决策模块，参数均读取自配置文件 [node_params](./src/pb2025_sentry_bringup/params/node_params.yaml)。
+将会运行串口通信、导航、行为树决策与 rosbag 触发节点，实车主参数读取自 [node_params](./src/pb2025_sentry_bringup/params/node_params.yaml)。
 
 ```bash
 ros2 launch pb2025_sentry_bringup bringup.launch.py \
-world:=<YOUR_PARAMS_FILE> \
+world:=<YOUR_WORLD_NAME> \
+slam:=False \
 use_rviz:=True
 ```
 
 ## 3. 常用调试启动命令
 
 > [!NOTE]
-> 请自行替换 `<YOUR_WORLD_NAME>` 为你的 map, pcd 的文件名；替换 `<YOUR_PARAMS_FILE>` 为你的配置文件的**绝对路径**，如 [node_params](./src/pb2025_sentry_bringup/params/node_params.yaml)。
+> 请自行替换 `<YOUR_WORLD_NAME>` 为你的 map / pcd 文件名；如需改整车参数，优先修改 [node_params](./src/pb2025_sentry_bringup/params/node_params.yaml)。
 
 ### 3.1 子模块
 
@@ -105,10 +106,13 @@ params_file:=<YOUR_PARAMS_FILE>
 Navigation
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_reality_launch.py \
-world:=<YOUR_WORLD_NAME>  \
-slam:=False
+ros2 launch pb2025_sentry_bringup bringup.launch.py \
+world:=<YOUR_WORLD_NAME> \
+slam:=False \
+use_rviz:=True
 ```
+
+当前实车联调优先使用 `pb2025_sentry_bringup/bringup.launch.py`，它会同时补齐串口、TF、行为树和实车主参数；`pb2025_nav_bringup/rm_navigation_reality_launch.py` 只建议做导航子系统单独排查。
 
 Behavior Tree
 

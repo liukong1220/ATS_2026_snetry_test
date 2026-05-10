@@ -5,6 +5,7 @@
 本文主要说明当前项目中 MPPI 局部控制器的核心参数含义、常见现象与调参方向，优先针对：
 
 - `ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True`
+- `ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True`
 - 参数文件：`src/loopback_sim/params/nav2_params.yaml`
 
 这套说明也可以迁移到：
@@ -17,6 +18,8 @@
 
 另外一定要记住：
 
+- `loopback_nav_only.launch.py`
+  - 适合只看导航、平滑、ESDF、trajectory profile 和速度链
 - `loopback_decision_sim.launch.py`
   - 默认读取 `src/loopback_sim/params/nav2_params.yaml`
 - `bringup.launch.py`
@@ -97,6 +100,13 @@ MPPI 不是单一 PID 参数，而是：
 
 - `local_costmap/costmap_raw`
 - `global_costmap/costmap_raw`
+- `/smoothed_path_visual`
+- `/trajectory_profile`
+- `/trajectory_profile_markers`
+- `/trajectory_esdf_debug`
+- `/cmd_vel_controller`
+- `/cmd_vel_controller_governed`
+- `/cmd_vel_nav2_result`
 - `back_up_free_space_markers`（如果恢复可视化打开）
 
 ## 调参基本顺序
@@ -820,15 +830,22 @@ prediction_horizon = time_steps * model_dt
 
 优先检查：
 
-1. `PathFollowCritic.cost_weight`
-2. `GoalCritic.cost_weight`
-3. `vx_max / vy_max`
+1. `/trajectory_profile.max_abs_curvature`
+2. `/trajectory_profile.curvature_penalty`
+3. `/cmd_vel_controller`
+4. `/cmd_vel_controller_governed`
+5. `/cmd_vel_nav2_result`
+6. `PathFollowCritic.cost_weight`
+7. `GoalCritic.cost_weight`
+8. `vx_max / vy_max`
 
 推荐方向：
 
-- 先略增 `PathFollowCritic`
-- 再看是否需要提高 `GoalCritic`
-- 最后才考虑扩大速度上限和 std
+- 如果 `max_abs_curvature` 很大且 `curvature_penalty` 主导，先处理 planner / smoother 的轨迹形状。
+- 如果 `/cmd_vel_controller` 已经很小，优先看 MPPI critic、目标距离、局部 costmap 和 TF / odom。
+- 如果 `/cmd_vel_controller` 正常但 `/cmd_vel_controller_governed` 明显变小，看 `trajectory_speed_governor.curvature_window_points` 和 `curvature_brake_gain`。
+- 如果 governed 正常但 `/cmd_vel_nav2_result` 变小，看 `velocity_smoother` 的速度、加速度、timeout 和 deadband。
+- 确认前面都正常后，再考虑提高 `PathFollowCritic`、`GoalCritic` 或扩大速度上限和 std。
 
 ## 推荐调参流程
 
@@ -864,11 +881,21 @@ prediction_horizon = time_steps * model_dt
 
 这套参数不是“最终答案”，而是一套更适合继续迭代观察的基线。
 
+当前实车 `src/pb2025_sentry_bringup/params/node_params.yaml` 的速度基线更激进：
+
+- `lateral_accel_limit` / `longitudinal_accel_limit` 已提高到 `1.8`
+- `velocity_smoother.max_velocity` 为 `[4.5, 4.5, 5.0]`
+- `trajectory_speed_governor` 使用近端曲率窗口，而不是整条路径最大曲率
+- fake ESDF 已接入实车 optimizer 和 smoother，但暂不建议继续增强 obstacle 强度
+
 ## 与其他文档的关系
 
 可配合阅读：
 
-  - 记录 MPPI 可视化话题和迁移问题
+- `docs/omni_recovery_smoothing_optimization.md`
+  - 记录当前平滑、ESDF、trajectory profile 和速度链基线
+- `docs/navigate_through_poses_migration_checklist.md`
+  - 记录 `NavigateThroughPoses` 迁移和旧决策节点关系
 - `docs/slim_loopback_refactor.md`
   - 记录 loopback 精简和重构过程
 

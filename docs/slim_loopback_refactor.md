@@ -48,7 +48,11 @@ pb2025_sentry_behavior
   -> /navigate_through_poses
 
 Nav2
-  -> planner + controller + recovery
+  -> SmacPlannerHybrid
+  -> Nav2BSplineSmoother
+  -> MPPI
+  -> trajectory_speed_governor
+  -> velocity_smoother
   -> cmd_vel_nav2_result
 
 fake_vel_transform
@@ -356,6 +360,7 @@ ros2 topic echo /decision/vision_follow_markers
 5. 视觉接管判定
 6. 攻击圆周跟随点选择
 7. `SendNavThroughPoses` 稳定器
+8. `SmacPlannerHybrid -> Nav2BSplineSmoother -> MPPI -> trajectory_speed_governor -> velocity_smoother` 主链结构
 
 不同部分：
 
@@ -365,7 +370,8 @@ ros2 topic echo /decision/vision_follow_markers
 
 ## 13. 相关文档
 
-- [./移植.md](./移植.md)
+- [./总览.md](./总览.md)
+- [./omni_recovery_smoothing_optimization.md](./omni_recovery_smoothing_optimization.md)
 - [./sentry_bt_decision_checklist.md](./sentry_bt_decision_checklist.md)
 - [./sentry_posture_switch_logic.md](./sentry_posture_switch_logic.md)
 - [./融合.md](./融合.md)

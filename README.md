@@ -6,7 +6,7 @@
 
 1. 实机总启动链路
 2. 行为树决策与姿态切换链路
-3. Nav2 + MPPI 导航执行链路
+3. Nav2 + B 样条平滑 + MPPI 导航执行链路
 4. loopback 轻量仿真与视觉跟随测试链路
 
 ## 当前主线
@@ -17,7 +17,12 @@
 pb2025_sentry_bringup
   -> pb2025_sentry_behavior
   -> /navigate_through_poses
-  -> Nav2 Planner + MPPI Controller
+  -> SmacPlannerHybrid
+  -> Nav2BSplineSmoother
+  -> MPPI Controller
+  -> trajectory_speed_governor
+  -> velocity_smoother
+  -> fake_vel_transform
   -> /cmd_vel
   -> standard_robot_pp_ros2 / loopback_sim
 ```
@@ -29,6 +34,14 @@ pb2025_sentry_bringup
 - `pb2025_sentry_nav` 负责 Nav2、定位、地图、传感器链路
 - `standard_robot_pp_ros2` 负责上下位机串口与裁判系统接口
 - `loopback_sim` 负责无实车条件下的软件闭环仿真
+
+当前导航优化基线：
+
+- 实车主参数入口是 [src/pb2025_sentry_bringup/params/node_params.yaml](./src/pb2025_sentry_bringup/params/node_params.yaml)。
+- loopback 纯导航入口是 [src/pb2025_sentry_bringup/launch/loopback_nav_only.launch.py](./src/pb2025_sentry_bringup/launch/loopback_nav_only.launch.py)。
+- `trajectory_profile` 已接入主链，`trajectory_speed_governor` 根据近端曲率窗口对 `cmd_vel_controller` 做二次限速。
+- fake ESDF 已接入 loopback 与实车链路，当前重点是稳定观察，不建议继续单纯增强 obstacle 权重。
+- 实车已经完成一轮速度过慢排查：曲率源、速度 profile、governor 和 velocity smoother 参数已按全向底盘基线重新整理。
 
 ## 环境要求
 
@@ -122,7 +135,16 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py \
 
 - [src/pb2025_sentry_bringup/launch/bringup.launch.py](./src/pb2025_sentry_bringup/launch/bringup.launch.py)
 
-### 4. 实车直接命令速查
+### 4. loopback 纯导航与轨迹优化观察
+
+```bash
+source install/setup.bash
+ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
+```
+
+这个入口只看路径规划、B 样条平滑、ESDF debug、trajectory profile 和速度链，适合复现实车导航问题前先做软件闭环排查。
+
+### 5. 实车直接命令速查
 
 下面默认都在工作区根目录执行，并且统一以：
 
@@ -142,7 +164,7 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py ...
 
 这样更符合当前仓库结构，也更不容易出现 TF 树缺失。
 
-#### 4.1 通用准备
+#### 5.1 通用准备
 
 每开一个新终端，都先执行：
 
@@ -156,7 +178,7 @@ source install/setup.bash
 - [src/pb2025_sentry_bringup/params/node_params.yaml](./src/pb2025_sentry_bringup/params/node_params.yaml)
 - [src/pb2025_sentry_bringup/launch/bringup.launch.py](./src/pb2025_sentry_bringup/launch/bringup.launch.py)
 
-#### 4.2 实车建图
+#### 5.2 实车建图
 
 推荐直接使用总入口切到 SLAM 模式：
 
@@ -174,7 +196,7 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py \
 - `world:=<YOUR_WORLD_NAME>` 建议在建图阶段就写成你最终想保存的地图名，后面导航时可以直接复用同名文件。
 - `use_rviz:=True` 方便直接在 RViz 里看点云、地图和 TF；如果不需要图形界面，可以改成 `False`。
 
-#### 4.3 保存地图
+#### 5.3 保存地图
 
 建图完成后，另开一个终端执行：
 
@@ -205,7 +227,7 @@ ros2 run nav2_map_server map_saver_cli \
 --ros-args -r __ns:=/<YOUR_NAMESPACE>
 ```
 
-#### 4.4 保存建图得到的 PCD
+#### 5.4 保存建图得到的 PCD
 
 当前建图链路里，`slam:=True` 时会额外打开 Point-LIO 的 `pcd_save.pcd_save_en`。结束建图并退出对应进程后，会在：
 
@@ -226,7 +248,7 @@ cp "$(ls -t src/pb2025_sentry_nav/point_lio/PCD/scans_*.pcd | head -n 1)" \
 - `src/pb2025_sentry_bringup/map/<YOUR_WORLD_NAME>.yaml`
 - `src/pb2025_sentry_bringup/pcd/<YOUR_WORLD_NAME>.pcd`
 
-#### 4.5 实车导航
+#### 5.5 实车导航
 
 保存好地图和先验点云后，直接使用总入口切回导航模式：
 
@@ -244,7 +266,7 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py \
 - `slam:=False` 表示进入导航/重定位模式
 - 这也是当前更推荐的实车导航启动方式
 
-#### 4.6 rosbag2 直接录包
+#### 5.6 rosbag2 直接录包
 
 如果你想不用脚本，直接手动录制和当前仓库一致的最小实车数据集，可以执行：
 
@@ -294,7 +316,7 @@ ros2 bag record \
   -d 30
 ```
 
-#### 4.7 当前总入口里和 rosbag 相关的默认参数
+#### 5.7 当前总入口里和 rosbag 相关的默认参数
 
 `bringup.launch.py` 内部还会启动一个 `rosbag_recorder` 节点，对应参数在：
 
@@ -451,6 +473,18 @@ ros2 topic echo /cmd_spin
 ros2 topic echo /cmd_vel
 ```
 
+### 查看导航速度链
+
+```bash
+ros2 topic echo /trajectory_profile
+ros2 topic echo /cmd_vel_controller
+ros2 topic echo /cmd_vel_controller_governed
+ros2 topic echo /cmd_vel_nav2_result
+ros2 topic echo /cmd_vel
+```
+
+如果 `/trajectory_profile.max_abs_curvature` 很大且 `curvature_penalty` 明显主导，通常先排查 planner/smoother 轨迹形状；如果 profile 速度正常但 `/cmd_vel_controller` 已经很小，再看 MPPI critic、TF/odom 和局部 costmap。
+
 ### loopback 运行中重定位
 
 ```bash
@@ -464,15 +498,17 @@ ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
 
 建议按下面顺序阅读：
 
-1. [docs/移植.md](./docs/移植.md)
-2. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
-3. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
-4. [docs/slim_loopback_refactor.md](./docs/slim_loopback_refactor.md)
-5. [docs/融合.md](./docs/融合.md)
-6. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
-7. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
-8. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
-9. [docs/navigate_through_poses_migration_checklist.md](./docs/navigate_through_poses_migration_checklist.md)
+1. [docs/总览.md](./docs/总览.md)
+2. [docs/omni_recovery_smoothing_optimization.md](./docs/omni_recovery_smoothing_optimization.md)
+3. [docs/上车测试清单.md](./docs/上车测试清单.md)
+4. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
+5. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
+6. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
+7. [docs/slim_loopback_refactor.md](./docs/slim_loopback_refactor.md)
+8. [docs/融合.md](./docs/融合.md)
+9. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
+10. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
+11. [docs/navigate_through_poses_migration_checklist.md](./docs/navigate_through_poses_migration_checklist.md)
 
 ## 仓库结构
 
