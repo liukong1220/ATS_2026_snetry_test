@@ -531,6 +531,7 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   double follow_arc_half_angle_deg = 90.0;
   double min_replan_interval_s = 0.4;
   double min_goal_shift_m = 0.35;
+  double min_goal_distance_from_robot_m = 0.35;
   double max_goal_angle_step_deg = 18.0;
   double pose_jump_reset_distance_m = 0.8;
   double pose_jump_reset_angle_deg = 55.0;
@@ -544,6 +545,8 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   node_->get_parameter("decision.vision.follow_arc_half_angle_deg", follow_arc_half_angle_deg);
   node_->get_parameter("decision.vision.min_replan_interval_s", min_replan_interval_s);
   node_->get_parameter("decision.vision.min_goal_shift_m", min_goal_shift_m);
+  node_->get_parameter(
+    "decision.vision.min_goal_distance_from_robot_m", min_goal_distance_from_robot_m);
   node_->get_parameter(
     "decision.vision.max_goal_angle_step_deg", max_goal_angle_step_deg);
   node_->get_parameter(
@@ -572,6 +575,7 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   sample_count = std::max(4, sample_count);
   min_replan_interval_s = std::max(0.0, min_replan_interval_s);
   min_goal_shift_m = std::max(0.0, min_goal_shift_m);
+  min_goal_distance_from_robot_m = std::max(0.0, min_goal_distance_from_robot_m);
   follow_candidate_clearance_radius_m = std::max(0.0, follow_candidate_clearance_radius_m);
   follow_max_path_length_ratio = std::max(1.0, follow_max_path_length_ratio);
   follow_reachability_max_expansions = std::max(200, follow_reachability_max_expansions);
@@ -764,6 +768,12 @@ BT::NodeStatus SelectVisionFollowPathAction::tick()
   // 再用角度限幅做平滑，而不是长期冻结在旧路径上等待阈值触发。
   selected_point = smoothSelectedGoal(
     planning_frame, *target_point, selected_point, max_goal_angle_step_rad);
+
+  if (has_current_position) {
+    selected_point = enforceMinimumGoalDistance(
+      *target_point, current_position, selected_point, attack_radius,
+      min_goal_distance_from_robot_m);
+  }
 
   bool update_plan_position_anchor = true;
   if (has_cached_path_ && last_plan_frame_id_ == planning_frame && last_plan_time_) {
@@ -975,6 +985,54 @@ geometry_msgs::msg::Point SelectVisionFollowPathAction::smoothSelectedGoal(
   const double limited_angle =
     last_angle + std::copysign(max_goal_angle_step_rad, angle_delta);
   return sampleCirclePoint(target_point, raw_radius, limited_angle);
+}
+
+geometry_msgs::msg::Point SelectVisionFollowPathAction::enforceMinimumGoalDistance(
+  const geometry_msgs::msg::Point & target_point, const geometry_msgs::msg::Point & current_position,
+  const geometry_msgs::msg::Point & candidate_goal, double attack_radius,
+  double min_goal_distance_from_robot_m) const
+{
+  if (min_goal_distance_from_robot_m <= kPositionEpsilon) {
+    return candidate_goal;
+  }
+
+  const double candidate_distance = planarDistance(candidate_goal, current_position);
+  if (candidate_distance >= min_goal_distance_from_robot_m) {
+    return candidate_goal;
+  }
+
+  const double base_angle = std::atan2(
+    candidate_goal.y - target_point.y, candidate_goal.x - target_point.x);
+  const double robot_angle = std::atan2(
+    current_position.y - target_point.y, current_position.x - target_point.x);
+  const double angle_offset_limit = M_PI / 2.0;
+  const double angle_step = M_PI / 36.0;
+
+  geometry_msgs::msg::Point best_goal = candidate_goal;
+  double best_distance = candidate_distance;
+
+  for (int i = 1; i <= 18; ++i) {
+    const double angle_offset = std::min(angle_offset_limit, angle_step * static_cast<double>(i));
+    const std::array<double, 2> test_angles{{base_angle + angle_offset, base_angle - angle_offset}};
+    for (const double angle : test_angles) {
+      auto goal = sampleCirclePoint(target_point, attack_radius, angle);
+      const double distance = planarDistance(goal, current_position);
+      if (distance > best_distance) {
+        best_distance = distance;
+        best_goal = goal;
+      }
+      if (distance >= min_goal_distance_from_robot_m) {
+        return goal;
+      }
+    }
+  }
+
+  const auto opposite_goal = sampleCirclePoint(target_point, attack_radius, robot_angle + M_PI);
+  if (planarDistance(opposite_goal, current_position) > best_distance) {
+    return opposite_goal;
+  }
+
+  return best_goal;
 }
 
 bool SelectVisionFollowPathAction::shouldResetCachedStateForPoseJump(

@@ -85,6 +85,9 @@ IsRobotResourceModeCondition::IsRobotResourceModeCondition(
   node_->get_parameter("decision.resource_policy.resupply_exit_hp", resupply_exit_hp_);
   node_->get_parameter("decision.resource_policy.resupply_enter_ammo", resupply_enter_ammo_);
   node_->get_parameter("decision.resource_policy.resupply_exit_ammo", resupply_exit_ammo_);
+  node_->get_parameter(
+    "decision.resource_policy.assume_engage_when_status_missing",
+    assume_engage_when_status_missing_);
 }
 
 BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
@@ -111,6 +114,13 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
 
   auto robot_status = getInput<pb_rm_interfaces::msg::RobotStatus>("robot_status");
   if (!robot_status) {
+    if (assume_engage_when_status_missing_) {
+      root_blackboard->set<std::string>(kResourceModeBlackboardKey, "engage");
+      RCLCPP_WARN_THROTTLE(
+        logger_, *node_->get_clock(), 2000,
+        "Decision resource mode fallback to engage because referee/robot_status is unavailable");
+      return expected_mode == ResourceMode::kEngage ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+    }
     // 仿真若没有发布假裁判输入，则不强行阻断主树，让后续 simulation/referee 分支继续接管。
     root_blackboard->set<std::string>(kResourceModeBlackboardKey, "unknown");
     RCLCPP_INFO_THROTTLE(

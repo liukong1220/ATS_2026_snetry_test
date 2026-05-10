@@ -216,6 +216,7 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.vision.follow_arc_half_angle_deg", 90.0);
   declare_parameter("decision.vision.min_replan_interval_s", 0.4);
   declare_parameter("decision.vision.min_goal_shift_m", 0.35);
+  declare_parameter("decision.vision.min_goal_distance_from_robot_m", 0.35);
   // 跟随点选侧稳定参数：
   // 1. prefer_previous_goal_side：若上一帧已经有稳定可用的跟随点，优先保持在同一侧，
   //    减少在转角、终点附近或目标轻微抖动时左右突然翻边。
@@ -251,6 +252,7 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.resource_policy.resupply_exit_hp", 300);
   declare_parameter("decision.resource_policy.resupply_enter_ammo", 50);
   declare_parameter("decision.resource_policy.resupply_exit_ammo", 100);
+  declare_parameter("decision.resource_policy.assume_engage_when_status_missing", false);
   declare_parameter("decision.pose.expected_frame", std::string("map"));
   declare_parameter("decision.pose.timeout_s", 0.5);
   declare_parameter("decision.pose.tf_fallback_enabled", true);
@@ -279,6 +281,8 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.decision_config.path_tolerance", 0.2);
   declare_parameter(
     "decision.decision_config.nav2_action_server", std::string("/navigate_through_poses"));
+  declare_parameter(
+    "decision.decision_config.nav2_to_pose_action_server", std::string("/navigate_to_pose"));
   declare_parameter("decision.decision_config.decision_period_ms", 100);
   declare_parameter("decision.decision_config.goal_position_tolerance", 0.1);
   // 行为层“是否已到达路径终点”的判定容差。

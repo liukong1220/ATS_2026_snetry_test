@@ -45,3 +45,4 @@ __pycache__/
 .marscode/
 *.pcd
 src/sp_vision25/
+*.pdf

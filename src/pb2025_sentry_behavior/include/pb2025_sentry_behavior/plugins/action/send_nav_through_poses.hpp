@@ -9,6 +9,7 @@
 
 #include "behaviortree_cpp/action_node.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "nav2_msgs/action/navigate_through_poses.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "pb2025_sentry_behavior/decision_utils.hpp"
@@ -25,6 +26,8 @@ class SendNavThroughPosesAction : public BT::SyncActionNode
 public:
   using NavigateThroughPoses = nav2_msgs::action::NavigateThroughPoses;
   using GoalHandle = rclcpp_action::ClientGoalHandle<NavigateThroughPoses>;
+  using NavigateToPose = nav2_msgs::action::NavigateToPose;
+  using GoalHandleToPose = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 
   SendNavThroughPosesAction(const std::string & name, const BT::NodeConfig & config);
 
@@ -54,10 +57,17 @@ private:
   // 若机器人已经被重新放置到远离终点的位置，就应允许重新下发同一路径。
   bool isActiveGoalStillReached(const nav_msgs::msg::Path & path, double tolerance) const;
   void resultCallback(std::uint64_t request_id, const GoalHandle::WrappedResult & result);
+  void resultToPoseCallback(
+    std::uint64_t request_id, const GoalHandleToPose::WrappedResult & result);
   void feedbackCallback(
     std::uint64_t request_id, GoalHandle::SharedPtr goal_handle,
     const std::shared_ptr<const NavigateThroughPoses::Feedback> feedback);
+  void feedbackToPoseCallback(
+    std::uint64_t request_id, GoalHandleToPose::SharedPtr goal_handle,
+    const std::shared_ptr<const NavigateToPose::Feedback> feedback);
   void goalResponseCallback(std::uint64_t request_id, const GoalHandle::SharedPtr & goal_handle);
+  void goalResponseToPoseCallback(
+    std::uint64_t request_id, const GoalHandleToPose::SharedPtr & goal_handle);
   void cancelCurrentGoal();
 
   rclcpp::Node::SharedPtr node_;
@@ -65,9 +75,12 @@ private:
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp_action::Client<NavigateThroughPoses>::SharedPtr action_client_;
+  rclcpp_action::Client<NavigateToPose>::SharedPtr action_to_pose_client_;
   std::string action_name_;
+  std::string action_to_pose_name_ = "/navigate_to_pose";
   std::mutex mutex_;
   GoalHandle::SharedPtr current_goal_handle_;
+  GoalHandleToPose::SharedPtr current_goal_to_pose_handle_;
   nav_msgs::msg::Path active_path_;
   geometry_msgs::msg::PoseStamped latest_pose_;
   bool has_current_pose_ = false;

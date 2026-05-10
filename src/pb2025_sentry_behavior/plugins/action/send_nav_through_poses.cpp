@@ -124,6 +124,7 @@ SendNavThroughPosesAction::SendNavThroughPosesAction(
   logger_ = node_->get_logger();
   action_name_ = "/navigate_through_poses";
   node_->get_parameter("decision.decision_config.nav2_action_server", action_name_);
+  node_->get_parameter("decision.decision_config.nav2_to_pose_action_server", action_to_pose_name_);
   node_->get_parameter(
     "decision.decision_config.goal_position_tolerance", path_compare_tolerance_);
   node_->get_parameter(
@@ -144,6 +145,7 @@ SendNavThroughPosesAction::SendNavThroughPosesAction(
   node_->get_parameter("decision.pose.timeout_s", pose_timeout_s_);
 
   action_client_ = rclcpp_action::create_client<NavigateThroughPoses>(node_, action_name_);
+  action_to_pose_client_ = rclcpp_action::create_client<NavigateToPose>(node_, action_to_pose_name_);
 }
 
 BT::PortsList SendNavThroughPosesAction::providedPorts()
@@ -165,11 +167,18 @@ BT::NodeStatus SendNavThroughPosesAction::tick()
     return BT::NodeStatus::FAILURE;
   }
 
-  if (!action_client_->wait_for_action_server(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>(action_server_wait_timeout_s_))))
+  const bool is_single_pose_path = path->poses.size() == 1;
+  const auto action_wait_timeout =
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::duration<double>(action_server_wait_timeout_s_));
+  const bool action_server_ready = is_single_pose_path ?
+    action_to_pose_client_->wait_for_action_server(action_wait_timeout) :
+    action_client_->wait_for_action_server(action_wait_timeout);
+  if (!action_server_ready)
   {
-    RCLCPP_ERROR(logger_, "Action server %s is not available", action_name_.c_str());
+    RCLCPP_ERROR(
+      logger_, "Action server %s is not available",
+      (is_single_pose_path ? action_to_pose_name_ : action_name_).c_str());
     return BT::NodeStatus::FAILURE;
   }
 
@@ -229,14 +238,7 @@ BT::NodeStatus SendNavThroughPosesAction::tick()
 
   cancelCurrentGoal();
 
-  NavigateThroughPoses::Goal goal;
-  goal.poses = path->poses;
-  for (auto & pose : goal.poses) {
-    pose.header.stamp = node_->now();
-    if (pose.header.frame_id.empty()) {
-      pose.header.frame_id = "map";
-    }
-  }
+  const auto now = node_->now();
 
   std::uint64_t request_id = 0;
   {
@@ -245,10 +247,54 @@ BT::NodeStatus SendNavThroughPosesAction::tick()
     goal_pending_ = true;
     last_goal_succeeded_ = false;
     active_path_ = *path;
-    last_goal_sent_at_ = node_->now();
+    last_goal_sent_at_ = now;
     has_last_goal_sent_at_ = true;
   }
   setOutput("goal_succeeded", false);
+
+  if (is_single_pose_path) {
+    NavigateToPose::Goal goal;
+    goal.pose = path->poses.front();
+    goal.pose.header.stamp = now;
+    if (goal.pose.header.frame_id.empty()) {
+      goal.pose.header.frame_id = "map";
+    }
+
+    const auto & pose = goal.pose.pose.position;
+    RCLCPP_INFO(
+      logger_,
+      "Send NavigateToPose goal for single-pose vision path: pose=(%.2f, %.2f)",
+      pose.x, pose.y);
+
+    auto send_goal_options =
+      rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
+    send_goal_options.goal_response_callback =
+      [this, request_id](const GoalHandleToPose::SharedPtr handle) {
+        goalResponseToPoseCallback(request_id, handle);
+      };
+    send_goal_options.feedback_callback =
+      [this, request_id](
+        GoalHandleToPose::SharedPtr handle,
+        const std::shared_ptr<const NavigateToPose::Feedback> feedback) {
+          feedbackToPoseCallback(request_id, handle, feedback);
+        };
+    send_goal_options.result_callback =
+      [this, request_id](const GoalHandleToPose::WrappedResult & result) {
+        resultToPoseCallback(request_id, result);
+      };
+
+    action_to_pose_client_->async_send_goal(goal, send_goal_options);
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  NavigateThroughPoses::Goal goal;
+  goal.poses = path->poses;
+  for (auto & pose : goal.poses) {
+    pose.header.stamp = now;
+    if (pose.header.frame_id.empty()) {
+      pose.header.frame_id = "map";
+    }
+  }
 
   const auto & first_pose = goal.poses.front().pose.position;
   const auto & last_pose = goal.poses.back().pose.position;
@@ -285,15 +331,44 @@ void SendNavThroughPosesAction::goalResponseCallback(
   }
   goal_pending_ = false;
   current_goal_handle_ = goal_handle;
+  current_goal_to_pose_handle_.reset();
   if (!goal_handle) {
     last_goal_succeeded_ = false;
     RCLCPP_ERROR(logger_, "NavigateThroughPoses goal was rejected by server");
   }
 }
 
+void SendNavThroughPosesAction::goalResponseToPoseCallback(
+  std::uint64_t request_id, const GoalHandleToPose::SharedPtr & goal_handle)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (request_id != goal_request_id_) {
+    return;
+  }
+  goal_pending_ = false;
+  current_goal_to_pose_handle_ = goal_handle;
+  current_goal_handle_.reset();
+  if (!goal_handle) {
+    last_goal_succeeded_ = false;
+    RCLCPP_ERROR(logger_, "NavigateToPose goal was rejected by server");
+  }
+}
+
 void SendNavThroughPosesAction::feedbackCallback(
   std::uint64_t request_id, GoalHandle::SharedPtr,
   const std::shared_ptr<const NavigateThroughPoses::Feedback> feedback)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (request_id != goal_request_id_) {
+    return;
+  }
+  latest_pose_ = feedback->current_pose;
+  has_current_pose_ = true;
+}
+
+void SendNavThroughPosesAction::feedbackToPoseCallback(
+  std::uint64_t request_id, GoalHandleToPose::SharedPtr,
+  const std::shared_ptr<const NavigateToPose::Feedback> feedback)
 {
   std::lock_guard<std::mutex> lock(mutex_);
   if (request_id != goal_request_id_) {
@@ -333,19 +408,56 @@ void SendNavThroughPosesAction::resultCallback(
     static_cast<int>(result.code));
 }
 
+void SendNavThroughPosesAction::resultToPoseCallback(
+  std::uint64_t request_id, const GoalHandleToPose::WrappedResult & result)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (request_id != goal_request_id_) {
+    return;
+  }
+  goal_pending_ = false;
+  current_goal_to_pose_handle_.reset();
+  current_goal_handle_.reset();
+  if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+    last_goal_succeeded_ = true;
+    if (!active_path_.poses.empty()) {
+      latest_pose_ = active_path_.poses.back();
+      has_current_pose_ = true;
+    }
+    return;
+  }
+
+  last_goal_succeeded_ = false;
+
+  if (result.code == rclcpp_action::ResultCode::CANCELED) {
+    RCLCPP_INFO(logger_, "NavigateToPose goal was canceled");
+    return;
+  }
+
+  RCLCPP_WARN(
+    logger_, "NavigateToPose goal finished with result code %d",
+    static_cast<int>(result.code));
+}
+
 void SendNavThroughPosesAction::cancelCurrentGoal()
 {
   GoalHandle::SharedPtr goal_handle;
+  GoalHandleToPose::SharedPtr goal_to_pose_handle;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     ++goal_request_id_;
     goal_handle = current_goal_handle_;
+    goal_to_pose_handle = current_goal_to_pose_handle_;
     current_goal_handle_.reset();
+    current_goal_to_pose_handle_.reset();
     goal_pending_ = false;
     last_goal_succeeded_ = false;
   }
   if (goal_handle) {
     action_client_->async_cancel_goal(goal_handle);
+  }
+  if (goal_to_pose_handle) {
+    action_to_pose_client_->async_cancel_goal(goal_to_pose_handle);
   }
 }
 

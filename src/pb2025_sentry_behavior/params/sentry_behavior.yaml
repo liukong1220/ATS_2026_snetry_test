@@ -103,6 +103,9 @@ pb2025_sentry_behavior_server:
         # 新跟随目标点相对旧目标点至少移动这么多才重发。
         # 这是控制“视觉轻微抖动是否值得重新规划”的关键参数。
         min_goal_shift_m: 0.45
+        # 若视觉选出的单点目标离当前车位太近，Nav2 可能直接判定已经到点而不给线速度。
+        # 这里要求视觉跟随点至少和当前车位拉开一小段距离，避免“有路径但不走”。
+        min_goal_distance_from_robot_m: 0.35
         # 是否优先保持上一帧已经选定的跟随侧。
         # 实车强烈建议保持 true，这对转角处、贴边交会和接近终点时的稳定性帮助很大。
         prefer_previous_goal_side: true
@@ -178,8 +181,8 @@ pb2025_sentry_behavior_server:
         decision_period_ms: 100
         goal_position_tolerance: 0.2
         # 行为层“是否到达目标”的判定容差，需要与实车 Nav2 goal checker 对齐。
-        # 当前实车链路 general_goal_checker.xy_goal_tolerance 为 0.15。
-        path_goal_reached_tolerance: 0.15
+        # 当前实车链路 general_goal_checker.xy_goal_tolerance 为 0.20。
+        path_goal_reached_tolerance: 0.20
         # 若行为树新给出的路径只是在当前目标附近轻微漂移，
         # 则先保持 Nav2 正在执行的目标，避免实车在墙角和终点附近被频繁抢占。
         active_goal_hold_tolerance: 0.45

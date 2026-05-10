@@ -55,6 +55,10 @@ private:
   geometry_msgs::msg::Point smoothSelectedGoal(
     const std::string & planning_frame, const geometry_msgs::msg::Point & target_point,
     const geometry_msgs::msg::Point & raw_selected_goal, double max_goal_angle_step_rad) const;
+  geometry_msgs::msg::Point enforceMinimumGoalDistance(
+    const geometry_msgs::msg::Point & target_point, const geometry_msgs::msg::Point & current_position,
+    const geometry_msgs::msg::Point & candidate_goal, double attack_radius,
+    double min_goal_distance_from_robot_m) const;
   // 缓存上一拍视觉跟随结果。
   // update_plan_position_anchor=true 时，会同步刷新“上一次真正换目标时的机器人位姿”；
   // 若本拍只是因为死区而继续沿用旧目标，则保留旧参考位姿，让机器人位移能够累计，

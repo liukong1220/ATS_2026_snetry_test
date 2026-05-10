@@ -108,6 +108,8 @@ pb2025_sentry_behavior_server:
         resupply_exit_hp: 300
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100
+        # 专用视觉测试常见于未接裁判系统时，此时允许临时按 engage 跑通视觉跟随链路。
+        assume_engage_when_status_missing: true
 
       pose:
         # 行为树默认使用 map 作为决策位姿坐标系。

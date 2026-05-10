@@ -35,6 +35,7 @@ private:
   int resupply_exit_hp_ = 400;
   int resupply_enter_ammo_ = 50;
   int resupply_exit_ammo_ = 100;
+  bool assume_engage_when_status_missing_ = false;
 };
 
 }  // namespace pb2025_sentry_behavior
