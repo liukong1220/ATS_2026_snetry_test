@@ -8,6 +8,17 @@ standard_robot_pp_ros2:
     set_detector_color: false
     record_rosbag: true
     debug: false
+    # 三自由度云台 TF 由 ID_JOINT_STATE 中的 big_yaw/small_yaw/pitch 反馈驱动。
+    # IMU 仅作为姿态传感器发布，不再把 imu yaw/pitch 冒充 gimbal_yaw/pitch joint。
+    publish_imu_as_gimbal_joint_state: false
+    # 下位机已升级到三字段 joint 包后，应关闭旧两字段兼容模式，
+    # 避免误接老协议时静默退化成“只有大 yaw 正确”的半残 TF。
+    accept_legacy_two_axis_joint_state: false
+    # 若下位机上报的小 yaw 实际上是“炮口/IMU 绝对 yaw”，
+    # 可先把它转换成相对大 yaw 的关节角再进 TF，作为联调阶段兜底。
+    small_yaw_is_relative: true
+    invert_small_yaw: false
+    small_yaw_offset: 0.0
     # 订阅上层行为树发布的姿态模式话题，
     # 并将值写入 SendRobotCmdData.data.speed_vector.mode。
     robot_mode_topic: decision/robot_mode

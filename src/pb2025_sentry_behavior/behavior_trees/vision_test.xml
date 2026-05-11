@@ -2,8 +2,6 @@
 <root BTCPP_format="4">
   <BehaviorTree ID="vision_override">
     <Sequence>
-      <IsRobotResourceMode state="engage"
-                           robot_status="{@referee_robotStatus}"/>
       <IsVisionTargetValid key_port="{@sp_vision_target}"
                            timeout_s="{@decision_vision_timeout_s}"
                            require_nav_hold="true"

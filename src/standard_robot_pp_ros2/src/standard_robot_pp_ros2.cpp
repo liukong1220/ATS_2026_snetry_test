@@ -2,6 +2,7 @@
 
 #include "standard_robot_pp_ros2/standard_robot_pp_ros2.hpp"
 
+#include <cmath>
 #include <memory>
 
 #include "standard_robot_pp_ros2/crc8_crc16.hpp"
@@ -16,6 +17,14 @@ using namespace std::chrono_literals;
 
 namespace standard_robot_pp_ros2
 {
+
+namespace
+{
+double normalizeAngle(const double angle)
+{
+  return std::atan2(std::sin(angle), std::cos(angle));
+}
+}  // namespace
 
 StandardRobotPpRos2Node::StandardRobotPpRos2Node(const rclcpp::NodeOptions & options)
 : Node("StandardRobotPpRos2Node", options),
@@ -202,6 +211,12 @@ void StandardRobotPpRos2Node::getParams()
   record_rosbag_ = declare_parameter("record_rosbag", false);
   set_detector_color_ = declare_parameter("set_detector_color", false);
   debug_ = declare_parameter("debug", false);
+  publish_imu_as_gimbal_joint_state_ = declare_parameter("publish_imu_as_gimbal_joint_state", false);
+  accept_legacy_two_axis_joint_state_ =
+    declare_parameter("accept_legacy_two_axis_joint_state", false);
+  small_yaw_is_relative_ = declare_parameter("small_yaw_is_relative", true);
+  invert_small_yaw_ = declare_parameter("invert_small_yaw", false);
+  small_yaw_offset_ = declare_parameter("small_yaw_offset", 0.0);
   // 上层行为树通过该话题下发姿态模式，默认值与 pb2025_sentry_behavior 保持一致。
   robot_mode_topic_ = declare_parameter("robot_mode_topic", std::string("decision/robot_mode"));
 }
@@ -379,8 +394,21 @@ void StandardRobotPpRos2Node::receiveData()
           publishRobotStatus(robot_status_data);
         } break;
         case ID_JOINT_STATE: {
-          ReceiveJointState joint_state_data = fromVector<ReceiveJointState>(data_buf);
-          publishJointState(joint_state_data);
+          if (header_frame.len == sizeof(ReceiveJointState) - sizeof(HeaderFrame) - 2U) {
+            ReceiveJointState joint_state_data = fromVector<ReceiveJointState>(data_buf);
+            publishJointState(joint_state_data);
+          } else if (
+            accept_legacy_two_axis_joint_state_ &&
+            header_frame.len == sizeof(ReceiveLegacyJointState) - sizeof(HeaderFrame) - 2U)
+          {
+            ReceiveLegacyJointState joint_state_data = fromVector<ReceiveLegacyJointState>(data_buf);
+            publishLegacyJointState(joint_state_data);
+          } else {
+            RCLCPP_WARN_THROTTLE(
+              get_logger(), *get_clock(), 2000,
+              "Ignore ID_JOINT_STATE with unsupported payload length %u; expected %zu bytes for three-axis gimbal state",
+              header_frame.len, sizeof(ReceiveJointState) - sizeof(HeaderFrame) - 2U);
+          }
         } break;
         case ID_BUFF: {
           ReceiveBuff buff = fromVector<ReceiveBuff>(data_buf);
@@ -430,10 +458,11 @@ void StandardRobotPpRos2Node::publishDebugData(ReceiveDebugData & received_debug
 
 void StandardRobotPpRos2Node::publishImuData(ReceiveImuData & imu_data)
 {
-  sensor_msgs::msg::JointState joint_msg;
   sensor_msgs::msg::Imu imu_msg;
-  imu_msg.header.stamp = joint_msg.header.stamp = now();
-  imu_msg.header.frame_id = "gimbal_pitch_odom";
+  imu_msg.header.stamp = now();
+  // 下位机 IMU 安装在小 yaw / pitch 这套可动云台上，
+  // 会同时跟随 `gimbal_yaw` 和 `gimbal_pitch` 运动，因此 frame_id 对齐到 `gimbal_pitch`。
+  imu_msg.header.frame_id = "gimbal_pitch";
 
   // Convert Euler angles to quaternion
   tf2::Quaternion q;
@@ -444,19 +473,13 @@ void StandardRobotPpRos2Node::publishImuData(ReceiveImuData & imu_data)
   imu_msg.angular_velocity.z = imu_data.data.yaw_vel;
   imu_pub_->publish(imu_msg);
 
-  joint_msg.name = {
-    "gimbal_pitch_joint",
-    "gimbal_yaw_joint",
-    "gimbal_pitch_odom_joint",
-    "gimbal_yaw_odom_joint",
-  };
-  joint_msg.position = {
-    imu_data.data.pitch,
-    imu_data.data.yaw,
-    last_gimbal_pitch_odom_joint_,
-    last_gimbal_yaw_odom_joint_,
-  };
-  joint_state_pub_->publish(joint_msg);
+  if (publish_imu_as_gimbal_joint_state_) {
+    sensor_msgs::msg::JointState joint_msg;
+    joint_msg.header.stamp = imu_msg.header.stamp;
+    joint_msg.name = {"gimbal_yaw_joint", "gimbal_pitch_joint"};
+    joint_msg.position = {imu_data.data.yaw, imu_data.data.pitch};
+    joint_state_pub_->publish(joint_msg);
+  }
 }
 
 void StandardRobotPpRos2Node::publishRobotInfo(ReceiveRobotInfoData & robot_info)
@@ -637,10 +660,6 @@ void StandardRobotPpRos2Node::publishRobotStatus(ReceiveRobotStatus & robot_stat
   msg.projectile_allowance_17mm = robot_status.data.projectile_allowance_17mm;
   msg.remaining_gold_coin = robot_status.data.remaining_gold_coin;
 
-  RCLCPP_INFO(get_logger(), "current robot id: %hhu, current hp: %d", msg.robot_id, msg.current_hp);
-  RCLCPP_INFO(get_logger(), "current maximum hp: %d", msg.maximum_hp);
-  RCLCPP_INFO(get_logger(), "projectile allowance 17mm: %d", msg.projectile_allowance_17mm);
-
   msg.is_hp_deduced = last_hp_ >= 0.0F && (last_hp_ - static_cast<float>(msg.current_hp) > 0.0F);
   last_hp_ = robot_status.data.current_hp;
 
@@ -660,8 +679,41 @@ void StandardRobotPpRos2Node::publishRobotStatus(ReceiveRobotStatus & robot_stat
 
 void StandardRobotPpRos2Node::publishJointState(ReceiveJointState & packet)
 {
-  last_gimbal_pitch_odom_joint_ = packet.data.pitch;
-  last_gimbal_yaw_odom_joint_ = packet.data.yaw;
+  double small_yaw = packet.data.small_yaw;
+  if (!small_yaw_is_relative_) {
+    small_yaw -= packet.data.big_yaw;
+  }
+  if (invert_small_yaw_) {
+    small_yaw = -small_yaw;
+  }
+  small_yaw = normalizeAngle(small_yaw + small_yaw_offset_);
+
+  sensor_msgs::msg::JointState joint_msg;
+  joint_msg.header.stamp = now();
+  joint_msg.name = {
+    "gimbal_yaw_odom_joint",
+    "gimbal_yaw_joint",
+    "gimbal_pitch_joint",
+  };
+  joint_msg.position = {
+    packet.data.big_yaw,
+    small_yaw,
+    packet.data.pitch,
+  };
+  joint_state_pub_->publish(joint_msg);
+}
+
+void StandardRobotPpRos2Node::publishLegacyJointState(ReceiveLegacyJointState & packet)
+{
+  sensor_msgs::msg::JointState joint_msg;
+  joint_msg.header.stamp = now();
+  joint_msg.name = {"gimbal_yaw_odom_joint"};
+  joint_msg.position = {packet.data.yaw};
+  joint_state_pub_->publish(joint_msg);
+
+  RCLCPP_WARN_THROTTLE(
+    get_logger(), *get_clock(), 2000,
+    "Received legacy two-axis joint state. Only big yaw is used for TF; upgrade lower controller to publish big_yaw, small_yaw, pitch for accurate vision target projection.");
 }
 
 void StandardRobotPpRos2Node::publishBuff(ReceiveBuff & buff)
@@ -682,13 +734,6 @@ void StandardRobotPpRos2Node::publishBuff(ReceiveBuff & buff)
 void StandardRobotPpRos2Node::sendData()
 {
   RCLCPP_INFO(get_logger(), "Start sendData!");
-
-  //   if ((this->now() - stop_start_time_).seconds() > 10.0) { // 2秒后自动重置
-  //     send_robot_cmd_data_.data.speed_vector.stop = false;
-  //   }
-  //   else {
-  //   stop_start_time_ = this->now(); // 重置计时器
-  // }
 
   {
     std::lock_guard<std::mutex> lock(send_cmd_mutex_);
@@ -775,14 +820,18 @@ void StandardRobotPpRos2Node::cmdShootCallback(const example_interfaces::msg::UI
 void StandardRobotPpRos2Node::cmdRobotModeCallback(
   const example_interfaces::msg::UInt8::SharedPtr msg)
 {
-  constexpr uint8_t kMoveMode = 0;
+  constexpr uint8_t kMoveMode = 3;
+  constexpr uint8_t kAttackMode = 1;
   constexpr uint8_t kDefendMode = 2;
   // 协议当前约定：
-  // 0=move，1=attack，2=defend。
+  // 3=move，1=attack，2=defend。
   // 这里不重新做业务判断，只做最终的合法值保护和串口结构体写入。
 
-  // 当前协议只支持 0/1/2 三种姿态，收到非法值时自动回退到 move。
-  const uint8_t mode = msg->data <= kDefendMode ? msg->data : kMoveMode;
+  // 当前协议只支持 1/2/3 三种姿态，收到非法值时自动回退到 move。
+  const uint8_t mode =
+    (msg->data == kAttackMode || msg->data == kDefendMode || msg->data == kMoveMode) ?
+    msg->data :
+    kMoveMode;
   if (mode != msg->data) {
     RCLCPP_WARN_THROTTLE(
       get_logger(), *get_clock(), 1000,

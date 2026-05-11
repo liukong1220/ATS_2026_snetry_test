@@ -43,11 +43,11 @@ pb2025_sentry_behavior_server:
         cmd_vel: cmd_vel
         gimbal_cmd: cmd_gimbal
         # 哨兵姿态模式话题：
-        # 0=move，1=attack，2=defend。
+        # 3=move，1=attack，2=defend。
         robot_mode: decision/robot_mode
 
       motion:
-        default_spin_speed: 7.0
+        default_spin_speed: 3.0
         # 检测到新的掉血后的自旋角速度。
         hit_spin_speed: 7.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
@@ -55,9 +55,9 @@ pb2025_sentry_behavior_server:
 
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
-        switch_cooldown_s: 5.0
+        switch_cooldown_s: 6.0
         # 每局比赛内单一姿态允许累计存在的最大时长。
-        max_cumulative_s: 180.0
+        max_cumulative_s: 175.0
 
       mode_visualization:
         # 是否发布姿态可视化 Marker。
@@ -69,15 +69,15 @@ pb2025_sentry_behavior_server:
       vision:
         topic: vision/target
         # 专用视觉测试树也沿用与主树一致的消息时效约束，方便结论直接迁移回主树。
-        timeout_s: 0.5
+        timeout_s: 0.3
         # 初次进入视觉跟随前，需要先持续稳定满足条件一小段时间。
         activation_hold_s: 0.25
         # 如果当前已锁定某个目标，新目标必须稳定保持这么久才允许切换。
-        switch_target_hold_s: 0.45
+        switch_target_hold_s: 0.3
         # 视觉专用测试入口中，用于抵御 tracking 抖动、短时遮挡和仿真消息频率波动。
         override_hold_s: 0.6
         # 这些跟随参数与主树保持同源，这样 vision_test 中调出的结果才容易迁回 rmul_2026。
-        attack_radius: 2.0
+        attack_radius: 0.5
         follow_occupied_threshold: 40
         follow_sample_count: 16
         follow_arc_half_angle_deg: 90.0
@@ -100,12 +100,11 @@ pb2025_sentry_behavior_server:
         visualization_topic: decision/vision_follow_markers
 
       resource_policy:
-        # loopback_vision_test 默认也走与实车一致的 rmul_2026 主树。
-        # 视觉接管仍然受资源门控约束，这样仿真结果才更接近实车。
-        defend_enter_hp: 100
-        defend_exit_hp: 150
-        resupply_enter_hp: 250
-        resupply_exit_hp: 300
+        # vision_test 的视觉接管分支不受资源门控影响；这些阈值只影响视觉失效后的回退分支。
+        defend_enter_hp: 250
+        defend_exit_hp: 300
+        resupply_enter_hp: 150
+        resupply_exit_hp: 400
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100
         # 专用视觉测试常见于未接裁判系统时，此时允许临时按 engage 跑通视觉跟随链路。
@@ -164,4 +163,4 @@ pb2025_sentry_behavior_server:
 pb2025_sentry_behavior_client:
   ros__parameters:
     use_sim_time: true
-    target_tree: rmul_2026
+    target_tree: vision_test

@@ -46,6 +46,11 @@ private:
   std::unique_ptr<drivers::serial_driver::SerialDriver> serial_driver_;
   bool record_rosbag_;
   bool set_detector_color_;
+  bool publish_imu_as_gimbal_joint_state_;
+  bool accept_legacy_two_axis_joint_state_;
+  bool small_yaw_is_relative_;
+  bool invert_small_yaw_;
+  double small_yaw_offset_;
   // 姿态模式订阅话题，默认来自行为树发布的 decision/robot_mode。
   std::string robot_mode_topic_;
 
@@ -100,6 +105,7 @@ private:
   void publishRfidStatus(ReceiveRfidStatus & data);
   void publishRobotStatus(ReceiveRobotStatus & data);
   void publishJointState(ReceiveJointState & data);
+  void publishLegacyJointState(ReceiveLegacyJointState & data);
   void publishBuff(ReceiveBuff & data);
 
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
@@ -122,7 +128,6 @@ private:
   uint8_t previous_game_progress_ = 0;
 
   float last_hp_ = -1.0F;
-  float last_gimbal_pitch_odom_joint_, last_gimbal_yaw_odom_joint_;
   // rclcpp::Time stop_start_time_;
 };
 }  // namespace standard_robot_pp_ros2

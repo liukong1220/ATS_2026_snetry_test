@@ -31,7 +31,7 @@ def generate_launch_description():
                 "state_estimation_topic": "aft_mapped_to_init",
                 "registered_scan_topic": "cloud_registered",
                 "odom_frame": "odom",
-                "base_frame": "gimbal_yaw",
+                "base_frame": "gimbal_yaw_odom",
                 "lidar_frame": "front_mid360",
             }
         ],

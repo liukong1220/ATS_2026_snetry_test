@@ -7,7 +7,6 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import SetParameter
 
-
 def generate_launch_description():
     bringup_dir = get_package_share_directory("pb2025_sentry_bringup")
     behavior_dir = get_package_share_directory("pb2025_sentry_behavior")
@@ -74,7 +73,7 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "world",
-            default_value="",
+            default_value="ats",
             description="Select world. Map and PCD file share the same name as this parameter",
         )
     )
@@ -151,7 +150,7 @@ def generate_launch_description():
     )
     ld.add_action(
         DeclareLaunchArgument(
-            "use_rviz", default_value="False", description="Whether to start RViz"
+            "use_rviz", default_value="True", description="Whether to start RViz"
         )
     )
     ld.add_action(

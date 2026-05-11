@@ -12,6 +12,17 @@ standard_robot_pp_ros2:
     set_detector_color: false
     record_rosbag: true
     debug: false
+    # 三自由度云台 TF 由 ID_JOINT_STATE 中的 big_yaw/small_yaw/pitch 反馈驱动。
+    # IMU 仅作为姿态传感器发布，不再把 imu yaw/pitch 冒充 gimbal_yaw/pitch joint。
+    publish_imu_as_gimbal_joint_state: false
+    # 下位机已升级到三字段 joint 包后，应关闭旧两字段兼容模式，
+    # 避免误接老协议时静默退化成“只有大 yaw 正确”的半残 TF。
+    accept_legacy_two_axis_joint_state: false
+    # 若下位机上报的小 yaw 实际上是“炮口/IMU 绝对 yaw”，
+    # 可先把它转换成相对大 yaw 的关节角再进 TF，作为联调阶段兜底。
+    small_yaw_is_relative: false
+    invert_small_yaw: false
+    small_yaw_offset: 0.0
     robot_mode_topic: decision/robot_mode
 
 joint_state_publisher:
@@ -124,7 +135,7 @@ loam_interface:
     state_estimation_topic: "aft_mapped_to_init"
     registered_scan_topic: "cloud_registered"
     odom_frame: "odom"
-    base_frame: "base_footprint"
+    base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
 
 sensor_scan_generation:
@@ -132,7 +143,7 @@ sensor_scan_generation:
     use_sim_time: false
     lidar_frame: "front_mid360"
     base_frame: "base_footprint"
-    robot_base_frame: "gimbal_yaw"
+    robot_base_frame: "gimbal_yaw_odom"
 
 terrain_analysis:
   ros__parameters:
@@ -188,9 +199,9 @@ fake_vel_transform:
     use_sim_time: false
     odom_topic: "odometry"
     local_plan_topic: "transformed_global_plan"
-    # 当前底盘运动学和云台/车体坐标关系仍然以 gimbal_yaw 为机器人运动参考轴。
-    # 若后续修改雷达或车体主参考系，这里的 frame 链要和 TF、定位、视觉同步检查。
-    robot_base_frame: "gimbal_yaw"
+    # 大 yaw 作为导航/定位主参考轴，对应 joint/link 名 `gimbal_yaw_odom_*`。
+    # 小 yaw `gimbal_yaw` 只用于自瞄云台控制，不再作为底盘运动参考系。
+    robot_base_frame: "gimbal_yaw_odom"
     fake_robot_base_frame: "gimbal_yaw_fake"
     input_cmd_vel_topic: "cmd_vel_nav2_result"
     output_cmd_vel_topic: "cmd_vel"
@@ -202,13 +213,17 @@ small_gicp_relocalization:
     use_sim_time: false
     num_threads: 4
     num_neighbors: 20
+    min_source_points: 500
+    min_inliers: 200
     global_leaf_size: 0.15
     registered_leaf_size: 0.05
     max_dist_sq: 3.0
+    max_registration_error: -1.0
+    log_registration_details: true
     map_frame: "map"
     odom_frame: "odom"
-    base_frame: "base_footprint"
-    robot_base_frame: "gimbal_yaw"
+    base_frame: "gimbal_yaw_odom"
+    robot_base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
     init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # [x, y, z, roll, pitch, yaw]
     #init_pose: [20.3, 0.0, 0.0, 0.0, 0.0, 3.14]   # [x, y, z, roll, pitch, yaw]
@@ -930,7 +945,7 @@ velocity_smoother:
 pb_teleop_twist_joy_node:
   ros__parameters:
     use_sim_time: false
-    robot_base_frame: gimbal_yaw
+    robot_base_frame: gimbal_yaw_odom
     control_mode: auto_control    # Option: auto_control, manual_control
 
     require_enable_button: true

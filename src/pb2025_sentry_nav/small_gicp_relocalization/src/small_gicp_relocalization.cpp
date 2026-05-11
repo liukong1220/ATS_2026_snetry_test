@@ -18,9 +18,13 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
 {
   this->declare_parameter("num_threads", 4);
   this->declare_parameter("num_neighbors", 20);
+  this->declare_parameter("min_source_points", 500);
+  this->declare_parameter("min_inliers", 200);
   this->declare_parameter("global_leaf_size", 0.25);
   this->declare_parameter("registered_leaf_size", 0.25);
   this->declare_parameter("max_dist_sq", 1.0);
+  this->declare_parameter("max_registration_error", -1.0);
+  this->declare_parameter("log_registration_details", true);
   this->declare_parameter("map_frame", "map");
   this->declare_parameter("odom_frame", "odom");
   this->declare_parameter("base_frame", "");
@@ -31,9 +35,13 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
 
   this->get_parameter("num_threads", num_threads_);
   this->get_parameter("num_neighbors", num_neighbors_);
+  this->get_parameter("min_source_points", min_source_points_);
+  this->get_parameter("min_inliers", min_inliers_);
   this->get_parameter("global_leaf_size", global_leaf_size_);
   this->get_parameter("registered_leaf_size", registered_leaf_size_);
   this->get_parameter("max_dist_sq", max_dist_sq_);
+  this->get_parameter("max_registration_error", max_registration_error_);
+  this->get_parameter("log_registration_details", log_registration_details_);
   this->get_parameter("map_frame", map_frame_);
   this->get_parameter("odom_frame", odom_frame_);
   this->get_parameter("base_frame", base_frame_);
@@ -100,6 +108,13 @@ void SmallGicpRelocalizationNode::loadGlobalMap(const std::string & file_name)
   }
   RCLCPP_INFO(this->get_logger(), "Loaded global map with %zu points", global_map_->points.size());
 
+  if (base_frame_.empty() || lidar_frame_.empty()) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Skip global map frame conversion because base_frame or lidar_frame is empty.");
+    return;
+  }
+
   // NOTE: Transform global pcd_map (based on `lidar_odom` frame) to the `odom` frame
   Eigen::Affine3d odom_to_lidar_odom;
   while (true) {
@@ -129,6 +144,7 @@ void SmallGicpRelocalizationNode::registeredPcdCallback(
 {
   last_scan_time_ = msg->header.stamp;
   current_scan_frame_id_ = msg->header.frame_id;
+  has_received_scan_ = true;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr scan(new pcl::PointCloud<pcl::PointXYZ>());
   pcl::fromROSMsg(*msg, *scan);
@@ -139,6 +155,14 @@ void SmallGicpRelocalizationNode::performRegistration()
 {
   if (accumulated_cloud_->empty()) {
     RCLCPP_WARN(this->get_logger(), "No accumulated points to process.");
+    return;
+  }
+
+  if (static_cast<int>(accumulated_cloud_->size()) < min_source_points_) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Skip GICP: accumulated source cloud too small (%zu < %d).",
+      accumulated_cloud_->size(), min_source_points_);
     return;
   }
 
@@ -161,10 +185,25 @@ void SmallGicpRelocalizationNode::performRegistration()
 
   auto result = register_->align(*target_, *source_, *target_tree_, previous_result_t_);
 
-  if (result.converged) {
+  const bool inlier_ok = static_cast<int>(result.num_inliers) >= min_inliers_;
+  const bool error_ok = max_registration_error_ < 0.0 || result.error <= max_registration_error_;
+
+  if (log_registration_details_) {
+    RCLCPP_INFO(
+      this->get_logger(),
+      "GICP result: converged=%s iterations=%zu inliers=%zu error=%.6f source_points=%zu downsampled_source=%zu",
+      result.converged ? "true" : "false", result.iterations, result.num_inliers, result.error,
+      accumulated_cloud_->size(), source_->size());
+  }
+
+  if (result.converged && inlier_ok && error_ok) {
     result_t_ = previous_result_t_ = result.T_target_source;
   } else {
-    RCLCPP_WARN(this->get_logger(), "GICP did not converge.");
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Reject GICP result: converged=%s inliers=%zu/%d error=%.6f max_error=%.6f",
+      result.converged ? "true" : "false", result.num_inliers, min_inliers_, result.error,
+      max_registration_error_);
   }
 
   accumulated_cloud_->clear();
@@ -178,7 +217,8 @@ void SmallGicpRelocalizationNode::publishTransform()
 
   geometry_msgs::msg::TransformStamped transform_stamped;
   // `+ 0.1` means transform into future. according to https://robotics.stackexchange.com/a/96615
-  transform_stamped.header.stamp = last_scan_time_ + rclcpp::Duration::from_seconds(0.1);
+  transform_stamped.header.stamp =
+    has_received_scan_ ? last_scan_time_ + rclcpp::Duration::from_seconds(0.1) : now();
   transform_stamped.header.frame_id = map_frame_;
   transform_stamped.child_frame_id = odom_frame_;
 
@@ -213,15 +253,16 @@ void SmallGicpRelocalizationNode::initialPoseCallback(
 
   try {
     auto transform =
-      tf_buffer_->lookupTransform(robot_base_frame_, current_scan_frame_id_, tf2::TimePointZero);
+      tf_buffer_->lookupTransform(robot_base_frame_, odom_frame_, tf2::TimePointZero);
     Eigen::Isometry3d robot_base_to_odom = tf2::transformToEigen(transform.transform);
     Eigen::Isometry3d map_to_odom = map_to_robot_base * robot_base_to_odom;
 
     previous_result_t_ = result_t_ = map_to_odom;
+    accumulated_cloud_->clear();
   } catch (tf2::TransformException & ex) {
     RCLCPP_WARN(
       this->get_logger(), "Could not transform initial pose from %s to %s: %s",
-      robot_base_frame_.c_str(), current_scan_frame_id_.c_str(), ex.what());
+      robot_base_frame_.c_str(), odom_frame_.c_str(), ex.what());
   }
 }
 

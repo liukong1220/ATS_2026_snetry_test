@@ -670,7 +670,7 @@ prediction_horizon = time_steps * model_dt
   - 应与实车保持同一位姿
 - 导航链路默认仍使用：
   - `lidar_frame: front_mid360`
-  - `robot_base_frame: gimbal_yaw`
+  - `robot_base_frame: gimbal_yaw_odom`
 
 而 `sensor_scan_generation`、`loam_interface`、costmap `sensor_frame` 依赖的是运行时 TF 结果。
 

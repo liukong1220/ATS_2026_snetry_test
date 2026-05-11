@@ -314,8 +314,10 @@ struct ReceiveRobotStatus
   uint16_t crc;
 } __attribute__((packed));
 
-// 云台状态数据包
-struct ReceiveJointState
+// 旧版云台状态数据包：
+// data.yaw 曾用于 gimbal_yaw_odom_joint（大 yaw），data.pitch 不再用于当前三自由度模型。
+// 保留该结构是为了兼容尚未升级的下位机协议。
+struct ReceiveLegacyJointState
 {
   HeaderFrame frame_header;
   uint32_t time_stamp;
@@ -324,6 +326,25 @@ struct ReceiveJointState
   {
     float pitch;
     float yaw;
+  } __attribute__((packed)) data;
+
+  uint16_t crc;
+} __attribute__((packed));
+
+// 三自由度云台状态数据包：
+// big_yaw     -> gimbal_yaw_odom_joint，雷达所在的大 yaw
+// small_yaw   -> gimbal_yaw_joint，自瞄小 yaw
+// pitch       -> gimbal_pitch_joint，自瞄 pitch
+struct ReceiveJointState
+{
+  HeaderFrame frame_header;
+  uint32_t time_stamp;
+
+  struct
+  {
+    float big_yaw;
+    float small_yaw;
+    float pitch;
   } __attribute__((packed)) data;
 
   uint16_t crc;

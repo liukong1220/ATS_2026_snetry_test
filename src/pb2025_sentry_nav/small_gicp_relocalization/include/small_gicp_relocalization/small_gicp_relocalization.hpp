@@ -40,9 +40,13 @@ private:
 
   int num_threads_;
   int num_neighbors_;
+  int min_source_points_;
+  int min_inliers_;
   float global_leaf_size_;
   float registered_leaf_size_;
   float max_dist_sq_;
+  double max_registration_error_;
+  bool log_registration_details_;
   std::vector<double> init_pose_;
 
   std::string map_frame_;
@@ -53,6 +57,7 @@ private:
   std::string lidar_frame_;
   std::string current_scan_frame_id_;
   rclcpp::Time last_scan_time_;
+  bool has_received_scan_{false};
   Eigen::Isometry3d result_t_;
   Eigen::Isometry3d previous_result_t_;
 

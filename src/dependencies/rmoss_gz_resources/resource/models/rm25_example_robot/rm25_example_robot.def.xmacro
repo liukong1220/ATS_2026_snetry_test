@@ -6,7 +6,7 @@
     <xmacro_include uri="model://rm21_speed_monitor_module/rm21_speed_monitor_module.def.xmacro" />
     <xmacro_include uri="model://rmua19_standard_robot/chassis_wheel.def.xmacro" />
     <!--macro defination: rm25_example_robot-->
-    <xmacro_define_block name="rm25_example_robot" params="sticker_type chassis_height gimbal_pitch_height gimbal_yaw_height">
+    <xmacro_define_block name="rm25_example_robot" params="sticker_type chassis_height gimbal_yaw_height small_yaw_offset_x small_yaw_offset_y small_yaw_offset_z pitch_offset_x pitch_offset_y pitch_offset_z">
         <link name="base_footprint"/>
         <joint name="base_to_chassis" type="fixed">
             <pose>0 0 ${chassis_height} 0 0 0</pose>
@@ -70,10 +70,22 @@
             <pose relative_to="gimbal_yaw_odom_joint">0 0 0 0 0 0</pose>
         </link>
 
-        <joint name="gimbal_pitch_odom_joint" type="fixed">
-            <pose relative_to='gimbal_yaw_odom'>0 0 ${gimbal_pitch_height} 0 0 0</pose>
+        <!--
+            中间参考链说明：
+            1. gimbal_yaw_odom      = 大 yaw 轴中心
+            2. small_yaw_mount      = 小 yaw 轴安装参考层，位于小 yaw 轴中心
+            3. gimbal_yaw_joint     = 小 yaw 轴，轴心与 small_yaw_mount 重合
+            4. gimbal_pitch_joint   = pitch 轴，其轴心相对小 yaw 轴心存在 pitch_offset_*
+
+            因此：
+            - small_yaw_offset_* 表示“小 yaw 轴中心相对大 yaw 轴中心”的偏置
+            - pitch_offset_* 表示“pitch 轴中心相对小 yaw 轴中心”的偏置
+            - 若 pitch 与小 yaw 不共线，直接填写 pitch_offset_x/y/z
+        -->
+        <joint name="small_yaw_mount_joint" type="fixed">
+            <pose relative_to='gimbal_yaw_odom'>${small_yaw_offset_x} ${small_yaw_offset_y} ${small_yaw_offset_z} 0 0 0</pose>
             <parent>gimbal_yaw_odom</parent>
-            <child>gimbal_pitch_odom</child>
+            <child>small_yaw_mount</child>
             <axis>
                 <xyz>0 1 0</xyz>
                 <limit>
@@ -84,14 +96,14 @@
                 </limit>
             </axis>
         </joint>
-        <link name="gimbal_pitch_odom">
-            <pose relative_to="gimbal_pitch_odom_joint">0 0 0 0 0 0</pose>
+        <link name="small_yaw_mount">
+            <pose relative_to="small_yaw_mount_joint">0 0 0 0 0 0</pose>
         </link>
 
         <!--gimbal yaw module-->
         <joint name="gimbal_yaw_joint" type="revolute">
-            <pose relative_to='gimbal_pitch_odom'>0 0 -${gimbal_pitch_height} 0 0 0</pose>
-            <parent>gimbal_pitch_odom</parent>
+            <pose relative_to='small_yaw_mount'>0 0 0 0 0 0</pose>
+            <parent>small_yaw_mount</parent>
             <child>gimbal_yaw</child>
             <axis>
                 <xyz>0 0 1</xyz>
@@ -119,7 +131,7 @@
         </link>
         <!--gimbal pitch module-->
         <joint name="gimbal_pitch_joint" type="revolute">
-            <pose relative_to='gimbal_yaw'>0 0 ${gimbal_pitch_height} 0 0 0</pose>
+            <pose relative_to='gimbal_yaw'>${pitch_offset_x} ${pitch_offset_y} ${pitch_offset_z} 0 0 0</pose>
             <parent>gimbal_yaw</parent>
             <child>gimbal_pitch</child>
             <axis>

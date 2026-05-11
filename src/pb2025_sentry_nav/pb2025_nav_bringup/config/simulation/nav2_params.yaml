@@ -87,7 +87,7 @@ loam_interface:
     state_estimation_topic: "aft_mapped_to_init"
     registered_scan_topic: "cloud_registered"
     odom_frame: "odom"
-    base_frame: "base_footprint"
+    base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
 
 sensor_scan_generation:
@@ -95,7 +95,7 @@ sensor_scan_generation:
     use_sim_time: True
     lidar_frame: "front_mid360"
     base_frame: "base_footprint"
-    robot_base_frame: "gimbal_yaw"
+    robot_base_frame: "gimbal_yaw_odom"
 
 terrain_analysis:
   ros__parameters:
@@ -151,7 +151,7 @@ fake_vel_transform:
     use_sim_time: True
     odom_topic: "odometry"
     local_plan_topic: "transformed_global_plan"
-    robot_base_frame: "gimbal_yaw"
+    robot_base_frame: "gimbal_yaw_odom"
     fake_robot_base_frame: "gimbal_yaw_fake"
     input_cmd_vel_topic: "cmd_vel_nav2_result"
     output_cmd_vel_topic: "cmd_vel"
@@ -168,8 +168,8 @@ small_gicp_relocalization:
     max_dist_sq: 3.0
     map_frame: "map"
     odom_frame: "odom"
-    base_frame: "base_footprint"
-    robot_base_frame: "gimbal_yaw"
+    base_frame: "gimbal_yaw_odom"
+    robot_base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
     init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # [x, y, z, roll, pitch, yaw]
     # The prior_pcd_file does not need to be specified since it going to be set by defaults in launch.
@@ -715,7 +715,7 @@ velocity_smoother:
 pb_teleop_twist_joy_node:
   ros__parameters:
     use_sim_time: true
-    robot_base_frame: gimbal_yaw
+    robot_base_frame: gimbal_yaw_odom
     control_mode: auto_control    # Option: auto_control, manual_control
 
     require_enable_button: true

@@ -48,7 +48,7 @@ referee/robot_status
 
 当前姿态固定为：
 
-- `move = 0`
+- `move = 3`
 - `attack = 1`
 - `defend = 2`
 

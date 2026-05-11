@@ -9,23 +9,34 @@
     <!--property defination-->
     <xmacro_define_value name="global_initial_color" value="none" />
     <xmacro_define_value name="global_armor_sticker_type" value="num3" />
+    <!-- 坐标约定：
+         x 向前，y 向左，z 向上；
+         欧拉角顺序为 roll pitch yaw，单位 rad。 -->
     <!-- 底盘距离水平地面的高度 -->
     <xmacro_define_value name="chassis_height" value="0.1" />
-    <!-- gimbal_yaw 相对于底盘的 z 轴安装偏移 -->
+    <!-- 大 yaw 轴中心相对于底盘参考点的 z 轴安装偏移 -->
     <xmacro_define_value name="gimbal_yaw_height" value="0.0" />
-    <!-- gimbal_pitch 相对于 gimbal_yaw 的高度差 -->
-    <xmacro_define_value name="gimbal_pitch_height" value="0.14" />
+    <!-- pitch 轴中心相对小 yaw 轴中心的安装偏置：
+         x<0 表示在小 yaw 轴后方，y>0 表示在左侧，z>0 表示在上方。 -->
+    <xmacro_define_value name="pitch_offset_x" value="-0.053" />
+    <xmacro_define_value name="pitch_offset_y" value="0.0" />
+    <xmacro_define_value name="pitch_offset_z" value="0.064" />
+    <!-- 小 yaw 轴中心相对大 yaw 轴中心的安装偏置；非共轴结构必须按实车测量填写 -->
+    <xmacro_define_value name="small_yaw_offset_x" value="0.061" />
+    <xmacro_define_value name="small_yaw_offset_y" value="0.00" />
+    <xmacro_define_value name="small_yaw_offset_z" value="0.131" />
 
     <!--simulation_robot model-->
     <model name="simulation_robot">
 
+        <!-- 整车模型原点相对世界原点的初始位姿。 -->
         <pose>0 0 0.15 0 0 0</pose>
-        <xmacro_block name="rm25_example_robot" sticker_type="${global_armor_sticker_type}" chassis_height="${chassis_height}" gimbal_yaw_height="${gimbal_yaw_height}" gimbal_pitch_height="${gimbal_pitch_height}"/>
-        <!--rplidar a2-->
+        <xmacro_block name="rm25_example_robot" sticker_type="${global_armor_sticker_type}" chassis_height="${chassis_height}" gimbal_yaw_height="${gimbal_yaw_height}" small_yaw_offset_x="${small_yaw_offset_x}" small_yaw_offset_y="${small_yaw_offset_y}" small_yaw_offset_z="${small_yaw_offset_z}" pitch_offset_x="${pitch_offset_x}" pitch_offset_y="${pitch_offset_y}" pitch_offset_z="${pitch_offset_z}"/>
+        <!-- 2D 激光雷达相对底盘 `chassis` 的安装位姿：pose = x y z roll pitch yaw。 -->
         <xmacro_block name="rplidar_a2" prefix="front_" parent="chassis" pose="0.155 0 0.1 0 0 0" update_rate="10" samples="400" visualize="true"/>
-        <!--livox-->
-       <xmacro_block name="livox" prefix="front_" parent="gimbal_yaw" pose="0.1 0.245 0.3 ${68*pi/180} 0 -${161*pi/180}" update_rate="20" samples="1875"/>
-        <!--industrial camera-->
+        <!-- Livox 相对大 yaw 坐标系 `gimbal_yaw_odom` 的安装位姿。 -->
+        <xmacro_block name="livox" prefix="front_" parent="gimbal_yaw_odom" pose="0.1 0.245 0.3 ${68*pi/180} 0 -${161*pi/180}" update_rate="20" samples="1875"/>
+        <!-- 工业相机相对 pitch 坐标系 `gimbal_pitch` 的安装位姿。 -->
         <xmacro_block name="industrial_camera" prefix="front_" parent="gimbal_pitch" pose="0.1 0 0.045 0 0 0" update_rate="30" horizontal_fov="1" width="1920" height="1080"/>
 
         <!--plugins-->

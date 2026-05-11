@@ -87,6 +87,12 @@ std::vector<geometry_msgs::msg::Point> buildArcPoints(
   return points;
 }
 
+std::vector<geometry_msgs::msg::Point> buildCirclePoints(
+  const geometry_msgs::msg::Point & center, double radius, int segments)
+{
+  return buildArcPoints(center, radius, 0.0, M_PI, segments);
+}
+
 bool isTraversable(
   const nav_msgs::msg::OccupancyGrid & costmap, const geometry_msgs::msg::Point & point,
   int occupied_threshold)
@@ -1091,6 +1097,9 @@ void SelectVisionFollowPathAction::publishVisualization(
 
   const auto stamp = node_->now();
   visualization_msgs::msg::MarkerArray markers;
+  const double selected_radius = planarDistance(target_point, selected_goal);
+  const double effective_radius =
+    selected_radius > kPositionEpsilon ? selected_radius : attack_radius;
 
   visualization_msgs::msg::Marker target_marker;
   target_marker.header.frame_id = planning_frame;
@@ -1110,22 +1119,39 @@ void SelectVisionFollowPathAction::publishVisualization(
   target_marker.color.a = 0.95F;
   markers.markers.push_back(target_marker);
 
-  visualization_msgs::msg::Marker arc_marker;
-  arc_marker.header.frame_id = planning_frame;
-  arc_marker.header.stamp = stamp;
-  arc_marker.ns = "vision_follow";
-  arc_marker.id = 1;
-  arc_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-  arc_marker.action = visualization_msgs::msg::Marker::ADD;
-  arc_marker.pose.orientation.w = 1.0;
-  arc_marker.scale.x = 0.06;
-  arc_marker.color.r = 0.15F;
-  arc_marker.color.g = 0.85F;
-  arc_marker.color.b = 1.0F;
-  arc_marker.color.a = 0.95F;
-  arc_marker.points = buildArcPoints(
-    target_point, attack_radius, nearest_angle, arc_half_angle, std::max(24, sample_count));
-  markers.markers.push_back(arc_marker);
+  visualization_msgs::msg::Marker desired_radius_marker;
+  desired_radius_marker.header.frame_id = planning_frame;
+  desired_radius_marker.header.stamp = stamp;
+  desired_radius_marker.ns = "vision_follow";
+  desired_radius_marker.id = 1;
+  desired_radius_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  desired_radius_marker.action = visualization_msgs::msg::Marker::ADD;
+  desired_radius_marker.pose.orientation.w = 1.0;
+  desired_radius_marker.scale.x = 0.035;
+  desired_radius_marker.color.r = 0.15F;
+  desired_radius_marker.color.g = 0.85F;
+  desired_radius_marker.color.b = 1.0F;
+  desired_radius_marker.color.a = 0.35F;
+  desired_radius_marker.points =
+    buildCirclePoints(target_point, attack_radius, std::max(24, sample_count));
+  markers.markers.push_back(desired_radius_marker);
+
+  visualization_msgs::msg::Marker effective_arc_marker;
+  effective_arc_marker.header.frame_id = planning_frame;
+  effective_arc_marker.header.stamp = stamp;
+  effective_arc_marker.ns = "vision_follow";
+  effective_arc_marker.id = 5;
+  effective_arc_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  effective_arc_marker.action = visualization_msgs::msg::Marker::ADD;
+  effective_arc_marker.pose.orientation.w = 1.0;
+  effective_arc_marker.scale.x = 0.065;
+  effective_arc_marker.color.r = 0.25F;
+  effective_arc_marker.color.g = 1.0F;
+  effective_arc_marker.color.b = 0.35F;
+  effective_arc_marker.color.a = 0.95F;
+  effective_arc_marker.points = buildArcPoints(
+    target_point, effective_radius, nearest_angle, arc_half_angle, std::max(24, sample_count));
+  markers.markers.push_back(effective_arc_marker);
 
   visualization_msgs::msg::Marker nearest_goal_marker;
   nearest_goal_marker.header.frame_id = planning_frame;
@@ -1179,6 +1205,23 @@ void SelectVisionFollowPathAction::publishVisualization(
   path_marker.points.push_back(current_position);
   path_marker.points.push_back(selected_goal);
   markers.markers.push_back(path_marker);
+
+  visualization_msgs::msg::Marker radius_marker;
+  radius_marker.header.frame_id = planning_frame;
+  radius_marker.header.stamp = stamp;
+  radius_marker.ns = "vision_follow";
+  radius_marker.id = 6;
+  radius_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+  radius_marker.action = visualization_msgs::msg::Marker::ADD;
+  radius_marker.pose.orientation.w = 1.0;
+  radius_marker.scale.x = 0.04;
+  radius_marker.color.r = 0.35F;
+  radius_marker.color.g = 1.0F;
+  radius_marker.color.b = 0.35F;
+  radius_marker.color.a = 0.9F;
+  radius_marker.points.push_back(target_point);
+  radius_marker.points.push_back(selected_goal);
+  markers.markers.push_back(radius_marker);
 
   visualization_publisher_->publish(markers);
 }

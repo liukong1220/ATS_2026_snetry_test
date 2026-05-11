@@ -309,10 +309,10 @@
 		<link name="gimbal_yaw_odom">
 			<pose relative_to="gimbal_yaw_odom_joint">0 0 0 0 0 0</pose>
 		</link>
-		<joint name="gimbal_pitch_odom_joint" type="fixed">
-			<pose relative_to="gimbal_yaw_odom">0 0 0.16 0 0 0</pose>
+		<joint name="small_yaw_mount_joint" type="fixed">
+			<pose relative_to="gimbal_yaw_odom">0.061 0 0.131 0 0 0</pose>
 			<parent>gimbal_yaw_odom</parent>
-			<child>gimbal_pitch_odom</child>
+			<child>small_yaw_mount</child>
 			<axis>
 				<xyz>0 1 0</xyz>
 				<limit>
@@ -323,13 +323,13 @@
 				</limit>
 			</axis>
 		</joint>
-		<link name="gimbal_pitch_odom">
-			<pose relative_to="gimbal_pitch_odom_joint">0 0 0 0 0 0</pose>
+		<link name="small_yaw_mount">
+			<pose relative_to="small_yaw_mount_joint">0 0 0 0 0 0</pose>
 		</link>
 		<!--gimbal yaw module-->
 		<joint name="gimbal_yaw_joint" type="revolute">
-			<pose relative_to="gimbal_pitch_odom">0 0 -0.16 0 0 0</pose>
-			<parent>gimbal_pitch_odom</parent>
+			<pose relative_to="small_yaw_mount">0 0 0 0 0 0</pose>
+			<parent>small_yaw_mount</parent>
 			<child>gimbal_yaw</child>
 			<axis>
 				<xyz>0 0 1</xyz>
@@ -373,7 +373,7 @@
 		</link>
 		<!--gimbal pitch module-->
 		<joint name="gimbal_pitch_joint" type="revolute">
-			<pose relative_to="gimbal_yaw">0 0 0.16 0 0 0</pose>
+			<pose relative_to="gimbal_yaw">-0.053 0 0.064 0 0 0</pose>
 			<parent>gimbal_yaw</parent>
 			<child>gimbal_pitch</child>
 			<axis>
@@ -1115,4 +1115,3 @@
 		</plugin>
 	</model>
 </sdf>
-

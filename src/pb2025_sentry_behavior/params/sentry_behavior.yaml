@@ -43,11 +43,11 @@ pb2025_sentry_behavior_server:
         cmd_vel: cmd_vel
         gimbal_cmd: cmd_gimbal
         # 哨兵姿态模式话题：
-        # 0=move，1=attack，2=defend。
+        # 3=move，1=attack，2=defend。
         robot_mode: decision/robot_mode
 
       motion:
-        default_spin_speed: 7.0
+        default_spin_speed: 3.0
         # 检测到新的掉血后的自旋角速度。
         hit_spin_speed: 7.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
@@ -55,9 +55,9 @@ pb2025_sentry_behavior_server:
 
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
-        switch_cooldown_s: 5.0
+        switch_cooldown_s: 6.0
         # 每局比赛内单一姿态允许累计存在的最大时长。
-        max_cumulative_s: 180.0
+        max_cumulative_s: 175.0
 
       mode_visualization:
         # 是否发布姿态可视化 Marker。
@@ -71,19 +71,19 @@ pb2025_sentry_behavior_server:
         # 视觉融合消息允许的最大年龄。
         # 实车若视觉链路整体时延偏大，可以略调大；
         # 但过大时会继续追一个已经丢失的旧目标。
-        timeout_s: 0.5
+        timeout_s: 0.3
         # 初次进入视觉跟随前，需要连续稳定满足条件的最短时间。
         # 实车建议先从 0.2~0.35s 起调，兼顾响应速度和抗误检能力。
         activation_hold_s: 0.25
         # 目标切换确认时间。
         # 如果原目标暂时被遮挡、同时旁边冒出新目标，只有新目标持续稳定超过该时间才切换。
-        switch_target_hold_s: 0.45
+        switch_target_hold_s: 0.3
         # tracking 短时抖动、单帧丢消息或视觉暂时被挡住时，额外维持当前视觉接管的时间。
         # 只有这个保持时间也耗尽后，系统才会平滑回到普通巡航/裁判决策。
         override_hold_s: 0.6
         # 跟随目标时的期望攻击半径，单位 m。
         # 实车上这个参数要结合雷达安装位姿、车体外形、射界和墙边安全裕度一起调。
-        attack_radius: 1.0
+        attack_radius: 0.5
         # costmap 代价值达到该阈值后就不再把该点作为候选跟随点。
         # 实车贴墙过于激进时先尝试调小；狭窄区域总过不去再考虑调大。
         follow_occupied_threshold: 40
@@ -137,7 +137,7 @@ pb2025_sentry_behavior_server:
         # 4. resupply_exit_ammo >= resupply_enter_ammo + 20
         defend_enter_hp: 250
         defend_exit_hp: 300
-        resupply_enter_hp: 100
+        resupply_enter_hp: 150
         resupply_exit_hp: 400
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100

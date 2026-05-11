@@ -370,7 +370,7 @@ ros2 bag record \
 
 当前姿态枚举固定为：
 
-- `move = 0`
+- `move = 3`
 - `attack = 1`
 - `defend = 2`
 

@@ -43,7 +43,7 @@ pb2025_sentry_behavior_server:
         cmd_vel: cmd_vel
         gimbal_cmd: cmd_gimbal
         # 哨兵姿态模式话题：
-        # 0=move，1=attack，2=defend。
+        # 3=move，1=attack，2=defend。
         robot_mode: decision/robot_mode
 
       motion:

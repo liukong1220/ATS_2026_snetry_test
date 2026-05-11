@@ -121,7 +121,7 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        gimbal_pitch_odom:
+        small_yaw_mount:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -199,7 +199,7 @@ Visualization Manager:
           Value: true
         gimbal_pitch:
           Value: true
-        gimbal_pitch_odom:
+        small_yaw_mount:
           Value: true
         gimbal_yaw:
           Value: true
@@ -246,10 +246,10 @@ Visualization Manager:
                 front_right_wheel:
                   {}
                 gimbal_yaw_odom:
-                  gimbal_pitch_odom:
+                  front_mid360:
+                    {}
+                  small_yaw_mount:
                     gimbal_yaw:
-                      front_mid360:
-                        {}
                       gimbal_pitch:
                         front_industrial_camera:
                           front_industrial_camera_optical_frame:

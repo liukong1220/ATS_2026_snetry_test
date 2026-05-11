@@ -30,6 +30,10 @@ CTestTestfile.cmake
 *.user
 *.sln.docstates
 .cache/
+.rviz2/
+.ros/
+.config/
+.local/
 
 # Temporary and backup files
 *~
