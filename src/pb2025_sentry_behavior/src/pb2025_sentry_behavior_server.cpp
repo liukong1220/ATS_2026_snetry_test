@@ -198,7 +198,7 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.topics.cmd_vel", std::string("cmd_vel"));
   declare_parameter("decision.topics.gimbal_cmd", std::string("cmd_gimbal"));
   declare_parameter("decision.topics.robot_mode", std::string("decision/robot_mode"));
-  declare_parameter("decision.motion.default_spin_speed", 7.0);
+  declare_parameter("decision.motion.default_spin_speed", 0.0);
   declare_parameter("decision.motion.hit_spin_speed", 7.0);
   declare_parameter("decision.motion.hit_spin_stop_after_no_hp_drop_s", 2.0);
   declare_parameter("decision.mode_limits.switch_cooldown_s", 5.0);
