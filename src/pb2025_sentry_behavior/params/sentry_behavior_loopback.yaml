@@ -47,7 +47,7 @@ pb2025_sentry_behavior_server:
         robot_mode: decision/robot_mode
 
       motion:
-        default_spin_speed: 7.0
+        default_spin_speed: 0.0
         # 检测到新的掉血后的自旋角速度。
         hit_spin_speed: 7.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。

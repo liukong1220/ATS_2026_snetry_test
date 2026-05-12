@@ -251,7 +251,7 @@
           <ReactiveFallback>
             <Sequence>
               <IsAttacked key_port="{@referee_robotStatus}"/>
-              <PublishSpinSpeed spin_speed="{@decision_hit_spin_speed}"
+              <PublishSpinSpeed spin_speed="{@decision_default_spin_speed}"
                                 duration="0.0"
                                 topic_name="{@decision_spin_topic}"/>
             </Sequence>

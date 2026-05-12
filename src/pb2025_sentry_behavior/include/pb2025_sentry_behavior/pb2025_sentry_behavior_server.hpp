@@ -81,7 +81,7 @@ private:
   std::string decision_robot_mode_topic_;
   std::string decision_vision_topic_;
   double decision_vision_timeout_s_ = 0.5;
-  double decision_hit_spin_speed_ = 7.0;
+  double decision_hit_spin_speed_ = 0.0;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   std::string pose_expected_frame_ = "map";

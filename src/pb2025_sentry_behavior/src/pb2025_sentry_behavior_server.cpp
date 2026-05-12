@@ -318,7 +318,7 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   std::string cmd_vel_topic = "cmd_vel";
   std::string gimbal_topic = "cmd_gimbal";
   std::string robot_mode_topic = "decision/robot_mode";
-  double default_spin_speed = 7.0;
+  double default_spin_speed = 0.0;
   double hit_spin_speed = 7.0;
   double hit_spin_stop_after_no_hp_drop_s = 2.0;
   double mode_switch_cooldown_s = 5.0;
