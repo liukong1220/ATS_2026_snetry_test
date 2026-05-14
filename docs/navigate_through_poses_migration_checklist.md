@@ -199,16 +199,16 @@ pb2025_sentry_bringup/bringup.launch.py
 
 ## 4. 仓库里保留的旧 `robot_decision` 节点是什么状态
 
-旧节点代码仍在仓库里：
+旧 `robot_decision` 相关遗留内容当前只剩：
 
-- [`../src/standard_robot_pp_ros2/src/2025_robot_decision.cpp`](../src/standard_robot_pp_ros2/src/2025_robot_decision.cpp)
+- [`../src/standard_robot_pp_ros2/launch/standard_robot_pp_ros2.launch.py`](../src/standard_robot_pp_ros2/launch/standard_robot_pp_ros2.launch.py)
 - [`../src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml`](../src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml)
 
 但它当前有三个重要事实：
 
 1. 默认不参与总入口运行
-2. 代码里当前 action client 仍然是 `NavigateToPose`
-3. 参数默认值当前仍然是：
+2. launch 层仍保留 `launch_robot_decision` 这个 legacy 开关
+3. 参数文件中仍保留 `robot_decision` 参数块，其中默认值仍然是：
    - `decision_config.nav2_action_server = "/navigate_to_pose"`
 
 因此：

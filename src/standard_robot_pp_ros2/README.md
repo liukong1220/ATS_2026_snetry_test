@@ -1,12 +1,12 @@
 # standard_robot_pp_ros2
 
-当前项目中的上下位机串口接口层。
+当前工作区中的上下位机串口桥接与裁判系统接口层。
 
-这个包在当前仓库里的职责是：
+本包当前职责：
 
-1. 接收下位机串口数据并发布成 ROS topic
-2. 接收上层行为树和导航输出并写回串口发送结构
-3. 作为实机链路中 `cmd_vel`、姿态模式、裁判系统信息的接口桥梁
+1. 把下位机串口数据解析成 ROS 话题
+2. 接收导航与行为树输出并写回串口发送结构
+3. 作为 `/cmd_vel`、姿态模式、裁判系统和云台关节状态的实机桥梁
 
 ## 当前入口
 
@@ -14,111 +14,133 @@
 
 - [launch/standard_robot_pp_ros2.launch.py](./launch/standard_robot_pp_ros2.launch.py)
 
-默认参数文件：
+默认参数：
 
 - [config/standard_robot_pp_ros2.yaml](./config/standard_robot_pp_ros2.yaml)
 
-在整车主线中，通常由：
+当前通常由整车总入口拉起：
 
 - [../pb2025_sentry_bringup/launch/bringup.launch.py](../pb2025_sentry_bringup/launch/bringup.launch.py)
 
-统一拉起。
+## 当前与上层系统的对接
 
-## 当前与上层决策的对接关系
+### 1. 底盘速度
 
-### 1. 姿态模式
-
-当前行为树通过：
-
-- `decision/robot_mode`
-
-发布姿态模式。
-
-本包订阅该话题后，写入串口发送结构中的：
-
-- `SendRobotCmdData.data.speed_vector.mode`
-
-当前模式约定固定为：
-
-- `move = 3`
-- `attack = 1`
-- `defend = 2`
-
-对应代码位置：
-
-- [src/standard_robot_pp_ros2.cpp](./src/standard_robot_pp_ros2.cpp)
-- [include/standard_robot_pp_ros2/packet_typedef.hpp](./include/standard_robot_pp_ros2/packet_typedef.hpp)
-
-### 2. 底盘速度
-
-当前本包订阅：
+当前订阅：
 
 - `/cmd_vel`
 
-并把速度写入：
+并写入串口发送结构：
 
 - `SendRobotCmdData.data.speed_vector.vx`
 - `SendRobotCmdData.data.speed_vector.vy`
 - `SendRobotCmdData.data.speed_vector.wz`
 
-因此：
+当前还额外做了两层保护：
 
-- 上层受击自旋最终就是通过 `/cmd_vel.angular.z`
-- 再映射到串口结构体的 `speed_vector.wz`
+1. 瞬时零速短时保持
+2. `cmd_vel` 断流 watchdog
+
+对应代码：
+
+- [src/standard_robot_pp_ros2.cpp](./src/standard_robot_pp_ros2.cpp)
+
+### 2. 姿态模式
+
+当前行为树通过：
+
+- `decision/robot_mode`
+
+发布姿态模式，本包订阅后写入：
+
+- `SendRobotCmdData.data.speed_vector.mode`
+
+当前固定约定：
+
+- `move = 3`
+- `attack = 1`
+- `defend = 2`
+
+协议定义：
+
+- [include/standard_robot_pp_ros2/packet_typedef.hpp](./include/standard_robot_pp_ros2/packet_typedef.hpp)
 
 ### 3. 裁判系统数据
 
-当前本包负责把串口中的裁判系统数据转成 ROS topic，供行为树直接消费：
+当前会把下位机上传的裁判系统字段发布为：
 
 - `referee/game_status`
 - `referee/robot_status`
 - `referee/rfid_status`
+- 以及其他裁判相关话题
 
-这也是姿态切换、低血量防御、受击自旋等逻辑的数据来源。
+这些话题是行为树资源门控、受击检测和比赛状态判断的直接数据源。
+
+### 4. 云台关节与 IMU
+
+当前会发布：
+
+- `serial/gimbal_joint_state`
+- `serial/imu`
+
+其中 `gimbal_joint_state` 供 `joint_state_publisher` / `robot_state_publisher` 维护整车 TF 链。
 
 ## 当前关键参数
 
-参数文件：
+最常动的参数在：
 
 - [config/standard_robot_pp_ros2.yaml](./config/standard_robot_pp_ros2.yaml)
 
-当前和行为树主线最相关的参数：
+尤其是：
 
 - `device_name`
 - `baud_rate`
 - `robot_mode_topic`
+- `enable_transient_zero_cmd_hold`
+- `transient_zero_cmd_hold_timeout_ms`
+- `cmd_vel_watchdog_timeout_ms`
+- `publish_imu_as_gimbal_joint_state`
+- `accept_legacy_two_axis_joint_state`
+- `small_yaw_is_relative`
 
-其中：
+## 当前常见维护问题
 
-- `robot_mode_topic` 默认就是 `decision/robot_mode`
+### 1. `/cmd_vel` 有值但底盘卡顿
 
-## 当前运行方式
+先看：
 
-### 单独启动串口层
+1. `enable_transient_zero_cmd_hold`
+2. `transient_zero_cmd_hold_timeout_ms`
+3. `cmd_vel_watchdog_timeout_ms`
+4. 上游 `/cmd_vel` 是否夹杂零速帧
 
-```bash
-source install/setup.bash
-ros2 launch standard_robot_pp_ros2 standard_robot_pp_ros2.launch.py
-```
+### 2. 姿态模式不生效
 
-### 在整车主线中启动
+先看：
 
-```bash
-source install/setup.bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py world:=<YOUR_WORLD_NAME> use_rviz:=True
-```
+1. `decision/robot_mode`
+2. `robot_mode_topic`
+3. `packet_typedef.hpp` 中的模式枚举
+4. 下位机协议是否与当前约定一致
 
-## 当前维护建议
+### 3. TF 不完整或云台投影不对
 
-1. 改姿态切换规则、攻击/防御触发逻辑，不在本包改，去 `pb2025_sentry_behavior`
-2. 改模式枚举和串口协议字段映射，要同时检查本包和行为层是否一致
-3. 改自旋速度时，不在本包直接写死，优先调行为树参数 `decision.motion.hit_spin_speed`
-4. 改模式话题名时，要同步检查：
-   - `pb2025_sentry_behavior` 的 `decision.topics.robot_mode`
-   - 本包的 `robot_mode_topic`
+先看：
+
+1. `serial/gimbal_joint_state`
+2. `publish_imu_as_gimbal_joint_state`
+3. `accept_legacy_two_axis_joint_state`
+4. `small_yaw_is_relative`
+
+## 当前维护边界
+
+1. 改串口协议、模式字段映射、瞬时零速保护，在本包改
+2. 改姿态切换规则、视觉接管、受击自旋，不在本包改，去 `pb2025_sentry_behavior`
+3. 改 `/cmd_vel` 生成链，不在本包改，去 `pb2025_sentry_nav`
+4. 改整车启动和总参数入口，不在本包改，去 `pb2025_sentry_bringup`
 
 ## 相关文档
 
+- [../../docs/总览.md](../../docs/总览.md)
 - [../../docs/sentry_posture_switch_logic.md](../../docs/sentry_posture_switch_logic.md)
-- [../../docs/sentry_bt_decision_checklist.md](../../docs/sentry_bt_decision_checklist.md)
 - [../../docs/实机视觉跟随优化方案.md](../../docs/实机视觉跟随优化方案.md)
