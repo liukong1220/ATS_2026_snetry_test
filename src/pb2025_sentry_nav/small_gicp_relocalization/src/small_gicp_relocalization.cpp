@@ -6,6 +6,7 @@
 #include "pcl_conversions/pcl_conversions.h"
 #include "small_gicp/pcl/pcl_registration.hpp"
 #include "small_gicp/util/downsampling_omp.hpp"
+#include "tf2/utils.h"
 #include "tf2_eigen/tf2_eigen.hpp"
 
 namespace small_gicp_relocalization
@@ -25,6 +26,11 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("max_dist_sq", 1.0);
   this->declare_parameter("max_registration_error", -1.0);
   this->declare_parameter("log_registration_details", true);
+  this->declare_parameter("registration_interval_s", 0.25);
+  this->declare_parameter("max_accumulation_age_s", 0.30);
+  this->declare_parameter("min_registration_translation_delta", 0.10);
+  this->declare_parameter("min_registration_yaw_delta", 0.12);
+  this->declare_parameter("initial_pose_force_registration_window_s", 2.0);
   this->declare_parameter("map_frame", "map");
   this->declare_parameter("odom_frame", "odom");
   this->declare_parameter("base_frame", "");
@@ -42,6 +48,13 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("max_dist_sq", max_dist_sq_);
   this->get_parameter("max_registration_error", max_registration_error_);
   this->get_parameter("log_registration_details", log_registration_details_);
+  this->get_parameter("registration_interval_s", registration_interval_s_);
+  this->get_parameter("max_accumulation_age_s", max_accumulation_age_s_);
+  this->get_parameter("min_registration_translation_delta", min_registration_translation_delta_);
+  this->get_parameter("min_registration_yaw_delta", min_registration_yaw_delta_);
+  this->get_parameter(
+    "initial_pose_force_registration_window_s",
+    initial_pose_force_registration_window_s_);
   this->get_parameter("map_frame", map_frame_);
   this->get_parameter("odom_frame", odom_frame_);
   this->get_parameter("base_frame", base_frame_);
@@ -59,6 +72,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
       Eigen::AngleAxisd(init_pose_[3], Eigen::Vector3d::UnitX()).toRotationMatrix();
   }
   previous_result_t_ = result_t_;
+  last_registration_robot_base_to_odom_ = Eigen::Isometry3d::Identity();
 
   accumulated_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   global_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
@@ -92,7 +106,8 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
     std::bind(&SmallGicpRelocalizationNode::initialPoseCallback, this, std::placeholders::_1));
 
   register_timer_ = this->create_wall_timer(
-    std::chrono::milliseconds(500),  // 2 Hz
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::duration<double>(std::max(0.05, registration_interval_s_))),
     std::bind(&SmallGicpRelocalizationNode::performRegistration, this));
 
   transform_timer_ = this->create_wall_timer(
@@ -145,6 +160,9 @@ void SmallGicpRelocalizationNode::registeredPcdCallback(
   last_scan_time_ = msg->header.stamp;
   current_scan_frame_id_ = msg->header.frame_id;
   has_received_scan_ = true;
+  if (!first_accumulated_scan_time_) {
+    first_accumulated_scan_time_ = msg->header.stamp;
+  }
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr scan(new pcl::PointCloud<pcl::PointXYZ>());
   pcl::fromROSMsg(*msg, *scan);
@@ -153,16 +171,15 @@ void SmallGicpRelocalizationNode::registeredPcdCallback(
 
 void SmallGicpRelocalizationNode::performRegistration()
 {
+  if (!shouldRunRegistration()) {
+    return;
+  }
+
   if (accumulated_cloud_->empty()) {
-    RCLCPP_WARN(this->get_logger(), "No accumulated points to process.");
     return;
   }
 
   if (static_cast<int>(accumulated_cloud_->size()) < min_source_points_) {
-    RCLCPP_WARN(
-      this->get_logger(),
-      "Skip GICP: accumulated source cloud too small (%zu < %d).",
-      accumulated_cloud_->size(), min_source_points_);
     return;
   }
 
@@ -198,6 +215,9 @@ void SmallGicpRelocalizationNode::performRegistration()
 
   if (result.converged && inlier_ok && error_ok) {
     result_t_ = previous_result_t_ = result.T_target_source;
+    if (auto current_robot_base_to_odom = getCurrentRobotBaseToOdom()) {
+      last_registration_robot_base_to_odom_ = *current_robot_base_to_odom;
+    }
   } else {
     RCLCPP_WARN(
       this->get_logger(),
@@ -207,6 +227,7 @@ void SmallGicpRelocalizationNode::performRegistration()
   }
 
   accumulated_cloud_->clear();
+  first_accumulated_scan_time_.reset();
 }
 
 void SmallGicpRelocalizationNode::publishTransform()
@@ -259,11 +280,95 @@ void SmallGicpRelocalizationNode::initialPoseCallback(
 
     previous_result_t_ = result_t_ = map_to_odom;
     accumulated_cloud_->clear();
+    first_accumulated_scan_time_.reset();
+    initial_pose_override_time_ = this->now();
+    if (auto current_robot_base_to_odom = getCurrentRobotBaseToOdom()) {
+      last_registration_robot_base_to_odom_ = *current_robot_base_to_odom;
+    }
   } catch (tf2::TransformException & ex) {
     RCLCPP_WARN(
       this->get_logger(), "Could not transform initial pose from %s to %s: %s",
       robot_base_frame_.c_str(), odom_frame_.c_str(), ex.what());
   }
+}
+
+bool SmallGicpRelocalizationNode::shouldRunRegistration()
+{
+  if (!has_received_scan_ || accumulated_cloud_->empty()) {
+    return false;
+  }
+
+  if (first_accumulated_scan_time_) {
+    const double accumulation_age = accumulatedCloudAgeSeconds();
+    if (max_accumulation_age_s_ > 0.0 && accumulation_age < max_accumulation_age_s_) {
+      return false;
+    }
+  }
+
+  const bool force_after_initial_pose =
+    initial_pose_override_time_ &&
+    (this->now() - *initial_pose_override_time_).seconds() <= initial_pose_force_registration_window_s_;
+  if (force_after_initial_pose) {
+    return true;
+  }
+
+  auto current_robot_base_to_odom = getCurrentRobotBaseToOdom();
+  if (!current_robot_base_to_odom) {
+    return false;
+  }
+
+  if (!last_registration_robot_base_to_odom_) {
+    last_registration_robot_base_to_odom_ = *current_robot_base_to_odom;
+    return false;
+  }
+
+  const double translation_delta = translationDeltaFromLastTrigger(*current_robot_base_to_odom);
+  const double yaw_delta = yawDeltaFromLastTrigger(*current_robot_base_to_odom);
+  return
+    translation_delta >= std::max(0.0, min_registration_translation_delta_) ||
+    yaw_delta >= std::max(0.0, min_registration_yaw_delta_);
+}
+
+double SmallGicpRelocalizationNode::accumulatedCloudAgeSeconds() const
+{
+  if (!first_accumulated_scan_time_) {
+    return 0.0;
+  }
+  return std::max(0.0, (last_scan_time_ - *first_accumulated_scan_time_).seconds());
+}
+
+std::optional<Eigen::Isometry3d> SmallGicpRelocalizationNode::getCurrentRobotBaseToOdom() const
+{
+  try {
+    auto transform =
+      tf_buffer_->lookupTransform(robot_base_frame_, odom_frame_, tf2::TimePointZero);
+    return tf2::transformToEigen(transform.transform);
+  } catch (const tf2::TransformException &) {
+    return std::nullopt;
+  }
+}
+
+double SmallGicpRelocalizationNode::translationDeltaFromLastTrigger(
+  const Eigen::Isometry3d & current_robot_base_to_odom) const
+{
+  if (!last_registration_robot_base_to_odom_) {
+    return 0.0;
+  }
+  return (
+    current_robot_base_to_odom.translation() -
+    last_registration_robot_base_to_odom_->translation()).norm();
+}
+
+double SmallGicpRelocalizationNode::yawDeltaFromLastTrigger(
+  const Eigen::Isometry3d & current_robot_base_to_odom) const
+{
+  if (!last_registration_robot_base_to_odom_) {
+    return 0.0;
+  }
+  const double current_yaw = current_robot_base_to_odom.rotation().eulerAngles(0, 1, 2).z();
+  const double previous_yaw =
+    last_registration_robot_base_to_odom_->rotation().eulerAngles(0, 1, 2).z();
+  return std::abs(std::atan2(std::sin(current_yaw - previous_yaw), std::cos(current_yaw - previous_yaw)));
 }
 
 }  // namespace small_gicp_relocalization

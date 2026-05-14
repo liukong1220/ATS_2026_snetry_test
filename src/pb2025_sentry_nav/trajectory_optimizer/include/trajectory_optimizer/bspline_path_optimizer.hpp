@@ -46,6 +46,9 @@ struct OptimizerParams
   double obstacle_refinement_gain = 0.03;
   bool use_esdf_obstacle_cost = false;
   double obstacle_safe_distance = 0.30;
+  double obstacle_speed_reduction_distance = 0.45;
+  double obstacle_speed_min_distance = 0.20;
+  double obstacle_speed_min_scale = 0.55;
 };
 
 struct TrajectorySample2D
@@ -150,6 +153,7 @@ private:
   std::vector<Point2D> buildSmoothedPolyline(const std::vector<Point2D> & points) const;
   TrajectoryProfile2D buildTrajectoryProfile(const std::vector<Point2D> & points) const;
   void applyCurvatureSpeedLimits(TrajectoryProfile2D & profile) const;
+  void applyObstacleSpeedLimits(TrajectoryProfile2D & profile) const;
   void applyAccelerationLimits(TrajectoryProfile2D & profile) const;
   void smoothVelocityProfile(TrajectoryProfile2D & profile) const;
   static Point2D discreteFirstDerivative(

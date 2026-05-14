@@ -28,6 +28,18 @@ double normalizeAngle(double angle)
   return angle;
 }
 
+const char * planSourceName(pb_nav2_behaviors::BackUpFreeSpace::PlanSource source)
+{
+  switch (source) {
+    case pb_nav2_behaviors::BackUpFreeSpace::PlanSource::CORRIDOR_PRIMARY:
+      return "corridor";
+    case pb_nav2_behaviors::BackUpFreeSpace::PlanSource::CENTROID_FALLBACK:
+      return "centroid_fallback";
+    default:
+      return "unknown";
+  }
+}
+
 }  // namespace
 
 void BackUpFreeSpace::onConfigure()
@@ -91,6 +103,10 @@ void BackUpFreeSpace::onConfigure()
   nav2_util::declare_parameter_if_not_declared(
     node, "minimum_speed_xy", rclcpp::ParameterValue(0.08));
   nav2_util::declare_parameter_if_not_declared(
+    node, "high_cost_speed_threshold", rclcpp::ParameterValue(48.0));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "high_cost_speed_min_scale", rclcpp::ParameterValue(0.55));
+  nav2_util::declare_parameter_if_not_declared(
     node, "goal_tolerance", rclcpp::ParameterValue(0.04));
   nav2_util::declare_parameter_if_not_declared(
     node, "monitor_lookahead_distance", rclcpp::ParameterValue(0.35));
@@ -131,6 +147,8 @@ void BackUpFreeSpace::onConfigure()
   node->get_parameter("translational_acc_limit", translational_acc_limit_);
   node->get_parameter("translational_decel_limit", translational_decel_limit_);
   node->get_parameter("minimum_speed_xy", minimum_speed_xy_);
+  node->get_parameter("high_cost_speed_threshold", high_cost_speed_threshold_);
+  node->get_parameter("high_cost_speed_min_scale", high_cost_speed_min_scale_);
   node->get_parameter("goal_tolerance", goal_tolerance_);
   node->get_parameter("monitor_lookahead_distance", monitor_lookahead_distance_);
   node->get_parameter("enable_full_circle_fallback", enable_full_circle_fallback_);
@@ -186,13 +204,25 @@ nav2_behaviors::Status BackUpFreeSpace::onRun(
   // 这里不再像旧实现那样只找一个“最空方向”然后直接开退，
   // 而是先规划一条短时恢复轨迹，后续执行和重规划都围绕这条轨迹展开。
   if (!planEscapeTrajectory(costmap, current_pose_2d, command_distance_abs_, active_plan_)) {
+    if (!planCentroidFallbackTrajectory(
+          costmap, current_pose_2d, command_distance_abs_, active_plan_))
+    {
+      RCLCPP_WARN(
+        logger_,
+        "No smooth omni recovery trajectory found within %.2fm around the robot.",
+        command_distance_abs_);
+      return nav2_behaviors::Status::FAILED;
+    }
+    active_plan_source_ = PlanSource::CENTROID_FALLBACK;
     RCLCPP_WARN(
       logger_,
-      "No smooth omni recovery trajectory found within %.2fm around the robot.",
-      command_distance_abs_);
-    return nav2_behaviors::Status::FAILED;
+      "Fallback to centroid-based recovery heading %.2fdeg.",
+      active_plan_.heading * 180.0 / M_PI);
+  } else {
+    active_plan_source_ = PlanSource::CORRIDOR_PRIMARY;
   }
 
+  active_plan_average_cost_ = computePlanAverageCost(costmap, active_plan_);
   previous_plan_heading_ = active_plan_.heading;
   has_previous_plan_heading_ = true;
   execution_state_ = RecoveryExecutionState::EXECUTING;
@@ -201,8 +231,10 @@ nav2_behaviors::Status BackUpFreeSpace::onRun(
   }
   RCLCPP_WARN(
     logger_,
-    "Start omni recovery: distance=%.2f heading=%.2fdeg score=%.2f",
-    active_plan_.distance, active_plan_.heading * 180.0 / M_PI, active_plan_.score);
+    "Start omni recovery: source=%s distance=%.2f heading=%.2fdeg score=%.2f avg_cost=%.2f",
+    planSourceName(active_plan_source_),
+    active_plan_.distance, active_plan_.heading * 180.0 / M_PI, active_plan_.score,
+    active_plan_average_cost_);
 
   return nav2_behaviors::Status::SUCCEEDED;
 }
@@ -425,6 +457,67 @@ bool BackUpFreeSpace::planEscapeTrajectory(
   return best_plan.valid;
 }
 
+bool BackUpFreeSpace::planCentroidFallbackTrajectory(
+  const nav2_msgs::msg::Costmap & costmap, const geometry_msgs::msg::Pose2D & pose,
+  double target_distance, EscapePlan & fallback_plan) const
+{
+  fallback_plan = EscapePlan();
+
+  const double resolution = static_cast<double>(costmap.metadata.resolution);
+  const double origin_x = costmap.metadata.origin.position.x;
+  const double origin_y = costmap.metadata.origin.position.y;
+  const int size_x = static_cast<int>(costmap.metadata.size_x);
+  const int size_y = static_cast<int>(costmap.metadata.size_y);
+  const double radius_limit = std::max(target_distance, resolution);
+
+  double accum_x = 0.0;
+  double accum_y = 0.0;
+  int free_count = 0;
+
+  for (int mx = 0; mx < size_x; ++mx) {
+    for (int my = 0; my < size_y; ++my) {
+      const auto index =
+        static_cast<std::size_t>(my) * static_cast<std::size_t>(size_x) +
+        static_cast<std::size_t>(mx);
+      if (index >= costmap.data.size()) {
+        continue;
+      }
+
+      const double x = origin_x + (static_cast<double>(mx) + 0.5) * resolution;
+      const double y = origin_y + (static_cast<double>(my) + 0.5) * resolution;
+      const double distance = std::hypot(x - pose.x, y - pose.y);
+      if (distance > radius_limit) {
+        continue;
+      }
+
+      const unsigned char cost = static_cast<unsigned char>(costmap.data[index]);
+      if (cost >= kInscribedObstacleCost || static_cast<int>(cost) > max_allowed_cost_) {
+        continue;
+      }
+
+      accum_x += x;
+      accum_y += y;
+      free_count++;
+    }
+  }
+
+  if (free_count < 5) {
+    return false;
+  }
+
+  const double centroid_x = accum_x / static_cast<double>(free_count);
+  const double centroid_y = accum_y / static_cast<double>(free_count);
+  const double heading = std::atan2(centroid_y - pose.y, centroid_x - pose.x);
+
+  EscapePlan candidate;
+  if (!evaluateCandidateTrajectory(costmap, pose, heading, target_distance, candidate)) {
+    return false;
+  }
+
+  fallback_plan = candidate;
+  return true;
+}
+
 bool BackUpFreeSpace::evaluateCandidateTrajectory(
   const nav2_msgs::msg::Costmap & costmap, const geometry_msgs::msg::Pose2D & pose,
   double heading, double target_distance, EscapePlan & candidate) const
@@ -539,6 +632,27 @@ std::optional<unsigned char> BackUpFreeSpace::sampleCost(
   return static_cast<unsigned char>(costmap.data[index]);
 }
 
+double BackUpFreeSpace::computePlanAverageCost(
+  const nav2_msgs::msg::Costmap & costmap, const EscapePlan & plan) const
+{
+  if (!plan.valid || plan.centerline.empty()) {
+    return 0.0;
+  }
+
+  double accumulated_cost = 0.0;
+  int sampled_points = 0;
+  for (const auto & point : plan.centerline) {
+    const auto cost = sampleCost(costmap, point.x, point.y);
+    if (!cost.has_value()) {
+      continue;
+    }
+    accumulated_cost += static_cast<double>(*cost);
+    sampled_points++;
+  }
+
+  return sampled_points > 0 ? accumulated_cost / static_cast<double>(sampled_points) : 0.0;
+}
+
 bool BackUpFreeSpace::isTrajectoryPrefixSafe(
   const geometry_msgs::msg::Pose2D & pose, double remaining_distance)
 {
@@ -601,6 +715,17 @@ geometry_msgs::msg::Twist BackUpFreeSpace::buildDesiredCommand(double remaining_
   const double stop_speed =
     std::sqrt(std::max(0.0, 2.0 * translational_decel_limit_ * remaining_distance));
   double target_speed = std::min(command_speed_abs_, stop_speed);
+
+  const double high_cost_threshold = std::max(1.0, high_cost_speed_threshold_);
+  const double min_cost_scale = std::clamp(high_cost_speed_min_scale_, 0.1, 1.0);
+  if (active_plan_average_cost_ > high_cost_threshold) {
+    const double overload =
+      std::min(1.0, (active_plan_average_cost_ - high_cost_threshold) /
+      std::max(1.0, 252.0 - high_cost_threshold));
+    const double cost_scale = 1.0 - overload * (1.0 - min_cost_scale);
+    target_speed *= cost_scale;
+  }
+
   if (target_speed < minimum_speed_xy_ && remaining_distance > goal_tolerance_) {
     target_speed = minimum_speed_xy_;
   }
@@ -656,6 +781,8 @@ void BackUpFreeSpace::resetExecutionState()
   failed_replan_attempts_ = 0;
   command_distance_abs_ = 0.0;
   command_speed_abs_ = 0.0;
+  active_plan_average_cost_ = 0.0;
+  active_plan_source_ = PlanSource::CORRIDOR_PRIMARY;
   last_safe_prefix_distance_.reset();
   estimated_prefix_rate_ = 0.0;
 }
@@ -677,10 +804,16 @@ bool BackUpFreeSpace::replanFromCurrentPose(
   EscapePlan new_plan;
   const auto pose_2d = poseToPose2D(current_pose);
   if (!planEscapeTrajectory(costmap, pose_2d, remaining_total_distance, new_plan)) {
-    return false;
+    if (!planCentroidFallbackTrajectory(costmap, pose_2d, remaining_total_distance, new_plan)) {
+      return false;
+    }
+    active_plan_source_ = PlanSource::CENTROID_FALLBACK;
+  } else {
+    active_plan_source_ = PlanSource::CORRIDOR_PRIMARY;
   }
 
   active_plan_ = new_plan;
+  active_plan_average_cost_ = computePlanAverageCost(costmap, active_plan_);
   plan_start_pose_ = current_pose;
   completed_distance_before_plan_ = total_distance_traveled;
   previous_plan_heading_ = active_plan_.heading;
@@ -688,9 +821,10 @@ bool BackUpFreeSpace::replanFromCurrentPose(
   last_replan_time_ = clock_->now();
   RCLCPP_INFO(
     logger_,
-    "Recovery replanned: remaining_total=%.2f released_segment=%.2f heading=%.2fdeg score=%.2f",
+    "Recovery replanned: source=%s remaining_total=%.2f released_segment=%.2f heading=%.2fdeg score=%.2f avg_cost=%.2f",
+    planSourceName(active_plan_source_),
     remaining_total_distance, active_plan_.distance,
-    active_plan_.heading * 180.0 / M_PI, active_plan_.score);
+    active_plan_.heading * 180.0 / M_PI, active_plan_.score, active_plan_average_cost_);
   return true;
 }
 
@@ -711,9 +845,10 @@ void BackUpFreeSpace::visualizePlan(
   path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
   path_marker.action = visualization_msgs::msg::Marker::ADD;
   path_marker.scale.x = 0.05;
-  path_marker.color.r = 0.15f;
-  path_marker.color.g = 1.0f;
-  path_marker.color.b = 0.25f;
+  const bool centroid_fallback = active_plan_source_ == PlanSource::CENTROID_FALLBACK;
+  path_marker.color.r = centroid_fallback ? 1.0f : 0.15f;
+  path_marker.color.g = centroid_fallback ? 0.55f : 1.0f;
+  path_marker.color.b = centroid_fallback ? 0.10f : 0.25f;
   path_marker.color.a = 0.95f;
 
   geometry_msgs::msg::Point start;
@@ -739,9 +874,9 @@ void BackUpFreeSpace::visualizePlan(
   left_boundary_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
   left_boundary_marker.action = visualization_msgs::msg::Marker::ADD;
   left_boundary_marker.scale.x = 0.03;
-  left_boundary_marker.color.r = 0.1f;
-  left_boundary_marker.color.g = 0.75f;
-  left_boundary_marker.color.b = 1.0f;
+  left_boundary_marker.color.r = centroid_fallback ? 1.0f : 0.1f;
+  left_boundary_marker.color.g = centroid_fallback ? 0.35f : 0.75f;
+  left_boundary_marker.color.b = centroid_fallback ? 0.20f : 1.0f;
   left_boundary_marker.color.a = 0.9f;
 
   geometry_msgs::msg::Point start_left = start;
@@ -763,9 +898,9 @@ void BackUpFreeSpace::visualizePlan(
   right_boundary_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
   right_boundary_marker.action = visualization_msgs::msg::Marker::ADD;
   right_boundary_marker.scale.x = 0.03;
-  right_boundary_marker.color.r = 0.1f;
-  right_boundary_marker.color.g = 0.75f;
-  right_boundary_marker.color.b = 1.0f;
+  right_boundary_marker.color.r = centroid_fallback ? 1.0f : 0.1f;
+  right_boundary_marker.color.g = centroid_fallback ? 0.35f : 0.75f;
+  right_boundary_marker.color.b = centroid_fallback ? 0.20f : 1.0f;
   right_boundary_marker.color.a = 0.9f;
 
   geometry_msgs::msg::Point start_right = start;
@@ -791,11 +926,30 @@ void BackUpFreeSpace::visualizePlan(
   goal_marker.scale.x = 0.18;
   goal_marker.scale.y = 0.18;
   goal_marker.scale.z = 0.18;
-  goal_marker.color.r = 0.95f;
-  goal_marker.color.g = 0.85f;
-  goal_marker.color.b = 0.15f;
+  goal_marker.color.r = centroid_fallback ? 1.0f : 0.95f;
+  goal_marker.color.g = centroid_fallback ? 0.45f : 0.85f;
+  goal_marker.color.b = centroid_fallback ? 0.15f : 0.15f;
   goal_marker.color.a = 0.95f;
   markers.markers.push_back(goal_marker);
+
+  visualization_msgs::msg::Marker text_marker;
+  text_marker.header = path_marker.header;
+  text_marker.ns = "back_up_free_space";
+  text_marker.id = 4;
+  text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+  text_marker.action = visualization_msgs::msg::Marker::ADD;
+  text_marker.pose.position = plan.goal_point;
+  text_marker.pose.position.z += 0.28;
+  text_marker.pose.orientation.w = 1.0;
+  text_marker.scale.z = 0.16;
+  text_marker.color.r = centroid_fallback ? 1.0f : 0.85f;
+  text_marker.color.g = centroid_fallback ? 0.50f : 0.95f;
+  text_marker.color.b = centroid_fallback ? 0.15f : 0.90f;
+  text_marker.color.a = 0.95f;
+  text_marker.text =
+    std::string(planSourceName(active_plan_source_)) +
+    " cost=" + std::to_string(active_plan_average_cost_).substr(0, 4);
+  markers.markers.push_back(text_marker);
 
   marker_pub_->publish(markers);
 }

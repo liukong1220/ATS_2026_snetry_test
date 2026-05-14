@@ -43,6 +43,15 @@ public:
     BLOCKED = 2,    // 当前轨迹前缀连续若干拍被阻挡，等待冷却后重规划
   };
 
+  // 当前恢复轨迹来自哪种规划分支：
+  // 1. CORRIDOR_PRIMARY：主走廊搜索成功
+  // 2. CENTROID_FALLBACK：主走廊失败后退化到自由空间重心方向
+  enum class PlanSource
+  {
+    CORRIDOR_PRIMARY = 0,
+    CENTROID_FALLBACK = 1,
+  };
+
   // EscapePlan 不是全局路径，只是恢复行为在局部 costmap 上生成的一段短时逃逸轨迹。
   // 对全向舵轮来说，它更像一条“短走廊”，允许斜后退 / 侧后退，而不是死板纯后退。
   struct EscapePlan
@@ -89,6 +98,10 @@ protected:
   bool planEscapeTrajectory(
     const nav2_msgs::msg::Costmap & costmap, const geometry_msgs::msg::Pose2D & pose,
     double target_distance, EscapePlan & best_plan);
+  // 当走廊搜索失败时，退化为“自由空间重心”方向估计，给恢复行为一个最后的逃逸方向。
+  bool planCentroidFallbackTrajectory(
+    const nav2_msgs::msg::Costmap & costmap, const geometry_msgs::msg::Pose2D & pose,
+    double target_distance, EscapePlan & fallback_plan) const;
   // 评估单个候选恢复方向。
   // 这里会沿着一条“有宽度的走廊”批量采样，而不是只检查一条线。
   bool evaluateCandidateTrajectory(
@@ -98,6 +111,8 @@ protected:
   // 返回空表示超出地图范围，这类候选方向会直接判为不可用。
   std::optional<unsigned char> sampleCost(
     const nav2_msgs::msg::Costmap & costmap, double x, double y) const;
+  // 计算恢复轨迹中心线的平均 cost，用于把“勉强能走的窄缝”自动降速。
+  double computePlanAverageCost(const nav2_msgs::msg::Costmap & costmap, const EscapePlan & plan) const;
   // 计算当前恢复轨迹前方还能安全通行多远。
   // 这是第二阶段“动态障碍简单速度预测”的观测量基础。
   double computeSafePrefixDistance(
@@ -143,6 +158,8 @@ protected:
   int failed_replan_attempts_ = 0;
   double previous_plan_heading_ = 0.0;
   bool has_previous_plan_heading_ = false;
+  double active_plan_average_cost_ = 0.0;
+  PlanSource active_plan_source_ = PlanSource::CORRIDOR_PRIMARY;
 
   // parameters
   std::string service_name_;
@@ -172,6 +189,8 @@ protected:
   double translational_acc_limit_;    // 恢复阶段平移加速度上限。
   double translational_decel_limit_;  // 恢复阶段平移减速度上限。
   double minimum_speed_xy_;           // 恢复阶段的最小平移速度，避免末段反复抖动。
+  double high_cost_speed_threshold_;  // 超过该平均 cost 后开始下调恢复速度。
+  double high_cost_speed_min_scale_;  // 高 cost 窄缝恢复时允许保留的最低速度比例。
   double goal_tolerance_;             // 恢复到终点的距离容差。
   double monitor_lookahead_distance_; // 恢复执行时前视检测长度。大：更早预判；小：更激进。
   bool enable_full_circle_fallback_;  // 侧后退都失败时，是否放开到全方向搜索。

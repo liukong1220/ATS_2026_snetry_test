@@ -4,13 +4,21 @@ standard_robot_pp_ros2:
     # 行为树决策参数不在这份文件里，而在：
     # src/pb2025_sentry_behavior/params/sentry_behavior.yaml
     # bringup.launch.py 会同时加载本文件和 sentry_behavior.yaml。
+    # 串口设备路径。实车上若换 USB 口或 udev 名称，这里要同步更新。
     device_name: /dev/ttyACM0
+    # 串口波特率。必须与下位机固件配置完全一致。
     baud_rate: 115200
+    # 串口流控。通常保持 none，除非下位机协议明确要求硬件流控。
     flow_control: none
+    # 串口校验位。必须与下位机一致。
     parity: none
+    # 串口停止位。一般保持 1。
     stop_bits: "1"
+    # 是否联动设置检测器颜色。仅在 detector 联调时需要打开。
     set_detector_color: false
+    # 是否启用 rosbag 录制控制。实车复盘建议保留 true。
     record_rosbag: true
+    # 串口节点调试开关。打开后日志会明显增多。
     debug: false
     # 三自由度云台 TF 由 ID_JOINT_STATE 中的 big_yaw/small_yaw/pitch 反馈驱动。
     # IMU 仅作为姿态传感器发布，不再把 imu yaw/pitch 冒充 gimbal_yaw/pitch joint。
@@ -23,11 +31,17 @@ standard_robot_pp_ros2:
     small_yaw_is_relative: false
     invert_small_yaw: false
     small_yaw_offset: 0.0
+    # 对上游偶发单拍零速做短时保持，避免底盘被打成停-走-停-走。
     enable_transient_zero_cmd_hold: true
+    # 短时零速保持窗口。调大更抗抖，但真实刹停会略滞后。
     transient_zero_cmd_hold_timeout_ms: 50
+    # 线速度判零阈值。小于该值视作近似零速。
     transient_zero_cmd_linear_epsilon: 0.001
+    # 角速度判零阈值。小于该值视作近似零速。
     transient_zero_cmd_angular_epsilon: 0.001
+    # cmd_vel 断流 watchdog。超过该时间没有新速度就主动清零。
     cmd_vel_watchdog_timeout_ms: 300
+    # 行为树姿态模式输入话题。需与行为树配置一致。
     robot_mode_topic: decision/robot_mode
 
 joint_state_publisher:
@@ -216,19 +230,43 @@ fake_vel_transform:
 small_gicp_relocalization:
   ros__parameters:
     use_sim_time: false
+    # GICP 并行线程数。大：更快；小：更省 CPU。
     num_threads: 4
+    # 协方差估计邻域点数。大：更稳；小：更灵敏但更噪。
     num_neighbors: 20
+    # 触发一次注册前，累积源点云的最低点数。
     min_source_points: 500
+    # 最低内点数门槛。低于该值的注册结果直接拒绝。
     min_inliers: 200
+    # 全局地图下采样体素。大：更快更粗；小：更精细更耗算力。
     global_leaf_size: 0.15
+    # 在线源点云下采样体素。高速巡航模糊较大时可适当增大。
     registered_leaf_size: 0.05
+    # 最大匹配距离平方。过小容易掉配准，过大容易吃进错误对应。
     max_dist_sq: 3.0
+    # 最大允许注册误差。<0 表示只用 converged + inlier 判据。
     max_registration_error: -1.0
+    # 是否打印每次注册结果。联调建议开，比赛可关。
     log_registration_details: true
+    # 定时器周期。表示“最频繁多久尝试一次注册”，不代表每次都真的执行。
+    registration_interval_s: 0.25
+    # 最短点云累积窗口。太短时跳过注册，避免点还没积够就配。
+    max_accumulation_age_s: 0.30
+    # 相对上次成功/手动重置后，平移至少变化这么多才允许再次注册。
+    min_registration_translation_delta: 0.10
+    # 相对上次成功/手动重置后，偏航至少变化这么多才允许再次注册。
+    min_registration_yaw_delta: 0.12
+    # 手动 initialpose 后，允许一段短窗口内强制持续触发注册。
+    initial_pose_force_registration_window_s: 2.0
+    # 重定位输出 map->odom 的父坐标系。
     map_frame: "map"
+    # 重定位输出 map->odom 的子坐标系。
     odom_frame: "odom"
+    # 用于 PCD 初始对齐转换的 base frame。
     base_frame: "gimbal_yaw_odom"
+    # 当前导航主参考底盘坐标系。
     robot_base_frame: "gimbal_yaw_odom"
+    # 配准点云所属雷达坐标系。
     lidar_frame: "front_mid360"
     init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # [x, y, z, roll, pitch, yaw]
     #init_pose: [20.3, 0.0, 0.0, 0.0, 0.0, 3.14]   # [x, y, z, roll, pitch, yaw]
@@ -389,46 +427,73 @@ bt_navigator:
 trajectory_optimizer:
   ros__parameters:
     use_sim_time: false
+    # 旁路轨迹优化输入，通常接全局规划器的 `plan`。
     input_path_topic: "plan"
+    # 仅用于调试/RViz 的平滑路径输出，不参与主控制闭环。
     output_path_topic: "smoothed_path_visual"
+    # 仅用于调试/RViz 的 profile 输出，不参与主控制闭环。
     output_profile_topic: "trajectory_profile_visual"
     # 旁路可视化订阅全局 costmap，避免 RViz 青色线只显示几何样条而忽略 J_obs。
     costmap_topic: "global_costmap/costmap_raw"
     # 控制点间距：越大越平滑，但越容易在拐角内侧切进膨胀层。
     # 当前用 0.24 保形，优先解决“转弯不跟线、抄近道”。
     control_point_spacing: 0.24
+    # 输出路径采样间距。小：更密更细；大：更省算力。
     output_path_spacing: 0.05
+    # 输入路径去重点最小间距。太小保留噪声，太大丢几何细节。
     min_input_point_spacing: 0.02
     # 最大横向偏移：限制 B 样条离原始全局路径的距离。
     # 当前压到 0.12，避免平滑器把路径抹进障碍膨胀层。
     max_lateral_deviation: 0.16
+    # 最低控制点数。通常保持默认即可。
     min_control_points: 5
     # 曲率上限：当前不是追求极圆，而是避免曲率约束过硬导致路径贴墙。
     curvature_limit: 1.90
+    # 曲率超限惩罚权重。大：更强压弯；小：更允许急弯存在。
     curvature_weight: 10.0
+    # 曲率 refinement 次数。大：更圆滑，但更可能偏离原路径。
     curvature_refinement_iterations: 2
+    # 单次曲率修正步长。大：更激进；小：更保守。
     curvature_refinement_gain: 0.010
+    # profile 的全局速度上限，不是底盘理论极限，而是给 governor 的基础巡航上限。
     global_speed_limit: 4.5
+    # 横向加速度上限。越小弯道越早降速，越大过弯越敢冲。
     lateral_accel_limit: 3.6
+    # 纵向加速度上限。决定 profile 自身起步/提速有多快。
     longitudinal_accel_limit: 4.8
+    # 速度 profile 平滑增益。大：更平滑但更肉；小：更敢提速。
     velocity_smoothing_gain: 0.12
+    # 数值求导步长。一般与 output_path_spacing 同量级。
     derivative_step: 0.02
     # J_obs 参数：cost 超过 48 就开始推离障碍，权重比之前更强。
     obstacle_safe_cost: 48
     use_esdf_obstacle_cost: true
+    # ESDF 视为“靠近障碍”的安全距离。
     obstacle_safe_distance: 0.30
+    # 离障小于该值时，开始额外压低速度上限。
+    obstacle_speed_reduction_distance: 0.35
+    # 离障速度压缩的最小距离。更小表示允许更贴障时仍保留速度。
+    obstacle_speed_min_distance: 0.20
+    # 离障速度压缩后的最低速度比例。越小越保守。
+    obstacle_speed_min_scale: 0.60
+    # 障碍代价权重。大：更不愿贴边；小：更保形。
     obstacle_weight: 40.0
+    # 障碍 refinement 次数。大：更会把路径往障碍外侧推。
     obstacle_refinement_iterations: 3
+    # 单次障碍回拉步长。大：更强硬；小：更温和。
     obstacle_refinement_gain: 0.02
 
 controller_server:
   ros__parameters:
     use_sim_time: false
     odom_topic: odometry
-    controller_frequency: 20.0
+    # 控制频率。高速巡航建议 >=20Hz；更高会增加算力开销。
+    controller_frequency: 25.0
+    # 小于这些阈值的速度会被视作 0，避免浮点噪声导致控制状态抖动。
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001
+    # 控制失败容忍量。太小会频繁报失败，太大则异常被拖延发现。
     failure_tolerance: 0.3
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
@@ -466,14 +531,15 @@ controller_server:
       # 官方建议：一般与控制周期一致，通常不要大于控制周期。
       model_dt: 0.05
       # Parameter `batch_size`
-      # 每周期采样轨迹数。官方经验值大致为：
-      # 50Hz 时约 1000，30Hz 时约 2000；本项目需结合算力和频率折中。
+      # 每周期采样轨迹数。大：更稳更全局；小：更省算力但更容易局部最优。
       batch_size: 1200
       # Parameter `temperature`
       # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
+      # 小：动作更硬更贪心；大：更平滑但也更保守。
       temperature: 0.16
       # Parameter `gamma`
       # 官方说明：这是控制能量/平滑正则项，通常不需要偏离默认值太多。
+      # 大：更抑制控制跳变；小：更愿意做激烈修正。
       gamma: 0.030
       iteration_count: 1
       # Parameter `shift_control_sequence`
@@ -788,6 +854,7 @@ smoother_server:
     bspline_smoother:
       plugin: "trajectory_optimizer/Nav2BSplineSmoother"
       # 与 trajectory_optimizer 保持同一组参数；BT 主链真正跟踪的是这里输出的路径。
+      # 真正影响控制链的是这里，不是上面的旁路 visualization optimizer。
       control_point_spacing: 0.24
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
@@ -807,6 +874,13 @@ smoother_server:
       obstacle_safe_cost: 96
       use_esdf_obstacle_cost: true
       obstacle_safe_distance: 0.30
+      # 离障速度限速三件套：
+      # reduction_distance：开始限速的距离
+      # min_distance：压到最低比例时对应的距离
+      # min_scale：最低还保留多少速度比例
+      obstacle_speed_reduction_distance: 0.45
+      obstacle_speed_min_distance: 0.20
+      obstacle_speed_min_scale: 0.60
       obstacle_weight: 16.0
       obstacle_refinement_iterations: 3
       obstacle_refinement_gain: 0.02
@@ -849,7 +923,9 @@ behavior_server:
     min_rotational_vel: 0.4
     rotational_acc_lim: 3.2
     # params for pb_nav2_behaviors/BackUpFreeSpace
+    # 恢复行为通过服务拿全局 costmap 快照，而不是持续绑定 costmap topic。
     service_name: "global_costmap/get_costmap"
+    # 最大搜索半径。大：更容易脱困；小：更保守更快。
     max_radius: 1.6
     # 高于该 cost 的膨胀区不再被当作“可脱困方向”，防止恢复动作继续贴墙试探。
     max_allowed_cost: 96
@@ -899,13 +975,17 @@ behavior_server:
     translational_decel_limit: 1.2
     # 最小恢复速度，避免在静摩擦区间来回抖动。
     minimum_speed_xy: 0.08
+    # 平均走廊代价高时自动降速，避免窄缝恢复时电机冲击过大。
+    high_cost_speed_threshold: 48.0
+    # 高 cost 恢复时允许保留的最低速度比例。越小越温和。
+    high_cost_speed_min_scale: 0.55
     # 到位容差。
     goal_tolerance: 0.04
     # 前向 lookahead 检测长度。
     monitor_lookahead_distance: 0.35
     # 若后向和侧后向都不行，允许全角域兜底搜索。
     enable_full_circle_fallback: true
-    visualize: false
+    visualize: true
 
 waypoint_follower:
   ros__parameters:
@@ -927,23 +1007,35 @@ trajectory_speed_governor:
     marker_topic: "trajectory_profile_markers"
     # 保持 governor 在链路中生效：用 B 样条 profile 做高速巡航的动态限速，而不是旁路透传。
     enabled: true
+    # governor 最低保留速度比例。大：弯道也更敢跑；小：弯前更稳。
     min_speed_scale: 0.90
+    # 曲率制动增益。大：更早更重地减速；小：更接近透传。
     curvature_brake_gain: 0.06
+    # 向前看的曲率窗口点数。小：更看近端；大：更看整体趋势。
     curvature_window_points: 8
+    # 峰值曲率权重。大：更怕单个尖弯；小：更看平均曲率。
     curvature_peak_weight: 0.20
+    # 目标速度比例低通增益。大：更跟手；小：更稳。
     speed_scale_filter_gain: 0.14
+    # 速度比例上升斜率。大：恢复更快；小：更柔和。
     speed_scale_rise_rate: 6.0
+    # 速度比例下降斜率。大：刹得更快；小：更平顺。
     speed_scale_fall_rate: 2.2
 
 velocity_smoother:
   ros__parameters:
     use_sim_time: false
+    # 平滑器输出频率。大：命令更细腻；小：更省算力。
     smoothing_frequency: 40.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
+    # 最终发给底盘前的速度边界。
+    # 这里如果比 MPPI 采样边界还小，前面调再大也会在这里被截断。
     max_velocity: [4.8, 4.8, 5.0]
     min_velocity: [-4.2, -4.2, -5.0]
+    # 最终输出加速度上限。想让底盘更快冲起来，优先看这组。
     max_accel: [8.0, 8.0, 7.0]
+    # 最终输出减速度上限。通常略大于 max_accel，便于更干净地收尾。
     max_decel: [-9.0, -9.0, -7.5]
     odom_topic: "odometry"
     odom_duration: 0.1

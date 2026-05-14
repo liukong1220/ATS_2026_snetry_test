@@ -4,9 +4,11 @@
 #define SMALL_GICP_RELOCALIZATION__SMALL_GICP_RELOCALIZATION_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include <Eigen/Geometry>
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "pcl/io/pcd_io.h"
 #include "rclcpp/rclcpp.hpp"
@@ -34,6 +36,11 @@ private:
   void performRegistration();
   void publishTransform();
   void initialPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
+  bool shouldRunRegistration();
+  double accumulatedCloudAgeSeconds() const;
+  std::optional<Eigen::Isometry3d> getCurrentRobotBaseToOdom() const;
+  double translationDeltaFromLastTrigger(const Eigen::Isometry3d & current_robot_base_to_odom) const;
+  double yawDeltaFromLastTrigger(const Eigen::Isometry3d & current_robot_base_to_odom) const;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pcd_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_sub_;
@@ -47,6 +54,11 @@ private:
   float max_dist_sq_;
   double max_registration_error_;
   bool log_registration_details_;
+  double registration_interval_s_;
+  double max_accumulation_age_s_;
+  double min_registration_translation_delta_;
+  double min_registration_yaw_delta_;
+  double initial_pose_force_registration_window_s_;
   std::vector<double> init_pose_;
 
   std::string map_frame_;
@@ -57,9 +69,12 @@ private:
   std::string lidar_frame_;
   std::string current_scan_frame_id_;
   rclcpp::Time last_scan_time_;
+  std::optional<rclcpp::Time> first_accumulated_scan_time_;
+  std::optional<rclcpp::Time> initial_pose_override_time_;
   bool has_received_scan_{false};
   Eigen::Isometry3d result_t_;
   Eigen::Isometry3d previous_result_t_;
+  std::optional<Eigen::Isometry3d> last_registration_robot_base_to_odom_;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr global_map_;
   pcl::PointCloud<pcl::PointXYZ>::Ptr registered_scan_;

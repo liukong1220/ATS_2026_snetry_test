@@ -137,6 +137,15 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".obstacle_safe_distance",
     rclcpp::ParameterValue(params.obstacle_safe_distance));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_speed_reduction_distance",
+    rclcpp::ParameterValue(params.obstacle_speed_reduction_distance));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_speed_min_distance",
+    rclcpp::ParameterValue(params.obstacle_speed_min_distance));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".obstacle_speed_min_scale",
+    rclcpp::ParameterValue(params.obstacle_speed_min_scale));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".profile_topic",
     rclcpp::ParameterValue(profile_topic_));
   nav2_util::declare_parameter_if_not_declared(
@@ -192,6 +201,15 @@ void Nav2BSplineSmoother::configure(
   node->get_parameter(
     plugin_name_ + ".obstacle_safe_distance",
     params.obstacle_safe_distance);
+  node->get_parameter(
+    plugin_name_ + ".obstacle_speed_reduction_distance",
+    params.obstacle_speed_reduction_distance);
+  node->get_parameter(
+    plugin_name_ + ".obstacle_speed_min_distance",
+    params.obstacle_speed_min_distance);
+  node->get_parameter(
+    plugin_name_ + ".obstacle_speed_min_scale",
+    params.obstacle_speed_min_scale);
   params.obstacle_safe_cost = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_safe_cost)));
   node->get_parameter(plugin_name_ + ".profile_topic", profile_topic_);

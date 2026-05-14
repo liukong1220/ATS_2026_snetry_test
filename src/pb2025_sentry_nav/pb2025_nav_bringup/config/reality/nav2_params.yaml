@@ -857,7 +857,7 @@ behavior_server:
     monitor_lookahead_distance: 0.35
     # 后向搜索失败时，是否放开到全方向搜索，优先确保能脱困。
     enable_full_circle_fallback: true
-    visualize: false
+    visualize: true
 
 waypoint_follower:
   ros__parameters:

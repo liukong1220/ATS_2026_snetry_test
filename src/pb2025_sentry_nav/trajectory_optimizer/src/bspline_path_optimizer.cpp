@@ -512,6 +512,7 @@ TrajectoryProfile2D BSplinePathOptimizer::buildTrajectoryProfile(
 
   profile.curvature_penalty *= params_.curvature_weight;
   applyCurvatureSpeedLimits(profile);
+  applyObstacleSpeedLimits(profile);
   applyAccelerationLimits(profile);
   smoothVelocityProfile(profile);
 
@@ -685,6 +686,50 @@ void BSplinePathOptimizer::applyCurvatureSpeedLimits(TrajectoryProfile2D & profi
         std::sqrt(params_.lateral_accel_limit / abs_curvature));
     }
     sample.speed = sample.speed_limit;
+  }
+}
+
+void BSplinePathOptimizer::applyObstacleSpeedLimits(TrajectoryProfile2D & profile) const
+{
+  const double reduction_distance = std::max(
+    params_.obstacle_speed_reduction_distance,
+    params_.obstacle_speed_min_distance + 1e-3);
+  const double min_distance = std::max(0.01, params_.obstacle_speed_min_distance);
+  const double min_scale = clampValue(params_.obstacle_speed_min_scale, 0.05, 1.0);
+
+  for (auto & sample : profile.samples) {
+    double obstacle_distance = std::numeric_limits<double>::infinity();
+    bool have_distance = false;
+
+    if (params_.use_esdf_obstacle_cost) {
+      double esdf_distance = 0.0;
+      if (sampleEsdfDistance(sample.point, esdf_distance) && std::isfinite(esdf_distance) && esdf_distance >= 0.0) {
+        obstacle_distance = esdf_distance;
+        have_distance = true;
+      }
+    }
+
+    if (!have_distance) {
+      unsigned char obstacle_cost = 0;
+      if (sampleObstacleCost(sample.point, obstacle_cost)) {
+        const double normalized_cost =
+          clampValue(static_cast<double>(obstacle_cost) / 255.0, 0.0, 1.0);
+        obstacle_distance =
+          reduction_distance - normalized_cost * (reduction_distance - min_distance);
+        have_distance = true;
+      }
+    }
+
+    if (!have_distance || obstacle_distance >= reduction_distance) {
+      continue;
+    }
+
+    const double clamped_distance = clampValue(obstacle_distance, min_distance, reduction_distance);
+    const double ratio =
+      (clamped_distance - min_distance) / std::max(kEpsilon, reduction_distance - min_distance);
+    const double obstacle_scale = min_scale + ratio * (1.0 - min_scale);
+    sample.speed_limit = std::min(sample.speed_limit, params_.global_speed_limit * obstacle_scale);
+    sample.speed = std::min(sample.speed, sample.speed_limit);
   }
 }
 
