@@ -23,6 +23,11 @@ standard_robot_pp_ros2:
     small_yaw_is_relative: false
     invert_small_yaw: false
     small_yaw_offset: 0.0
+    enable_transient_zero_cmd_hold: true
+    transient_zero_cmd_hold_timeout_ms: 50
+    transient_zero_cmd_linear_epsilon: 0.001
+    transient_zero_cmd_angular_epsilon: 0.001
+    cmd_vel_watchdog_timeout_ms: 300
     robot_mode_topic: decision/robot_mode
 
 joint_state_publisher:
@@ -391,7 +396,7 @@ trajectory_optimizer:
     costmap_topic: "global_costmap/costmap_raw"
     # 控制点间距：越大越平滑，但越容易在拐角内侧切进膨胀层。
     # 当前用 0.24 保形，优先解决“转弯不跟线、抄近道”。
-    control_point_spacing: 0.20
+    control_point_spacing: 0.24
     output_path_spacing: 0.05
     min_input_point_spacing: 0.02
     # 最大横向偏移：限制 B 样条离原始全局路径的距离。
@@ -399,14 +404,14 @@ trajectory_optimizer:
     max_lateral_deviation: 0.16
     min_control_points: 5
     # 曲率上限：当前不是追求极圆，而是避免曲率约束过硬导致路径贴墙。
-    curvature_limit: 1.60
+    curvature_limit: 1.90
     curvature_weight: 10.0
     curvature_refinement_iterations: 2
     curvature_refinement_gain: 0.010
-    global_speed_limit: 2.0
-    lateral_accel_limit: 1.8
-    longitudinal_accel_limit: 1.8
-    velocity_smoothing_gain: 0.18
+    global_speed_limit: 4.5
+    lateral_accel_limit: 3.6
+    longitudinal_accel_limit: 4.8
+    velocity_smoothing_gain: 0.12
     derivative_step: 0.02
     # J_obs 参数：cost 超过 48 就开始推离障碍，权重比之前更强。
     obstacle_safe_cost: 48
@@ -456,20 +461,20 @@ controller_server:
       # Parameter `time_steps`
       # 官方定义：`time_steps * model_dt` = prediction horizon。
       # 过长会在转角和终点附近“想太远”，过短则提前量不足。
-      time_steps: 35
+      time_steps: 30
       # Parameter `model_dt`
       # 官方建议：一般与控制周期一致，通常不要大于控制周期。
       model_dt: 0.05
       # Parameter `batch_size`
       # 每周期采样轨迹数。官方经验值大致为：
       # 50Hz 时约 1000，30Hz 时约 2000；本项目需结合算力和频率折中。
-      batch_size: 1000
+      batch_size: 1200
       # Parameter `temperature`
       # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
-      temperature: 0.15
+      temperature: 0.16
       # Parameter `gamma`
       # 官方说明：这是控制能量/平滑正则项，通常不需要偏离默认值太多。
-      gamma: 0.015
+      gamma: 0.030
       iteration_count: 1
       # Parameter `shift_control_sequence`
       # 使用前一周期最优序列做 warm-start，减少控制输出抖动。
@@ -481,10 +486,10 @@ controller_server:
       # 这是 MPPI 的采样边界，不等同于“底盘理论极限速度”。
       # 官方调参建议里，这组参数通常是最优先检查的对象之一。
       # 如果 rollout 视觉上明显发散，可先检查这里是否设得过激。
-      vx_max: 3.5
-      vx_min: -3.5
-      vy_max: 3.5
-      vy_min: -3.5
+      vx_max: 4.2
+      vx_min: -4.2
+      vy_max: 4.2
+      vy_min: -4.2
       wz_max: 3.0
       wz_min: -3.0
 
@@ -492,9 +497,9 @@ controller_server:
       # Parameters `vx_std / vy_std / wz_std`
       # std 越大探索越强，但 trajectories 更容易散；
       # std 越小更稳，但也更保守。
-      vx_std: 0.55
-      vy_std: 0.55
-      wz_std: 0.45
+      vx_std: 0.42
+      vy_std: 0.42
+      wz_std: 0.32
 
       # --- Critics ---
       # 调参时建议一次只动少数几个 critic，避免现象混在一起看不清。
@@ -515,14 +520,14 @@ controller_server:
         # Parameter `PathAlignCritic.cost_weight`
         # 路径贴合项。太大时更贴线，但转角修正会变硬。
         # 角点前后容易来回试探时，先适度降低它，避免“死贴历史路径”。
-        cost_weight: 12.0
+        cost_weight: 7.0
         # Parameter `PathAlignCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 0.8
+        threshold_to_consider: 1.0
         # Parameter `PathAlignCritic.offset_from_furthest`
         # 参考前方路径的距离，越大越激进、越爱切弯。
         # 这里略缩短前视距离，减少拐角处的 shortcut 倾向。
-        offset_from_furthest: 6
+        offset_from_furthest: 4
         trajectory_point_step: 4
         max_path_occupancy_ratio: 0.05
         use_path_orientations: false
@@ -531,24 +536,24 @@ controller_server:
         cost_power: 1
         # Parameter `PathFollowCritic.cost_weight`
         # 鼓励沿路径整体向前推进。
-        cost_weight: 6.0
+        cost_weight: 8.0
         # Parameter `PathFollowCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 1.4
+        threshold_to_consider: 1.6
         offset_from_furthest: 5
       PathAngleCritic:
         enabled: true
         cost_power: 1
         # Parameter `PathAngleCritic.cost_weight`
         # 用来抑制轨迹方向与路径方向严重不一致，反向试探明显时优先看它。
-        cost_weight: 3.5
+        cost_weight: 3.0
         # Parameter `PathAngleCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 0.5
+        threshold_to_consider: 0.7
         offset_from_furthest: 4
         # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 越小越严格，太小会让过弯很僵。
-        max_angle_to_furthest: 0.85
+        max_angle_to_furthest: 1.05
         # fake gimbal yaw 需要稳定的前向参考，避免巡航时路径朝向被反向采样打散。
         forward_preference: true
       GoalCritic:
@@ -578,7 +583,7 @@ controller_server:
         # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
         # 数值越大越早避障，但也更容易被障碍代价场推离路径。
         # 当前下调，先避免控制器在可走窄通道里因为过度保守而只做厘米级试探。
-        repulsion_weight: 2.0
+        repulsion_weight: 1.4
         # Parameter `ObstaclesCritic.critical_weight`
         critical_weight: 60.0
         # Parameter `ObstaclesCritic.collision_margin_distance`
@@ -783,19 +788,19 @@ smoother_server:
     bspline_smoother:
       plugin: "trajectory_optimizer/Nav2BSplineSmoother"
       # 与 trajectory_optimizer 保持同一组参数；BT 主链真正跟踪的是这里输出的路径。
-      control_point_spacing: 0.20
+      control_point_spacing: 0.24
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
       max_lateral_deviation: 0.16
       min_control_points: 5
-      curvature_limit: 1.60
+      curvature_limit: 1.90
       curvature_weight: 10.0
       curvature_refinement_iterations: 2
       curvature_refinement_gain: 0.010
-      global_speed_limit: 2.0
-      lateral_accel_limit: 1.8
-      longitudinal_accel_limit: 1.8
-      velocity_smoothing_gain: 0.18
+      global_speed_limit: 4.5
+      lateral_accel_limit: 3.6
+      longitudinal_accel_limit: 4.8
+      velocity_smoothing_gain: 0.12
       derivative_step: 0.02
       profile_topic: "trajectory_profile"
       # cost 超过 96 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
@@ -922,21 +927,24 @@ trajectory_speed_governor:
     marker_topic: "trajectory_profile_markers"
     # 保持 governor 在链路中生效：用 B 样条 profile 做高速巡航的动态限速，而不是旁路透传。
     enabled: true
-    min_speed_scale: 0.75
-    curvature_brake_gain: 0.20
-    curvature_window_points: 12
-    speed_scale_filter_gain: 0.40
+    min_speed_scale: 0.90
+    curvature_brake_gain: 0.06
+    curvature_window_points: 8
+    curvature_peak_weight: 0.20
+    speed_scale_filter_gain: 0.14
+    speed_scale_rise_rate: 6.0
+    speed_scale_fall_rate: 2.2
 
 velocity_smoother:
   ros__parameters:
     use_sim_time: false
-    smoothing_frequency: 20.0
+    smoothing_frequency: 40.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [4.5, 4.5, 5.0]
-    min_velocity: [-4.0, -4.0, -5.0]
-    max_accel: [4.5, 4.5, 5.0]
-    max_decel: [-4.5, -4.5, -5.0]
+    max_velocity: [4.8, 4.8, 5.0]
+    min_velocity: [-4.2, -4.2, -5.0]
+    max_accel: [8.0, 8.0, 7.0]
+    max_decel: [-9.0, -9.0, -7.5]
     odom_topic: "odometry"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

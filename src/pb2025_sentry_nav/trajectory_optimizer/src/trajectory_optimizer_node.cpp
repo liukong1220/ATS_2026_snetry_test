@@ -91,6 +91,14 @@ geometry_msgs::msg::Point offsetPoint(
   return shifted;
 }
 
+template<typename PublisherT>
+bool hasSubscribers(const std::shared_ptr<PublisherT> & publisher)
+{
+  return publisher &&
+         (publisher->get_subscription_count() > 0 ||
+         publisher->get_intra_process_subscription_count() > 0);
+}
+
 }  // namespace
 
 TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & options)
@@ -173,6 +181,13 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
 
 void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
 {
+  const bool publish_smoothed_path = hasSubscribers(smoothed_path_pub_);
+  const bool publish_profile = hasSubscribers(profile_pub_);
+  const bool publish_esdf_debug = hasSubscribers(esdf_marker_pub_);
+  if (!publish_smoothed_path && !publish_profile && !publish_esdf_debug) {
+    return;
+  }
+
   if (!costmap_sub_) {
     costmap_sub_ =
       std::make_shared<nav2_costmap_2d::CostmapSubscriber>(shared_from_this(), costmap_topic_);
@@ -201,15 +216,22 @@ void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr 
     }
   }
   const auto result = optimizer_.optimizeDetailed(*msg);
-  smoothed_path_pub_->publish(result.path);
-  profile_pub_->publish(toProfileMsg(msg->header, "trajectory_optimizer_node", result.profile));
-  publishEsdfDebugMarkers(result.path);
+  if (publish_smoothed_path) {
+    smoothed_path_pub_->publish(result.path);
+  }
+  if (publish_profile) {
+    profile_pub_->publish(toProfileMsg(msg->header, "trajectory_optimizer_node", result.profile));
+  }
+  if (publish_esdf_debug) {
+    publishEsdfDebugMarkers(result.path);
+  }
 }
 
 void TrajectoryOptimizerNode::publishEsdfDebugMarkers(const nav_msgs::msg::Path & path)
 {
   if (!esdf_marker_pub_ || !fake_esdf_provider_ || !params_.use_esdf_obstacle_cost ||
-    !fake_esdf_provider_->available() || path.poses.empty())
+    !fake_esdf_provider_->available() || path.poses.empty() ||
+    !hasSubscribers(esdf_marker_pub_))
   {
     return;
   }

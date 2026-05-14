@@ -19,6 +19,14 @@ standard_robot_pp_ros2:
     small_yaw_is_relative: true
     invert_small_yaw: false
     small_yaw_offset: 0.0
+    # 当上游偶发掉出 1~3 帧全零速度时，短暂保持最近一次非零速度，
+    # 避免底盘被打成“走一拍、停一拍”的电机冲击。
+    enable_transient_zero_cmd_hold: true
+    transient_zero_cmd_hold_timeout_ms: 50
+    transient_zero_cmd_linear_epsilon: 0.001
+    transient_zero_cmd_angular_epsilon: 0.001
+    # 上游彻底断流时，最多保留旧速度这么久，超时后主动刹停。
+    cmd_vel_watchdog_timeout_ms: 300
     # 订阅上层行为树发布的姿态模式话题，
     # 并将值写入 SendRobotCmdData.data.speed_vector.mode。
     robot_mode_topic: decision/robot_mode

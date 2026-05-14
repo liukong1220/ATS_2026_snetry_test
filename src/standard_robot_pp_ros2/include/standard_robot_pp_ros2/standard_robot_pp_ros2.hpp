@@ -3,6 +3,7 @@
 #ifndef STANDARD_ROBOT_PP_ROS2__STANDARD_ROBOT_PP_ROS2_HPP_
 #define STANDARD_ROBOT_PP_ROS2__STANDARD_ROBOT_PP_ROS2_HPP_
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -53,6 +54,16 @@ private:
   double small_yaw_offset_;
   // 姿态模式订阅话题，默认来自行为树发布的 decision/robot_mode。
   std::string robot_mode_topic_;
+  bool enable_transient_zero_cmd_hold_ = true;
+  int transient_zero_cmd_hold_timeout_ms_ = 150;
+  double transient_zero_cmd_linear_epsilon_ = 1e-3;
+  double transient_zero_cmd_angular_epsilon_ = 1e-3;
+  int cmd_vel_watchdog_timeout_ms_ = 300;
+  geometry_msgs::msg::Twist last_nonzero_cmd_vel_;
+  std::chrono::steady_clock::time_point last_cmd_vel_steady_time_;
+  std::chrono::steady_clock::time_point last_nonzero_cmd_steady_time_;
+  bool has_cmd_vel_ = false;
+  bool has_nonzero_cmd_vel_ = false;
 
   std::thread receive_thread_;
   std::thread send_thread_;

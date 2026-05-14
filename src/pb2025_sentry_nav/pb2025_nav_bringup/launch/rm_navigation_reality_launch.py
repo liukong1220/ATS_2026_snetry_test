@@ -33,6 +33,7 @@ def generate_launch_description():
     rviz_force_software = LaunchConfiguration("rviz_force_software")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
+    launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -127,6 +128,12 @@ def generate_launch_description():
         "use_rviz", default_value="True", description="Whether to start RVIZ"
     )
 
+    declare_launch_joy_teleop_cmd = DeclareLaunchArgument(
+        "launch_joy_teleop",
+        default_value="False",
+        description="Whether to start joystick teleop nodes",
+    )
+
     # Create our own temporary YAML files that include substitutions
 
     configured_params = ParameterFile(
@@ -188,6 +195,7 @@ def generate_launch_description():
 
     joy_teleop_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(launch_dir, "joy_teleop_launch.py")),
+        condition=IfCondition(launch_joy_teleop),
         launch_arguments={
             "namespace": namespace,
             "use_sim_time": use_sim_time,
@@ -211,6 +219,7 @@ def generate_launch_description():
     ld.add_action(declare_rviz_force_software_cmd)
     ld.add_action(declare_use_robot_state_pub_cmd)
     ld.add_action(declare_use_rviz_cmd)
+    ld.add_action(declare_launch_joy_teleop_cmd)
     ld.add_action(declare_use_respawn_cmd)
 
     # Add the actions to launch all of the navigation nodes

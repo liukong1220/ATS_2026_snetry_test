@@ -3,6 +3,7 @@
 #ifndef TRAJECTORY_OPTIMIZER__TRAJECTORY_SPEED_GOVERNOR_HPP_
 #define TRAJECTORY_OPTIMIZER__TRAJECTORY_SPEED_GOVERNOR_HPP_
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -39,10 +40,15 @@ private:
   double min_speed_scale_ = 0.35;
   double curvature_brake_gain_ = 0.7;
   int curvature_window_points_ = 12;
+  double curvature_peak_weight_ = 0.35;
   double speed_scale_filter_gain_ = 0.25;
+  double speed_scale_rise_rate_ = 4.0;
+  double speed_scale_fall_rate_ = 1.8;
   double current_speed_scale_ = 1.0;
+  double applied_speed_scale_ = 1.0;
   geometry_msgs::msg::Twist latest_cmd_vel_;
   bool has_cmd_vel_ = false;
+  std::chrono::steady_clock::time_point last_publish_steady_time_;
 };
 
 }  // namespace trajectory_optimizer

@@ -2,6 +2,7 @@
 
 #include "standard_robot_pp_ros2/standard_robot_pp_ros2.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -23,6 +24,20 @@ namespace
 double normalizeAngle(const double angle)
 {
   return std::atan2(std::sin(angle), std::cos(angle));
+}
+
+bool isNearlyZeroTwist(
+  const geometry_msgs::msg::Twist & msg,
+  const double linear_epsilon,
+  const double angular_epsilon)
+{
+  return
+    std::abs(msg.linear.x) <= linear_epsilon &&
+    std::abs(msg.linear.y) <= linear_epsilon &&
+    std::abs(msg.linear.z) <= linear_epsilon &&
+    std::abs(msg.angular.x) <= angular_epsilon &&
+    std::abs(msg.angular.y) <= angular_epsilon &&
+    std::abs(msg.angular.z) <= angular_epsilon;
 }
 }  // namespace
 
@@ -217,6 +232,14 @@ void StandardRobotPpRos2Node::getParams()
   small_yaw_is_relative_ = declare_parameter("small_yaw_is_relative", true);
   invert_small_yaw_ = declare_parameter("invert_small_yaw", false);
   small_yaw_offset_ = declare_parameter("small_yaw_offset", 0.0);
+  enable_transient_zero_cmd_hold_ = declare_parameter("enable_transient_zero_cmd_hold", true);
+  transient_zero_cmd_hold_timeout_ms_ =
+    declare_parameter("transient_zero_cmd_hold_timeout_ms", 150);
+  transient_zero_cmd_linear_epsilon_ =
+    declare_parameter("transient_zero_cmd_linear_epsilon", 1e-3);
+  transient_zero_cmd_angular_epsilon_ =
+    declare_parameter("transient_zero_cmd_angular_epsilon", 1e-3);
+  cmd_vel_watchdog_timeout_ms_ = declare_parameter("cmd_vel_watchdog_timeout_ms", 300);
   // 上层行为树通过该话题下发姿态模式，默认值与 pb2025_sentry_behavior 保持一致。
   robot_mode_topic_ = declare_parameter("robot_mode_topic", std::string("decision/robot_mode"));
 }
@@ -763,6 +786,16 @@ void StandardRobotPpRos2Node::sendData()
       SendRobotCmdData send_packet;
       {
         std::lock_guard<std::mutex> lock(send_cmd_mutex_);
+        if (has_cmd_vel_ && cmd_vel_watchdog_timeout_ms_ > 0) {
+          const auto now = std::chrono::steady_clock::now();
+          const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - last_cmd_vel_steady_time_);
+          if (elapsed.count() > cmd_vel_watchdog_timeout_ms_) {
+            send_robot_cmd_data_.data.speed_vector.vx = 0.0F;
+            send_robot_cmd_data_.data.speed_vector.vy = 0.0F;
+            send_robot_cmd_data_.data.speed_vector.wz = 0.0F;
+          }
+        }
         send_packet = send_robot_cmd_data_;
       }
       send_packet.time_stamp = static_cast<uint32_t>(this->now().nanoseconds() / 1000000ULL);
@@ -786,6 +819,35 @@ void StandardRobotPpRos2Node::sendData()
 void StandardRobotPpRos2Node::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
 {
   std::lock_guard<std::mutex> lock(send_cmd_mutex_);
+  has_cmd_vel_ = true;
+  last_cmd_vel_steady_time_ = std::chrono::steady_clock::now();
+  const bool is_zero_cmd = isNearlyZeroTwist(
+    *msg, transient_zero_cmd_linear_epsilon_, transient_zero_cmd_angular_epsilon_);
+  const auto now = last_cmd_vel_steady_time_;
+  const bool stop_requested = send_robot_cmd_data_.data.speed_vector.stop;
+
+  if (!is_zero_cmd) {
+    last_nonzero_cmd_vel_ = *msg;
+    last_nonzero_cmd_steady_time_ = now;
+    has_nonzero_cmd_vel_ = true;
+  } else if (
+    enable_transient_zero_cmd_hold_ && !stop_requested && has_nonzero_cmd_vel_ &&
+    transient_zero_cmd_hold_timeout_ms_ > 0)
+  {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now - last_nonzero_cmd_steady_time_);
+    if (elapsed.count() >= 0 && elapsed.count() <= transient_zero_cmd_hold_timeout_ms_) {
+      send_robot_cmd_data_.data.speed_vector.vx = last_nonzero_cmd_vel_.linear.x;
+      send_robot_cmd_data_.data.speed_vector.vy = last_nonzero_cmd_vel_.linear.y;
+      send_robot_cmd_data_.data.speed_vector.wz = last_nonzero_cmd_vel_.angular.z;
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "Holding last non-zero cmd_vel for transient zero input (%ld ms <= %d ms)",
+        elapsed.count(), transient_zero_cmd_hold_timeout_ms_);
+      return;
+    }
+  }
+
   send_robot_cmd_data_.data.speed_vector.vx = msg->linear.x;
   send_robot_cmd_data_.data.speed_vector.vy = msg->linear.y;
   send_robot_cmd_data_.data.speed_vector.wz = msg->angular.z;

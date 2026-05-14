@@ -34,6 +34,14 @@ std_msgs::msg::ColorRGBA colorFromSpeedRatio(double ratio)
     0.88f);
 }
 
+template<typename PublisherT>
+bool hasSubscribers(const std::shared_ptr<PublisherT> & publisher)
+{
+  return publisher &&
+         (publisher->get_subscription_count() > 0 ||
+         publisher->get_intra_process_subscription_count() > 0);
+}
+
 }  // namespace
 
 TrajectorySpeedGovernor::TrajectorySpeedGovernor(const rclcpp::NodeOptions & options)
@@ -47,7 +55,10 @@ TrajectorySpeedGovernor::TrajectorySpeedGovernor(const rclcpp::NodeOptions & opt
   declare_parameter<double>("min_speed_scale", min_speed_scale_);
   declare_parameter<double>("curvature_brake_gain", curvature_brake_gain_);
   declare_parameter<int>("curvature_window_points", curvature_window_points_);
+  declare_parameter<double>("curvature_peak_weight", curvature_peak_weight_);
   declare_parameter<double>("speed_scale_filter_gain", speed_scale_filter_gain_);
+  declare_parameter<double>("speed_scale_rise_rate", speed_scale_rise_rate_);
+  declare_parameter<double>("speed_scale_fall_rate", speed_scale_fall_rate_);
 
   get_parameter("profile_topic", profile_topic_);
   get_parameter("input_cmd_vel_topic", input_cmd_vel_topic_);
@@ -57,7 +68,10 @@ TrajectorySpeedGovernor::TrajectorySpeedGovernor(const rclcpp::NodeOptions & opt
   get_parameter("min_speed_scale", min_speed_scale_);
   get_parameter("curvature_brake_gain", curvature_brake_gain_);
   get_parameter("curvature_window_points", curvature_window_points_);
+  get_parameter("curvature_peak_weight", curvature_peak_weight_);
   get_parameter("speed_scale_filter_gain", speed_scale_filter_gain_);
+  get_parameter("speed_scale_rise_rate", speed_scale_rise_rate_);
+  get_parameter("speed_scale_fall_rate", speed_scale_fall_rate_);
 
   profile_sub_ = create_subscription<sp_msgs::msg::TrajectoryProfileMsg>(
     profile_topic_, 10,
@@ -88,10 +102,12 @@ void TrajectorySpeedGovernor::profileCallback(
       static_cast<std::size_t>(std::max(1, curvature_window_points_))));
 
   double window_max_abs_curvature = 0.0;
+  double window_avg_abs_curvature = 0.0;
   double profile_speed_scale = 1.0;
   for (std::size_t i = 0; i < window_points; ++i) {
-    window_max_abs_curvature = std::max(
-      window_max_abs_curvature, std::abs(msg->points[i].curvature));
+    const double abs_curvature = std::abs(msg->points[i].curvature);
+    window_max_abs_curvature = std::max(window_max_abs_curvature, abs_curvature);
+    window_avg_abs_curvature += abs_curvature;
     const double speed_limit = msg->points[i].speed_limit;
     if (speed_limit > 1e-3) {
       const double point_speed_scale =
@@ -99,9 +115,14 @@ void TrajectorySpeedGovernor::profileCallback(
       profile_speed_scale = std::min(profile_speed_scale, point_speed_scale);
     }
   }
+  window_avg_abs_curvature /= static_cast<double>(window_points);
 
+  const double peak_weight = std::max(0.0, std::min(1.0, curvature_peak_weight_));
+  const double effective_curvature =
+    peak_weight * window_max_abs_curvature +
+    (1.0 - peak_weight) * window_avg_abs_curvature;
   const double curvature_scale =
-    1.0 / (1.0 + curvature_brake_gain_ * window_max_abs_curvature);
+    1.0 / (1.0 + curvature_brake_gain_ * effective_curvature);
   const double target_speed_scale = std::max(
     min_speed_scale_, std::min(1.0, std::min(curvature_scale, profile_speed_scale)));
   const double filter_gain = std::max(0.0, std::min(1.0, speed_scale_filter_gain_));
@@ -109,11 +130,13 @@ void TrajectorySpeedGovernor::profileCallback(
 
   RCLCPP_INFO_THROTTLE(
     get_logger(), *get_clock(), 1000,
-    "Speed governor scale: target=%.3f filtered=%.3f profile=%.3f curvature=%.3f kappa_window_max=%.3f window_points=%zu",
+    "Speed governor scale: target=%.3f filtered=%.3f applied=%.3f profile=%.3f curvature=%.3f kappa_avg=%.3f kappa_max=%.3f window_points=%zu",
     target_speed_scale,
     current_speed_scale_,
+    applied_speed_scale_,
     profile_speed_scale,
     curvature_scale,
+    window_avg_abs_curvature,
     window_max_abs_curvature,
     window_points);
 
@@ -139,16 +162,28 @@ void TrajectorySpeedGovernor::publishGovernedCmd()
     return;
   }
 
-  governed.linear.x *= current_speed_scale_;
-  governed.linear.y *= current_speed_scale_;
-  governed.angular.z *= std::sqrt(current_speed_scale_);
+  const auto now = std::chrono::steady_clock::now();
+  double dt = 0.0;
+  if (last_publish_steady_time_.time_since_epoch().count() != 0) {
+    dt = std::chrono::duration<double>(now - last_publish_steady_time_).count();
+  }
+  last_publish_steady_time_ = now;
+
+  const double rise_step = std::max(0.0, speed_scale_rise_rate_) * dt;
+  const double fall_step = std::max(0.0, speed_scale_fall_rate_) * dt;
+  applied_speed_scale_ += std::clamp(current_speed_scale_ - applied_speed_scale_, -fall_step, rise_step);
+  applied_speed_scale_ = std::max(min_speed_scale_, std::min(1.0, applied_speed_scale_));
+
+  governed.linear.x *= applied_speed_scale_;
+  governed.linear.y *= applied_speed_scale_;
+  governed.angular.z *= std::sqrt(applied_speed_scale_);
   governed_cmd_pub_->publish(governed);
 }
 
 void TrajectorySpeedGovernor::publishProfileMarkers(
   const sp_msgs::msg::TrajectoryProfileMsg & msg)
 {
-  if (!marker_pub_ || msg.points.empty()) {
+  if (!marker_pub_ || msg.points.empty() || !hasSubscribers(marker_pub_)) {
     return;
   }
 
