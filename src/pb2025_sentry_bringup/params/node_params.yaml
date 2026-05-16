@@ -229,9 +229,25 @@ fake_vel_transform:
     robot_base_frame: "gimbal_yaw_odom"
     fake_robot_base_frame: "gimbal_yaw_fake"
     input_cmd_vel_topic: "cmd_vel_nav2_result"
-    output_cmd_vel_topic: "cmd_vel"
+    output_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
     cmd_spin_topic: "cmd_spin"
     init_spin_speed: 0.0
+
+chassis_vel_transform:
+  ros__parameters:
+    use_sim_time: false
+    joint_state_topic: "serial/gimbal_joint_state"
+    input_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
+    output_cmd_vel_topic: "/cmd_vel"
+    big_yaw_joint_name: "gimbal_yaw_odom_joint"
+    # 提速放在最终坐标转换节点里做，并叠加限幅/限加速度，避免串口出口硬放大导致过冲摇摆。
+    linear_gain: 1.25
+    max_linear_speed: 4.2
+    max_linear_accel: 5.0
+    invert_big_yaw: false
+    invert_output_x: false
+    invert_output_y: false
+    pass_through_without_yaw: true
 
 small_gicp_relocalization:
   ros__parameters:

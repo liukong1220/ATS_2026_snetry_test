@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="vision_override_no_referee">
+    <Sequence>
+      <IsVisionTargetValid key_port="{@sp_vision_target}"
+                           timeout_s="{@decision_vision_timeout_s}"
+                           require_nav_hold="true"
+                           gimbal_yaw="{vision_gimbal_yaw}"
+                           gimbal_pitch="{vision_gimbal_pitch}"
+                           target_id="{vision_target_id}"/>
+      <PublishRobotMode mode="attack"
+                        duration="0.0"
+                        topic_name="{@decision_robot_mode_topic}"/>
+      <PublishGimbalAbsolute topic_name="{@decision_gimbal_topic}"
+                             duration="0.0"
+                             gimbal_yaw="{vision_gimbal_yaw}"
+                             gimbal_pitch="{vision_gimbal_pitch}"/>
+      <SelectVisionFollowPath key_port="{@sp_vision_target}"
+                              current_pose="{@decision_current_pose}"
+                              current_costmap="{@nav_globalCostmap}"
+                              path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_test_safe_point">
+    <Sequence>
+      <PublishRobotMode mode="defend"
+                        duration="0.0"
+                        topic_name="{@decision_robot_mode_topic}"/>
+      <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+      <SelectFixedPath target_index="{@decision_supply_safe_point_index}"
+                       path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_test_retreat">
+    <Sequence>
+      <PublishRobotMode mode="defend"
+                        duration="0.0"
+                        topic_name="{@decision_robot_mode_topic}"/>
+      <SelectNearestRetreatPath current_pose="{@decision_current_pose}"
+                                selected_index="{@decision_low_hp_target_index}"
+                                path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+          <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_test_anchor">
+    <Sequence>
+      <PublishRobotMode mode="move"
+                        duration="0.0"
+                        topic_name="{@decision_robot_mode_topic}"/>
+      <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+      <SelectFixedPath target_index="{@decision_anchor_target_index}"
+                       path="{decision_path}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_test_patrol">
+    <Sequence>
+      <PublishRobotMode mode="move"
+                        duration="0.0"
+                        topic_name="{@decision_robot_mode_topic}"/>
+      <ResetLowHpTarget selected_index="{@decision_low_hp_target_index}"/>
+      <SelectPatrolPath patrol_cursor="{decision_patrol_cursor}"
+                        patrol_direction="{decision_patrol_direction}"
+                        path="{decision_path}"
+                        next_cursor="{decision_next_patrol_cursor}"
+                        next_direction="{decision_next_patrol_direction}"/>
+      <Fallback>
+        <Sequence>
+          <IsPathGoalReached path="{decision_path}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"
+                             current_pose="{@decision_current_pose}"/>
+          <AdvancePatrolCursor next_cursor="{decision_next_patrol_cursor}"
+                               next_direction="{decision_next_patrol_direction}"
+                               patrol_cursor="{decision_patrol_cursor}"
+                               patrol_direction="{decision_patrol_direction}"
+                               goal_succeeded="{decision_nav_goal_succeeded}"/>
+        </Sequence>
+        <SendNavThroughPoses path="{decision_path}"
+                             current_pose="{@decision_current_pose}"
+                             goal_succeeded="{decision_nav_goal_succeeded}"/>
+      </Fallback>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_test_simulation">
+    <ReactiveFallback>
+      <Sequence>
+        <IsDecisionMode mode="safe"/>
+        <SubTree ID="decision_test_safe_point"/>
+      </Sequence>
+
+      <Sequence>
+        <IsDecisionMode mode="retreat"/>
+        <SubTree ID="decision_test_retreat"/>
+      </Sequence>
+
+      <Sequence>
+        <IsDecisionMode mode="anchor"/>
+        <SubTree ID="decision_test_anchor"/>
+      </Sequence>
+
+      <Sequence>
+        <IsDecisionMode mode="patrol"/>
+        <SubTree ID="decision_test_patrol"/>
+      </Sequence>
+
+      <SubTree ID="decision_test_patrol"/>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="decision_vision_test">
+    <KeepRunningUntilFailure>
+      <ForceSuccess>
+        <ReactiveSequence>
+          <PublishSpinSpeed spin_speed="{@decision_default_spin_speed}"
+                            duration="0.0"
+                            topic_name="{@decision_spin_topic}"/>
+          <ReactiveFallback>
+            <SubTree ID="vision_override_no_referee"/>
+            <SubTree ID="decision_test_simulation"/>
+          </ReactiveFallback>
+        </ReactiveSequence>
+      </ForceSuccess>
+    </KeepRunningUntilFailure>
+  </BehaviorTree>
+</root>

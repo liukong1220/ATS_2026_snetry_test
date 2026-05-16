@@ -198,6 +198,18 @@ def generate_launch_description():
         output="screen",
     )
 
+    start_chassis_vel_transform_cmd = Node(
+        package="sentry_chassis_vel_transform",
+        executable="chassis_vel_transform_node",
+        name="chassis_vel_transform",
+        namespace=namespace,
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
+        arguments=["--ros-args", "--log-level", log_level],
+    )
+
     start_navigation_launch_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
@@ -285,6 +297,7 @@ def generate_launch_description():
     ld.add_action(start_rviz_cmd)
     ld.add_action(start_serial_driver_cmd)
     ld.add_action(static_tf_base_link_cmd)
+    ld.add_action(start_chassis_vel_transform_cmd)
     ld.add_action(start_navigation_launch_cmd)
     ld.add_action(start_behavior_launch_cmd)
     ld.add_action(record_rosbag_cmd)

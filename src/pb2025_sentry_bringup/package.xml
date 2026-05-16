@@ -15,6 +15,7 @@
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>standard_robot_pp_ros2</exec_depend>
+  <exec_depend>sentry_chassis_vel_transform</exec_depend>
   <exec_depend>pb2025_nav_bringup</exec_depend>
   <exec_depend>pb2025_sentry_behavior</exec_depend>
   <exec_depend>pb_rm_interfaces</exec_depend>
