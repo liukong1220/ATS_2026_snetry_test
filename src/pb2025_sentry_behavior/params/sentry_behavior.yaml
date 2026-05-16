@@ -17,13 +17,13 @@ pb2025_sentry_behavior_server:
       input_source: referee
 
       goal_points:
-        x: [0.2, 5.38, 3.6, 0.0]
-        y: [0.18, 2.2, 3.6, 0.0]
-        z: [0.0, 0.0, 0.0, 0.0]
+        x: [0.20,  4.16 ,  4.92 ,  1.51 , 0.0]
+        y: [-0.18, -3.45 , 0.11 , -2.19 , 0.0]
+        z: [0.00,  0.00 ,  0.00 ,  0.00 , 0.00]
 
       point_roles:
         supply_safe_point_index: 0
-        patrol_indices: [1, 2]
+        patrol_indices: [1, 2, 3]
         low_hp_candidate_indices: [1, 2]
         critical_time_target_index: 1
         anchor_target_index: 2

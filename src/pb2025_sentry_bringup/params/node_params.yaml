@@ -41,6 +41,12 @@ standard_robot_pp_ros2:
     transient_zero_cmd_angular_epsilon: 0.001
     # cmd_vel 断流 watchdog。超过该时间没有新速度就主动清零。
     cmd_vel_watchdog_timeout_ms: 300
+    # 串口下发到底盘前的速度缩放。
+    # 当下位机把 vx/vy/wz 当成“控制幅值”而不是严格物理 m/s / rad/s 时，
+    # 可在这里做统一倍率适配，避免上层导航参数被迫整体放大。
+    cmd_vel_linear_scale_x: 1.0
+    cmd_vel_linear_scale_y: 1.0
+    cmd_vel_angular_scale_z: 1.0
     # 行为树姿态模式输入话题。需与行为树配置一致。
     robot_mode_topic: decision/robot_mode
 

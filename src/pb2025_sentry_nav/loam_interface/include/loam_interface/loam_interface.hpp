@@ -3,11 +3,15 @@
 #ifndef LOAM_INTERFACE__LOAM_INTERFACE_HPP_
 #define LOAM_INTERFACE__LOAM_INTERFACE_HPP_
 
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "nav_msgs/msg/odometry.hpp"
+#include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
+#include "tf2/LinearMath/Transform.h"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -20,9 +24,20 @@ public:
   explicit LoamInterfaceNode(const rclcpp::NodeOptions & options);
 
 private:
+  struct OdomSample
+  {
+    rclcpp::Time stamp;
+    tf2::Transform pose;
+  };
+
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
 
   void odometryCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
+
+  bool getClosestOdomSample(const rclcpp::Time & stamp, OdomSample & sample);
+
+  nav_msgs::msg::Odometry buildOdometryMessage(
+    const OdomSample & sample, const rclcpp::Time & stamp) const;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pcd_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
@@ -41,6 +56,9 @@ private:
 
   bool base_frame_to_lidar_initialized_;
   tf2::Transform tf_odom_to_lidar_odom_;
+  std::deque<OdomSample> odom_buffer_;
+  std::mutex odom_buffer_mutex_;
+  static constexpr std::size_t kMaxOdomBufferSize = 4096;
 };
 
 }  // namespace loam_interface

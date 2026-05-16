@@ -2,6 +2,8 @@
 
 #include "loam_interface/loam_interface.hpp"
 
+#include <algorithm>
+
 #include "pcl_ros/transforms.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
@@ -33,20 +35,30 @@ LoamInterfaceNode::LoamInterfaceNode(const rclcpp::NodeOptions & options)
   odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("lidar_odometry", 5);
 
   pcd_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    registered_scan_topic_, 5,
+    registered_scan_topic_, rclcpp::SensorDataQoS(),
     std::bind(&LoamInterfaceNode::pointCloudCallback, this, std::placeholders::_1));
   odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-    state_estimation_topic_, 5,
+    state_estimation_topic_, rclcpp::SensorDataQoS().keep_last(1),
     std::bind(&LoamInterfaceNode::odometryCallback, this, std::placeholders::_1));
 }
 
 void LoamInterfaceNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
 {
+  OdomSample matched_odom;
+  const auto cloud_stamp = rclcpp::Time(msg->header.stamp);
+  if (!getClosestOdomSample(cloud_stamp, matched_odom)) {
+    RCLCPP_WARN_THROTTLE(
+      this->get_logger(), *this->get_clock(), 2000,
+      "Skipping registered_scan publish because no lidar odometry sample is available yet.");
+    return;
+  }
+
   // NOTE: Input point cloud message is based on the `lidar_odom`
   // Here we transform it to the REAL `odom` frame
   auto out = std::make_shared<sensor_msgs::msg::PointCloud2>();
   pcl_ros::transformPointCloud(odom_frame_, tf_odom_to_lidar_odom_, *msg, *out);
   pcd_pub_->publish(*out);
+  odom_pub_->publish(buildOdometryMessage(matched_odom, cloud_stamp));
 }
 
 void LoamInterfaceNode::odometryCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
@@ -72,18 +84,58 @@ void LoamInterfaceNode::odometryCallback(const nav_msgs::msg::Odometry::ConstSha
   tf2::fromMsg(msg->pose.pose, tf_lidar_odom_to_lidar);
   tf2::Transform tf_odom_to_lidar = tf_odom_to_lidar_odom_ * tf_lidar_odom_to_lidar;
 
+  std::lock_guard<std::mutex> lock(odom_buffer_mutex_);
+  odom_buffer_.push_back(OdomSample{rclcpp::Time(msg->header.stamp), tf_odom_to_lidar});
+  if (odom_buffer_.size() > kMaxOdomBufferSize) {
+    odom_buffer_.pop_front();
+  }
+}
+
+bool LoamInterfaceNode::getClosestOdomSample(const rclcpp::Time & stamp, OdomSample & sample)
+{
+  std::lock_guard<std::mutex> lock(odom_buffer_mutex_);
+  if (odom_buffer_.empty()) {
+    return false;
+  }
+
+  const auto newer_it = std::lower_bound(
+    odom_buffer_.begin(), odom_buffer_.end(), stamp,
+    [](const OdomSample & entry, const rclcpp::Time & target_stamp) {
+      return entry.stamp < target_stamp;
+    });
+
+  if (newer_it == odom_buffer_.begin()) {
+    sample = *newer_it;
+    return true;
+  }
+
+  if (newer_it == odom_buffer_.end()) {
+    sample = odom_buffer_.back();
+    return true;
+  }
+
+  const auto older_it = std::prev(newer_it);
+  const auto older_dt = (stamp - older_it->stamp).nanoseconds();
+  const auto newer_dt = (newer_it->stamp - stamp).nanoseconds();
+  sample = (older_dt <= newer_dt) ? *older_it : *newer_it;
+  return true;
+}
+
+nav_msgs::msg::Odometry LoamInterfaceNode::buildOdometryMessage(
+  const OdomSample & sample, const rclcpp::Time & stamp) const
+{
   nav_msgs::msg::Odometry out;
-  out.header.stamp = msg->header.stamp;
+  out.header.stamp = stamp;
   out.header.frame_id = odom_frame_;
   out.child_frame_id = lidar_frame_;
 
-  const auto & origin = tf_odom_to_lidar.getOrigin();
+  const auto & origin = sample.pose.getOrigin();
   out.pose.pose.position.x = origin.x();
   out.pose.pose.position.y = origin.y();
   out.pose.pose.position.z = origin.z();
-  out.pose.pose.orientation = tf2::toMsg(tf_odom_to_lidar.getRotation());
+  out.pose.pose.orientation = tf2::toMsg(sample.pose.getRotation());
 
-  odom_pub_->publish(out);
+  return out;
 }
 
 }  // namespace loam_interface

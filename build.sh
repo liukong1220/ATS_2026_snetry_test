@@ -5,6 +5,8 @@ set -euo pipefail
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${WORKSPACE_DIR}"
 
+echo "[build] starting in ${WORKSPACE_DIR}"
+
 # 默认按 ROS 2 Humble 处理，也允许外部通过 ROS_DISTRO 覆盖。
 ROS_DISTRO_NAME="${ROS_DISTRO:-humble}"
 ROS_SETUP="/opt/ros/${ROS_DISTRO_NAME}/setup.bash"
@@ -34,9 +36,20 @@ HEAVY_PACKAGES=(
   terrain_analysis_ext
 )
 
+has_package() {
+  local pkg="$1"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q --glob 'package.xml' "<name>${pkg}</name>" src
+  else
+    grep -Rqs --include='package.xml' "<name>${pkg}</name>" src
+  fi
+}
+
 # 启动前先确认关键重包都在当前工作区里，避免脚本跑偏。
+echo "[build] checking required packages"
 for pkg in "${HEAVY_PACKAGES[@]}"; do
-  if [[ ! -d "src" ]] || ! grep -Rqs "<name>${pkg}</name>" src; then
+  echo "[build]   - ${pkg}"
+  if [[ ! -d "src" ]] || ! has_package "${pkg}"; then
     echo "Required package not found in workspace: ${pkg}" >&2
     exit 1
   fi

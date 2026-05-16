@@ -17,9 +17,9 @@ pb2025_sentry_behavior_server:
       input_source: referee
 
       goal_points:
-        x: [0.2, 5.38, 3.6, 0.0]
-        y: [0.18, 2.2, 3.6, 0.0]
-        z: [0.0, 0.0, 0.0, 0.0]
+        x: [0.20,  4.16 ,  4.92 ,  1.51 , 0.0]
+        y: [-0.18, -3.45 , 0.11 , -2.19 , 0.0]
+        z: [0.00,  0.00 ,  0.00 ,  0.00 , 0.00]
 
       point_roles:
         supply_safe_point_index: 0
@@ -47,9 +47,9 @@ pb2025_sentry_behavior_server:
         robot_mode: decision/robot_mode
 
       motion:
-        default_spin_speed: 0.0
+        default_spin_speed: -10.0
         # 检测到新的掉血后的自旋角速度。
-        hit_spin_speed: 7.0
+        hit_spin_speed: -10.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
