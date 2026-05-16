@@ -22,6 +22,7 @@
 #include "pb_rm_interfaces/msg/robot_state_info.hpp"
 #include "pb_rm_interfaces/msg/robot_status.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "serial_driver/serial_driver.hpp"
@@ -67,6 +68,8 @@ private:
   std::chrono::steady_clock::time_point last_nonzero_cmd_steady_time_;
   bool has_cmd_vel_ = false;
   bool has_nonzero_cmd_vel_ = false;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
+    parameter_callback_handle_;
 
   std::thread receive_thread_;
   std::thread send_thread_;
@@ -123,6 +126,8 @@ private:
   void publishBuff(ReceiveBuff & data);
 
   void writeScaledCmdVel(const geometry_msgs::msg::Twist & msg);
+  rcl_interfaces::msg::SetParametersResult onParametersSet(
+    const std::vector<rclcpp::Parameter> & params);
 
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
   void cmdGimbalJointCallback(const sensor_msgs::msg::JointState::SharedPtr msg);

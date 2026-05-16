@@ -34,6 +34,7 @@ CTestTestfile.cmake
 .ros/
 .config/
 .local/
+rosbag2_*/
 
 # Temporary and backup files
 *~

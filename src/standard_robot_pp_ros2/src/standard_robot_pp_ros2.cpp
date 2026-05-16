@@ -49,6 +49,8 @@ StandardRobotPpRos2Node::StandardRobotPpRos2Node(const rclcpp::NodeOptions & opt
   RCLCPP_INFO(get_logger(), "Start StandardRobotPpRos2Node!");
 
   getParams();
+  parameter_callback_handle_ = this->add_on_set_parameters_callback(
+    std::bind(&StandardRobotPpRos2Node::onParametersSet, this, std::placeholders::_1));
   createPublisher();
   createSubscription();
 
@@ -860,6 +862,27 @@ void StandardRobotPpRos2Node::writeScaledCmdVel(const geometry_msgs::msg::Twist 
     static_cast<float>(msg.linear.y * cmd_vel_linear_scale_y_);
   send_robot_cmd_data_.data.speed_vector.wz =
     static_cast<float>(msg.angular.z * cmd_vel_angular_scale_z_);
+}
+
+rcl_interfaces::msg::SetParametersResult StandardRobotPpRos2Node::onParametersSet(
+  const std::vector<rclcpp::Parameter> & params)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  result.reason = "success";
+
+  std::lock_guard<std::mutex> lock(send_cmd_mutex_);
+  for (const auto & param : params) {
+    if (param.get_name() == "cmd_vel_linear_scale_x") {
+      cmd_vel_linear_scale_x_ = param.as_double();
+    } else if (param.get_name() == "cmd_vel_linear_scale_y") {
+      cmd_vel_linear_scale_y_ = param.as_double();
+    } else if (param.get_name() == "cmd_vel_angular_scale_z") {
+      cmd_vel_angular_scale_z_ = param.as_double();
+    }
+  }
+
+  return result;
 }
 
 void StandardRobotPpRos2Node::cmdGimbalJointCallback(

@@ -27,6 +27,12 @@ standard_robot_pp_ros2:
     transient_zero_cmd_angular_epsilon: 0.001
     # 上游彻底断流时，最多保留旧速度这么久，超时后主动刹停。
     cmd_vel_watchdog_timeout_ms: 300
+    # 串口下发到底盘前的速度缩放。
+    # 若下位机实际期望的是“控制幅值”而不是严格物理 m/s / rad/s，
+    # 可在这里做统一倍率适配，而不破坏上层导航参数的物理含义。
+    cmd_vel_linear_scale_x: 1.0
+    cmd_vel_linear_scale_y: 1.0
+    cmd_vel_angular_scale_z: 1.0
     # 订阅上层行为树发布的姿态模式话题，
     # 并将值写入 SendRobotCmdData.data.speed_vector.mode。
     robot_mode_topic: decision/robot_mode
