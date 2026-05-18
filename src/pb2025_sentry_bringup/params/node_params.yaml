@@ -41,12 +41,6 @@ standard_robot_pp_ros2:
     transient_zero_cmd_angular_epsilon: 0.001
     # cmd_vel 断流 watchdog。超过该时间没有新速度就主动清零。
     cmd_vel_watchdog_timeout_ms: 300
-    # 串口下发到底盘前的速度缩放。
-    # 当下位机把 vx/vy/wz 当成“控制幅值”而不是严格物理 m/s / rad/s 时，
-    # 可在这里做统一倍率适配，避免上层导航参数被迫整体放大。
-    cmd_vel_linear_scale_x: 1.0
-    cmd_vel_linear_scale_y: 1.0
-    cmd_vel_angular_scale_z: 1.0
     # 行为树姿态模式输入话题。需与行为树配置一致。
     robot_mode_topic: decision/robot_mode
 
@@ -241,9 +235,10 @@ chassis_vel_transform:
     output_cmd_vel_topic: "/cmd_vel"
     big_yaw_joint_name: "gimbal_yaw_odom_joint"
     # 提速放在最终坐标转换节点里做，并叠加限幅/限加速度，避免串口出口硬放大导致过冲摇摆。
-    linear_gain: 1.25
-    max_linear_speed: 4.2
-    max_linear_accel: 5.0
+    linear_gain: 1.10
+    angular_gain: 2.0
+    max_linear_speed: 7.2
+    max_linear_accel: 7.0
     invert_big_yaw: false
     invert_output_x: false
     invert_output_y: false
@@ -253,7 +248,7 @@ small_gicp_relocalization:
   ros__parameters:
     use_sim_time: false
     # GICP 并行线程数。大：更快；小：更省 CPU。
-    num_threads: 4
+    num_threads: 6
     # 协方差估计邻域点数。大：更稳；小：更灵敏但更噪。
     num_neighbors: 20
     # 触发一次注册前，累积源点云的最低点数。
@@ -578,8 +573,8 @@ controller_server:
       vx_min: -4.2
       vy_max: 4.2
       vy_min: -4.2
-      wz_max: 3.0
-      wz_min: -3.0
+      wz_max: 5.0
+      wz_min: -5.0
 
       # --- Sampling standard deviations ---
       # Parameters `vx_std / vy_std / wz_std`

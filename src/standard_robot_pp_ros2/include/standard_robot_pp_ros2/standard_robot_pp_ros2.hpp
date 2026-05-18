@@ -60,9 +60,6 @@ private:
   double transient_zero_cmd_linear_epsilon_ = 1e-3;
   double transient_zero_cmd_angular_epsilon_ = 1e-3;
   int cmd_vel_watchdog_timeout_ms_ = 300;
-  double cmd_vel_linear_scale_x_ = 1.0;
-  double cmd_vel_linear_scale_y_ = 1.0;
-  double cmd_vel_angular_scale_z_ = 1.0;
   geometry_msgs::msg::Twist last_nonzero_cmd_vel_;
   std::chrono::steady_clock::time_point last_cmd_vel_steady_time_;
   std::chrono::steady_clock::time_point last_nonzero_cmd_steady_time_;
@@ -125,7 +122,7 @@ private:
   void publishLegacyJointState(ReceiveLegacyJointState & data);
   void publishBuff(ReceiveBuff & data);
 
-  void writeScaledCmdVel(const geometry_msgs::msg::Twist & msg);
+  void writeCmdVel(const geometry_msgs::msg::Twist & msg);
   rcl_interfaces::msg::SetParametersResult onParametersSet(
     const std::vector<rclcpp::Parameter> & params);
 

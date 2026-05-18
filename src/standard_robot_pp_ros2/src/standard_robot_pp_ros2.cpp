@@ -242,9 +242,6 @@ void StandardRobotPpRos2Node::getParams()
   transient_zero_cmd_angular_epsilon_ =
     declare_parameter("transient_zero_cmd_angular_epsilon", 1e-3);
   cmd_vel_watchdog_timeout_ms_ = declare_parameter("cmd_vel_watchdog_timeout_ms", 300);
-  cmd_vel_linear_scale_x_ = declare_parameter("cmd_vel_linear_scale_x", 1.0);
-  cmd_vel_linear_scale_y_ = declare_parameter("cmd_vel_linear_scale_y", 1.0);
-  cmd_vel_angular_scale_z_ = declare_parameter("cmd_vel_angular_scale_z", 1.0);
   // 上层行为树通过该话题下发姿态模式，默认值与 pb2025_sentry_behavior 保持一致。
   robot_mode_topic_ = declare_parameter("robot_mode_topic", std::string("decision/robot_mode"));
 }
@@ -842,7 +839,7 @@ void StandardRobotPpRos2Node::cmdVelCallback(const geometry_msgs::msg::Twist::Sh
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       now - last_nonzero_cmd_steady_time_);
     if (elapsed.count() >= 0 && elapsed.count() <= transient_zero_cmd_hold_timeout_ms_) {
-      writeScaledCmdVel(last_nonzero_cmd_vel_);
+      writeCmdVel(last_nonzero_cmd_vel_);
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 1000,
         "Holding last non-zero cmd_vel for transient zero input (%ld ms <= %d ms)",
@@ -851,17 +848,14 @@ void StandardRobotPpRos2Node::cmdVelCallback(const geometry_msgs::msg::Twist::Sh
     }
   }
 
-  writeScaledCmdVel(*msg);
+  writeCmdVel(*msg);
 }
 
-void StandardRobotPpRos2Node::writeScaledCmdVel(const geometry_msgs::msg::Twist & msg)
+void StandardRobotPpRos2Node::writeCmdVel(const geometry_msgs::msg::Twist & msg)
 {
-  send_robot_cmd_data_.data.speed_vector.vx =
-    static_cast<float>(msg.linear.x * cmd_vel_linear_scale_x_);
-  send_robot_cmd_data_.data.speed_vector.vy =
-    static_cast<float>(msg.linear.y * cmd_vel_linear_scale_y_);
-  send_robot_cmd_data_.data.speed_vector.wz =
-    static_cast<float>(msg.angular.z * cmd_vel_angular_scale_z_);
+  send_robot_cmd_data_.data.speed_vector.vx = static_cast<float>(msg.linear.x);
+  send_robot_cmd_data_.data.speed_vector.vy = static_cast<float>(msg.linear.y);
+  send_robot_cmd_data_.data.speed_vector.wz = static_cast<float>(msg.angular.z);
 }
 
 rcl_interfaces::msg::SetParametersResult StandardRobotPpRos2Node::onParametersSet(
@@ -872,15 +866,7 @@ rcl_interfaces::msg::SetParametersResult StandardRobotPpRos2Node::onParametersSe
   result.reason = "success";
 
   std::lock_guard<std::mutex> lock(send_cmd_mutex_);
-  for (const auto & param : params) {
-    if (param.get_name() == "cmd_vel_linear_scale_x") {
-      cmd_vel_linear_scale_x_ = param.as_double();
-    } else if (param.get_name() == "cmd_vel_linear_scale_y") {
-      cmd_vel_linear_scale_y_ = param.as_double();
-    } else if (param.get_name() == "cmd_vel_angular_scale_z") {
-      cmd_vel_angular_scale_z_ = param.as_double();
-    }
-  }
+  (void)params;
 
   return result;
 }

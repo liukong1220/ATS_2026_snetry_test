@@ -18,13 +18,13 @@ pb2025_sentry_behavior_server:
       input_source: simulation
 
       goal_points:
-        x: [0.20, 2.8, 4.92, 1.51, 0.0]
-        y: [-0.18, 2.0, 0.11, -2.19, 0.0]
+        x: [0.20, 2.8, 0.00, 1.51, 0.0]
+        y: [-0.18, 2.0, 0.00, -2.19, 0.0]
         z: [0.00, 0.00, 0.00, 0.00, 0.00]
 
       point_roles:
         supply_safe_point_index: 0
-        patrol_indices: [1]
+        patrol_indices: [1,2]
         low_hp_candidate_indices: [1, 2]
         critical_time_target_index: 1
         anchor_target_index: 2
@@ -46,8 +46,8 @@ pb2025_sentry_behavior_server:
         robot_mode: decision/robot_mode
 
       motion:
-        default_spin_speed: -7.0
-        hit_spin_speed: 0.0
+        default_spin_speed: 5.0
+        hit_spin_speed: 5.0
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
       mode_limits:

@@ -20,6 +20,7 @@ ChassisVelTransform::ChassisVelTransform(const rclcpp::NodeOptions & options)
   big_yaw_joint_name_ = declare_parameter<std::string>(
     "big_yaw_joint_name", "gimbal_yaw_odom_joint");
   linear_gain_ = declare_parameter<double>("linear_gain", 1.0);
+  angular_gain_ = declare_parameter<double>("angular_gain", 1.0);
   max_linear_speed_ = declare_parameter<double>("max_linear_speed", 0.0);
   max_linear_accel_ = declare_parameter<double>("max_linear_accel", 0.0);
   invert_big_yaw_ = declare_parameter<bool>("invert_big_yaw", false);
@@ -88,6 +89,7 @@ void ChassisVelTransform::cmdVelCallback(const geometry_msgs::msg::Twist::Shared
   geometry_msgs::msg::Twist output = *msg;
   output.linear.x = (msg->linear.x * cos_yaw - msg->linear.y * sin_yaw) * linear_gain_;
   output.linear.y = (msg->linear.x * sin_yaw + msg->linear.y * cos_yaw) * linear_gain_;
+  output.angular.z = msg->angular.z * angular_gain_;
   if (invert_output_x_) {
     output.linear.x = -output.linear.x;
   }

@@ -100,9 +100,6 @@
 - `enable_transient_zero_cmd_hold`
 - `transient_zero_cmd_hold_timeout_ms`
 - `cmd_vel_watchdog_timeout_ms`
-- `cmd_vel_linear_scale_x`
-- `cmd_vel_linear_scale_y`
-- `cmd_vel_angular_scale_z`
 - `publish_imu_as_gimbal_joint_state`
 - `accept_legacy_two_axis_joint_state`
 - `small_yaw_is_relative`
@@ -117,7 +114,7 @@
 2. `transient_zero_cmd_hold_timeout_ms`
 3. `cmd_vel_watchdog_timeout_ms`
 4. 上游 `/cmd_vel` 是否夹杂零速帧
-5. `cmd_vel_linear_scale_x / y / angular_scale_z` 是否仍为默认 1.0
+5. 上游 `/cmd_vel` 是否已经在速度转换节点中限幅和限加速度
 
 ### 2. 姿态模式不生效
 

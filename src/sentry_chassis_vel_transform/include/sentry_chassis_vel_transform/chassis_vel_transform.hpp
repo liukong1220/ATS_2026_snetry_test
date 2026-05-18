@@ -37,6 +37,7 @@ private:
   std::string output_cmd_vel_topic_;
   std::string big_yaw_joint_name_;
   double linear_gain_ = 1.0;
+  double angular_gain_ = 1.0;
   double max_linear_speed_ = 0.0;
   double max_linear_accel_ = 0.0;
   bool invert_big_yaw_ = false;
