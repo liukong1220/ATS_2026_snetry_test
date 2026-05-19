@@ -42,6 +42,7 @@ def generate_launch_description():
     vision_tracking = LaunchConfiguration("vision_tracking")
     vision_nav_hold = LaunchConfiguration("vision_nav_hold")
     vision_fire_permitted = LaunchConfiguration("vision_fire_permitted")
+    vision_target_type = LaunchConfiguration("vision_target_type")
     vision_target_id = LaunchConfiguration("vision_target_id")
     vision_confidence = LaunchConfiguration("vision_confidence")
     vision_target_distance = LaunchConfiguration("vision_target_distance")
@@ -197,6 +198,12 @@ def generate_launch_description():
         description="Whether the fake vision target allows firing.",
     )
 
+    declare_vision_target_type_cmd = DeclareLaunchArgument(
+        "vision_target_type",
+        default_value="0",
+        description="Fake vision target type. 0=unknown/default and 7=outpost both disable vision follow.",
+    )
+
     declare_vision_target_id_cmd = DeclareLaunchArgument(
         "vision_target_id",
         default_value="7",
@@ -338,6 +345,7 @@ def generate_launch_description():
                 "vision_tracking": vision_tracking,
                 "vision_nav_hold": vision_nav_hold,
                 "vision_fire_permitted": vision_fire_permitted,
+                "vision_target_type": vision_target_type,
                 "vision_target_id": vision_target_id,
                 "vision_confidence": vision_confidence,
                 "vision_target_distance": vision_target_distance,
@@ -415,6 +423,7 @@ def generate_launch_description():
     ld.add_action(declare_vision_tracking_cmd)
     ld.add_action(declare_vision_nav_hold_cmd)
     ld.add_action(declare_vision_fire_permitted_cmd)
+    ld.add_action(declare_vision_target_type_cmd)
     ld.add_action(declare_vision_target_id_cmd)
     ld.add_action(declare_vision_confidence_cmd)
     ld.add_action(declare_vision_target_distance_cmd)

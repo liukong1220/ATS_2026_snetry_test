@@ -62,6 +62,9 @@ class FakeDecisionSimInputs(Node):
         # 当前行为树主线会要求 nav_hold=true 才允许进入视觉跟随。
         self.declare_parameter("vision_nav_hold", True)
         self.declare_parameter("vision_fire_permitted", False)
+        self.declare_parameter(
+            "vision_target_type", int(VisionTargetMsg.TARGET_TYPE_UNKNOWN)
+        )
         self.declare_parameter("vision_target_id", 7)
         self.declare_parameter("vision_confidence", 1.0)
         self.declare_parameter("vision_target_distance", 3.0)
@@ -366,6 +369,7 @@ class FakeDecisionSimInputs(Node):
         msg.nav_hold = bool(self.get_parameter("vision_nav_hold").value)
         msg.fire_permitted = bool(self.get_parameter("vision_fire_permitted").value)
         msg.target_id = int(self.get_parameter("vision_target_id").value)
+        msg.target_type = int(self.get_parameter("vision_target_type").value)
         msg.confidence = float(self.get_parameter("vision_confidence").value)
         msg.target_distance = float(
             self.get_parameter("vision_target_distance").value

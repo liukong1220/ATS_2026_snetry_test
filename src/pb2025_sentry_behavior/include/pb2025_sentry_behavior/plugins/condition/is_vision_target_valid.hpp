@@ -26,6 +26,7 @@ private:
   void resetVisionLatchState();
   BT::NodeStatus keepLatchedTargetIfAllowed(const char * reason);
   BT::NodeStatus failWithReason(const char * reason);
+  BT::NodeStatus failImmediately(const char * reason);
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Logger logger_ = rclcpp::get_logger("IsVisionTargetValidCondition");

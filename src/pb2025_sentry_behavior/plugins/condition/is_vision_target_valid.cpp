@@ -60,6 +60,14 @@ BT::NodeStatus IsVisionTargetValidCondition::failWithReason(const char * reason)
   return BT::NodeStatus::FAILURE;
 }
 
+BT::NodeStatus IsVisionTargetValidCondition::failImmediately(const char * reason)
+{
+  RCLCPP_INFO_THROTTLE(
+    logger_, *node_->get_clock(), 2000, "Vision override rejected: %s", reason);
+  resetVisionLatchState();
+  return BT::NodeStatus::FAILURE;
+}
+
 BT::NodeStatus IsVisionTargetValidCondition::tickCondition()
 {
   auto vision_target = getInput<sp_msgs::msg::VisionTargetMsg>("key_port");
@@ -75,6 +83,13 @@ BT::NodeStatus IsVisionTargetValidCondition::tickCondition()
   float incoming_gimbal_pitch = 0.0F;
 
   if (vision_target) {
+    const auto target_type = decision::visionTargetTypeFromMsg(*vision_target);
+    if (!decision::isVisionFollowAllowed(target_type)) {
+      std::string reason = "vision follow disabled for target_type=";
+      reason += decision::visionTargetTypeToString(target_type);
+      return failImmediately(reason.c_str());
+    }
+
     const bool gimbal_valid =
       std::isfinite(vision_target->target_yaw) && std::isfinite(vision_target->target_pitch);
     bool stamp_valid = false;

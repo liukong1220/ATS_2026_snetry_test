@@ -25,6 +25,7 @@ def generate_launch_description():
     vision_tracking = LaunchConfiguration("vision_tracking")
     vision_nav_hold = LaunchConfiguration("vision_nav_hold")
     vision_fire_permitted = LaunchConfiguration("vision_fire_permitted")
+    vision_target_type = LaunchConfiguration("vision_target_type")
     vision_target_id = LaunchConfiguration("vision_target_id")
     vision_confidence = LaunchConfiguration("vision_confidence")
     vision_target_distance = LaunchConfiguration("vision_target_distance")
@@ -70,6 +71,7 @@ def generate_launch_description():
             "vision_tracking": vision_tracking,
             "vision_nav_hold": vision_nav_hold,
             "vision_fire_permitted": vision_fire_permitted,
+            "vision_target_type": vision_target_type,
             "vision_target_id": vision_target_id,
             "vision_confidence": vision_confidence,
             "vision_target_distance": vision_target_distance,
@@ -186,6 +188,13 @@ def generate_launch_description():
             "vision_fire_permitted",
             default_value="False",
             description="假视觉是否允许发弹，当前主要用于接口观测。",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "vision_target_type",
+            default_value="0",
+            description="假视觉当前目标类型。0=unknown/default、7=outpost；这两类目标当前都禁止视觉跟随。",
         )
     )
     ld.add_action(

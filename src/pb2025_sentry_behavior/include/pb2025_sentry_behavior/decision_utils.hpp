@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -16,6 +17,7 @@
 #include "pb_rm_interfaces/msg/game_status.hpp"
 #include "pb_rm_interfaces/msg/robot_status.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sp_msgs/msg/vision_target_msg.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
@@ -36,6 +38,19 @@ enum class HpBand
   kNormal = 0,
   kLow,
   kCritical
+};
+
+enum class VisionTargetType : std::uint8_t
+{
+  kUnknown = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_UNKNOWN,
+  kHero = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_HERO,
+  kEngineer = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_ENGINEER,
+  kInfantry3 = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_INFANTRY_3,
+  kInfantry4 = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_INFANTRY_4,
+  kInfantry5 = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_INFANTRY_5,
+  kSentry = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_SENTRY,
+  kOutpost = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_OUTPOST,
+  kBase = sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_BASE
 };
 
 struct TimeThresholds
@@ -60,6 +75,79 @@ struct HpThresholds
   HpStageThresholds tense;
   HpStageThresholds critical;
 };
+
+inline VisionTargetType visionTargetTypeFromMsg(std::uint8_t raw_target_type)
+{
+  switch (raw_target_type) {
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_HERO:
+      return VisionTargetType::kHero;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_ENGINEER:
+      return VisionTargetType::kEngineer;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_INFANTRY_3:
+      return VisionTargetType::kInfantry3;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_INFANTRY_4:
+      return VisionTargetType::kInfantry4;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_INFANTRY_5:
+      return VisionTargetType::kInfantry5;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_SENTRY:
+      return VisionTargetType::kSentry;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_OUTPOST:
+      return VisionTargetType::kOutpost;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_BASE:
+      return VisionTargetType::kBase;
+    case sp_msgs::msg::VisionTargetMsg::TARGET_TYPE_UNKNOWN:
+    default:
+      return VisionTargetType::kUnknown;
+  }
+}
+
+inline VisionTargetType visionTargetTypeFromMsg(const sp_msgs::msg::VisionTargetMsg & target)
+{
+  return visionTargetTypeFromMsg(target.target_type);
+}
+
+inline const char * visionTargetTypeToString(VisionTargetType target_type)
+{
+  switch (target_type) {
+    case VisionTargetType::kHero:
+      return "hero";
+    case VisionTargetType::kEngineer:
+      return "engineer";
+    case VisionTargetType::kInfantry3:
+      return "infantry_3";
+    case VisionTargetType::kInfantry4:
+      return "infantry_4";
+    case VisionTargetType::kInfantry5:
+      return "infantry_5";
+    case VisionTargetType::kSentry:
+      return "sentry";
+    case VisionTargetType::kOutpost:
+      return "outpost";
+    case VisionTargetType::kBase:
+      return "base";
+    case VisionTargetType::kUnknown:
+    default:
+      return "unknown";
+  }
+}
+
+inline bool isVisionFollowAllowed(VisionTargetType target_type)
+{
+  switch (target_type) {
+    case VisionTargetType::kHero:
+    case VisionTargetType::kEngineer:
+    case VisionTargetType::kInfantry3:
+    case VisionTargetType::kInfantry4:
+    case VisionTargetType::kInfantry5:
+    case VisionTargetType::kSentry:
+    case VisionTargetType::kBase:
+      return true;
+    case VisionTargetType::kUnknown:
+    case VisionTargetType::kOutpost:
+    default:
+      return false;
+  }
+}
 
 inline rclcpp::Node::SharedPtr getNodeFromBlackboard(const BT::TreeNode & tree_node)
 {
