@@ -2,7 +2,7 @@
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_SCRIPT="$WORKSPACE_DIR/install/setup.bash"
-WORLD_NAME="${1:-rmul}"
+WORLD_NAME="${1:-rmuc}"
 USE_RVIZ="${USE_RVIZ:-True}"
 RVIZ_FORCE_SOFTWARE="${RVIZ_FORCE_SOFTWARE:-0}"
 PID_FILE="$WORKSPACE_DIR/.ros/nav2_sh.pid"

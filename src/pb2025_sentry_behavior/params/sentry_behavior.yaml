@@ -49,7 +49,7 @@ pb2025_sentry_behavior_server:
       motion:
         default_spin_speed: 0.0
         # 检测到新的掉血后的自旋角速度。
-        hit_spin_speed: 7.0
+        hit_spin_speed: 5.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
@@ -178,6 +178,7 @@ pb2025_sentry_behavior_server:
       decision_config:
         path_tolerance: 0.2
         nav2_action_server: "/navigate_through_poses"
+        nav2_to_pose_action_server: "/navigate_to_pose"
         decision_period_ms: 100
         goal_position_tolerance: 0.2
         # 行为层“是否到达目标”的判定容差，需要与实车 Nav2 goal checker 对齐。
@@ -198,7 +199,22 @@ pb2025_sentry_behavior_server:
         patrol_preview_points: 1
         action_server_wait_timeout_s: 0.0
 
+      rmuc:
+        csv_waypoints_file: "params/rmuc_waypoints.csv"
+        patrol_csv_file: "params/rmuc_patrol_waypoints.csv"
+        endgame_time_threshold: 180
+        supply_point:
+          x: -4.30
+          y: 2.00
+          z: 0.0
+
 pb2025_sentry_behavior_client:
   ros__parameters:
     use_sim_time: true
-    target_tree: rmul_2026
+    # 可选：
+    #   rmuc_2026_mapping     = 建图/补给/后期巡航综合决策
+    #   rmuc_2026_patrol_only = 备用：跳过建图路线，保留补给/保命/视觉接管，默认直接巡航
+    #   rmuc_2026_test_mapping_points = 无裁判测试：只跑 rmuc_waypoints.csv
+    #   rmuc_2026_test_supply_point   = 无裁判测试：只跑 decision.rmuc.supply_point
+    #   rmuc_2026_test_patrol_points  = 无裁判测试：只跑 rmuc_patrol_waypoints.csv
+    target_tree: rmuc_2026_mapping

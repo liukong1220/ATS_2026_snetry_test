@@ -36,7 +36,7 @@
         <xmacro_block name="rm25_example_robot" sticker_type="${global_armor_sticker_type}" chassis_height="${chassis_height}" gimbal_yaw_height="${gimbal_yaw_height}" small_yaw_offset_x="${small_yaw_offset_x}" small_yaw_offset_y="${small_yaw_offset_y}" small_yaw_offset_z="${small_yaw_offset_z}" pitch_offset_x="${pitch_offset_x}" pitch_offset_y="${pitch_offset_y}" pitch_offset_z="${pitch_offset_z}"/>
         <!-- Livox 相对大 yaw 坐标系 `gimbal_yaw_odom` 的安装位姿：
              pose = x y z roll pitch yaw。 -->
-        <xmacro_block name="livox" prefix="front_" parent="gimbal_yaw_odom" pose="-0.1 0.245 0.325 ${68*pi/180} 0 -${161*pi/180}" update_rate="20" samples="1875"/>
+        <xmacro_block name="livox" prefix="front_" parent="gimbal_yaw_odom" pose="-0.1 0.245 0.325 ${75*pi/180} 0 -${161*pi/180}" update_rate="20" samples="1875"/>
         <!-- 工业相机相对 pitch 坐标系 `gimbal_pitch` 的安装位姿：
              pose = x y z roll pitch yaw。 -->
         <xmacro_block name="industrial_camera" prefix="front_" parent="gimbal_pitch" pose="0.1 0 0.045 0 0 0" update_rate="30" horizontal_fov="1" width="1920" height="1080"/>

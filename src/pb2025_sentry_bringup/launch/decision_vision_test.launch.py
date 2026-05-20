@@ -232,7 +232,7 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "use_rviz",
-            default_value="False",
+            default_value="True",
             description="Whether to start RViz.",
         )
     )

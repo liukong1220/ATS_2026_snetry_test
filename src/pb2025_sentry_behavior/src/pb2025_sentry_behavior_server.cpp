@@ -304,6 +304,14 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.decision_config.waypoint_stop_duration_s", 0.0);
   declare_parameter("decision.decision_config.patrol_preview_points", 1);
   declare_parameter("decision.decision_config.action_server_wait_timeout_s", 0.5);
+
+  declare_parameter("decision.rmuc.csv_waypoints_file", std::string("params/rmuc_waypoints.csv"));
+  declare_parameter(
+    "decision.rmuc.patrol_csv_file", std::string("params/rmuc_patrol_waypoints.csv"));
+  declare_parameter("decision.rmuc.endgame_time_threshold", 180);
+  declare_parameter("decision.rmuc.supply_point.x", -4.30);
+  declare_parameter("decision.rmuc.supply_point.y", -2.00);
+  declare_parameter("decision.rmuc.supply_point.z", 0.0);
 }
 
 void SentryBehaviorServer::initializeDecisionBlackboard()
@@ -324,6 +332,9 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   double mode_switch_cooldown_s = 5.0;
   double mode_max_cumulative_s = 180.0;
   int resupply_enter_hp = 250;
+  int rmuc_endgame_time_threshold = 180;
+  std::string rmuc_csv_file = "params/rmuc_waypoints.csv";
+  std::string rmuc_patrol_csv_file = "params/rmuc_patrol_waypoints.csv";
   node()->get_parameter(
     "decision.point_roles.supply_safe_point_index", supply_safe_point_index);
   node()->get_parameter(
@@ -352,6 +363,9 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   node()->get_parameter("decision.mode_limits.max_cumulative_s", mode_max_cumulative_s);
   node()->get_parameter("decision.vision.timeout_s", decision_vision_timeout_s_);
   node()->get_parameter("decision.resource_policy.resupply_enter_hp", resupply_enter_hp);
+  node()->get_parameter("decision.rmuc.csv_waypoints_file", rmuc_csv_file);
+  node()->get_parameter("decision.rmuc.patrol_csv_file", rmuc_patrol_csv_file);
+  node()->get_parameter("decision.rmuc.endgame_time_threshold", rmuc_endgame_time_threshold);
 
   globalBlackboard()->set("node", node());
   globalBlackboard()->set("decision_input_source", decision_input_source_);
@@ -380,6 +394,9 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
   globalBlackboard()->set("decision_vision_timeout_s", decision_vision_timeout_s_);
   globalBlackboard()->set("decision_resupply_enter_hp", resupply_enter_hp);
+  globalBlackboard()->set("decision_rmuc_csv_file", rmuc_csv_file);
+  globalBlackboard()->set("decision_rmuc_patrol_csv_file", rmuc_patrol_csv_file);
+  globalBlackboard()->set("decision_rmuc_endgame_time_threshold", rmuc_endgame_time_threshold);
   // 资源策略节点会在运行时持续覆写该值，这里先给一个明确的初值，方便调试观测。
   globalBlackboard()->set("decision_resource_mode", std::string("unknown"));
   globalBlackboard()->set("decision_patrol_cursor", 0);

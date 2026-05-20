@@ -166,47 +166,47 @@ sensor_scan_generation:
 
 terrain_analysis:
   ros__parameters:
-    scanVoxelSize: 0.02                 # 点云下采样
-    decayTime: 0.5                      # 点云时间差阈值 大于则不会被处理
+    scanVoxelSize: 0.022                # 75deg 下视安装时保留近场细节，同时降低单帧毛刺。
+    decayTime: 0.30                     # 4m/s 下旧点 0.35s 会拖出约 1.4m 影子，继续缩短可减少障碍拖影。
     noDecayDis: 0.0                     # 点云距离阈值 小于该阈值不考虑时间差
     clearingDis: 15.0                    # 该距离外的点会被清除
     useSorting: True                    # 这个参数开起来就能上坡了；如果 use_sorting,那么就以周围点中的分位点作为地面点，否则以最低点作为地面点；周围其余点相对于地面点的高度作为通过代价，所以对于坡面，有的点的代价是正，有的是负，就相互抵消了；不要与 consider_drop 同时开启，计算上会有冲突
-    quantileZ: 0.2                      # useful if use_sorting is enabled.
+    quantileZ: 0.16                     # 下视点云地面占比更高，略取低分位可减少墙脚/斜边抬高地面估计。
     considerDrop: False                 # 考虑凹下去的地面,开启则将相对于地面点的高度取绝对值
     limitGroundLift: False
     maxGroundLift: 0.3
     clearDyObs: True                    # 清除动态物体的话，有动态物体走过的地方就走不了了
-    minDyObsDis: 0.5                    # 以下参数都是在 clear_dy_obs 的情况下才有用的
+    minDyObsDis: 0.45                   # 以下参数都是在 clear_dy_obs 的情况下才有用的
     minDyObsAngle: 0.0
     minDyObsRelZ: -0.3
     absDyObsRelZThre: 0.2
-    minDyObsVFOV: -50.0
-    maxDyObsVFOV: 3.0
-    minDyObsPointNum: 1
+    minDyObsVFOV: -64.0
+    maxDyObsVFOV: 6.0
+    minDyObsPointNum: 3
     noDataObstacle: False               # treat no data as obstacle
     noDataBlockSkipNum: 0
-    minBlockPointNum: 10
-    vehicleHeight: 0.3                  # 小于车辆高度的点才会进行处理
+    minBlockPointNum: 12
+    vehicleHeight: 0.45                 # 小于车辆高度的点才会进行处理
     voxelPointUpdateThre: 100
-    voxelTimeUpdateThre: 1.0
-    minRelZ: -0.75                       # min_rel_z 以及 max_rel_z 限制了有效点云点的Z值范围，用于对天花板和地板进行处理
-    maxRelZ: 0.25
-    disRatioZ: 0.2                      # Z 值的最大最小范围由这两个值决定，但是并不等于这两个值，是有一个比例关系的，距离机器人越远，限定范围就越大，这其中考虑了坡度
+    voxelTimeUpdateThre: 0.45
+    minRelZ: -0.65                      # min_rel_z 以及 max_rel_z 限制了有效点云点的Z值范围，用于对天花板和地板进行处理
+    maxRelZ: 0.32
+    disRatioZ: 0.10                     # 下视安装减少远距离高度窗口膨胀，避免天花板/远处高点混入障碍层。
 
 terrain_analysis_ext:
   ros__parameters:
-    scanVoxelSize: 0.03
-    decayTime: 0.2
+    scanVoxelSize: 0.035
+    decayTime: 0.30
     noDecayDis: 0.0
     clearingDis: 20.0
     useSorting: true
-    quantileZ: 0.2
-    vehicleHeight: 1.0
+    quantileZ: 0.16
+    vehicleHeight: 0.80
     voxelPointUpdateThre: 100
     voxelTimeUpdateThre: 2.0
-    lowerBoundZ: -1.5
-    upperBoundZ: 0.5
-    disRatioZ: 0.2
+    lowerBoundZ: -1.15
+    upperBoundZ: 0.42
+    disRatioZ: 0.10
     checkTerrainConn: False
     terrainUnderVehicle: -0.75
     terrainConnThre: 0.5
@@ -234,11 +234,18 @@ chassis_vel_transform:
     input_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
     output_cmd_vel_topic: "/cmd_vel"
     big_yaw_joint_name: "gimbal_yaw_odom_joint"
-    # 提速放在最终坐标转换节点里做，并叠加限幅/限加速度，避免串口出口硬放大导致过冲摇摆。
-    linear_gain: 1.10
-    angular_gain: 2.0
-    max_linear_speed: 7.2
-    max_linear_accel: 7.0
+    # 出口节点只做坐标转换和保护，不再做激进放大；4m/s 能力交给 MPPI/profile/smoother。
+    linear_gain: 1.0
+    angular_gain: 1.0
+    max_linear_speed: 4.6
+    max_linear_accel: 3.6
+    max_angular_speed: 4.2
+    max_angular_accel: 5.0
+    # 限制大 yaw 反馈进入速度坐标变换的变化率，避免关节角抖动直接变成底盘速度矢量跳变。
+    max_yaw_transform_rate: 3.5
+    # 若现场下位机在“都涵盖/底盘跟随云台”模式里已经做了大 yaw 解耦，
+    # 可临时置 false 验证是否存在双重补偿。
+    transform_linear_with_big_yaw: true
     invert_big_yaw: false
     invert_output_x: false
     invert_output_y: false
@@ -473,13 +480,13 @@ trajectory_optimizer:
     # 单次曲率修正步长。大：更激进；小：更保守。
     curvature_refinement_gain: 0.010
     # profile 的全局速度上限，不是底盘理论极限，而是给 governor 的基础巡航上限。
-    global_speed_limit: 4.5
+    global_speed_limit: 4.2
     # 横向加速度上限。越小弯道越早降速，越大过弯越敢冲。
-    lateral_accel_limit: 3.6
+    lateral_accel_limit: 3.0
     # 纵向加速度上限。决定 profile 自身起步/提速有多快。
-    longitudinal_accel_limit: 4.8
+    longitudinal_accel_limit: 3.8
     # 速度 profile 平滑增益。大：更平滑但更肉；小：更敢提速。
-    velocity_smoothing_gain: 0.12
+    velocity_smoothing_gain: 0.18
     # 数值求导步长。一般与 output_path_spacing 同量级。
     derivative_step: 0.02
     # J_obs 参数：cost 超过 48 就开始推离障碍，权重比之前更强。
@@ -488,11 +495,11 @@ trajectory_optimizer:
     # ESDF 视为“靠近障碍”的安全距离。
     obstacle_safe_distance: 0.30
     # 离障小于该值时，开始额外压低速度上限。
-    obstacle_speed_reduction_distance: 0.35
+    obstacle_speed_reduction_distance: 0.50
     # 离障速度压缩的最小距离。更小表示允许更贴障时仍保留速度。
     obstacle_speed_min_distance: 0.20
     # 离障速度压缩后的最低速度比例。越小越保守。
-    obstacle_speed_min_scale: 0.60
+    obstacle_speed_min_scale: 0.55
     # 障碍代价权重。大：更不愿贴边；小：更保形。
     obstacle_weight: 40.0
     # 障碍 refinement 次数。大：更会把路径往障碍外侧推。
@@ -542,27 +549,35 @@ controller_server:
       # --- Optimizer settings ---
       # Parameter `time_steps`
       # 官方定义：`time_steps * model_dt` = prediction horizon。
-      # 过长会在转角和终点附近“想太远”，过短则提前量不足。
-      time_steps: 30
+      # 4m/s 高速巡航时，30 * 0.05 = 1.5s，前视距离约 6m；
+      # 局部 costmap 需要同步放大，否则控制器会因前方路径/代价信息不足而保守降速。
+      time_steps: 32
       # Parameter `model_dt`
       # 官方建议：一般与控制周期一致，通常不要大于控制周期。
       model_dt: 0.05
       # Parameter `batch_size`
-      # 每周期采样轨迹数。大：更稳更全局；小：更省算力但更容易局部最优。
-      batch_size: 1200
+      # 每周期采样轨迹数。高速下需要更密的样本覆盖，否则最优轨迹容易卡在 2m/s 左右的保守局部最优。
+      batch_size: 1800
       # Parameter `temperature`
       # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
-      # 小：动作更硬更贪心；大：更平滑但也更保守。
-      temperature: 0.16
+      # 小：动作更硬更贪心；大：更平滑但也更保守。高速巡航适当降低，让最优高速样本更有话语权。
+      temperature: 0.20
       # Parameter `gamma`
       # 官方说明：这是控制能量/平滑正则项，通常不需要偏离默认值太多。
       # 大：更抑制控制跳变；小：更愿意做激烈修正。
-      gamma: 0.030
+      gamma: 0.075
       iteration_count: 1
       # Parameter `shift_control_sequence`
       # 使用前一周期最优序列做 warm-start，减少控制输出抖动。
       shift_control_sequence: true
       retry_attempt_limit: 1
+      # MPPI 跟踪路径时保留更长的有效前视段，匹配 4m/s 下 1.5s 的预测距离。
+      prune_distance: 7.5
+      transform_tolerance: 0.20
+      # 避免短暂掉帧/目标重发后立即清空 warm-start 序列，减少走走停停。
+      reset_period: 3.0
+      # 固定噪声序列能减少同一条直线路径上的采样抖动；动态避障仍由实时 costmap 重新打分。
+      regenerate_noises: false
 
       # --- Velocity constraints (reality) ---
       # Parameters `vx_max / vx_min / vy_max / vy_min / wz_max / wz_min`
@@ -570,19 +585,19 @@ controller_server:
       # 官方调参建议里，这组参数通常是最优先检查的对象之一。
       # 如果 rollout 视觉上明显发散，可先检查这里是否设得过激。
       vx_max: 4.2
-      vx_min: -4.2
-      vy_max: 4.2
-      vy_min: -4.2
-      wz_max: 5.0
-      wz_min: -5.0
+      vx_min: -1.6
+      vy_max: 1.8
+      vy_min: -1.8
+      wz_max: 3.0
+      wz_min: -3.0
 
       # --- Sampling standard deviations ---
       # Parameters `vx_std / vy_std / wz_std`
       # std 越大探索越强，但 trajectories 更容易散；
       # std 越小更稳，但也更保守。
-      vx_std: 0.42
-      vy_std: 0.42
-      wz_std: 0.32
+      vx_std: 0.55
+      vy_std: 0.18
+      wz_std: 0.18
 
       # --- Critics ---
       # 调参时建议一次只动少数几个 critic，避免现象混在一起看不清。
@@ -594,6 +609,8 @@ controller_server:
         "GoalAngleCritic",
         "ObstaclesCritic",
         "ConstraintCritic",
+        "PreferForwardCritic",
+        "VelocityDeadbandCritic",
         "TwirlingCritic"
       ]
 
@@ -601,42 +618,41 @@ controller_server:
         enabled: true
         cost_power: 1
         # Parameter `PathAlignCritic.cost_weight`
-        # 路径贴合项。太大时更贴线，但转角修正会变硬。
-        # 角点前后容易来回试探时，先适度降低它，避免“死贴历史路径”。
-        cost_weight: 7.0
+        # 路径贴合项。直线高速下适度提高，抑制全向底盘左右采样同价导致的横摆。
+        cost_weight: 12.0
         # Parameter `PathAlignCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 1.0
+        threshold_to_consider: 1.1
         # Parameter `PathAlignCritic.offset_from_furthest`
-        # 参考前方路径的距离，越大越激进、越爱切弯。
-        # 这里略缩短前视距离，减少拐角处的 shortcut 倾向。
-        offset_from_furthest: 4
+        # 参考前方路径的距离，越大越激进、越爱切弯。保持中等前视，兼顾高速和不过度抄近道。
+        offset_from_furthest: 5
         trajectory_point_step: 4
-        max_path_occupancy_ratio: 0.05
+        max_path_occupancy_ratio: 0.06
         use_path_orientations: false
       PathFollowCritic:
         enabled: true
         cost_power: 1
         # Parameter `PathFollowCritic.cost_weight`
         # 鼓励沿路径整体向前推进。
-        cost_weight: 8.0
+        cost_weight: 13.0
         # Parameter `PathFollowCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 1.6
-        offset_from_furthest: 5
+        # 过大的近终点关闭距离会让 4m 短直线很早失去“向前推”的代价项，导致速度上不去。
+        threshold_to_consider: 1.4
+        offset_from_furthest: 7
       PathAngleCritic:
         enabled: true
         cost_power: 1
         # Parameter `PathAngleCritic.cost_weight`
         # 用来抑制轨迹方向与路径方向严重不一致，反向试探明显时优先看它。
-        cost_weight: 3.0
+        cost_weight: 7.5
         # Parameter `PathAngleCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 0.7
-        offset_from_furthest: 4
+        threshold_to_consider: 1.0
+        offset_from_furthest: 5
         # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 越小越严格，太小会让过弯很僵。
-        max_angle_to_furthest: 1.05
+        max_angle_to_furthest: 0.75
         # fake gimbal yaw 需要稳定的前向参考，避免巡航时路径朝向被反向采样打散。
         forward_preference: true
       GoalCritic:
@@ -647,7 +663,8 @@ controller_server:
         cost_weight: 7.0
         # Parameter `GoalCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 1.8
+        # 终点制动只在较近范围内介入，避免中段被目标收敛项提前压速。
+        threshold_to_consider: 1.0
       GoalAngleCritic:
         enabled: true
         cost_power: 1
@@ -656,7 +673,7 @@ controller_server:
         cost_weight: 3.0
         # Parameter `GoalAngleCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 0.5
+        threshold_to_consider: 0.35
         symmetric_yaw_tolerance: true
       ObstaclesCritic:
         enabled: true
@@ -666,14 +683,14 @@ controller_server:
         # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
         # 数值越大越早避障，但也更容易被障碍代价场推离路径。
         # 当前下调，先避免控制器在可走窄通道里因为过度保守而只做厘米级试探。
-        repulsion_weight: 1.4
+        repulsion_weight: 1.5
         # Parameter `ObstaclesCritic.critical_weight`
-        critical_weight: 60.0
+        critical_weight: 70.0
         # Parameter `ObstaclesCritic.collision_margin_distance`
-        collision_margin_distance: 0.08
+        collision_margin_distance: 0.12
         # Parameter `ObstaclesCritic.near_goal_distance`
         # 终点附近适度放松障碍回避敏感度，方便最终贴点。
-        near_goal_distance: 0.35
+        near_goal_distance: 0.25
         # Parameter `ObstaclesCritic.inflation_radius`
         # 官方文档明确要求：这里应与 costmap inflation layer 保持一致。
         inflation_radius: 0.50
@@ -683,27 +700,33 @@ controller_server:
         cost_power: 1
         # Parameter `ConstraintCritic.cost_weight`
         # 违反运动约束时的惩罚，通常维持中等权重即可。
-        cost_weight: 4.0
+        cost_weight: 8.0
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        # 抑制倒车/侧向慢速试探，把直线段的采样质量集中到前向高速解。
+        cost_weight: 6.0
+        threshold_to_consider: 0.8
       TwirlingCritic:
         enabled: true
         cost_power: 1
         # Parameter `TwirlingCritic.cost_weight`
         # 抑制原地打圈。
-        cost_weight: 10.0
+        cost_weight: 20.0
       VelocityDeadbandCritic:
-        enabled: false
+        enabled: true
         cost_power: 1
         # Parameter `VelocityDeadbandCritic.cost_weight`
         # 抑制死区附近的小速度抖动，终点前抽动明显时很关键。
-        cost_weight: 35.0
+        cost_weight: 70.0
         # Parameter `VelocityDeadbandCritic.deadband_velocities`
-        deadband_velocities: [0.05, 0.05, 0.05]
+        deadband_velocities: [0.08, 0.08, 0.10]
 
       # --- Visualization ---
       # Parameter `visualize`
       # 建议实车联调时保持开启，方便在 RViz 中观察 rollout 形状。
       # 官方文档同时提醒：部署时保持 true 会增加算力开销，应谨慎使用。
-      visualize: true
+      visualize: false
       TrajectoryVisualizer:
         trajectory_step: 5
         time_step: 3
@@ -717,8 +740,10 @@ local_costmap:
       global_frame: odom
       robot_base_frame: gimbal_yaw_fake
       rolling_window: true
-      width: 5
-      height: 5
+      # 4m/s * 1.5s MPPI horizon ~= 6m，rolling window 至少要覆盖这个前视距离；
+      # 12m 窗口让高速直线段不再因为局部路径/代价图太短而主动降到 2m/s。
+      width: 12
+      height: 12
       resolution: 0.05
       footprint: "[[0.20, 0.20], [0.20, -0.20], [-0.20, -0.20], [-0.20, 0.20]]"
       footprint_padding: 0.02
@@ -733,12 +758,12 @@ local_costmap:
         mark_threshold: 0
         origin_z: 0.0
         unknown_threshold: 5
-        self_filter_radius: 0.42
+        self_filter_radius: 0.50
         z_resolution: 0.05
         z_voxels: 16
         min_obstacle_height: 0.0
         max_obstacle_height: 2.0
-        min_obstacle_intensity: 0.1
+        min_obstacle_intensity: 0.08
         max_obstacle_intensity: 2.0
         observation_sources: terrain_map
         terrain_map:
@@ -749,8 +774,8 @@ local_costmap:
           sensor_frame: front_mid360
           min_obstacle_height: 0.0
           max_obstacle_height: 2.0
-          obstacle_max_range: 5.0
-          obstacle_min_range: 0.35
+          obstacle_max_range: 7.0
+          obstacle_min_range: 0.50
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -784,12 +809,12 @@ global_costmap:
         mark_threshold: 0
         origin_z: 0.0
         unknown_threshold: 5
-        self_filter_radius: 0.42
+        self_filter_radius: 0.50
         z_resolution: 0.05
         z_voxels: 16
         min_obstacle_height: 0.0
         max_obstacle_height: 2.0
-        min_obstacle_intensity: 0.1
+        min_obstacle_intensity: 0.08
         max_obstacle_intensity: 2.0
         observation_sources: terrain_map_ext
         terrain_map_ext:
@@ -801,7 +826,7 @@ global_costmap:
           min_obstacle_height: 0.0
           max_obstacle_height: 2.0
           obstacle_max_range: 10.0
-          obstacle_min_range: 0.35
+          obstacle_min_range: 0.50
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -833,7 +858,7 @@ planner_server:
     expected_planner_frequency: 10.0
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      plugin: "nav2_smac_planner/SmacPlanner2D"
       tolerance: 0.3                      # 如果无法到达精确位置的规划容差，单位：米
       allow_unknown: true                 # 允许在未知空间中行驶
       downsample_costmap: false           # 是否对地图进行下采样
@@ -841,22 +866,23 @@ planner_server:
       max_iterations: 1000000             # 搜索的最大总迭代次数（如果无法到达），设置为-1以禁用
       max_on_approach_iterations: 1000    # 一旦在容差范围内，尝试到达目标的最大迭代次数
       max_planning_time: 3.5              # 规划、平滑和上采样的最大时间（秒）。将根据规划后的剩余时间缩放最大平滑和上采样时间。
-      cost_travel_multiplier: 2.2         # For 2D: 官方说明数值越大越会贴近通道中心，代价是搜索稍慢。保持旧实车基线，避免为远离代价区过度绕路。
-      motion_model_for_search: "DUBIN"    # For Hybrid Dubin, Redds-Shepp
-      angle_quantization_bins: 64         # For Hybrid nodes: 搜索的角度桶数，对于2D节点必须为1（无角度搜索）
+      cost_travel_multiplier: 1.25        # For 2D: 数值越大越贴通道中心，也越可能为了躲膨胀层绕远。全向底盘适当降低，减少不必要远路。
+      motion_model_for_search: "2D"       # 全向底盘用 2D 网格搜索；曲线由 smoother / MPPI 负责，不让全局 planner 像 Dubins 小车一样绕弯。
+      angle_quantization_bins: 1          # SmacPlanner2D 必须为 1；角度/曲线交给 smoother 与 MPPI 处理。
       analytic_expansion_ratio: 3.5       # For Hybrid/Lattice nodes: 在搜索过程中尝试解析扩展的比例，用于最终接近。
       analytic_expansion_max_length: 3.6  # For Hybrid/Lattice nodes: 解析扩展被认为有效的最大长度，以防止不安全的捷径（单位：米）。这应该与最小转弯半径成比例，不应小于最小半径的4-5倍。
       minimum_turning_radius: 0.07        # For Hybrid/Lattice nodes: 全向底盘不应被建模成 0.6m 大转弯半径车辆，否则会明显绕远。
-      retrospective_penalty: 0.07        # For Hybrid/Lattice nodes: 优先考虑路径上较晚的机动而不是较早的机动。节省搜索时间，因为较早的节点不会被扩展，直到有必要。必须 >= 0.0且 <= 1.0
+      retrospective_penalty: 0.02        # Hybrid/Lattice 参数；若回退 Hybrid，降低过度延迟扩展导致的绕远。
       reverse_penalty: 1.0                # For Reeds-Shepp model: 应用于倒车的惩罚，必须 >= 1
       change_penalty: 0.0                 # For Hybrid nodes: 应用于改变方向的惩罚，必须 >= 0
-      non_straight_penalty: 1.20          # For Hybrid nodes: 应用于非直线运动的惩罚，必须 >= 1
-      cost_penalty: 2.3                   # For Hybrid nodes: 保持旧实车基线，降低因高代价惩罚导致的绕远。
+      non_straight_penalty: 1.08          # Hybrid 参数；若回退 Hybrid，减轻曲线段绕远。
+      cost_penalty: 1.7                   # Hybrid 参数；若回退 Hybrid，减轻高代价过度绕行。
       rotation_penalty: 5.0               # For Lattice node: 仅在使用包含原地旋转原语的最小控制集时应用于纯原地旋转命令的惩罚。除非严格必要用于避开障碍物，否则应始终设置足够高的权重，以避免此操作，否则可能会在路径中频繁出现不连续的情况，要求机器人原地旋转以节省路径距离。
       lookup_table_size: 20.0             # For Hybrid nodes: 缓存的dubin/reeds-sheep距离窗口的大小，单位：米。
       cache_obstacle_heuristic: True      # For Hybrid nodes: 在同一目标位置的后续重新规划之间缓存障碍物地图动态规划距离扩展启发式。如果代价地图基本静态，则显著加快重新规划性能（40倍）。
       allow_reverse_expansion: False      # For Lattice node: 是否在前向原语或反向扩展状态格子图中扩展，将使每一步的分支因子加倍。
-      smooth_path: True                   # For Lattice/Hybrid nodes: 使用旧实车基线的 Smac 内置平滑，再由 B 样条做受限二次平滑和速度剖面。
+      use_final_approach_orientation: false
+      smooth_path: True                   # 2D 路径先做轻量平滑，再由 B 样条做受限二次平滑和速度剖面。
       smoother:
         max_iterations: 1000
         w_smooth: 0.3
@@ -872,19 +898,19 @@ smoother_server:
       plugin: "trajectory_optimizer/Nav2BSplineSmoother"
       # 与 trajectory_optimizer 保持同一组参数；BT 主链真正跟踪的是这里输出的路径。
       # 真正影响控制链的是这里，不是上面的旁路 visualization optimizer。
-      control_point_spacing: 0.24
+      control_point_spacing: 0.32
       output_path_spacing: 0.05
       min_input_point_spacing: 0.02
-      max_lateral_deviation: 0.16
+      max_lateral_deviation: 0.10
       min_control_points: 5
       curvature_limit: 1.90
       curvature_weight: 10.0
-      curvature_refinement_iterations: 2
-      curvature_refinement_gain: 0.010
-      global_speed_limit: 4.5
-      lateral_accel_limit: 3.6
-      longitudinal_accel_limit: 4.8
-      velocity_smoothing_gain: 0.12
+      curvature_refinement_iterations: 1
+      curvature_refinement_gain: 0.006
+      global_speed_limit: 4.2
+      lateral_accel_limit: 3.0
+      longitudinal_accel_limit: 3.8
+      velocity_smoothing_gain: 0.16
       derivative_step: 0.02
       profile_topic: "trajectory_profile"
       # cost 超过 96 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
@@ -895,12 +921,12 @@ smoother_server:
       # reduction_distance：开始限速的距离
       # min_distance：压到最低比例时对应的距离
       # min_scale：最低还保留多少速度比例
-      obstacle_speed_reduction_distance: 0.45
+      obstacle_speed_reduction_distance: 0.55
       obstacle_speed_min_distance: 0.20
-      obstacle_speed_min_scale: 0.60
-      obstacle_weight: 16.0
-      obstacle_refinement_iterations: 3
-      obstacle_refinement_gain: 0.02
+      obstacle_speed_min_scale: 0.55
+      obstacle_weight: 12.0
+      obstacle_refinement_iterations: 1
+      obstacle_refinement_gain: 0.008
       max_path_cost: 120
       footprint_collision_cost_threshold: 253
       pullback_samples: 8
@@ -1025,19 +1051,19 @@ trajectory_speed_governor:
     # 保持 governor 在链路中生效：用 B 样条 profile 做高速巡航的动态限速，而不是旁路透传。
     enabled: true
     # governor 最低保留速度比例。大：弯道也更敢跑；小：弯前更稳。
-    min_speed_scale: 0.90
+    min_speed_scale: 0.75
     # 曲率制动增益。大：更早更重地减速；小：更接近透传。
-    curvature_brake_gain: 0.06
+    curvature_brake_gain: 0.10
     # 向前看的曲率窗口点数。小：更看近端；大：更看整体趋势。
-    curvature_window_points: 8
+    curvature_window_points: 10
     # 峰值曲率权重。大：更怕单个尖弯；小：更看平均曲率。
-    curvature_peak_weight: 0.20
+    curvature_peak_weight: 0.30
     # 目标速度比例低通增益。大：更跟手；小：更稳。
-    speed_scale_filter_gain: 0.14
+    speed_scale_filter_gain: 0.12
     # 速度比例上升斜率。大：恢复更快；小：更柔和。
-    speed_scale_rise_rate: 6.0
+    speed_scale_rise_rate: 3.0
     # 速度比例下降斜率。大：刹得更快；小：更平顺。
-    speed_scale_fall_rate: 2.2
+    speed_scale_fall_rate: 3.0
 
 velocity_smoother:
   ros__parameters:
@@ -1048,15 +1074,15 @@ velocity_smoother:
     feedback: "OPEN_LOOP"
     # 最终发给底盘前的速度边界。
     # 这里如果比 MPPI 采样边界还小，前面调再大也会在这里被截断。
-    max_velocity: [4.8, 4.8, 5.0]
-    min_velocity: [-4.2, -4.2, -5.0]
+    max_velocity: [4.4, 4.4, 4.0]
+    min_velocity: [-2.0, -2.0, -4.0]
     # 最终输出加速度上限。想让底盘更快冲起来，优先看这组。
-    max_accel: [8.0, 8.0, 7.0]
+    max_accel: [4.2, 4.2, 4.0]
     # 最终输出减速度上限。通常略大于 max_accel，便于更干净地收尾。
-    max_decel: [-9.0, -9.0, -7.5]
+    max_decel: [-4.8, -4.8, -4.5]
     odom_topic: "odometry"
     odom_duration: 0.1
-    deadband_velocity: [0.0, 0.0, 0.0]
+    deadband_velocity: [0.01, 0.01, 0.02]
     velocity_timeout: 1.0
 
 pb_teleop_twist_joy_node:

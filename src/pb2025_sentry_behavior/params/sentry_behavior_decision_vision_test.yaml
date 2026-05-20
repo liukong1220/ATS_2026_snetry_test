@@ -18,13 +18,13 @@ pb2025_sentry_behavior_server:
       input_source: simulation
 
       goal_points:
-        x: [0.20, 2.8, 0.00, 1.51, 0.0]
-        y: [-0.18, 2.0, 0.00, -2.19, 0.0]
+        x: [0.20, 8.0, 0.00, 1.51, 0.0]
+        y: [-0.18, 0.0, 0.00, -2.19, 0.0]
         z: [0.00, 0.00, 0.00, 0.00, 0.00]
 
       point_roles:
         supply_safe_point_index: 0
-        patrol_indices: [1,2]
+        patrol_indices: [1]
         low_hp_candidate_indices: [1, 2]
         critical_time_target_index: 1
         anchor_target_index: 2
@@ -46,8 +46,8 @@ pb2025_sentry_behavior_server:
         robot_mode: decision/robot_mode
 
       motion:
-        default_spin_speed: 5.0
-        hit_spin_speed: 5.0
+        default_spin_speed: 3.0
+        hit_spin_speed: 0.0
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
       mode_limits:
@@ -128,9 +128,9 @@ pb2025_sentry_behavior_server:
         nav2_to_pose_action_server: "/navigate_to_pose"
         decision_period_ms: 100
         goal_position_tolerance: 0.2
-        path_goal_reached_tolerance: 0.25
+        path_goal_reached_tolerance: 0.2
         active_goal_hold_tolerance: 0.45
-        active_goal_min_resend_interval_s: 0.8
+        active_goal_min_resend_interval_s: 1.5
         vision_active_goal_hold_tolerance: 0.24
         vision_active_goal_min_resend_interval_s: 0.40
         waypoint_stop_duration_s: 0.0

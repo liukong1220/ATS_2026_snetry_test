@@ -58,9 +58,19 @@ ament_auto_add_library(is_robot_hp_below SHARED plugins/condition/is_robot_hp_be
 list(APPEND plugin_libs is_robot_hp_below)
 
 ament_auto_add_library(
+  is_robot_resupply_required SHARED
+  plugins/condition/is_robot_resupply_required.cpp)
+list(APPEND plugin_libs is_robot_resupply_required)
+
+ament_auto_add_library(
   is_robot_resource_mode SHARED
   plugins/condition/is_robot_resource_mode.cpp)
 list(APPEND plugin_libs is_robot_resource_mode)
+
+ament_auto_add_library(
+  is_friendly_outpost_destroyed SHARED
+  plugins/condition/is_friendly_outpost_destroyed.cpp)
+list(APPEND plugin_libs is_friendly_outpost_destroyed)
 
 ament_auto_add_library(is_path_goal_reached SHARED plugins/condition/is_path_goal_reached.cpp)
 list(APPEND plugin_libs is_path_goal_reached)
@@ -108,6 +118,12 @@ list(APPEND plugin_libs select_nearest_retreat_path)
 
 ament_auto_add_library(select_fixed_path SHARED plugins/action/select_fixed_path.cpp)
 list(APPEND plugin_libs select_fixed_path)
+
+ament_auto_add_library(load_csv_waypoints SHARED plugins/action/load_csv_waypoints.cpp)
+list(APPEND plugin_libs load_csv_waypoints)
+
+ament_auto_add_library(select_supply_point SHARED plugins/action/select_supply_point.cpp)
+list(APPEND plugin_libs select_supply_point)
 
 ament_auto_add_library(
   select_vision_follow_path SHARED

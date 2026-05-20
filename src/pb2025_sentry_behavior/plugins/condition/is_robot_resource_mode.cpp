@@ -149,9 +149,9 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
   // 3. engage  : 血量/弹量都在健康区间，允许巡航和视觉接管。
   switch (runtime_state.latched_mode) {
     case ResourceMode::kDefend:
-      if (current_hp <= defend_exit_hp) {
+      if (current_hp < defend_exit_hp) {
         resolved_mode = ResourceMode::kDefend;
-      } else if (current_hp <= resupply_exit_hp || current_ammo <= resupply_exit_ammo) {
+      } else if (current_hp < resupply_exit_hp || current_ammo < resupply_exit_ammo) {
         resolved_mode = ResourceMode::kResupply;
       } else {
         resolved_mode = ResourceMode::kEngage;
@@ -161,7 +161,7 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
     case ResourceMode::kResupply:
       if (current_hp <= defend_enter_hp_) {
         resolved_mode = ResourceMode::kDefend;
-      } else if (current_hp <= resupply_exit_hp || current_ammo <= resupply_exit_ammo) {
+      } else if (current_hp < resupply_exit_hp || current_ammo < resupply_exit_ammo) {
         resolved_mode = ResourceMode::kResupply;
       } else {
         resolved_mode = ResourceMode::kEngage;
