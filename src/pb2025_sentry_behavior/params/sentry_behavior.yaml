@@ -127,7 +127,7 @@ pb2025_sentry_behavior_server:
         # 统一资源决策状态机：
         # engage   = 健康巡航，可允许视觉接管
         # resupply = 血量或弹量不足，退出追击并回补给安全点
-        # defend   = 血量过低，直接进入退防保命
+        # defend   = 血量低于阈值，进入防御模式增强防御
         #
         # 官方比赛中血量和弹量都会有离散跳变，因此必须用 enter/exit 做迟滞。
         # 调参原则：
@@ -138,7 +138,7 @@ pb2025_sentry_behavior_server:
         defend_enter_hp: 250
         defend_exit_hp: 300
         resupply_enter_hp: 150
-        resupply_exit_hp: 400
+        resupply_exit_hp: 300
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100
 

@@ -157,7 +157,8 @@
     <ReactiveSequence>
       <ReactiveFallback>
         <Sequence>
-          <IsRobotResupplyRequired robot_status="{@referee_robotStatus}"/>
+          <IsRobotResourceMode state="resupply"
+                               robot_status="{@referee_robotStatus}"/>
           <SubTree ID="rmuc_patrol_only_decision_supply"/>
         </Sequence>
 
