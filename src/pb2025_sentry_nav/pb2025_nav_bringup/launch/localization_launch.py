@@ -25,6 +25,7 @@ def generate_launch_description():
     container_name = LaunchConfiguration("container_name")
     container_name_full = (namespace, "/", container_name)
     use_respawn = LaunchConfiguration("use_respawn")
+    launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
     log_level = LaunchConfiguration("log_level")
 
     lifecycle_nodes = ["map_server"]
@@ -98,6 +99,12 @@ def generate_launch_description():
         description="Whether to respawn if a node crashes. Applied when composition is disabled.",
     )
 
+    declare_launch_small_gicp_relocalization_cmd = DeclareLaunchArgument(
+        "launch_small_gicp_relocalization",
+        default_value="True",
+        description="Whether to start small_gicp map->odom relocalization",
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -133,6 +140,7 @@ def generate_launch_description():
                 package="small_gicp_relocalization",
                 executable="small_gicp_relocalization_node",
                 name="small_gicp_relocalization",
+                condition=IfCondition(launch_small_gicp_relocalization),
                 output="screen",
                 respawn=use_respawn,
                 respawn_delay=2.0,
@@ -154,6 +162,32 @@ def generate_launch_description():
         ],
     )
 
+    static_tf_map_to_odom_cmd = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="static_transform_publisher_map_to_odom",
+        condition=IfCondition(PythonExpression(["not ", launch_small_gicp_relocalization])),
+        output="screen",
+        arguments=[
+            "--x",
+            "0.0",
+            "--y",
+            "0.0",
+            "--z",
+            "0.0",
+            "--roll",
+            "0.0",
+            "--pitch",
+            "0.0",
+            "--yaw",
+            "0.0",
+            "--frame-id",
+            "map",
+            "--child-frame-id",
+            "odom",
+        ],
+    )
+
     load_composable_nodes = LoadComposableNodes(
         condition=IfCondition(use_composition),
         target_container=container_name_full,
@@ -163,12 +197,6 @@ def generate_launch_description():
                 plugin="nav2_map_server::MapServer",
                 name="map_server",
                 parameters=[configured_params],
-            ),
-            ComposableNode(
-                package="small_gicp_relocalization",
-                plugin="small_gicp_relocalization::SmallGicpRelocalizationNode",
-                name="small_gicp_relocalization",
-                parameters=[configured_params, {"prior_pcd_file": prior_pcd_file}],
             ),
             ComposableNode(
                 package="nav2_lifecycle_manager",
@@ -181,6 +209,21 @@ def generate_launch_description():
                         "node_names": lifecycle_nodes,
                     }
                 ],
+            ),
+        ],
+    )
+
+    load_small_gicp_node = LoadComposableNodes(
+        condition=IfCondition(
+            PythonExpression([use_composition, " and ", launch_small_gicp_relocalization])
+        ),
+        target_container=container_name_full,
+        composable_node_descriptions=[
+            ComposableNode(
+                package="small_gicp_relocalization",
+                plugin="small_gicp_relocalization::SmallGicpRelocalizationNode",
+                name="small_gicp_relocalization",
+                parameters=[configured_params, {"prior_pcd_file": prior_pcd_file}],
             ),
         ],
     )
@@ -202,11 +245,14 @@ def generate_launch_description():
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_container_name_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_launch_small_gicp_relocalization_cmd)
     ld.add_action(declare_log_level_cmd)
 
     # Add the actions to launch all of the localiztion nodes
     ld.add_action(start_point_lio_node)
+    ld.add_action(static_tf_map_to_odom_cmd)
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
+    ld.add_action(load_small_gicp_node)
 
     return ld

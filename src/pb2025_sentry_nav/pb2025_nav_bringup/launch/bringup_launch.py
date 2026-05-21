@@ -35,6 +35,8 @@ def generate_launch_description():
     autostart = LaunchConfiguration("autostart")
     use_composition = LaunchConfiguration("use_composition")
     use_respawn = LaunchConfiguration("use_respawn")
+    launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
+    launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
     log_level = LaunchConfiguration("log_level")
 
     # Create our own temporary YAML files that include substitutions
@@ -118,6 +120,18 @@ def generate_launch_description():
         description="Whether to respawn if a node crashes. Applied when composition is disabled.",
     )
 
+    declare_launch_trajectory_optimizer_cmd = DeclareLaunchArgument(
+        "launch_trajectory_optimizer",
+        default_value="False",
+        description="Whether to start non-critical trajectory visualization optimizer node",
+    )
+
+    declare_launch_small_gicp_relocalization_cmd = DeclareLaunchArgument(
+        "launch_small_gicp_relocalization",
+        default_value="True",
+        description="Whether to start small_gicp map->odom relocalization",
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -165,6 +179,8 @@ def generate_launch_description():
                     "use_composition": use_composition,
                     "use_respawn": use_respawn,
                     "container_name": "nav2_container",
+                    "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+                    "log_level": log_level,
                 }.items(),
             ),
             IncludeLaunchDescription(
@@ -179,6 +195,8 @@ def generate_launch_description():
                     "use_composition": use_composition,
                     "use_respawn": use_respawn,
                     "container_name": "nav2_container",
+                    "launch_trajectory_optimizer": launch_trajectory_optimizer,
+                    "log_level": log_level,
                 }.items(),
             ),
         ]
@@ -201,6 +219,8 @@ def generate_launch_description():
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_launch_trajectory_optimizer_cmd)
+    ld.add_action(declare_launch_small_gicp_relocalization_cmd)
     ld.add_action(declare_log_level_cmd)
 
     # Add the actions to launch all of the navigation nodes

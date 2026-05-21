@@ -34,6 +34,9 @@ def generate_launch_description():
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
     launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
+    launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
+    launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
+    log_level = LaunchConfiguration("log_level")
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -134,6 +137,22 @@ def generate_launch_description():
         description="Whether to start joystick teleop nodes",
     )
 
+    declare_launch_trajectory_optimizer_cmd = DeclareLaunchArgument(
+        "launch_trajectory_optimizer",
+        default_value="False",
+        description="Whether to start non-critical trajectory visualization optimizer node",
+    )
+
+    declare_launch_small_gicp_relocalization_cmd = DeclareLaunchArgument(
+        "launch_small_gicp_relocalization",
+        default_value="True",
+        description="Whether to start small_gicp map->odom relocalization",
+    )
+
+    declare_log_level_cmd = DeclareLaunchArgument(
+        "log_level", default_value="info", description="log level"
+    )
+
     # Create our own temporary YAML files that include substitutions
 
     configured_params = ParameterFile(
@@ -190,6 +209,9 @@ def generate_launch_description():
             "autostart": autostart,
             "use_composition": use_composition,
             "use_respawn": use_respawn,
+            "launch_trajectory_optimizer": launch_trajectory_optimizer,
+            "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+            "log_level": log_level,
         }.items(),
     )
 
@@ -220,7 +242,10 @@ def generate_launch_description():
     ld.add_action(declare_use_robot_state_pub_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_launch_joy_teleop_cmd)
+    ld.add_action(declare_launch_trajectory_optimizer_cmd)
+    ld.add_action(declare_launch_small_gicp_relocalization_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_log_level_cmd)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_robot_state_publisher_cmd)

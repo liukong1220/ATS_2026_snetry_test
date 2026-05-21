@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Sentry Competition Watchdog
+Name[zh_CN]=哨兵比赛看门狗
+Comment=Start Nav2 and vision watchdog in a visible terminal
+Comment[zh_CN]=在可见终端中启动 Nav2 和视觉看门狗
+Exec=/home/ats/ATS_2026_snetry_test/competition_watchdog_terminal.sh
+Path=/home/ats/ATS_2026_snetry_test
+Terminal=false
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true

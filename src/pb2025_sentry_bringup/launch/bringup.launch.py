@@ -42,6 +42,9 @@ def generate_launch_description():
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
     launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
+    launch_rosbag_recorder = LaunchConfiguration("launch_rosbag_recorder")
+    launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
+    launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
     use_composition = LaunchConfiguration("use_composition")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
@@ -145,13 +148,31 @@ def generate_launch_description():
     )
 
     declare_use_rviz_cmd = DeclareLaunchArgument(
-        "use_rviz", default_value="False", description="Whether to start RViz"
+        "use_rviz", default_value="True", description="Whether to start RViz"
     )
 
     declare_launch_joy_teleop_cmd = DeclareLaunchArgument(
         "launch_joy_teleop",
         default_value="False",
         description="Whether to start joystick teleop nodes that can publish to cmd_vel",
+    )
+
+    declare_launch_rosbag_recorder_cmd = DeclareLaunchArgument(
+        "launch_rosbag_recorder",
+        default_value="False",
+        description="Whether to start lightweight rosbag recorder node",
+    )
+
+    declare_launch_trajectory_optimizer_cmd = DeclareLaunchArgument(
+        "launch_trajectory_optimizer",
+        default_value="False",
+        description="Whether to start non-critical trajectory visualization optimizer node",
+    )
+
+    declare_launch_small_gicp_relocalization_cmd = DeclareLaunchArgument(
+        "launch_small_gicp_relocalization",
+        default_value="False",
+        description="Whether to start small_gicp map->odom relocalization",
     )
 
     declare_use_composition_cmd = DeclareLaunchArgument(
@@ -226,8 +247,11 @@ def generate_launch_description():
             "use_robot_state_pub": use_robot_state_pub,
             "use_rviz": "False",
             "launch_joy_teleop": launch_joy_teleop,
+            "launch_trajectory_optimizer": launch_trajectory_optimizer,
+            "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
             "use_composition": use_composition,
             "use_respawn": use_respawn,
+            "log_level": log_level,
         }.items(),
     )
 
@@ -260,6 +284,7 @@ def generate_launch_description():
         package="rosbag2_composable_recorder",
         executable="composable_recorder_node",
         name="rosbag_recorder",
+        condition=IfCondition(launch_rosbag_recorder),
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
@@ -289,6 +314,9 @@ def generate_launch_description():
     ld.add_action(declare_use_robot_state_pub_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_launch_joy_teleop_cmd)
+    ld.add_action(declare_launch_rosbag_recorder_cmd)
+    ld.add_action(declare_launch_trajectory_optimizer_cmd)
+    ld.add_action(declare_launch_small_gicp_relocalization_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)

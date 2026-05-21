@@ -49,9 +49,9 @@ pb2025_sentry_behavior_server:
       motion:
         default_spin_speed: 0.0
         # 检测到新的掉血后的自旋角速度。
-        hit_spin_speed: 5.0
+        hit_spin_speed: 10.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
-        hit_spin_stop_after_no_hp_drop_s: 2.0
+        hit_spin_stop_after_no_hp_drop_s: 5.0
 
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
@@ -204,8 +204,8 @@ pb2025_sentry_behavior_server:
         patrol_csv_file: "params/rmuc_patrol_waypoints.csv"
         endgame_time_threshold: 180
         supply_point:
-          x: -4.30
-          y: 2.00
+          x: -5.77
+          y: 0.60
           z: 0.0
 
 pb2025_sentry_behavior_client:

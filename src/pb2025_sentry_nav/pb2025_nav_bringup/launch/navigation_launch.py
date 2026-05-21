@@ -23,6 +23,7 @@ def generate_launch_description():
     container_name = LaunchConfiguration("container_name")
     container_name_full = (namespace, "/", container_name)
     use_respawn = LaunchConfiguration("use_respawn")
+    launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
     log_level = LaunchConfiguration("log_level")
 
     lifecycle_nodes = [
@@ -96,6 +97,12 @@ def generate_launch_description():
         description="Whether to respawn if a node crashes. Applied when composition is disabled.",
     )
 
+    declare_launch_trajectory_optimizer_cmd = DeclareLaunchArgument(
+        "launch_trajectory_optimizer",
+        default_value="False",
+        description="Whether to start non-critical trajectory visualization optimizer node",
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -159,6 +166,7 @@ def generate_launch_description():
                 package="trajectory_optimizer",
                 executable="trajectory_optimizer_node",
                 name="trajectory_optimizer",
+                condition=IfCondition(launch_trajectory_optimizer),
                 output="screen",
                 respawn=use_respawn,
                 respawn_delay=2.0,
@@ -292,12 +300,6 @@ def generate_launch_description():
             ),
             ComposableNode(
                 package="trajectory_optimizer",
-                plugin="trajectory_optimizer::TrajectoryOptimizerNode",
-                name="trajectory_optimizer",
-                parameters=[configured_params],
-            ),
-            ComposableNode(
-                package="trajectory_optimizer",
                 plugin="trajectory_optimizer::TrajectorySpeedGovernor",
                 name="trajectory_speed_governor",
                 parameters=[configured_params],
@@ -367,6 +369,21 @@ def generate_launch_description():
         ],
     )
 
+    load_trajectory_optimizer_node = LoadComposableNodes(
+        condition=IfCondition(
+            PythonExpression([use_composition, " and ", launch_trajectory_optimizer])
+        ),
+        target_container=container_name_full,
+        composable_node_descriptions=[
+            ComposableNode(
+                package="trajectory_optimizer",
+                plugin="trajectory_optimizer::TrajectoryOptimizerNode",
+                name="trajectory_optimizer",
+                parameters=[configured_params],
+            ),
+        ],
+    )
+
     # Create the launch description and populate
     ld = LaunchDescription()
 
@@ -382,11 +399,13 @@ def generate_launch_description():
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_container_name_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_launch_trajectory_optimizer_cmd)
     ld.add_action(declare_log_level_cmd)
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_terrain_analysis_cmd)
     ld.add_action(start_terrain_analysis_ext_cmd)
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
+    ld.add_action(load_trajectory_optimizer_node)
 
     return ld
