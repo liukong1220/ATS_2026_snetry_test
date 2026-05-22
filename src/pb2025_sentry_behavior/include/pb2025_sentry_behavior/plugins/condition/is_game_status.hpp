@@ -32,7 +32,10 @@ private:
    */
   BT::NodeStatus checkGameStart();
 
+  rclcpp::Node::SharedPtr node_;
   rclcpp::Logger logger_ = rclcpp::get_logger("IsGameStatusCondition");
+  bool has_last_result_ = false;
+  bool last_result_ = false;
 };
 }  // namespace pb2025_sentry_behavior
 

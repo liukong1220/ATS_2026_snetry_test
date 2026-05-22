@@ -58,6 +58,26 @@ bool isSupportedSimulationMode(const std::string & mode)
   return mode == "patrol" || mode == "anchor" || mode == "retreat" || mode == "safe";
 }
 
+const char * gameProgressName(const uint8_t progress)
+{
+  switch (progress) {
+    case pb_rm_interfaces::msg::GameStatus::NOT_START:
+      return "NOT_START";
+    case pb_rm_interfaces::msg::GameStatus::PREPARATION:
+      return "PREPARATION";
+    case pb_rm_interfaces::msg::GameStatus::SELF_CHECKING:
+      return "SELF_CHECKING";
+    case pb_rm_interfaces::msg::GameStatus::COUNT_DOWN:
+      return "COUNT_DOWN";
+    case pb_rm_interfaces::msg::GameStatus::RUNNING:
+      return "RUNNING";
+    case pb_rm_interfaces::msg::GameStatus::GAME_OVER:
+      return "GAME_OVER";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 std::string sanitizeSimulationMode(
   const std::string & raw_mode, const std::string & fallback, const rclcpp::Logger & logger,
   const std::string & context)
@@ -201,6 +221,7 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.motion.default_spin_speed", 0.0);
   declare_parameter("decision.motion.hit_spin_speed", 7.0);
   declare_parameter("decision.motion.hit_spin_stop_after_no_hp_drop_s", 2.0);
+  declare_parameter("decision.motion.hit_minimum_spin_duration_s", 1.2);
   declare_parameter("decision.mode_limits.switch_cooldown_s", 5.0);
   declare_parameter("decision.mode_limits.max_cumulative_s", 180.0);
   declare_parameter("decision.mode_visualization.enabled", true);
@@ -329,6 +350,7 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   double default_spin_speed = 0.0;
   double hit_spin_speed = 7.0;
   double hit_spin_stop_after_no_hp_drop_s = 2.0;
+  double hit_minimum_spin_duration_s = 1.2;
   double mode_switch_cooldown_s = 5.0;
   double mode_max_cumulative_s = 180.0;
   int resupply_enter_hp = 250;
@@ -358,6 +380,8 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   // 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
   node()->get_parameter(
     "decision.motion.hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
+  node()->get_parameter(
+    "decision.motion.hit_minimum_spin_duration_s", hit_minimum_spin_duration_s);
   // 姿态切换冷却和单局累计时长上限，由 PublishRobotMode 统一执行。
   node()->get_parameter("decision.mode_limits.switch_cooldown_s", mode_switch_cooldown_s);
   node()->get_parameter("decision.mode_limits.max_cumulative_s", mode_max_cumulative_s);
@@ -390,6 +414,8 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   globalBlackboard()->set("decision_hit_spin_speed", hit_spin_speed);
   globalBlackboard()->set(
     "decision_hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
+  globalBlackboard()->set(
+    "decision_hit_minimum_spin_duration_s", hit_minimum_spin_duration_s);
   globalBlackboard()->set("decision_mode_switch_cooldown_s", mode_switch_cooldown_s);
   globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
   globalBlackboard()->set("decision_vision_timeout_s", decision_vision_timeout_s_);
@@ -399,6 +425,8 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   globalBlackboard()->set("decision_rmuc_endgame_time_threshold", rmuc_endgame_time_threshold);
   // 资源策略节点会在运行时持续覆写该值，这里先给一个明确的初值，方便调试观测。
   globalBlackboard()->set("decision_resource_mode", std::string("unknown"));
+  globalBlackboard()->set("decision_requested_robot_mode", std::string("unknown"));
+  globalBlackboard()->set("decision_active_robot_mode", std::string("unknown"));
   globalBlackboard()->set("decision_patrol_cursor", 0);
   globalBlackboard()->set("decision_patrol_direction", 1);
   globalBlackboard()->set("decision_next_patrol_cursor", 0);
@@ -428,6 +456,7 @@ void SentryBehaviorServer::onTreeCreated(BT::Tree & tree)
 std::optional<BT::NodeStatus> SentryBehaviorServer::onLoopAfterTick(BT::NodeStatus /*status*/)
 {
   ++tick_count_;
+  logDecisionSnapshot();
 
   if (!pose_tf_fallback_enabled_) {
     return std::nullopt;
@@ -474,6 +503,51 @@ std::optional<BT::NodeStatus> SentryBehaviorServer::onLoopAfterTick(BT::NodeStat
     "decision_current_pose is stale and TF fallback failed for frame '%s'",
     pose_expected_frame_.c_str());
   return std::nullopt;
+}
+
+void SentryBehaviorServer::logDecisionSnapshot()
+{
+  pb_rm_interfaces::msg::GameStatus game_status;
+  pb_rm_interfaces::msg::RobotStatus robot_status;
+  if (
+    !globalBlackboard()->get("referee_gameStatus", game_status) ||
+    !globalBlackboard()->get("referee_robotStatus", robot_status))
+  {
+    RCLCPP_INFO_THROTTLE(
+      node()->get_logger(), *node()->get_clock(), 3000,
+      "[decision/summary] waiting referee data");
+    return;
+  }
+
+  std::string resource_mode = "unknown";
+  std::string requested_robot_mode = "unknown";
+  std::string active_robot_mode = "unknown";
+  auto bb = globalBlackboard();
+  (void)bb->get("decision_resource_mode", resource_mode);
+  (void)bb->get("decision_requested_robot_mode", requested_robot_mode);
+  (void)bb->get("decision_active_robot_mode", active_robot_mode);
+
+  std::string summary =
+    std::string("[decision/summary] progress=") + gameProgressName(game_status.game_progress) +
+    "(" + std::to_string(game_status.game_progress) + ")" +
+    " remain=" + std::to_string(game_status.stage_remain_time) +
+    " hp=" + std::to_string(robot_status.current_hp) + "/" + std::to_string(robot_status.maximum_hp) +
+    " ammo=" + std::to_string(robot_status.projectile_allowance_17mm) +
+    " heat=" + std::to_string(robot_status.shooter_17mm_1_barrel_heat) +
+    " resource=" + resource_mode +
+    " requested_mode=" + requested_robot_mode +
+    " active_mode=" + active_robot_mode +
+    " input=" + decision_input_source_ +
+    " sim=" + decision_sim_mode_;
+
+  if (summary != last_decision_summary_) {
+    RCLCPP_INFO(node()->get_logger(), "%s", summary.c_str());
+    last_decision_summary_ = summary;
+  } else {
+    RCLCPP_INFO_THROTTLE(
+      node()->get_logger(), *node()->get_clock(), 3000,
+      "%s", summary.c_str());
+  }
 }
 
 std::optional<std::string> SentryBehaviorServer::onTreeExecutionCompleted(

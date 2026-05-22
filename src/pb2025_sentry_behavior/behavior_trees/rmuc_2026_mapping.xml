@@ -61,9 +61,6 @@
 
   <BehaviorTree ID="rmuc_decision_supply">
     <Sequence>
-      <PublishRobotMode mode="move"
-                        duration="0.0"
-                        topic_name="{@decision_robot_mode_topic}"/>
       <SelectSupplyPoint path="{decision_path}"/>
       <Fallback>
         <Sequence>
@@ -79,23 +76,13 @@
   </BehaviorTree>
 
   <BehaviorTree ID="rmuc_decision_defend_hold">
-    <Sequence>
-      <PublishRobotMode mode="defend"
-                        duration="0.0"
-                        topic_name="{@decision_robot_mode_topic}"/>
-      <PublishTwist v_y="0.0"
-                    v_yaw="0.0"
-                    v_x="0.0"
-                    duration="0.0"
-                    topic_name="{@decision_cmd_vel_topic}"/>
-    </Sequence>
+    <PublishRobotMode mode="defend"
+                      duration="0.0"
+                      topic_name="{@decision_robot_mode_topic}"/>
   </BehaviorTree>
 
   <BehaviorTree ID="rmuc_decision_mapping_route">
     <Sequence>
-      <PublishRobotMode mode="move"
-                        duration="0.0"
-                        topic_name="{@decision_robot_mode_topic}"/>
       <LoadCsvWaypoints csv_file="{@decision_rmuc_csv_file}"
                         patrol_mode="false"
                         path="{decision_path}"/>
@@ -114,9 +101,6 @@
 
   <BehaviorTree ID="rmuc_decision_patrol">
     <Sequence>
-      <PublishRobotMode mode="move"
-                        duration="0.0"
-                        topic_name="{@decision_robot_mode_topic}"/>
       <LoadCsvWaypoints csv_file="{@decision_rmuc_patrol_csv_file}"
                         patrol_mode="true"
                         patrol_cursor="{decision_patrol_cursor}"
@@ -142,19 +126,25 @@
     </Sequence>
   </BehaviorTree>
 
+  <BehaviorTree ID="rmuc_publish_navigation_mode">
+    <ReactiveFallback>
+      <Sequence>
+        <IsRobotResourceMode state="defend"
+                             robot_status="{@referee_robotStatus}"/>
+        <SubTree ID="rmuc_decision_defend_hold"/>
+      </Sequence>
+      <PublishRobotMode mode="move"
+                        duration="0.0"
+                        topic_name="{@decision_robot_mode_topic}"/>
+    </ReactiveFallback>
+  </BehaviorTree>
+
   <BehaviorTree ID="rmuc_decision_referee_mapping">
     <ReactiveSequence>
       <ReactiveFallback>
         <Sequence>
-          <IsRobotResourceMode state="resupply"
-                               robot_status="{@referee_robotStatus}"/>
+          <IsRobotResupplyRequired robot_status="{@referee_robotStatus}"/>
           <SubTree ID="rmuc_decision_supply"/>
-        </Sequence>
-
-        <Sequence>
-          <IsRobotResourceMode state="defend"
-                               robot_status="{@referee_robotStatus}"/>
-          <SubTree ID="rmuc_decision_defend_hold"/>
         </Sequence>
 
         <Sequence>
@@ -191,6 +181,10 @@
                               duration="0.0"
                               topic_name="{@decision_spin_topic}"/>
           </ReactiveFallback>
+          <Sequence>
+            <IsDecisionInputSource source="referee"/>
+            <SubTree ID="rmuc_publish_navigation_mode"/>
+          </Sequence>
           <ReactiveFallback>
             <SubTree ID="rmuc_vision_override_realtime"/>
 

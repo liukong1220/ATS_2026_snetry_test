@@ -26,9 +26,13 @@ private:
   nav_msgs::msg::Path buildFullPath() const;
   nav_msgs::msg::Path buildPatrolPath(int patrol_cursor) const;
 
+  rclcpp::Node::SharedPtr node_;
   rclcpp::Logger logger_ = rclcpp::get_logger("LoadCsvWaypoints");
   std::vector<geometry_msgs::msg::Point> waypoints_;
   std::string loaded_filepath_;
+  std::string last_logged_filepath_;
+  bool last_logged_patrol_mode_ = false;
+  int last_logged_patrol_cursor_ = -1;
 };
 
 }  // namespace pb2025_sentry_behavior

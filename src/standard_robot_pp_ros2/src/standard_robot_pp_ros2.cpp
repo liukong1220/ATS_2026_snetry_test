@@ -39,6 +39,60 @@ bool isNearlyZeroTwist(
     std::abs(msg.angular.y) <= angular_epsilon &&
     std::abs(msg.angular.z) <= angular_epsilon;
 }
+
+const char * gameProgressName(const uint8_t progress)
+{
+  switch (progress) {
+    case pb_rm_interfaces::msg::GameStatus::NOT_START:
+      return "NOT_START";
+    case pb_rm_interfaces::msg::GameStatus::PREPARATION:
+      return "PREPARATION";
+    case pb_rm_interfaces::msg::GameStatus::SELF_CHECKING:
+      return "SELF_CHECKING";
+    case pb_rm_interfaces::msg::GameStatus::COUNT_DOWN:
+      return "COUNT_DOWN";
+    case pb_rm_interfaces::msg::GameStatus::RUNNING:
+      return "RUNNING";
+    case pb_rm_interfaces::msg::GameStatus::GAME_OVER:
+      return "GAME_OVER";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+const char * hpDeductionReasonName(const uint8_t reason)
+{
+  switch (reason) {
+    case pb_rm_interfaces::msg::RobotStatus::ARMOR_HIT:
+      return "ARMOR_HIT";
+    case pb_rm_interfaces::msg::RobotStatus::SYSTEM_OFFLINE:
+      return "SYSTEM_OFFLINE";
+    case pb_rm_interfaces::msg::RobotStatus::OVER_SHOOT_SPEED:
+      return "OVER_SHOOT_SPEED";
+    case pb_rm_interfaces::msg::RobotStatus::OVER_HEAT:
+      return "OVER_HEAT";
+    case pb_rm_interfaces::msg::RobotStatus::OVER_POWER:
+      return "OVER_POWER";
+    case pb_rm_interfaces::msg::RobotStatus::ARMOR_COLLISION:
+      return "ARMOR_COLLISION";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+const char * robotModeName(const uint8_t mode)
+{
+  switch (mode) {
+    case 1:
+      return "attack";
+    case 2:
+      return "defend";
+    case 3:
+      return "move";
+    default:
+      return "unknown";
+  }
+}
 }  // namespace
 
 StandardRobotPpRos2Node::StandardRobotPpRos2Node(const rclcpp::NodeOptions & options)
@@ -573,9 +627,32 @@ void StandardRobotPpRos2Node::publishGameStatus(ReceiveGameStatusData & game_sta
   msg.game_progress = game_status.data.game_progress;
   msg.stage_remain_time = game_status.data.stage_remain_time;
   game_status_pub_->publish(msg);
+  const uint8_t previous_progress = previous_game_progress_;
+  const bool progress_changed = msg.game_progress != previous_progress;
 
-  if (record_rosbag_ && game_status.data.game_progress != previous_game_progress_) {
-    previous_game_progress_ = game_status.data.game_progress;
+  if (
+    progress_changed ||
+    msg.stage_remain_time != last_logged_stage_remain_time_)
+  {
+    const bool should_log_remain = last_logged_stage_remain_time_ < 0 ||
+      (msg.stage_remain_time / 30) != (last_logged_stage_remain_time_ / 30) ||
+      std::abs(msg.stage_remain_time - last_logged_stage_remain_time_) >= 10;
+    if (progress_changed || should_log_remain) {
+      RCLCPP_INFO(
+        get_logger(),
+        "[serial/referee] game_status progress=%s(%u) remain=%ds",
+        gameProgressName(msg.game_progress), msg.game_progress, msg.stage_remain_time);
+    }
+  } else {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "[serial/referee] game_status progress=%s(%u) remain=%ds",
+      gameProgressName(msg.game_progress), msg.game_progress, msg.stage_remain_time);
+  }
+  previous_game_progress_ = msg.game_progress;
+  last_logged_stage_remain_time_ = msg.stage_remain_time;
+
+  if (record_rosbag_ && progress_changed) {
     RCLCPP_INFO(get_logger(), "Game progress: %d", game_status.data.game_progress);
 
     std::string service_name;
@@ -689,6 +766,37 @@ void StandardRobotPpRos2Node::publishRobotStatus(ReceiveRobotStatus & robot_stat
   last_hp_ = robot_status.data.current_hp;
 
   robot_status_pub_->publish(msg);
+
+  const bool status_changed =
+    last_logged_current_hp_ != static_cast<int>(msg.current_hp) ||
+    last_logged_maximum_hp_ != static_cast<int>(msg.maximum_hp) ||
+    last_logged_projectile_allowance_17mm_ != static_cast<int>(msg.projectile_allowance_17mm) ||
+    last_logged_heat_ != static_cast<int>(msg.shooter_17mm_1_barrel_heat) ||
+    last_logged_armor_id_ != static_cast<int>(msg.armor_id) ||
+    last_logged_hp_reason_ != static_cast<int>(msg.hp_deduction_reason) ||
+    last_logged_is_hp_deduced_ != msg.is_hp_deduced;
+
+  if (status_changed) {
+    RCLCPP_INFO(
+      get_logger(),
+      "[serial/referee] robot_status id=%u hp=%u/%u ammo=%u heat=%u deduced=%d armor_id=%u reason=%s(%u)",
+      msg.robot_id, msg.current_hp, msg.maximum_hp, msg.projectile_allowance_17mm,
+      msg.shooter_17mm_1_barrel_heat, static_cast<int>(msg.is_hp_deduced), msg.armor_id,
+      hpDeductionReasonName(msg.hp_deduction_reason), msg.hp_deduction_reason);
+    last_logged_current_hp_ = static_cast<int>(msg.current_hp);
+    last_logged_maximum_hp_ = static_cast<int>(msg.maximum_hp);
+    last_logged_projectile_allowance_17mm_ = static_cast<int>(msg.projectile_allowance_17mm);
+    last_logged_heat_ = static_cast<int>(msg.shooter_17mm_1_barrel_heat);
+    last_logged_armor_id_ = static_cast<int>(msg.armor_id);
+    last_logged_hp_reason_ = static_cast<int>(msg.hp_deduction_reason);
+    last_logged_is_hp_deduced_ = msg.is_hp_deduced;
+  } else {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "[serial/referee] robot_status id=%u hp=%u/%u ammo=%u heat=%u deduced=%d",
+      msg.robot_id, msg.current_hp, msg.maximum_hp, msg.projectile_allowance_17mm,
+      msg.shooter_17mm_1_barrel_heat, static_cast<int>(msg.is_hp_deduced));
+  }
 
   if (set_detector_color_) {
     uint8_t detect_color;
@@ -916,6 +1024,19 @@ void StandardRobotPpRos2Node::cmdRobotModeCallback(
     RCLCPP_WARN_THROTTLE(
       get_logger(), *get_clock(), 1000,
       "Received unsupported robot mode %u, fallback to move mode", msg->data);
+  }
+
+  if (mode != previous_robot_mode_cmd_) {
+    RCLCPP_INFO(
+      get_logger(),
+      "[serial/cmd] robot_mode request=%s(%u) raw=%u",
+      robotModeName(mode), mode, msg->data);
+    previous_robot_mode_cmd_ = mode;
+  } else {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "[serial/cmd] robot_mode=%s(%u)",
+      robotModeName(mode), mode);
   }
 
   std::lock_guard<std::mutex> lock(send_cmd_mutex_);

@@ -14,7 +14,9 @@ SentryBehaviorClient::SentryBehaviorClient(const rclcpp::NodeOptions & options)
 : Node("sentry_behavior_client", options)
 {
   declare_parameter<std::string>("target_tree", "test_attacked_feedback");
+  declare_parameter<int>("goal_retry_delay_ms", 200);
   get_parameter("target_tree", target_tree_);
+  get_parameter("goal_retry_delay_ms", retry_delay_ms_);
 
   action_client_ = rclcpp_action::create_client<BTExecuteTree>(this, "pb2025_sentry_behavior");
 
@@ -23,7 +25,11 @@ SentryBehaviorClient::SentryBehaviorClient(const rclcpp::NodeOptions & options)
     return;
   }
 
-  timer_ = create_wall_timer(500ms, std::bind(&SentryBehaviorClient::sendGoal, this));
+  timer_ = create_wall_timer(
+    std::chrono::milliseconds(std::max(1, retry_delay_ms_)),
+    std::bind(&SentryBehaviorClient::sendGoal, this));
+  timer_->cancel();
+  sendGoal();
 }
 
 void SentryBehaviorClient::sendGoal()
@@ -54,6 +60,9 @@ void SentryBehaviorClient::scheduleRetry()
 {
   goal_sent_ = false;
   goal_active_ = false;
+  RCLCPP_INFO(
+    get_logger(), "Schedule behavior tree retry in %d ms for target_tree=%s",
+    retry_delay_ms_, target_tree_.c_str());
   timer_->reset();
 }
 

@@ -67,6 +67,7 @@ private:
     const rclcpp::QoS & qos = rclcpp::QoS(10));
   void declareDecisionParameters();
   void initializeDecisionBlackboard();
+  void logDecisionSnapshot();
 
   std::vector<std::shared_ptr<rclcpp::SubscriptionBase>> subscriptions_;
   std::shared_ptr<BT::StdCoutLogger> logger_cout_;
@@ -88,6 +89,7 @@ private:
   std::vector<std::string> pose_base_frame_candidates_{"base_footprint", "base_link"};
   double pose_timeout_s_ = 0.5;
   bool pose_tf_fallback_enabled_ = true;
+  std::string last_decision_summary_;
 };
 
 }  // namespace pb2025_sentry_behavior

@@ -33,6 +33,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp_action::Client<BTExecuteTree>::SharedPtr action_client_;
   std::string target_tree_;
+  int retry_delay_ms_ = 200;
   bool goal_sent_ = false;
   bool goal_active_ = false;
 };

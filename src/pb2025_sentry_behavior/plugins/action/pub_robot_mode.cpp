@@ -172,6 +172,9 @@ bool PublishRobotModeAction::setMessage(example_interfaces::msg::UInt8 & msg)
   const uint8_t requested_mode = parseRobotMode(mode);
   // 这里发出去的不一定是 requested_mode，
   // 还要经过冷却时间和累计时长限制后的最终裁决。
+  if (auto root_blackboard = config().blackboard->rootBlackboard()) {
+    root_blackboard->set("decision_requested_robot_mode", std::string(modeName(requested_mode)));
+  }
   msg.data = resolveModeWithConstraints(requested_mode);
   return true;
 }
@@ -242,8 +245,15 @@ uint8_t PublishRobotModeAction::resolveModeWithConstraints(uint8_t requested_mod
       // 回到 move 代表当前追击/防御条件已经解除，应该允许尽快释放姿态，
       // 否则会出现导航目标已经切回巡航，但下位机模式还被旧的 attack/defend 卡住几秒。
       const bool releasing_to_move = (resolved_mode == kMoveMode);
+      // defend 属于保命姿态，不能被普通的切换冷却挡住，否则会出现血量已经跌破阈值，
+      // 但 RViz / 下位机仍停留在 move 或 attack 的错觉。
+      const bool entering_defend = (resolved_mode == kDefendMode);
       // 目标姿态合法，但仍要经过冷却时间校验，避免行为树在高频 tick 中反复抢切。
-      if (!releasing_to_move && since_switch_s < cooldown_s) {
+      if (!releasing_to_move && !entering_defend && since_switch_s < cooldown_s) {
+        RCLCPP_INFO_THROTTLE(
+          logger_, *node_->get_clock(), 1000,
+          "Robot posture request '%s' blocked by cooldown: active=%s dt=%.2fs cooldown=%.2fs",
+          modeName(resolved_mode), modeName(state.active_mode), since_switch_s, cooldown_s);
         resolved_mode = state.active_mode;
       }
     }
@@ -263,6 +273,12 @@ uint8_t PublishRobotModeAction::resolveModeWithConstraints(uint8_t requested_mod
   }
 
   root_blackboard->set(kRobotModeRuntimeStateKey, state);
+  root_blackboard->set("decision_active_robot_mode", std::string(modeName(state.active_mode)));
+  RCLCPP_INFO_THROTTLE(
+    logger_, *node_->get_clock(), 3000,
+    "[decision/mode] requested=%s active=%s game_progress=%u running=%d",
+    modeName(requested_mode), modeName(state.active_mode), current_game_progress,
+    static_cast<int>(match_running));
   publishModeVisualization(state.active_mode);
   return state.active_mode;
 }

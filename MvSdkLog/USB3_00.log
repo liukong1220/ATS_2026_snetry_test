@@ -1,0 +1,5 @@
+Info    2026-05-22 02:04:46  DevID:MV-CS016-10UC(DA1830792)  Source-Line:libMvUsb3vTL.so(Manager.cpp-L0100)  ProcessName:sentry_debug(10944)   Description:Current dynamic library path[/opt/MVS/lib/64/libMvUsb3vTL.so]     Solution:
+Info    2026-05-22 02:04:46  DevID:MV-CS016-10UC(DA1830792)  Source-Line:libMvUsb3vTL.so(Manager.cpp-L0102)  ProcessName:sentry_debug(10944)   Description:U3V_Version: 4.1.2.2, U3V_Description: BaseLine Build 20230815     Solution:
+Info    2026-05-22 02:04:46  DevID:MV-CS016-10UC(DA1830792)  Source-Line:libMvUsb3vTL.so(DriverLayer.cpp-L0758)  ProcessName:sentry_debug(10944)   Description:device speed: [0x4]     Solution:
+Error   2026-05-22 02:04:46  DevID:MV-CS016-10UC(DA1830792)  Source-Line:libMvUsb3vTL.so(DriverLayer.cpp-L0804)  ProcessName:sentry_debug(10944)   Description:[usb_claim_interface] failed     Solution:
+Error   2026-05-22 02:04:46  DevID:MV-CS016-10UC(DA1830792)  Source-Line:libMvUsb3vTL.so(Manager.cpp-L0339)  ProcessName:sentry_debug(10944)   Description:Open device failed, Ret[0x80000203]     Solution:

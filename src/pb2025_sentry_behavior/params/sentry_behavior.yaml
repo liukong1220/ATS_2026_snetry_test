@@ -2,7 +2,7 @@ pb2025_sentry_behavior_server:
   ros__parameters:
     use_sim_time: true
     action_name: pb2025_sentry_behavior
-    tick_frequency: 5
+    tick_frequency: 15
     groot2_port: 17777
     ros_plugins_timeout: 1000
     use_cout_logger: false
@@ -49,9 +49,11 @@ pb2025_sentry_behavior_server:
       motion:
         default_spin_speed: 0.0
         # 检测到新的掉血后的自旋角速度。
-        hit_spin_speed: 10.0
+        hit_spin_speed: 14.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
-        hit_spin_stop_after_no_hp_drop_s: 5.0
+        hit_spin_stop_after_no_hp_drop_s: 7.0
+        # 单次受击触发后至少保持自旋这么久，避免只被裁判打一拍就立刻停转。
+        hit_minimum_spin_duration_s: 1.4
 
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
@@ -126,18 +128,18 @@ pb2025_sentry_behavior_server:
       resource_policy:
         # 统一资源决策状态机：
         # engage   = 健康巡航，可允许视觉接管
-        # resupply = 血量或弹量不足，退出追击并回补给安全点
-        # defend   = 血量低于阈值，进入防御模式增强防御
+        # resupply = 血量或弹量不足，导航切到补给点
+        # defend   = 仅向下位机发布 defend 模式，不再阻断导航目标发送
         #
         # 官方比赛中血量和弹量都会有离散跳变，因此必须用 enter/exit 做迟滞。
         # 调参原则：
-        # 1. defend_enter_hp < resupply_enter_hp
+        # 1. defend_* 和 resupply_* 现在是两套独立阈值
         # 2. defend_exit_hp >= defend_enter_hp + 20
         # 3. resupply_exit_hp >= resupply_enter_hp + 20
         # 4. resupply_exit_ammo >= resupply_enter_ammo + 20
         defend_enter_hp: 250
         defend_exit_hp: 300
-        resupply_enter_hp: 150
+        resupply_enter_hp: 170
         resupply_exit_hp: 300
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100
@@ -186,10 +188,10 @@ pb2025_sentry_behavior_server:
         path_goal_reached_tolerance: 0.20
         # 若行为树新给出的路径只是在当前目标附近轻微漂移，
         # 则先保持 Nav2 正在执行的目标，避免实车在墙角和终点附近被频繁抢占。
-        active_goal_hold_tolerance: 0.45
+        active_goal_hold_tolerance: 0.25
         # 同一类导航目标最短重发间隔。
-        # 实车若仍有“目标点附近左右试探”，优先先略调大到 0.9~1.2。
-        active_goal_min_resend_interval_s: 0.8
+        # 这里调小后，建图点/巡航点/补给点之间切换会更快；若后续出现频繁抢占再回调。
+        active_goal_min_resend_interval_s: 0.5
         # 视觉实时跟随要比普通巡逻更积极地接受“最近圆周点变化”，
         # 否则机器人换位后，新的圆周点会被近似保持逻辑吞掉。
         vision_active_goal_hold_tolerance: 0.24
@@ -204,13 +206,14 @@ pb2025_sentry_behavior_server:
         patrol_csv_file: "params/rmuc_patrol_waypoints.csv"
         endgame_time_threshold: 180
         supply_point:
-          x: -5.77
-          y: 0.60
+          x: -5.5464
+          y: 0.23
           z: 0.0
 
 pb2025_sentry_behavior_client:
   ros__parameters:
     use_sim_time: true
+    goal_retry_delay_ms: 200
     # 可选：
     #   rmuc_2026_mapping     = 建图/补给/后期巡航综合决策
     #   rmuc_2026_patrol_only = 备用：跳过建图路线，保留补给/保命/视觉接管，默认直接巡航

@@ -21,11 +21,14 @@ public:
 private:
   BT::NodeStatus tickCondition();
 
+  rclcpp::Node::SharedPtr node_;
   rclcpp::Logger logger_ = rclcpp::get_logger("IsRobotResupplyRequired");
   int enter_hp_ = 150;
   int exit_hp_ = 400;
   int enter_ammo_ = 50;
   int exit_ammo_ = 100;
+  bool has_last_latched_state_ = false;
+  bool last_latched_state_ = false;
 };
 
 }  // namespace pb2025_sentry_behavior

@@ -25,6 +25,8 @@ struct ResourceRuntimeState
 {
   bool initialized = false;
   ResourceMode latched_mode = ResourceMode::kUnknown;
+  bool last_defend_match = false;
+  bool last_resupply_match = false;
 };
 
 std::string normalizeToken(std::string value)
@@ -196,6 +198,28 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
 
   root_blackboard->set(kResourceRuntimeStateKey, runtime_state);
   root_blackboard->set<std::string>(kResourceModeBlackboardKey, modeName(resolved_mode));
+
+  const bool is_defend_match = resolved_mode == ResourceMode::kDefend;
+  if (!runtime_state.initialized || is_defend_match != runtime_state.last_defend_match) {
+    RCLCPP_INFO(
+      logger_,
+      "[%s] defend_match=%d hp=%d defend_enter=%d defend_exit=%d resolved_mode=%s",
+      name().c_str(), static_cast<int>(is_defend_match), current_hp,
+      defend_enter_hp_, defend_exit_hp, modeName(resolved_mode));
+    runtime_state.last_defend_match = is_defend_match;
+  }
+
+  const bool is_resupply_match = resolved_mode == ResourceMode::kResupply;
+  if (!runtime_state.initialized || is_resupply_match != runtime_state.last_resupply_match) {
+    RCLCPP_INFO(
+      logger_,
+      "[%s] resupply_match=%d hp=%d ammo=%d resupply_enter_hp=%d resupply_exit_hp=%d "
+      "resupply_enter_ammo=%d resupply_exit_ammo=%d resolved_mode=%s",
+      name().c_str(), static_cast<int>(is_resupply_match), current_hp, current_ammo,
+      resupply_enter_hp_, resupply_exit_hp, resupply_enter_ammo_, resupply_exit_ammo,
+      modeName(resolved_mode));
+    runtime_state.last_resupply_match = is_resupply_match;
+  }
 
   return resolved_mode == expected_mode ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
 }

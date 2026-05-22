@@ -1,14 +1,17 @@
  
 
 #include "pb2025_sentry_behavior/plugins/condition/is_game_status.hpp"
+#include "pb2025_sentry_behavior/decision_utils.hpp"
 
 namespace pb2025_sentry_behavior
 {
 
 IsGameStatusCondition::IsGameStatusCondition(
   const std::string & name, const BT::NodeConfig & config)
-: BT::SimpleConditionNode(name, std::bind(&IsGameStatusCondition::checkGameStart, this), config)
+: BT::SimpleConditionNode(name, std::bind(&IsGameStatusCondition::checkGameStart, this), config),
+  node_(decision::getNodeFromBlackboard(*this))
 {
+  logger_ = node_->get_logger();
 }
 
 BT::NodeStatus IsGameStatusCondition::checkGameStart()
@@ -32,9 +35,27 @@ BT::NodeStatus IsGameStatusCondition::checkGameStart()
   const bool is_progress_match = (msg->game_progress == expected_game_progress);
   const bool is_time_in_range =
     (msg->stage_remain_time >= min_remain_time) && (msg->stage_remain_time <= max_remain_time);
+  const bool matched = is_progress_match && is_time_in_range;
 
-  return (is_progress_match && is_time_in_range) ? BT::NodeStatus::SUCCESS
-                                                 : BT::NodeStatus::FAILURE;
+  if (!has_last_result_ || matched != last_result_) {
+    RCLCPP_INFO(
+      logger_,
+      "[%s] game_status %s: progress=%d expected=%d remain=%ds range=[%d,%d]",
+      name().c_str(), matched ? "matched" : "not_matched",
+      static_cast<int>(msg->game_progress), expected_game_progress, msg->stage_remain_time,
+      min_remain_time, max_remain_time);
+    has_last_result_ = true;
+    last_result_ = matched;
+  } else {
+    RCLCPP_INFO_THROTTLE(
+      logger_, *node_->get_clock(), 2000,
+      "[%s] game_status=%s progress=%d expected=%d remain=%ds range=[%d,%d]",
+      name().c_str(), matched ? "matched" : "not_matched",
+      static_cast<int>(msg->game_progress), expected_game_progress, msg->stage_remain_time,
+      min_remain_time, max_remain_time);
+  }
+
+  return matched ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
 }
 
 BT::PortsList IsGameStatusCondition::providedPorts()

@@ -43,8 +43,10 @@ std::string resolveCsvPath(const std::string & filepath, const rclcpp::Logger & 
 
 LoadCsvWaypointsAction::LoadCsvWaypointsAction(
   const std::string & name, const BT::NodeConfig & config)
-: BT::SyncActionNode(name, config)
+: BT::SyncActionNode(name, config),
+  node_(decision::getNodeFromBlackboard(*this))
 {
+  logger_ = node_->get_logger();
 }
 
 BT::NodeStatus LoadCsvWaypointsAction::tick()
@@ -86,8 +88,36 @@ BT::NodeStatus LoadCsvWaypointsAction::tick()
       next_cursor = next_state.first;
       next_direction = next_state.second;
     }
+
+    if (
+      loaded_filepath_ != last_logged_filepath_ || !last_logged_patrol_mode_ ||
+      patrol_cursor != last_logged_patrol_cursor_)
+    {
+      const auto & point = waypoints_.at(static_cast<std::size_t>(patrol_cursor));
+      RCLCPP_INFO(
+        logger_,
+        "[%s] patrol waypoint selected: file=%s cursor=%d point=(%.2f, %.2f, %.2f) next_cursor=%d next_direction=%d",
+        name().c_str(), loaded_filepath_.c_str(), patrol_cursor,
+        point.x, point.y, point.z, next_cursor, next_direction);
+      last_logged_filepath_ = loaded_filepath_;
+      last_logged_patrol_mode_ = true;
+      last_logged_patrol_cursor_ = patrol_cursor;
+    }
   } else {
     path = buildFullPath();
+    if (loaded_filepath_ != last_logged_filepath_ || last_logged_patrol_mode_) {
+      const auto & first_point = waypoints_.front();
+      const auto & last_point = waypoints_.back();
+      RCLCPP_INFO(
+        logger_,
+        "[%s] mapping route selected: file=%s count=%zu first=(%.2f, %.2f, %.2f) last=(%.2f, %.2f, %.2f)",
+        name().c_str(), loaded_filepath_.c_str(), waypoints_.size(),
+        first_point.x, first_point.y, first_point.z,
+        last_point.x, last_point.y, last_point.z);
+      last_logged_filepath_ = loaded_filepath_;
+      last_logged_patrol_mode_ = false;
+      last_logged_patrol_cursor_ = -1;
+    }
   }
 
   if (path.poses.empty()) {

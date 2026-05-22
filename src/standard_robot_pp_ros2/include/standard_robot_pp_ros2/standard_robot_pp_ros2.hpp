@@ -144,6 +144,15 @@ private:
   std::string detector_node_name_;
 
   uint8_t previous_game_progress_ = 0;
+  int32_t last_logged_stage_remain_time_ = -1;
+  int last_logged_current_hp_ = -1;
+  int last_logged_maximum_hp_ = -1;
+  int last_logged_projectile_allowance_17mm_ = -1;
+  int last_logged_heat_ = -1;
+  int last_logged_armor_id_ = -1;
+  int last_logged_hp_reason_ = -1;
+  bool last_logged_is_hp_deduced_ = false;
+  uint8_t previous_robot_mode_cmd_ = 0;
 
   float last_hp_ = -1.0F;
   // rclcpp::Time stop_start_time_;
