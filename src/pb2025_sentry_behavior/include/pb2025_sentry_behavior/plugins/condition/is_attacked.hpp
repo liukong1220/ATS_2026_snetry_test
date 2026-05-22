@@ -49,16 +49,9 @@ private:
   rclcpp::Time last_attack_time_{0, 0, RCL_ROS_TIME};
   // 最近一次掉血对应的朝向，用于输出云台/底盘朝向。
   float last_attack_yaw_ = 0.0F;
-  // 最近一次触发后，至少保持自旋到这个时间点，避免只转一拍就掉下来。
-  rclcpp::Time minimum_spin_until_{0, 0, RCL_ROS_TIME};
-  // 记录上一拍的受击字段，便于识别“虽然 current_hp 没再变，但新的装甲受击事件又来了”。
-  bool last_is_hp_deduced_ = false;
-  uint8_t last_hp_deduction_reason_ = 255;
-  uint8_t last_armor_id_ = 255;
   // stop_after_s 没有配置时使用的默认停转超时时间。
   // 这里只是兜底默认值，推荐优先通过 YAML 参数调整。
   static constexpr double kDefaultSpinStopAfterNoHpDropSeconds = 2.0;
-  static constexpr double kDefaultMinimumSpinDurationSeconds = 1.2;
 };
 }  // namespace pb2025_sentry_behavior
 

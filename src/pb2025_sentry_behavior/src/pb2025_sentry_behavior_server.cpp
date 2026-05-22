@@ -221,7 +221,6 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.motion.default_spin_speed", 0.0);
   declare_parameter("decision.motion.hit_spin_speed", 7.0);
   declare_parameter("decision.motion.hit_spin_stop_after_no_hp_drop_s", 2.0);
-  declare_parameter("decision.motion.hit_minimum_spin_duration_s", 1.2);
   declare_parameter("decision.mode_limits.switch_cooldown_s", 5.0);
   declare_parameter("decision.mode_limits.max_cumulative_s", 180.0);
   declare_parameter("decision.mode_visualization.enabled", true);
@@ -350,7 +349,6 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   double default_spin_speed = 0.0;
   double hit_spin_speed = 7.0;
   double hit_spin_stop_after_no_hp_drop_s = 2.0;
-  double hit_minimum_spin_duration_s = 1.2;
   double mode_switch_cooldown_s = 5.0;
   double mode_max_cumulative_s = 180.0;
   int resupply_enter_hp = 250;
@@ -380,8 +378,6 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   // 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
   node()->get_parameter(
     "decision.motion.hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
-  node()->get_parameter(
-    "decision.motion.hit_minimum_spin_duration_s", hit_minimum_spin_duration_s);
   // 姿态切换冷却和单局累计时长上限，由 PublishRobotMode 统一执行。
   node()->get_parameter("decision.mode_limits.switch_cooldown_s", mode_switch_cooldown_s);
   node()->get_parameter("decision.mode_limits.max_cumulative_s", mode_max_cumulative_s);
@@ -414,8 +410,6 @@ void SentryBehaviorServer::initializeDecisionBlackboard()
   globalBlackboard()->set("decision_hit_spin_speed", hit_spin_speed);
   globalBlackboard()->set(
     "decision_hit_spin_stop_after_no_hp_drop_s", hit_spin_stop_after_no_hp_drop_s);
-  globalBlackboard()->set(
-    "decision_hit_minimum_spin_duration_s", hit_minimum_spin_duration_s);
   globalBlackboard()->set("decision_mode_switch_cooldown_s", mode_switch_cooldown_s);
   globalBlackboard()->set("decision_mode_max_cumulative_s", mode_max_cumulative_s);
   globalBlackboard()->set("decision_vision_timeout_s", decision_vision_timeout_s_);

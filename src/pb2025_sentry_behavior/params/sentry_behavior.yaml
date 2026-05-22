@@ -49,15 +49,13 @@ pb2025_sentry_behavior_server:
       motion:
         default_spin_speed: 0.0
         # 检测到新的掉血后的自旋角速度。
-        hit_spin_speed: 14.0
+        hit_spin_speed: 5.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
-        hit_spin_stop_after_no_hp_drop_s: 7.0
-        # 单次受击触发后至少保持自旋这么久，避免只被裁判打一拍就立刻停转。
-        hit_minimum_spin_duration_s: 1.4
+        hit_spin_stop_after_no_hp_drop_s: 2.0
 
       mode_limits:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
-        switch_cooldown_s: 6.0
+        switch_cooldown_s: 5.0
         # 每局比赛内单一姿态允许累计存在的最大时长。
         max_cumulative_s: 175.0
 
@@ -185,13 +183,13 @@ pb2025_sentry_behavior_server:
         goal_position_tolerance: 0.2
         # 行为层“是否到达目标”的判定容差，需要与实车 Nav2 goal checker 对齐。
         # 当前实车链路 general_goal_checker.xy_goal_tolerance 为 0.20。
-        path_goal_reached_tolerance: 0.20
+        path_goal_reached_tolerance: 0.4
         # 若行为树新给出的路径只是在当前目标附近轻微漂移，
         # 则先保持 Nav2 正在执行的目标，避免实车在墙角和终点附近被频繁抢占。
         active_goal_hold_tolerance: 0.25
         # 同一类导航目标最短重发间隔。
         # 这里调小后，建图点/巡航点/补给点之间切换会更快；若后续出现频繁抢占再回调。
-        active_goal_min_resend_interval_s: 0.5
+        active_goal_min_resend_interval_s: 0.8
         # 视觉实时跟随要比普通巡逻更积极地接受“最近圆周点变化”，
         # 否则机器人换位后，新的圆周点会被近似保持逻辑吞掉。
         vision_active_goal_hold_tolerance: 0.24
@@ -207,7 +205,7 @@ pb2025_sentry_behavior_server:
         endgame_time_threshold: 180
         supply_point:
           x: -5.5464
-          y: 0.23
+          y: 0.78
           z: 0.0
 
 pb2025_sentry_behavior_client:

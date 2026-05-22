@@ -49,7 +49,7 @@ pb2025_sentry_behavior_server:
       motion:
         default_spin_speed: 0.0
         # 检测到新的掉血后的自旋角速度。
-        hit_spin_speed: 7.0
+        hit_spin_speed: 5.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
@@ -57,7 +57,7 @@ pb2025_sentry_behavior_server:
         # 姿态切换冷却时间，防止 move/attack/defend 高频抖动。
         switch_cooldown_s: 5.0
         # 每局比赛内单一姿态允许累计存在的最大时长。
-        max_cumulative_s: 180.0
+        max_cumulative_s: 175.0
 
       mode_visualization:
         # 是否发布姿态可视化 Marker。
