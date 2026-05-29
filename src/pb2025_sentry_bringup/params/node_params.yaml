@@ -783,7 +783,7 @@ local_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         # 局部层与 MPPI ObstaclesCritic 保持一致，避免 critic 对 inflation 语义判断错位。
         cost_scaling_factor: 5.0
-        inflation_radius: 0.50
+        inflation_radius: 0.55
       always_send_full_costmap: False
 
 global_costmap:
@@ -834,7 +834,7 @@ global_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         # 全局层应比局部层更保守，优先把整条路径推回通道中心。
         cost_scaling_factor: 6.0
-        inflation_radius: 0.55
+        inflation_radius: 0.60
       always_send_full_costmap: False
 
 # The yaml_filename does not need to be specified since it going to be set by defaults in launch.

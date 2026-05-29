@@ -47,9 +47,9 @@ pb2025_sentry_behavior_server:
         robot_mode: decision/robot_mode
 
       motion:
-        default_spin_speed: 0.0
+        default_spin_speed: 3.0
         # 检测到新的掉血后的自旋角速度。
-        hit_spin_speed: 5.0
+        hit_spin_speed: 3.0
         # 最近一次掉血后，若在该时长内没有新的掉血，则停止自旋。
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
@@ -135,12 +135,15 @@ pb2025_sentry_behavior_server:
         # 2. defend_exit_hp >= defend_enter_hp + 20
         # 3. resupply_exit_hp >= resupply_enter_hp + 20
         # 4. resupply_exit_ammo >= resupply_enter_ammo + 20
-        defend_enter_hp: 250
+        defend_enter_hp: 280
         defend_exit_hp: 300
-        resupply_enter_hp: 170
+        resupply_enter_hp: 150
         resupply_exit_hp: 300
         resupply_enter_ammo: 50
         resupply_exit_ammo: 100
+        # 开局裁判/下位机有时会先发布 ammo=0。
+        # 在尚未收到过可信非零弹丸值前，不让这个 0 直接触发补给。
+        require_valid_ammo_before_resupply: true
 
       pose:
         # 行为树默认认为导航位姿应处在这个坐标系下。
@@ -202,20 +205,21 @@ pb2025_sentry_behavior_server:
       rmuc:
         csv_waypoints_file: "params/rmuc_waypoints.csv"
         patrol_csv_file: "params/rmuc_patrol_waypoints.csv"
-        endgame_time_threshold: 180
+        endgame_time_threshold: 0
         supply_point:
-          x: -5.5464
-          y: 0.78
+          x: -5.35
+          y: 0.60
           z: 0.0
 
 pb2025_sentry_behavior_client:
   ros__parameters:
     use_sim_time: true
-    goal_retry_delay_ms: 200
+    goal_retry_delay_ms: 100
     # 可选：
     #   rmuc_2026_mapping     = 建图/补给/后期巡航综合决策
-    #   rmuc_2026_patrol_only = 备用：跳过建图路线，保留补给/保命/视觉接管，默认直接巡航
+    #   rmuc_2026_patrol_only = 备用：跳过建图路线，保留补给/保命/视觉接管，普通状态按 patrol_csv_file 整条路线导航
     #   rmuc_2026_test_mapping_points = 无裁判测试：只跑 rmuc_waypoints.csv
     #   rmuc_2026_test_supply_point   = 无裁判测试：只跑 decision.rmuc.supply_point
     #   rmuc_2026_test_patrol_points  = 无裁判测试：只跑 rmuc_patrol_waypoints.csv
     target_tree: rmuc_2026_mapping
+  

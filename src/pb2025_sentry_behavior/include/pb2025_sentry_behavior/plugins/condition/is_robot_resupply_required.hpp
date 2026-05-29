@@ -27,6 +27,8 @@ private:
   int exit_hp_ = 400;
   int enter_ammo_ = 50;
   int exit_ammo_ = 100;
+  bool require_valid_ammo_before_resupply_ = true;
+  bool has_seen_valid_ammo_ = false;
   bool has_last_latched_state_ = false;
   bool last_latched_state_ = false;
 };

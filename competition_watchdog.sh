@@ -135,7 +135,7 @@ start_nav2() {
     export OMP_NUM_THREADS="$NAV_OMP_NUM_THREADS"
     export OPENBLAS_NUM_THREADS="$NAV_OMP_NUM_THREADS"
     export MKL_NUM_THREADS="$NAV_OMP_NUM_THREADS"
-    exec "${prefix[@]}" ros2 launch pb2025_sentry_bringup bringup.launch.py \
+    exec "${prefix[@]}" ros2 launch pb2025_sentry_bringup bringup.launch.py\
       world:="$WORLD_NAME" \
       slam:=False \
       params_file:="$NAV_PARAMS_FILE" \

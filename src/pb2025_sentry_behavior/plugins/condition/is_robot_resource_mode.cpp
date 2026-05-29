@@ -90,6 +90,9 @@ IsRobotResourceModeCondition::IsRobotResourceModeCondition(
   node_->get_parameter(
     "decision.resource_policy.assume_engage_when_status_missing",
     assume_engage_when_status_missing_);
+  node_->get_parameter(
+    "decision.resource_policy.require_valid_ammo_before_resupply",
+    require_valid_ammo_before_resupply_);
 }
 
 BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
@@ -142,6 +145,11 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
   const int defend_exit_hp = std::max(defend_exit_hp_, defend_enter_hp_);
   const int resupply_exit_hp = std::max(resupply_exit_hp_, resupply_enter_hp_);
   const int resupply_exit_ammo = std::max(resupply_exit_ammo_, resupply_enter_ammo_);
+  if (current_ammo > resupply_enter_ammo_) {
+    has_seen_valid_ammo_ = true;
+  }
+  const bool ammo_status_trusted =
+    !require_valid_ammo_before_resupply_ || has_seen_valid_ammo_ || current_ammo > 0;
 
   ResourceMode resolved_mode = runtime_state.latched_mode;
 
@@ -153,7 +161,10 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
     case ResourceMode::kDefend:
       if (current_hp < defend_exit_hp) {
         resolved_mode = ResourceMode::kDefend;
-      } else if (current_hp < resupply_exit_hp || current_ammo < resupply_exit_ammo) {
+      } else if (
+        current_hp < resupply_exit_hp ||
+        (ammo_status_trusted && current_ammo < resupply_exit_ammo))
+      {
         resolved_mode = ResourceMode::kResupply;
       } else {
         resolved_mode = ResourceMode::kEngage;
@@ -163,7 +174,10 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
     case ResourceMode::kResupply:
       if (current_hp <= defend_enter_hp_) {
         resolved_mode = ResourceMode::kDefend;
-      } else if (current_hp < resupply_exit_hp || current_ammo < resupply_exit_ammo) {
+      } else if (
+        current_hp < resupply_exit_hp ||
+        (ammo_status_trusted && current_ammo < resupply_exit_ammo))
+      {
         resolved_mode = ResourceMode::kResupply;
       } else {
         resolved_mode = ResourceMode::kEngage;
@@ -175,7 +189,10 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
     default:
       if (current_hp <= defend_enter_hp_) {
         resolved_mode = ResourceMode::kDefend;
-      } else if (current_hp <= resupply_enter_hp_ || current_ammo <= resupply_enter_ammo_) {
+      } else if (
+        current_hp <= resupply_enter_hp_ ||
+        (ammo_status_trusted && current_ammo <= resupply_enter_ammo_))
+      {
         resolved_mode = ResourceMode::kResupply;
       } else {
         resolved_mode = ResourceMode::kEngage;
@@ -193,8 +210,9 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
 
   RCLCPP_INFO_THROTTLE(
     logger_, *node_->get_clock(), 2000,
-    "Decision resource mode=%s expected=%s hp=%d ammo=%d",
-    modeName(resolved_mode), modeName(expected_mode), current_hp, current_ammo);
+    "Decision resource mode=%s expected=%s hp=%d ammo=%d ammo_trusted=%d",
+    modeName(resolved_mode), modeName(expected_mode), current_hp, current_ammo,
+    static_cast<int>(ammo_status_trusted));
 
   root_blackboard->set(kResourceRuntimeStateKey, runtime_state);
   root_blackboard->set<std::string>(kResourceModeBlackboardKey, modeName(resolved_mode));
@@ -214,9 +232,10 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
     RCLCPP_INFO(
       logger_,
       "[%s] resupply_match=%d hp=%d ammo=%d resupply_enter_hp=%d resupply_exit_hp=%d "
-      "resupply_enter_ammo=%d resupply_exit_ammo=%d resolved_mode=%s",
+      "resupply_enter_ammo=%d resupply_exit_ammo=%d ammo_trusted=%d resolved_mode=%s",
       name().c_str(), static_cast<int>(is_resupply_match), current_hp, current_ammo,
       resupply_enter_hp_, resupply_exit_hp, resupply_enter_ammo_, resupply_exit_ammo,
+      static_cast<int>(ammo_status_trusted),
       modeName(resolved_mode));
     runtime_state.last_resupply_match = is_resupply_match;
   }

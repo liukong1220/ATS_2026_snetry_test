@@ -273,6 +273,7 @@ void SentryBehaviorServer::declareDecisionParameters()
   declare_parameter("decision.resource_policy.resupply_enter_ammo", 50);
   declare_parameter("decision.resource_policy.resupply_exit_ammo", 100);
   declare_parameter("decision.resource_policy.assume_engage_when_status_missing", false);
+  declare_parameter("decision.resource_policy.require_valid_ammo_before_resupply", true);
   declare_parameter("decision.pose.expected_frame", std::string("map"));
   declare_parameter("decision.pose.timeout_s", 0.5);
   declare_parameter("decision.pose.tf_fallback_enabled", true);

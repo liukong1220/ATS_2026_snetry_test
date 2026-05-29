@@ -116,22 +116,13 @@
   <BehaviorTree ID="rmuc_patrol_only_decision_patrol">
     <Sequence>
       <LoadCsvWaypoints csv_file="{@decision_rmuc_patrol_csv_file}"
-                        patrol_mode="true"
-                        patrol_cursor="{decision_patrol_cursor}"
-                        patrol_direction="{decision_patrol_direction}"
-                        path="{decision_path}"
-                        next_cursor="{decision_next_patrol_cursor}"
-                        next_direction="{decision_next_patrol_direction}"/>
+                        patrol_mode="false"
+                        path="{decision_path}"/>
       <Fallback>
         <Sequence>
           <IsPathGoalReached path="{decision_path}"
                              goal_succeeded="{decision_nav_goal_succeeded}"
                              current_pose="{@decision_current_pose}"/>
-          <AdvancePatrolCursor next_cursor="{decision_next_patrol_cursor}"
-                               next_direction="{decision_next_patrol_direction}"
-                               patrol_cursor="{decision_patrol_cursor}"
-                               patrol_direction="{decision_patrol_direction}"
-                               goal_succeeded="{decision_nav_goal_succeeded}"/>
         </Sequence>
         <SendNavThroughPoses path="{decision_path}"
                              current_pose="{@decision_current_pose}"

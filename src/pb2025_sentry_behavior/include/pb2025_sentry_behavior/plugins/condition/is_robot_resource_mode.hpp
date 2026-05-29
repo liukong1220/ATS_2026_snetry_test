@@ -36,6 +36,8 @@ private:
   int resupply_enter_ammo_ = 50;
   int resupply_exit_ammo_ = 100;
   bool assume_engage_when_status_missing_ = false;
+  bool require_valid_ammo_before_resupply_ = true;
+  bool has_seen_valid_ammo_ = false;
 };
 
 }  // namespace pb2025_sentry_behavior
