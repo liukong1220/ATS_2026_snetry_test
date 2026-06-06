@@ -12,9 +12,12 @@
 #include "nav2_costmap_2d/costmap_subscriber.hpp"
 #include "nav2_core/smoother.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
 #include "sp_msgs/msg/trajectory_profile_msg.hpp"
 #include "trajectory_optimizer/bspline_path_optimizer.hpp"
+#include "trajectory_optimizer/esdf_provider.hpp"
 #include "trajectory_optimizer/fake_costmap_esdf_provider.hpp"
+#include "trajectory_optimizer/terrain_pointcloud_esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {
@@ -40,6 +43,8 @@ public:
     const rclcpp::Duration & max_time) override;
 
 private:
+  void terrainPointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+  void refreshEsdfProvider();
   void enforceCostmapClearance(
     nav_msgs::msg::Path & smoothed_path,
     const nav_msgs::msg::Path & reference_path) const;
@@ -81,8 +86,17 @@ private:
   std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub_;
   std::shared_ptr<nav2_costmap_2d::FootprintSubscriber> footprint_sub_;
   std::shared_ptr<FakeCostmapEsdfProvider> fake_esdf_provider_;
+  std::shared_ptr<TerrainPointCloudEsdfProvider> terrain_esdf_provider_;
+  EsdfProviderPtr active_esdf_provider_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr terrain_cloud_sub_;
   rclcpp_lifecycle::LifecyclePublisher<sp_msgs::msg::TrajectoryProfileMsg>::SharedPtr profile_pub_;
   std::string profile_topic_{"trajectory_profile"};
+  std::string esdf_source_{"costmap"};
+  std::string terrain_pointcloud_topic_{"terrain_map_ext"};
+  double terrain_esdf_resolution_{0.05};
+  double terrain_esdf_padding_{0.60};
+  double terrain_esdf_inflation_radius_{0.08};
+  double terrain_esdf_min_intensity_{0.0};
   unsigned char max_path_cost_{96};
   unsigned char footprint_collision_cost_threshold_{253};
   int pullback_samples_{6};

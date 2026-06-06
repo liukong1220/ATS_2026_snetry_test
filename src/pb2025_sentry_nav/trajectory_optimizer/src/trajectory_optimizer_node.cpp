@@ -131,6 +131,12 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<bool>("use_esdf_obstacle_cost", params_.use_esdf_obstacle_cost);
   declare_parameter<double>("obstacle_safe_distance", params_.obstacle_safe_distance);
   declare_parameter<std::string>("esdf_debug_topic", esdf_debug_topic_);
+  declare_parameter<std::string>("esdf_source", esdf_source_);
+  declare_parameter<std::string>("terrain_pointcloud_topic", terrain_pointcloud_topic_);
+  declare_parameter<double>("terrain_esdf_resolution", terrain_esdf_resolution_);
+  declare_parameter<double>("terrain_esdf_padding", terrain_esdf_padding_);
+  declare_parameter<double>("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
+  declare_parameter<double>("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
 
   get_parameter("input_path_topic", input_path_topic_);
   get_parameter("output_path_topic", output_path_topic_);
@@ -158,10 +164,17 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   get_parameter("use_esdf_obstacle_cost", params_.use_esdf_obstacle_cost);
   get_parameter("obstacle_safe_distance", params_.obstacle_safe_distance);
   get_parameter("esdf_debug_topic", esdf_debug_topic_);
+  get_parameter("esdf_source", esdf_source_);
+  get_parameter("terrain_pointcloud_topic", terrain_pointcloud_topic_);
+  get_parameter("terrain_esdf_resolution", terrain_esdf_resolution_);
+  get_parameter("terrain_esdf_padding", terrain_esdf_padding_);
+  get_parameter("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
+  get_parameter("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
   params_.obstacle_safe_cost = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_safe_cost)));
   optimizer_.setParams(params_);
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
+  terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
   optimizer_.clearEsdfProvider();
 
   smoothed_path_pub_ = create_publisher<nav_msgs::msg::Path>(output_path_topic_, 10);
@@ -172,11 +185,14 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   path_sub_ = create_subscription<nav_msgs::msg::Path>(
     input_path_topic_, 10,
     std::bind(&TrajectoryOptimizerNode::pathCallback, this, std::placeholders::_1));
+  terrain_cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+    terrain_pointcloud_topic_, rclcpp::SensorDataQoS(),
+    std::bind(&TrajectoryOptimizerNode::terrainPointCloudCallback, this, std::placeholders::_1));
 
   RCLCPP_INFO(
     get_logger(),
-    "Trajectory optimizer active: %s -> %s",
-    input_path_topic_.c_str(), output_path_topic_.c_str());
+    "Trajectory optimizer active: %s -> %s, esdf_source=%s",
+    input_path_topic_.c_str(), output_path_topic_.c_str(), esdf_source_.c_str());
 }
 
 void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
@@ -196,25 +212,24 @@ void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr 
     try {
       const auto costmap = costmap_sub_->getCostmap();
       optimizer_.setObstacleCostmap(costmap);
-      if (params_.use_esdf_obstacle_cost && fake_esdf_provider_) {
+      if (params_.use_esdf_obstacle_cost && fake_esdf_provider_ && esdf_source_ == "costmap") {
         fake_esdf_provider_->updateCostmap(costmap, params_.obstacle_safe_cost, true);
-        optimizer_.setEsdfProvider(fake_esdf_provider_);
+        active_esdf_provider_ = fake_esdf_provider_;
         RCLCPP_INFO_THROTTLE(
           get_logger(), *get_clock(), 5000,
           "Fake ESDF active in trajectory_optimizer_node: d_safe=%.3f cost_threshold=%d",
           params_.obstacle_safe_distance, static_cast<int>(params_.obstacle_safe_cost));
-      } else {
-        optimizer_.clearEsdfProvider();
       }
     } catch (const std::exception & ex) {
       optimizer_.clearObstacleCostmap();
-      optimizer_.clearEsdfProvider();
+      active_esdf_provider_.reset();
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
         "Costmap unavailable for visual trajectory optimizer, using geometry-only path: %s",
         ex.what());
     }
   }
+  refreshEsdfProvider();
   const auto result = optimizer_.optimizeDetailed(*msg);
   if (publish_smoothed_path) {
     smoothed_path_pub_->publish(result.path);
@@ -227,10 +242,53 @@ void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr 
   }
 }
 
+void TrajectoryOptimizerNode::terrainPointCloudCallback(
+  const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+{
+  if (!terrain_esdf_provider_) {
+    return;
+  }
+  terrain_esdf_provider_->updatePointCloud(
+    *msg,
+    terrain_esdf_resolution_,
+    terrain_esdf_padding_,
+    terrain_esdf_inflation_radius_,
+    terrain_esdf_min_intensity_);
+  if (esdf_source_ == "terrain_pointcloud") {
+    active_esdf_provider_ = terrain_esdf_provider_;
+    refreshEsdfProvider();
+  }
+}
+
+void TrajectoryOptimizerNode::refreshEsdfProvider()
+{
+  if (!params_.use_esdf_obstacle_cost) {
+    active_esdf_provider_.reset();
+    optimizer_.clearEsdfProvider();
+    return;
+  }
+
+  if (esdf_source_ == "terrain_pointcloud") {
+    if (terrain_esdf_provider_ && terrain_esdf_provider_->available()) {
+      active_esdf_provider_ = terrain_esdf_provider_;
+      optimizer_.setEsdfProvider(active_esdf_provider_);
+    } else {
+      optimizer_.clearEsdfProvider();
+    }
+    return;
+  }
+
+  if (active_esdf_provider_ && active_esdf_provider_->available()) {
+    optimizer_.setEsdfProvider(active_esdf_provider_);
+  } else {
+    optimizer_.clearEsdfProvider();
+  }
+}
+
 void TrajectoryOptimizerNode::publishEsdfDebugMarkers(const nav_msgs::msg::Path & path)
 {
-  if (!esdf_marker_pub_ || !fake_esdf_provider_ || !params_.use_esdf_obstacle_cost ||
-    !fake_esdf_provider_->available() || path.poses.empty() ||
+  if (!esdf_marker_pub_ || !active_esdf_provider_ || !params_.use_esdf_obstacle_cost ||
+    !active_esdf_provider_->available() || path.poses.empty() ||
     !hasSubscribers(esdf_marker_pub_))
   {
     return;
@@ -280,9 +338,9 @@ void TrajectoryOptimizerNode::publishEsdfDebugMarkers(const nav_msgs::msg::Path 
   std::size_t danger_count = 0;
   std::size_t gradient_count = 0;
   for (const auto & pose : path.poses) {
-    const double distance = fake_esdf_provider_->getDistance(
+    const double distance = active_esdf_provider_->getDistance(
       pose.pose.position.x, pose.pose.position.y);
-    const Eigen::Vector2d gradient = fake_esdf_provider_->getGradient(
+    const Eigen::Vector2d gradient = active_esdf_provider_->getGradient(
       pose.pose.position.x, pose.pose.position.y);
     const double gradient_norm = gradient.norm();
 

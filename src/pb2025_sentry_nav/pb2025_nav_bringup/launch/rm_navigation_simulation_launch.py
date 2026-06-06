@@ -4,13 +4,30 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
+
+
+def _filtered_ld_library_path():
+    blocked_entries = {"/opt/MVS/lib/64", "/opt/MVS/lib/32"}
+    raw_value = os.environ.get("LD_LIBRARY_PATH", "")
+    filtered_parts = []
+    for part in raw_value.split(":"):
+        normalized = part.strip()
+        if not normalized or normalized in blocked_entries:
+            continue
+        if normalized not in filtered_parts:
+            filtered_parts.append(normalized)
+    return ":".join(filtered_parts)
 
 
 def generate_launch_description():
@@ -33,6 +50,9 @@ def generate_launch_description():
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     rviz_force_software = LaunchConfiguration("rviz_force_software")
     use_rviz = LaunchConfiguration("use_rviz")
+    launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
+    launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
+    log_level = LaunchConfiguration("log_level")
 
     configured_params = ParameterFile(
         RewrittenYaml(
@@ -42,6 +62,10 @@ def generate_launch_description():
             convert_types=True,
         ),
         allow_substs=True,
+    )
+
+    sanitize_ld_library_path = SetEnvironmentVariable(
+        "LD_LIBRARY_PATH", _filtered_ld_library_path()
     )
 
     # Declare the launch arguments
@@ -131,6 +155,22 @@ def generate_launch_description():
         "use_rviz", default_value="True", description="Whether to start RVIZ"
     )
 
+    declare_launch_joy_teleop_cmd = DeclareLaunchArgument(
+        "launch_joy_teleop",
+        default_value="False",
+        description="Whether to start joystick teleop nodes",
+    )
+
+    declare_launch_trajectory_optimizer_cmd = DeclareLaunchArgument(
+        "launch_trajectory_optimizer",
+        default_value="True",
+        description="Whether to start non-critical trajectory visualization optimizer node",
+    )
+
+    declare_log_level_cmd = DeclareLaunchArgument(
+        "log_level", default_value="info", description="log level"
+    )
+
     start_velodyne_convert_tool = Node(
         package="ign_sim_pointcloud_tool",
         executable="ign_sim_pointcloud_tool_node",
@@ -163,11 +203,14 @@ def generate_launch_description():
             "autostart": autostart,
             "use_composition": use_composition,
             "use_respawn": use_respawn,
+            "launch_trajectory_optimizer": launch_trajectory_optimizer,
+            "log_level": log_level,
         }.items(),
     )
 
     joy_teleop_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(launch_dir, "joy_teleop_launch.py")),
+        condition=IfCondition(launch_joy_teleop),
         launch_arguments={
             "namespace": namespace,
             "use_sim_time": use_sim_time,
@@ -190,7 +233,11 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_file_cmd)
     ld.add_action(declare_rviz_force_software_cmd)
     ld.add_action(declare_use_rviz_cmd)
+    ld.add_action(declare_launch_joy_teleop_cmd)
+    ld.add_action(declare_launch_trajectory_optimizer_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_log_level_cmd)
+    ld.add_action(sanitize_ld_library_path)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_velodyne_convert_tool)

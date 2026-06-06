@@ -1,8 +1,11 @@
  
 
 #include <math.h>
+#include <algorithm>
 #include <queue>
 
+#include "geometry_msgs/msg/pose.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "pcl/filters/voxel_grid.h"
 #include "pcl/kdtree/kdtree_flann.h"
@@ -34,6 +37,9 @@ double terrainUnderVehicle = -0.75;
 double terrainConnThre = 0.5;
 double ceilingFilteringThre = 2.0;
 double localTerrainMapRadius = 4.0;
+double traversabilityObstacleHeightThre = 0.18;
+int traversabilityMinPointCount = 3;
+bool traversabilityUnknownAsOccupied = false;
 
 // terrain voxel parameters
 float terrainVoxelSize = 2.0;
@@ -67,6 +73,8 @@ int terrainVoxelUpdateNum[kTerrainVoxelNum] = {0};
 float terrainVoxelUpdateTime[kTerrainVoxelNum] = {0};
 float planarVoxelElev[kPlanarVoxelNum] = {0};
 int planarVoxelConn[kPlanarVoxelNum] = {0};
+float planarVoxelMaxRelHeight[kPlanarVoxelNum] = {0};
+int planarVoxelPointCount[kPlanarVoxelNum] = {0};
 std::vector<float> planarPointElev[kPlanarVoxelNum];
 std::queue<int> planarVoxelQueue;
 
@@ -156,6 +164,41 @@ void clearingHandler(const std_msgs::msg::Float32::ConstSharedPtr dis) {
   clearingCloud = true;
 }
 
+void publishTraversabilityGrid(
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr &publisher,
+    const rclcpp::Time &stamp) {
+  nav_msgs::msg::OccupancyGrid grid;
+  grid.header.stamp = stamp;
+  grid.header.frame_id = "odom";
+  grid.info.map_load_time = stamp;
+  grid.info.resolution = planarVoxelSize;
+  grid.info.width = planarVoxelWidth;
+  grid.info.height = planarVoxelWidth;
+  grid.info.origin.position.x =
+      vehicleX - (planarVoxelHalfWidth + 0.5) * planarVoxelSize;
+  grid.info.origin.position.y =
+      vehicleY - (planarVoxelHalfWidth + 0.5) * planarVoxelSize;
+  grid.info.origin.position.z = 0.0;
+  grid.info.origin.orientation.w = 1.0;
+  grid.data.assign(kPlanarVoxelNum, -1);
+
+  for (int i = 0; i < kPlanarVoxelNum; ++i) {
+    const bool has_points = planarVoxelPointCount[i] >= traversabilityMinPointCount;
+    const bool is_connected = !checkTerrainConn || planarVoxelConn[i] == 2;
+    if (!has_points) {
+      grid.data[static_cast<std::size_t>(i)] =
+          traversabilityUnknownAsOccupied ? 100 : -1;
+      continue;
+    }
+
+    const bool occupied =
+        !is_connected || planarVoxelMaxRelHeight[i] > traversabilityObstacleHeightThre;
+    grid.data[static_cast<std::size_t>(i)] = occupied ? 100 : 0;
+  }
+
+  publisher->publish(grid);
+}
+
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   auto nh = rclcpp::Node::make_shared("terrainAnalysisExt");
@@ -177,6 +220,12 @@ int main(int argc, char **argv) {
   nh->declare_parameter<double>("terrainConnThre", terrainConnThre);
   nh->declare_parameter<double>("ceilingFilteringThre", ceilingFilteringThre);
   nh->declare_parameter<double>("localTerrainMapRadius", localTerrainMapRadius);
+  nh->declare_parameter<double>("traversabilityObstacleHeightThre",
+                                traversabilityObstacleHeightThre);
+  nh->declare_parameter<int>("traversabilityMinPointCount",
+                             traversabilityMinPointCount);
+  nh->declare_parameter<bool>("traversabilityUnknownAsOccupied",
+                              traversabilityUnknownAsOccupied);
 
   nh->get_parameter("scanVoxelSize", scanVoxelSize);
   nh->get_parameter("decayTime", decayTime);
@@ -195,6 +244,12 @@ int main(int argc, char **argv) {
   nh->get_parameter("terrainConnThre", terrainConnThre);
   nh->get_parameter("ceilingFilteringThre", ceilingFilteringThre);
   nh->get_parameter("localTerrainMapRadius", localTerrainMapRadius);
+  nh->get_parameter("traversabilityObstacleHeightThre",
+                    traversabilityObstacleHeightThre);
+  nh->get_parameter("traversabilityMinPointCount",
+                    traversabilityMinPointCount);
+  nh->get_parameter("traversabilityUnknownAsOccupied",
+                    traversabilityUnknownAsOccupied);
 
   auto subOdometry = nh->create_subscription<nav_msgs::msg::Odometry>(
       "lidar_odometry", 5, odometryHandler);
@@ -214,6 +269,8 @@ int main(int argc, char **argv) {
 
   auto pubTerrainCloud =
       nh->create_publisher<sensor_msgs::msg::PointCloud2>("terrain_map_ext", 2);
+  auto pubTraversabilityGrid =
+      nh->create_publisher<nav_msgs::msg::OccupancyGrid>("traversability_grid", 2);
 
   for (int i = 0; i < kTerrainVoxelNum; i++) {
     terrainVoxelCloud[i].reset(new pcl::PointCloud<pcl::PointXYZI>());
@@ -375,6 +432,8 @@ int main(int argc, char **argv) {
       for (int i = 0; i < kPlanarVoxelNum; i++) {
         planarVoxelElev[i] = 0;
         planarVoxelConn[i] = 0;
+        planarVoxelMaxRelHeight[i] = 0.0f;
+        planarVoxelPointCount[i] = 0;
         planarPointElev[i].clear();
       }
 
@@ -407,6 +466,39 @@ int main(int argc, char **argv) {
                     .push_back(point.z);
               }
             }
+          }
+        }
+      }
+
+      for (int i = 0; i < terrainCloudSize; i++) {
+        point = terrainCloud->points[i];
+        float dis = sqrt((point.x - vehicleX) * (point.x - vehicleX) +
+                         (point.y - vehicleY) * (point.y - vehicleY));
+        if (point.z - vehicleZ > lowerBoundZ - disRatioZ * dis &&
+            point.z - vehicleZ < upperBoundZ + disRatioZ * dis) {
+          int indX =
+              static_cast<int>((point.x - vehicleX + planarVoxelSize / 2) /
+                               planarVoxelSize) +
+              planarVoxelHalfWidth;
+          int indY =
+              static_cast<int>((point.y - vehicleY + planarVoxelSize / 2) /
+                               planarVoxelSize) +
+              planarVoxelHalfWidth;
+
+          if (point.x - vehicleX + planarVoxelSize / 2 < 0)
+            indX--;
+          if (point.y - vehicleY + planarVoxelSize / 2 < 0)
+            indY--;
+
+          if (indX >= 0 && indX < planarVoxelWidth && indY >= 0 &&
+              indY < planarVoxelWidth) {
+            const int ind = planarVoxelWidth * indX + indY;
+            const float relHeight = point.z - planarVoxelElev[ind];
+            if (relHeight >= 0.0f) {
+              planarVoxelMaxRelHeight[ind] =
+                  std::max(planarVoxelMaxRelHeight[ind], relHeight);
+            }
+            planarVoxelPointCount[ind]++;
           }
         }
       }
@@ -547,6 +639,7 @@ int main(int argc, char **argv) {
           rclcpp::Time(static_cast<uint64_t>(laserCloudTime * 1e9));
       terrainCloud2.header.frame_id = "odom";
       pubTerrainCloud->publish(terrainCloud2);
+      publishTraversabilityGrid(pubTraversabilityGrid, terrainCloud2.header.stamp);
     }
 
     status = rclcpp::ok();

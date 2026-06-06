@@ -3,13 +3,30 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
+
+
+def _filtered_ld_library_path():
+    blocked_entries = {"/opt/MVS/lib/64", "/opt/MVS/lib/32"}
+    raw_value = os.environ.get("LD_LIBRARY_PATH", "")
+    filtered_parts = []
+    for part in raw_value.split(":"):
+        normalized = part.strip()
+        if not normalized or normalized in blocked_entries:
+            continue
+        if normalized not in filtered_parts:
+            filtered_parts.append(normalized)
+    return ":".join(filtered_parts)
 
 
 def generate_launch_description():
@@ -186,6 +203,10 @@ def generate_launch_description():
         parameters=[configured_params],
     )
 
+    sanitize_ld_library_path = SetEnvironmentVariable(
+        "LD_LIBRARY_PATH", _filtered_ld_library_path()
+    )
+
     rviz_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(launch_dir, "rviz_launch.py")),
         condition=IfCondition(use_rviz),
@@ -246,6 +267,7 @@ def generate_launch_description():
     ld.add_action(declare_launch_small_gicp_relocalization_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
+    ld.add_action(sanitize_ld_library_path)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_robot_state_publisher_cmd)

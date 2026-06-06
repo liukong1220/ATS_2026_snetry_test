@@ -459,6 +459,13 @@ trajectory_optimizer:
     output_profile_topic: "trajectory_profile_visual"
     # 旁路可视化订阅全局 costmap，避免 RViz 青色线只显示几何样条而忽略 J_obs。
     costmap_topic: "global_costmap/costmap_raw"
+    # 阶段一：旁路 optimizer 优先使用 terrain_map_ext 构造 ESDF，costmap 仅作为碰撞兜底。
+    esdf_source: "terrain_pointcloud"
+    terrain_pointcloud_topic: "terrain_map_ext"
+    terrain_esdf_resolution: 0.05
+    terrain_esdf_padding: 0.60
+    terrain_esdf_inflation_radius: 0.08
+    terrain_esdf_min_intensity: 0.0
     # 控制点间距：越大越平滑，但越容易在拐角内侧切进膨胀层。
     # 当前用 0.24 保形，优先解决“转弯不跟线、抄近道”。
     control_point_spacing: 0.24
@@ -913,6 +920,13 @@ smoother_server:
       velocity_smoothing_gain: 0.16
       derivative_step: 0.02
       profile_topic: "trajectory_profile"
+      # 阶段一：主链 smoother 与旁路 trajectory_optimizer 使用同一套 terrain 点云 ESDF。
+      esdf_source: "terrain_pointcloud"
+      terrain_pointcloud_topic: "terrain_map_ext"
+      terrain_esdf_resolution: 0.05
+      terrain_esdf_padding: 0.60
+      terrain_esdf_inflation_radius: 0.08
+      terrain_esdf_min_intensity: 0.0
       # cost 超过 96 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
       obstacle_safe_cost: 96
       use_esdf_obstacle_cost: true
