@@ -15,6 +15,7 @@
 #include "trajectory_optimizer/esdf_provider.hpp"
 #include "trajectory_optimizer/fake_costmap_esdf_provider.hpp"
 #include "trajectory_optimizer/terrain_pointcloud_esdf_provider.hpp"
+#include "trajectory_optimizer/traversability_esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {
@@ -27,18 +28,21 @@ public:
 private:
   void pathCallback(const nav_msgs::msg::Path::SharedPtr msg);
   void terrainPointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+  void traversabilityGridCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   void publishEsdfDebugMarkers(const nav_msgs::msg::Path & path);
   void refreshEsdfProvider();
 
   BSplinePathOptimizer optimizer_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr terrain_cloud_sub_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr traversability_grid_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr smoothed_path_pub_;
   rclcpp::Publisher<sp_msgs::msg::TrajectoryProfileMsg>::SharedPtr profile_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr esdf_marker_pub_;
   std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub_;
   std::shared_ptr<FakeCostmapEsdfProvider> fake_esdf_provider_;
   std::shared_ptr<TerrainPointCloudEsdfProvider> terrain_esdf_provider_;
+  std::shared_ptr<TraversabilityEsdfProvider> traversability_esdf_provider_;
   EsdfProviderPtr active_esdf_provider_;
   OptimizerParams params_;
 
@@ -49,10 +53,13 @@ private:
   std::string esdf_debug_topic_{"trajectory_esdf_debug"};
   std::string esdf_source_{"costmap"};
   std::string terrain_pointcloud_topic_{"terrain_map_ext"};
+  std::string traversability_grid_topic_{"traversability_grid"};
   double terrain_esdf_resolution_{0.05};
   double terrain_esdf_padding_{0.60};
   double terrain_esdf_inflation_radius_{0.08};
   double terrain_esdf_min_intensity_{0.0};
+  int traversability_obstacle_value_threshold_{50};
+  bool traversability_unknown_is_obstacle_{false};
 };
 
 }  // namespace trajectory_optimizer

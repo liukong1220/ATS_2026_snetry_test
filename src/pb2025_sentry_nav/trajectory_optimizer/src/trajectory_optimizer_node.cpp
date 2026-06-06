@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "geometry_msgs/msg/vector3.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 
 namespace trajectory_optimizer
@@ -133,10 +134,15 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<std::string>("esdf_debug_topic", esdf_debug_topic_);
   declare_parameter<std::string>("esdf_source", esdf_source_);
   declare_parameter<std::string>("terrain_pointcloud_topic", terrain_pointcloud_topic_);
+  declare_parameter<std::string>("traversability_grid_topic", traversability_grid_topic_);
   declare_parameter<double>("terrain_esdf_resolution", terrain_esdf_resolution_);
   declare_parameter<double>("terrain_esdf_padding", terrain_esdf_padding_);
   declare_parameter<double>("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
   declare_parameter<double>("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
+  declare_parameter<int>(
+    "traversability_obstacle_value_threshold", traversability_obstacle_value_threshold_);
+  declare_parameter<bool>(
+    "traversability_unknown_is_obstacle", traversability_unknown_is_obstacle_);
 
   get_parameter("input_path_topic", input_path_topic_);
   get_parameter("output_path_topic", output_path_topic_);
@@ -166,15 +172,21 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   get_parameter("esdf_debug_topic", esdf_debug_topic_);
   get_parameter("esdf_source", esdf_source_);
   get_parameter("terrain_pointcloud_topic", terrain_pointcloud_topic_);
+  get_parameter("traversability_grid_topic", traversability_grid_topic_);
   get_parameter("terrain_esdf_resolution", terrain_esdf_resolution_);
   get_parameter("terrain_esdf_padding", terrain_esdf_padding_);
   get_parameter("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
   get_parameter("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
+  get_parameter(
+    "traversability_obstacle_value_threshold", traversability_obstacle_value_threshold_);
+  get_parameter(
+    "traversability_unknown_is_obstacle", traversability_unknown_is_obstacle_);
   params_.obstacle_safe_cost = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_safe_cost)));
   optimizer_.setParams(params_);
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
+  traversability_esdf_provider_ = std::make_shared<TraversabilityEsdfProvider>();
   optimizer_.clearEsdfProvider();
 
   smoothed_path_pub_ = create_publisher<nav_msgs::msg::Path>(output_path_topic_, 10);
@@ -188,11 +200,15 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   terrain_cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     terrain_pointcloud_topic_, rclcpp::SensorDataQoS(),
     std::bind(&TrajectoryOptimizerNode::terrainPointCloudCallback, this, std::placeholders::_1));
+  traversability_grid_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_grid_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(&TrajectoryOptimizerNode::traversabilityGridCallback, this, std::placeholders::_1));
 
   RCLCPP_INFO(
     get_logger(),
-    "Trajectory optimizer active: %s -> %s, esdf_source=%s",
-    input_path_topic_.c_str(), output_path_topic_.c_str(), esdf_source_.c_str());
+    "Trajectory optimizer active: %s -> %s, esdf_source=%s terrain_topic=%s traversability_topic=%s",
+    input_path_topic_.c_str(), output_path_topic_.c_str(), esdf_source_.c_str(),
+    terrain_pointcloud_topic_.c_str(), traversability_grid_topic_.c_str());
 }
 
 void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
@@ -260,6 +276,22 @@ void TrajectoryOptimizerNode::terrainPointCloudCallback(
   }
 }
 
+void TrajectoryOptimizerNode::traversabilityGridCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  if (!traversability_esdf_provider_) {
+    return;
+  }
+  traversability_esdf_provider_->updateGrid(
+    *msg,
+    traversability_obstacle_value_threshold_,
+    traversability_unknown_is_obstacle_);
+  if (esdf_source_ == "traversability_grid") {
+    active_esdf_provider_ = traversability_esdf_provider_;
+    refreshEsdfProvider();
+  }
+}
+
 void TrajectoryOptimizerNode::refreshEsdfProvider()
 {
   if (!params_.use_esdf_obstacle_cost) {
@@ -271,6 +303,16 @@ void TrajectoryOptimizerNode::refreshEsdfProvider()
   if (esdf_source_ == "terrain_pointcloud") {
     if (terrain_esdf_provider_ && terrain_esdf_provider_->available()) {
       active_esdf_provider_ = terrain_esdf_provider_;
+      optimizer_.setEsdfProvider(active_esdf_provider_);
+    } else {
+      optimizer_.clearEsdfProvider();
+    }
+    return;
+  }
+
+  if (esdf_source_ == "traversability_grid") {
+    if (traversability_esdf_provider_ && traversability_esdf_provider_->available()) {
+      active_esdf_provider_ = traversability_esdf_provider_;
       optimizer_.setEsdfProvider(active_esdf_provider_);
     } else {
       optimizer_.clearEsdfProvider();

@@ -170,6 +170,9 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".terrain_pointcloud_topic",
     rclcpp::ParameterValue(terrain_pointcloud_topic_));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".traversability_grid_topic",
+    rclcpp::ParameterValue(traversability_grid_topic_));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".terrain_esdf_resolution",
     rclcpp::ParameterValue(terrain_esdf_resolution_));
   nav2_util::declare_parameter_if_not_declared(
@@ -181,6 +184,12 @@ void Nav2BSplineSmoother::configure(
   nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".terrain_esdf_min_intensity",
     rclcpp::ParameterValue(terrain_esdf_min_intensity_));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".traversability_obstacle_value_threshold",
+    rclcpp::ParameterValue(traversability_obstacle_value_threshold_));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".traversability_unknown_is_obstacle",
+    rclcpp::ParameterValue(traversability_unknown_is_obstacle_));
 
   node->get_parameter(plugin_name_ + ".control_point_spacing", params.control_point_spacing);
   node->get_parameter(plugin_name_ + ".output_path_spacing", params.output_path_spacing);
@@ -245,12 +254,19 @@ void Nav2BSplineSmoother::configure(
     plugin_name_ + ".collision_skip_initial_distance", collision_skip_initial_distance_);
   node->get_parameter(plugin_name_ + ".esdf_source", esdf_source_);
   node->get_parameter(plugin_name_ + ".terrain_pointcloud_topic", terrain_pointcloud_topic_);
+  node->get_parameter(plugin_name_ + ".traversability_grid_topic", traversability_grid_topic_);
   node->get_parameter(plugin_name_ + ".terrain_esdf_resolution", terrain_esdf_resolution_);
   node->get_parameter(plugin_name_ + ".terrain_esdf_padding", terrain_esdf_padding_);
   node->get_parameter(
     plugin_name_ + ".terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
   node->get_parameter(
     plugin_name_ + ".terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
+  node->get_parameter(
+    plugin_name_ + ".traversability_obstacle_value_threshold",
+    traversability_obstacle_value_threshold_);
+  node->get_parameter(
+    plugin_name_ + ".traversability_unknown_is_obstacle",
+    traversability_unknown_is_obstacle_);
   max_path_cost_ = static_cast<unsigned char>(std::max(0, configured_max_cost));
   footprint_collision_cost_threshold_ = static_cast<unsigned char>(
     std::max(0, std::min(255, configured_footprint_collision_threshold)));
@@ -261,6 +277,7 @@ void Nav2BSplineSmoother::configure(
   optimizer_.clearEsdfProvider();
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
+  traversability_esdf_provider_ = std::make_shared<TraversabilityEsdfProvider>();
   costmap_sub_ = costmap_sub;
   footprint_sub_ = footprint_sub;
   logger_ = node->get_logger();
@@ -270,9 +287,13 @@ void Nav2BSplineSmoother::configure(
   terrain_cloud_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
     terrain_pointcloud_topic_, rclcpp::SensorDataQoS(),
     std::bind(&Nav2BSplineSmoother::terrainPointCloudCallback, this, std::placeholders::_1));
+  traversability_grid_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_grid_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(&Nav2BSplineSmoother::traversabilityGridCallback, this, std::placeholders::_1));
   RCLCPP_INFO(
-    logger_, "Configured Nav2BSplineSmoother plugin: %s, esdf_source=%s",
-    plugin_name_.c_str(), esdf_source_.c_str());
+    logger_, "Configured Nav2BSplineSmoother plugin: %s, esdf_source=%s terrain_topic=%s traversability_topic=%s",
+    plugin_name_.c_str(), esdf_source_.c_str(), terrain_pointcloud_topic_.c_str(),
+    traversability_grid_topic_.c_str());
 }
 
 void Nav2BSplineSmoother::cleanup()
@@ -424,6 +445,22 @@ void Nav2BSplineSmoother::terrainPointCloudCallback(
   }
 }
 
+void Nav2BSplineSmoother::traversabilityGridCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  if (!traversability_esdf_provider_) {
+    return;
+  }
+  traversability_esdf_provider_->updateGrid(
+    *msg,
+    traversability_obstacle_value_threshold_,
+    traversability_unknown_is_obstacle_);
+  if (esdf_source_ == "traversability_grid") {
+    active_esdf_provider_ = traversability_esdf_provider_;
+    refreshEsdfProvider();
+  }
+}
+
 void Nav2BSplineSmoother::refreshEsdfProvider()
 {
   const auto params = optimizer_.getParams();
@@ -436,6 +473,16 @@ void Nav2BSplineSmoother::refreshEsdfProvider()
   if (esdf_source_ == "terrain_pointcloud") {
     if (terrain_esdf_provider_ && terrain_esdf_provider_->available()) {
       active_esdf_provider_ = terrain_esdf_provider_;
+      optimizer_.setEsdfProvider(active_esdf_provider_);
+    } else {
+      optimizer_.clearEsdfProvider();
+    }
+    return;
+  }
+
+  if (esdf_source_ == "traversability_grid") {
+    if (traversability_esdf_provider_ && traversability_esdf_provider_->available()) {
+      active_esdf_provider_ = traversability_esdf_provider_;
       optimizer_.setEsdfProvider(active_esdf_provider_);
     } else {
       optimizer_.clearEsdfProvider();

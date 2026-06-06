@@ -15,6 +15,7 @@ ament_auto_add_library(${PROJECT_NAME} SHARED
   src/bspline_path_optimizer.cpp
   src/fake_costmap_esdf_provider.cpp
   src/terrain_pointcloud_esdf_provider.cpp
+  src/traversability_esdf_provider.cpp
   src/trajectory_optimizer_node.cpp
   src/nav2_bspline_smoother.cpp
   src/trajectory_speed_governor.cpp

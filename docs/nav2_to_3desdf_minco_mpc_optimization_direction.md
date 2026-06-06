@@ -17,12 +17,12 @@
 
 当前项目已经完成的部分是：
 
-`点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> terrain_pointcloud ESDF -> Nav2 smoother / trajectory visual optimizer -> MPPI`
+`点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> traversability_grid -> traversability ESDF -> Nav2 smoother / trajectory visual optimizer -> MPPI`
 
 也就是说，现在仓库已经不再只是“纯 2D costmap + simple smoother”：
 
-1. 已经把 `terrain_map_ext` 接入到了 `trajectory_optimizer` 和 `Nav2BSplineSmoother`。
-2. 已经支持 `esdf_source: terrain_pointcloud`，说明 2.5D 地形点云已经开始参与路径回拉与近障碍代价。
+1. 已经把 `terrain_map_ext` 和 `traversability_grid` 接入到了 `trajectory_optimizer` 和 `Nav2BSplineSmoother`。
+2. 已经支持 `esdf_source: traversability_grid`，说明 2.5D 地形分析结果开始直接参与路径回拉与近障碍代价。
 3. 已经有 Gazebo 入口验证这条过渡链。
 
 但当前项目还没有完成的关键部分同样需要明确：
@@ -46,34 +46,35 @@
 
 但和最初版本相比，已经发生了两个实质变化：
 
-1. `terrain_analysis_ext` 发布 `terrain_map_ext`，不再只有 costmap 视角。
-2. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 都支持 `terrain_pointcloud` ESDF 源。
+1. `terrain_analysis_ext` 发布 `terrain_map_ext` 与 `traversability_grid`，不再只有 costmap 视角。
+2. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 都支持 `traversability_grid` ESDF 源。
 
 从代码看，这个过渡已经落实在下面几处：
 
 1. `terrain_analysis_ext` 发布 `terrain_map_ext`
-2. `trajectory_optimizer/src/terrain_pointcloud_esdf_provider.cpp` 会把 `terrain_map_ext` 转成二维距离场
-3. `trajectory_optimizer_node` 和 `Nav2BSplineSmoother` 都支持 `esdf_source: terrain_pointcloud`
-4. Gazebo 仿真参数已经默认切到这套点云 ESDF 过渡链
+2. `terrain_analysis_ext` 发布 `traversability_grid`
+3. `trajectory_optimizer/src/traversability_esdf_provider.cpp` 会把 `traversability_grid` 转成二维距离场
+4. `trajectory_optimizer_node` 和 `Nav2BSplineSmoother` 都支持 `esdf_source: traversability_grid`
+5. Gazebo 仿真参数已经默认切到这套 traversability ESDF 过渡链
 
-### 2.2 当前这套 “terrain_pointcloud ESDF” 的真实定位
+### 2.2 当前这套 “traversability ESDF” 的真实定位
 
 它的价值很明确：
 
 1. 已经摆脱了完全依赖 `global_costmap` 后处理构造 fake ESDF 的状态。
-2. 已经把三维点云投影/筛选后的结果接到了平滑器和可视化优化器上。
+2. 已经把三维点云投影/筛选后的可通行分析结果接到了平滑器和可视化优化器上。
 3. 已经为后续替换成真正的导航前端保留了 `EsdfProvider` 接口。
 
 但它还不能等价于 PDF 里那套完整方案，原因也很明确：
 
-1. 当前 `terrain_pointcloud_esdf_provider` 本质上还是“把点云直接栅格化后做二维距离传播”。
-2. 它没有显式维护 PDF 里强调的 `occupancy / traversability / height_diff / occupancy_ratio / ground_confidence` 这些中间层语义。
+1. 当前 `traversability_esdf_provider` 已经从点云直栅格化前进一步，但仍然只消费 `unknown / traversable / occupied` 三值语义。
+2. 它还没有显式维护 PDF 里强调的 `height_diff / occupancy_ratio / ground_confidence` 这些更丰富的中间层语义。
 3. 它目前服务的仍然是 `B 样条平滑器`，不是 `MINCO` 两阶段优化器。
 4. 它目前服务的控制器仍然是 `MPPI`，不是“牢牢贴轨迹”的 `SE2 MPC`。
 
 因此它更适合被定义为：
 
-`通向 3D/2.5D ESDF 主链的过渡型 ESDF 后端`
+`通向 3D/2.5D ESDF 主链的过渡型 Traversability ESDF 后端`
 
 而不是最终形态。
 
@@ -159,8 +160,9 @@
 当前已经开始落地的第一步是：
 
 1. `terrain_analysis_ext` 除了 `terrain_map_ext` 之外，新增输出 `traversability_grid`
-2. 第一版语义先收敛为 `unknown / traversable / occupied`
-3. 先保证 Gazebo 和现有导航链能稳定消费，再逐步补 `height_diff / occupancy_ratio / ground_confidence`
+2. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 已经可以直接消费 `traversability_grid`
+3. 第一版语义先收敛为 `unknown / traversable / occupied`
+4. 先保证 Gazebo 和现有导航链能稳定消费，再逐步补 `height_diff / occupancy_ratio / ground_confidence`
 
 这一步做完之后，ESDF 才真正有“来自地形语义”的基础。
 

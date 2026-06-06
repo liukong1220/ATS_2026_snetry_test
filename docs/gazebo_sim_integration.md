@@ -72,7 +72,7 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_trajectory_opt
 
 当前 Gazebo 仿真验证的并不是“最终版 JPS + MINCO + MPC”，而是下面这条过渡主链：
 
-`Gazebo robot -> 点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> terrain_map_ext + traversability_grid -> terrain_pointcloud ESDF -> Nav2(Smac + bspline smoother + MPPI)`
+`Gazebo robot -> 点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> terrain_map_ext + traversability_grid -> traversability ESDF -> Nav2(Smac + bspline smoother + MPPI)`
 
 更细一点是：
 
@@ -83,10 +83,11 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_trajectory_opt
 5. `terrain_analysis_ext`
 6. `terrain_map_ext`
 7. `traversability_grid`
-8. `planner_server: SmacPlannerHybrid`
-9. `smoother_server: Nav2BSplineSmoother`
-10. `controller_server: MPPIController`
-11. 可选 `trajectory_optimizer_node` 作为旁路可视化与剖面调试
+8. `TraversabilityEsdfProvider`
+9. `planner_server: SmacPlannerHybrid`
+10. `smoother_server: Nav2BSplineSmoother`
+11. `controller_server: MPPIController`
+12. 可选 `trajectory_optimizer_node` 作为旁路可视化与剖面调试
 
 ## 5.1 当前完整仿真模式
 
@@ -155,18 +156,18 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 
 ## 6. 已经同步到仿真的 2.5D ESDF 改动
 
-当前仿真参数已明确切到过渡版点云 ESDF 链：
+当前仿真参数已明确切到过渡版 traversability ESDF 链：
 
-1. `trajectory_optimizer.esdf_source: terrain_pointcloud`
-2. `trajectory_optimizer.terrain_pointcloud_topic: terrain_map_ext`
-3. `smoother_server.bspline_smoother.esdf_source: terrain_pointcloud`
-4. `smoother_server.bspline_smoother.terrain_pointcloud_topic: terrain_map_ext`
+1. `trajectory_optimizer.esdf_source: traversability_grid`
+2. `trajectory_optimizer.traversability_grid_topic: traversability_grid`
+3. `smoother_server.bspline_smoother.esdf_source: traversability_grid`
+4. `smoother_server.bspline_smoother.traversability_grid_topic: traversability_grid`
 5. `terrain_analysis_ext` 新增 `traversability_grid`
 
 这意味着 Gazebo 现在验证的不是旧版 `costmap fake ESDF` 单一路线，而是：
 
-1. `terrain_analysis_ext` 输出的扩展地形点云
-2. `terrain_pointcloud_esdf_provider` 构造出的二维 ESDF
+1. `terrain_analysis_ext` 输出的扩展地形点云和可通行栅格
+2. `traversability_esdf_provider` 构造出的二维 ESDF
 3. `bspline smoother` 利用该 ESDF 做近障碍回拉
 
 ## 7. 这套仿真目前能验证什么
@@ -176,7 +177,7 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 1. Gazebo 点云是否能正确进入 `terrain_analysis` 与 `terrain_analysis_ext`
 2. `terrain_map_ext` 是否与地图障碍位置基本一致
 3. `traversability_grid` 是否已经把“可通行 / 不可通行 / 未知”分出来
-4. `terrain_pointcloud` ESDF 是否能在 RViz 中表现出合理的近障碍风险分布
+4. `traversability` ESDF 是否能在 RViz 中表现出合理的近障碍风险分布
 5. `Nav2BSplineSmoother` 是否会把贴边路径往安全侧回拉
 6. `trajectory_profile` 的曲率、速度限制和近障碍代价是否合理
 7. MPPI 在上述过渡路径上的跟踪是否连续稳定
@@ -262,7 +263,7 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 
 验证：
 
-1. `terrain_map_ext -> traversability_grid -> terrain_pointcloud ESDF -> bspline smoother -> MPPI`
+1. `terrain_map_ext -> traversability_grid -> traversability ESDF -> bspline smoother -> MPPI`
 
 ### 阶段 B：下一阶段
 
