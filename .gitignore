@@ -42,6 +42,7 @@ records/
 *.swp
 *.swo
 .DS_Store
+._*
 
 # Python generated files
 __pycache__/
