@@ -1,1 +1,2 @@
 *.db3 filter=lfs diff=lfs merge=lfs -text
+src/rmu_gazebo_simulator/rmu_gazebo_simulator/resource/models/rmul_2024/meshes/*.stl filter=lfs diff=lfs merge=lfs -text
