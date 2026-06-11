@@ -3,6 +3,7 @@
 
 #include "laser_geometry/laser_geometry.hpp"
 #include "message_filters/subscriber.h"
+#include "nav2_costmap_2d/footprint.hpp"
 #include "nav2_costmap_2d/layer.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/observation_buffer.hpp"
@@ -46,6 +47,14 @@ protected:
   void updateFootprint(
     double robot_x, double robot_y, double robot_yaw, double * min_x, double * min_y,
     double * max_x, double * max_y);
+  bool buildSelfFilterFootprint(
+    double robot_x, double robot_y, double robot_yaw,
+    std::vector<geometry_msgs::msg::Point> & oriented_footprint) const;
+  bool pointInsideSelfFilterFootprint(
+    double px, double py, const std::vector<geometry_msgs::msg::Point> & footprint) const;
+  void clearSelfFilterFootprint(
+    const std::vector<geometry_msgs::msg::Point> & footprint,
+    double * min_x, double * min_y, double * max_x, double * max_y);
   void clearSelfFilterRadius(
     double robot_x, double robot_y, double * min_x, double * min_y, double * max_x,
     double * max_y);
@@ -57,6 +66,8 @@ private:
   double z_resolution_, origin_z_;
   double min_obstacle_intensity_, max_obstacle_intensity_;
   double self_filter_radius_;
+  double self_filter_padding_;
+  bool self_filter_use_footprint_;
   unsigned int unknown_threshold_, mark_threshold_, size_z_;
   rclcpp::Clock::SharedPtr clock_;
 

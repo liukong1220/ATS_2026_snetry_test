@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include "sensor_msgs/point_cloud2_iterator.hpp"
@@ -17,6 +18,38 @@ using nav2_costmap_2d::ObservationBuffer;
 
 namespace pb_nav2_costmap_2d
 {
+
+namespace
+{
+
+bool pointInPolygon(
+  double x, double y,
+  const std::vector<geometry_msgs::msg::Point> & polygon)
+{
+  if (polygon.size() < 3) {
+    return false;
+  }
+
+  bool inside = false;
+  std::size_t j = polygon.size() - 1;
+  for (std::size_t i = 0; i < polygon.size(); ++i) {
+    const double xi = polygon[i].x;
+    const double yi = polygon[i].y;
+    const double xj = polygon[j].x;
+    const double yj = polygon[j].y;
+    const bool intersects =
+      ((yi > y) != (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / std::max(yj - yi, 1e-9) + xi);
+    if (intersects) {
+      inside = !inside;
+    }
+    j = i;
+  }
+
+  return inside;
+}
+
+}  // namespace
 
 void IntensityVoxelLayer::onInitialize()
 {
@@ -34,6 +67,8 @@ void IntensityVoxelLayer::onInitialize()
   min_obstacle_intensity_ = node->declare_parameter(name_ + ".min_obstacle_intensity", 0.1);
   max_obstacle_intensity_ = node->declare_parameter(name_ + ".max_obstacle_intensity", 2.0);
   self_filter_radius_ = node->declare_parameter(name_ + ".self_filter_radius", 0.0);
+  self_filter_padding_ = node->declare_parameter(name_ + ".self_filter_padding", 0.03);
+  self_filter_use_footprint_ = node->declare_parameter(name_ + ".self_filter_use_footprint", true);
   z_resolution_ = node->declare_parameter(name_ + ".z_resolution", 0.05);
   unknown_threshold_ =
     node->declare_parameter(name_ + ".unknown_threshold", 15) + (VOXEL_BITS - size_z_);
@@ -113,6 +148,11 @@ void IntensityVoxelLayer::updateBounds(
   // update the global current status
   current_ = current;
 
+  std::vector<geometry_msgs::msg::Point> self_filter_footprint;
+  const bool has_self_filter_footprint =
+    self_filter_use_footprint_ &&
+    buildSelfFilterFootprint(robot_x, robot_y, robot_yaw, self_filter_footprint);
+
   // place the new obstacles into a priority queue... each with a priority of zero to begin with
   for (const auto & obs : observations) {
     double sq_obstacle_max_range = obs.obstacle_max_range_ * obs.obstacle_max_range_;
@@ -128,7 +168,14 @@ void IntensityVoxelLayer::updateBounds(
 
       const double sq_robot_dist =
         (px - robot_x) * (px - robot_x) + (py - robot_y) * (py - robot_y);
-      if (self_filter_radius_ > 0.0 && sq_robot_dist <= sq_self_filter_radius) {
+      if (has_self_filter_footprint &&
+        pointInsideSelfFilterFootprint(px, py, self_filter_footprint))
+      {
+        continue;
+      }
+      if (!has_self_filter_footprint &&
+        self_filter_radius_ > 0.0 && sq_robot_dist <= sq_self_filter_radius)
+      {
         continue;
       }
 
@@ -193,8 +240,63 @@ void IntensityVoxelLayer::updateBounds(
     voxel_pub_->publish(grid_msg);
   }
 
-  clearSelfFilterRadius(robot_x, robot_y, min_x, min_y, max_x, max_y);
+  if (has_self_filter_footprint) {
+    clearSelfFilterFootprint(self_filter_footprint, min_x, min_y, max_x, max_y);
+  } else {
+    clearSelfFilterRadius(robot_x, robot_y, min_x, min_y, max_x, max_y);
+  }
   updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+}
+
+bool IntensityVoxelLayer::buildSelfFilterFootprint(
+  double robot_x, double robot_y, double robot_yaw,
+  std::vector<geometry_msgs::msg::Point> & oriented_footprint) const
+{
+  const auto & base_footprint = getFootprint();
+  if (base_footprint.size() < 3) {
+    return false;
+  }
+
+  std::vector<geometry_msgs::msg::Point> padded_footprint = base_footprint;
+  const double padding = std::max(self_filter_padding_, 0.0);
+  if (padding > 0.0) {
+    nav2_costmap_2d::padFootprint(padded_footprint, padding);
+  }
+  nav2_costmap_2d::transformFootprint(
+    robot_x, robot_y, robot_yaw, padded_footprint, oriented_footprint);
+  return oriented_footprint.size() >= 3;
+}
+
+bool IntensityVoxelLayer::pointInsideSelfFilterFootprint(
+  double px, double py,
+  const std::vector<geometry_msgs::msg::Point> & footprint) const
+{
+  return pointInPolygon(px, py, footprint);
+}
+
+void IntensityVoxelLayer::clearSelfFilterFootprint(
+  const std::vector<geometry_msgs::msg::Point> & footprint,
+  double * min_x, double * min_y, double * max_x, double * max_y)
+{
+  if (footprint.size() < 3) {
+    return;
+  }
+
+  double polygon_min_x = std::numeric_limits<double>::max();
+  double polygon_min_y = std::numeric_limits<double>::max();
+  double polygon_max_x = -std::numeric_limits<double>::max();
+  double polygon_max_y = -std::numeric_limits<double>::max();
+  for (const auto & point : footprint) {
+    polygon_min_x = std::min(polygon_min_x, point.x);
+    polygon_min_y = std::min(polygon_min_y, point.y);
+    polygon_max_x = std::max(polygon_max_x, point.x);
+    polygon_max_y = std::max(polygon_max_y, point.y);
+    touch(point.x, point.y, min_x, min_y, max_x, max_y);
+  }
+
+  setConvexPolygonCost(footprint, nav2_costmap_2d::FREE_SPACE);
+  touch(polygon_min_x, polygon_min_y, min_x, min_y, max_x, max_y);
+  touch(polygon_max_x, polygon_max_y, min_x, min_y, max_x, max_y);
 }
 
 void IntensityVoxelLayer::clearSelfFilterRadius(
