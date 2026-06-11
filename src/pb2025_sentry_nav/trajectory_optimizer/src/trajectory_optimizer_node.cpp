@@ -141,6 +141,8 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<double>("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
   declare_parameter<int>(
     "traversability_obstacle_value_threshold", traversability_obstacle_value_threshold_);
+  declare_parameter<int>(
+    "traversability_lethal_value_threshold", traversability_lethal_value_threshold_);
   declare_parameter<bool>(
     "traversability_unknown_is_obstacle", traversability_unknown_is_obstacle_);
 
@@ -179,6 +181,8 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   get_parameter("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
   get_parameter(
     "traversability_obstacle_value_threshold", traversability_obstacle_value_threshold_);
+  get_parameter(
+    "traversability_lethal_value_threshold", traversability_lethal_value_threshold_);
   get_parameter(
     "traversability_unknown_is_obstacle", traversability_unknown_is_obstacle_);
   params_.obstacle_safe_cost = static_cast<unsigned char>(
@@ -285,7 +289,8 @@ void TrajectoryOptimizerNode::traversabilityGridCallback(
   traversability_esdf_provider_->updateGrid(
     *msg,
     traversability_obstacle_value_threshold_,
-    traversability_unknown_is_obstacle_);
+    traversability_unknown_is_obstacle_,
+    traversability_lethal_value_threshold_);
   if (esdf_source_ == "traversability_grid") {
     active_esdf_provider_ = traversability_esdf_provider_;
     refreshEsdfProvider();

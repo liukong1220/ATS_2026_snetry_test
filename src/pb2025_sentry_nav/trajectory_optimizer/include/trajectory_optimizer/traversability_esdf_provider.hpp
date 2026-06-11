@@ -21,7 +21,8 @@ public:
   void updateGrid(
     const nav_msgs::msg::OccupancyGrid & grid,
     int obstacle_value_threshold,
-    bool unknown_is_obstacle);
+    bool unknown_is_obstacle,
+    int lethal_value_threshold = 100);
 
   bool available() const override;
   double getDistance(double x, double y) const override;

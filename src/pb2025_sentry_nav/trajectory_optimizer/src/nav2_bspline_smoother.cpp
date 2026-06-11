@@ -188,6 +188,9 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".traversability_obstacle_value_threshold",
     rclcpp::ParameterValue(traversability_obstacle_value_threshold_));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".traversability_lethal_value_threshold",
+    rclcpp::ParameterValue(traversability_lethal_value_threshold_));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".traversability_unknown_is_obstacle",
     rclcpp::ParameterValue(traversability_unknown_is_obstacle_));
 
@@ -264,6 +267,9 @@ void Nav2BSplineSmoother::configure(
   node->get_parameter(
     plugin_name_ + ".traversability_obstacle_value_threshold",
     traversability_obstacle_value_threshold_);
+  node->get_parameter(
+    plugin_name_ + ".traversability_lethal_value_threshold",
+    traversability_lethal_value_threshold_);
   node->get_parameter(
     plugin_name_ + ".traversability_unknown_is_obstacle",
     traversability_unknown_is_obstacle_);
@@ -454,7 +460,8 @@ void Nav2BSplineSmoother::traversabilityGridCallback(
   traversability_esdf_provider_->updateGrid(
     *msg,
     traversability_obstacle_value_threshold_,
-    traversability_unknown_is_obstacle_);
+    traversability_unknown_is_obstacle_,
+    traversability_lethal_value_threshold_);
   if (esdf_source_ == "traversability_grid") {
     active_esdf_provider_ = traversability_esdf_provider_;
     refreshEsdfProvider();

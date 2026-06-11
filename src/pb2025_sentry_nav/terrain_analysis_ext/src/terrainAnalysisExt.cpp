@@ -1,7 +1,8 @@
  
 
-#include <math.h>
 #include <algorithm>
+#include <limits>
+#include <math.h>
 #include <queue>
 
 #include "geometry_msgs/msg/pose.hpp"
@@ -38,8 +39,17 @@ double terrainConnThre = 0.5;
 double ceilingFilteringThre = 2.0;
 double localTerrainMapRadius = 4.0;
 double traversabilityObstacleHeightThre = 0.18;
+double traversabilitySafeHeightThre = 0.08;
+double traversabilityOccupancyRatioThre = 0.45;
+double traversabilityGroundConfidenceThre = 0.55;
+double traversabilityHeightWeight = 0.55;
+double traversabilityOccupancyWeight = 0.30;
+double traversabilityGroundWeight = 0.15;
+double traversabilityDebugHeightDiffCap = 0.30;
+double traversabilityDebugOccupancyRatioCap = 1.0;
 int traversabilityMinPointCount = 3;
 bool traversabilityUnknownAsOccupied = false;
+bool publishTraversabilityDebugGrids = true;
 
 // terrain voxel parameters
 float terrainVoxelSize = 2.0;
@@ -74,6 +84,11 @@ float terrainVoxelUpdateTime[kTerrainVoxelNum] = {0};
 float planarVoxelElev[kPlanarVoxelNum] = {0};
 int planarVoxelConn[kPlanarVoxelNum] = {0};
 float planarVoxelMaxRelHeight[kPlanarVoxelNum] = {0};
+float planarVoxelMinZ[kPlanarVoxelNum] = {0};
+float planarVoxelMaxZ[kPlanarVoxelNum] = {0};
+float planarVoxelHeightDiff[kPlanarVoxelNum] = {0};
+float planarVoxelOccupancyRatio[kPlanarVoxelNum] = {0};
+float planarVoxelGroundConfidence[kPlanarVoxelNum] = {0};
 int planarVoxelPointCount[kPlanarVoxelNum] = {0};
 std::vector<float> planarPointElev[kPlanarVoxelNum];
 std::queue<int> planarVoxelQueue;
@@ -164,9 +179,15 @@ void clearingHandler(const std_msgs::msg::Float32::ConstSharedPtr dis) {
   clearingCloud = true;
 }
 
-void publishTraversabilityGrid(
-    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr &publisher,
-    const rclcpp::Time &stamp) {
+double clampUnit(double value) {
+  return std::max(0.0, std::min(1.0, value));
+}
+
+int8_t normalizedToOccupancy(double value) {
+  return static_cast<int8_t>(std::round(clampUnit(value) * 100.0));
+}
+
+nav_msgs::msg::OccupancyGrid makePlanarGridMessage(const rclcpp::Time &stamp) {
   nav_msgs::msg::OccupancyGrid grid;
   grid.header.stamp = stamp;
   grid.header.frame_id = "odom";
@@ -181,6 +202,46 @@ void publishTraversabilityGrid(
   grid.info.origin.position.z = 0.0;
   grid.info.origin.orientation.w = 1.0;
   grid.data.assign(kPlanarVoxelNum, -1);
+  return grid;
+}
+
+void publishScalarGrid(
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr &publisher,
+    const rclcpp::Time &stamp, const float *values, double scale_limit) {
+  if (!publisher || scale_limit <= 0.0) {
+    return;
+  }
+
+  nav_msgs::msg::OccupancyGrid grid = makePlanarGridMessage(stamp);
+  for (int i = 0; i < kPlanarVoxelNum; ++i) {
+    const bool has_points = planarVoxelPointCount[i] >= traversabilityMinPointCount;
+    if (!has_points) {
+      continue;
+    }
+    grid.data[static_cast<std::size_t>(i)] =
+        normalizedToOccupancy(static_cast<double>(values[i]) / scale_limit);
+  }
+
+  publisher->publish(grid);
+}
+
+void publishTraversabilityGrid(
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr &publisher,
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr
+        &height_diff_publisher,
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr
+        &occupancy_ratio_publisher,
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr
+        &ground_confidence_publisher,
+    const rclcpp::Time &stamp) {
+  nav_msgs::msg::OccupancyGrid grid = makePlanarGridMessage(stamp);
+
+  const double height_range = std::max(
+      traversabilityObstacleHeightThre - traversabilitySafeHeightThre, 1e-3);
+  const double weight_sum =
+      std::max(traversabilityHeightWeight + traversabilityOccupancyWeight +
+                   traversabilityGroundWeight,
+               1e-6);
 
   for (int i = 0; i < kPlanarVoxelNum; ++i) {
     const bool has_points = planarVoxelPointCount[i] >= traversabilityMinPointCount;
@@ -191,12 +252,54 @@ void publishTraversabilityGrid(
       continue;
     }
 
-    const bool occupied =
-        !is_connected || planarVoxelMaxRelHeight[i] > traversabilityObstacleHeightThre;
-    grid.data[static_cast<std::size_t>(i)] = occupied ? 100 : 0;
+    const double point_confidence = clampUnit(
+        static_cast<double>(planarVoxelPointCount[i]) /
+        static_cast<double>(std::max(traversabilityMinPointCount * 2, 1)));
+    const double connectivity_confidence =
+        !checkTerrainConn ? 1.0 : (is_connected ? 1.0 : 0.0);
+    const double ground_confidence =
+        0.6 * point_confidence + 0.4 * connectivity_confidence;
+    planarVoxelGroundConfidence[i] = static_cast<float>(ground_confidence);
+
+    const double height_metric = std::max(
+        static_cast<double>(planarVoxelHeightDiff[i]),
+        static_cast<double>(planarVoxelMaxRelHeight[i]));
+    const double height_score = clampUnit(
+        (height_metric - traversabilitySafeHeightThre) / height_range);
+    const double occupancy_activation = clampUnit(
+        (height_metric - 0.5 * traversabilitySafeHeightThre) /
+        std::max(traversabilityObstacleHeightThre - 0.5 * traversabilitySafeHeightThre,
+                 1e-3));
+    const double occupancy_score =
+        occupancy_activation *
+        clampUnit(planarVoxelOccupancyRatio[i] /
+                  std::max(traversabilityOccupancyRatioThre, 1e-3));
+    const double ground_penalty = clampUnit(
+        (traversabilityGroundConfidenceThre - ground_confidence) /
+        std::max(traversabilityGroundConfidenceThre, 1e-3));
+
+    double combined_score =
+        (traversabilityHeightWeight * height_score +
+         traversabilityOccupancyWeight * occupancy_score +
+         traversabilityGroundWeight * ground_penalty) /
+        weight_sum;
+    if (!is_connected || height_metric >= traversabilityObstacleHeightThre) {
+      combined_score = 1.0;
+    }
+
+    grid.data[static_cast<std::size_t>(i)] =
+        normalizedToOccupancy(combined_score);
   }
 
   publisher->publish(grid);
+  if (publishTraversabilityDebugGrids) {
+    publishScalarGrid(height_diff_publisher, stamp, planarVoxelHeightDiff,
+                      traversabilityDebugHeightDiffCap);
+    publishScalarGrid(occupancy_ratio_publisher, stamp, planarVoxelOccupancyRatio,
+                      traversabilityDebugOccupancyRatioCap);
+    publishScalarGrid(ground_confidence_publisher, stamp,
+                      planarVoxelGroundConfidence, 1.0);
+  }
 }
 
 int main(int argc, char **argv) {
@@ -222,10 +325,28 @@ int main(int argc, char **argv) {
   nh->declare_parameter<double>("localTerrainMapRadius", localTerrainMapRadius);
   nh->declare_parameter<double>("traversabilityObstacleHeightThre",
                                 traversabilityObstacleHeightThre);
+  nh->declare_parameter<double>("traversabilitySafeHeightThre",
+                                traversabilitySafeHeightThre);
+  nh->declare_parameter<double>("traversabilityOccupancyRatioThre",
+                                traversabilityOccupancyRatioThre);
+  nh->declare_parameter<double>("traversabilityGroundConfidenceThre",
+                                traversabilityGroundConfidenceThre);
+  nh->declare_parameter<double>("traversabilityHeightWeight",
+                                traversabilityHeightWeight);
+  nh->declare_parameter<double>("traversabilityOccupancyWeight",
+                                traversabilityOccupancyWeight);
+  nh->declare_parameter<double>("traversabilityGroundWeight",
+                                traversabilityGroundWeight);
+  nh->declare_parameter<double>("traversabilityDebugHeightDiffCap",
+                                traversabilityDebugHeightDiffCap);
+  nh->declare_parameter<double>("traversabilityDebugOccupancyRatioCap",
+                                traversabilityDebugOccupancyRatioCap);
   nh->declare_parameter<int>("traversabilityMinPointCount",
                              traversabilityMinPointCount);
   nh->declare_parameter<bool>("traversabilityUnknownAsOccupied",
                               traversabilityUnknownAsOccupied);
+  nh->declare_parameter<bool>("publishTraversabilityDebugGrids",
+                              publishTraversabilityDebugGrids);
 
   nh->get_parameter("scanVoxelSize", scanVoxelSize);
   nh->get_parameter("decayTime", decayTime);
@@ -246,10 +367,25 @@ int main(int argc, char **argv) {
   nh->get_parameter("localTerrainMapRadius", localTerrainMapRadius);
   nh->get_parameter("traversabilityObstacleHeightThre",
                     traversabilityObstacleHeightThre);
+  nh->get_parameter("traversabilitySafeHeightThre", traversabilitySafeHeightThre);
+  nh->get_parameter("traversabilityOccupancyRatioThre",
+                    traversabilityOccupancyRatioThre);
+  nh->get_parameter("traversabilityGroundConfidenceThre",
+                    traversabilityGroundConfidenceThre);
+  nh->get_parameter("traversabilityHeightWeight", traversabilityHeightWeight);
+  nh->get_parameter("traversabilityOccupancyWeight",
+                    traversabilityOccupancyWeight);
+  nh->get_parameter("traversabilityGroundWeight", traversabilityGroundWeight);
+  nh->get_parameter("traversabilityDebugHeightDiffCap",
+                    traversabilityDebugHeightDiffCap);
+  nh->get_parameter("traversabilityDebugOccupancyRatioCap",
+                    traversabilityDebugOccupancyRatioCap);
   nh->get_parameter("traversabilityMinPointCount",
                     traversabilityMinPointCount);
   nh->get_parameter("traversabilityUnknownAsOccupied",
                     traversabilityUnknownAsOccupied);
+  nh->get_parameter("publishTraversabilityDebugGrids",
+                    publishTraversabilityDebugGrids);
 
   auto subOdometry = nh->create_subscription<nav_msgs::msg::Odometry>(
       "lidar_odometry", 5, odometryHandler);
@@ -271,6 +407,15 @@ int main(int argc, char **argv) {
       nh->create_publisher<sensor_msgs::msg::PointCloud2>("terrain_map_ext", 2);
   auto pubTraversabilityGrid =
       nh->create_publisher<nav_msgs::msg::OccupancyGrid>("traversability_grid", 2);
+  auto pubTraversabilityHeightDiffGrid =
+      nh->create_publisher<nav_msgs::msg::OccupancyGrid>(
+          "traversability_height_diff_grid", 2);
+  auto pubTraversabilityOccupancyRatioGrid =
+      nh->create_publisher<nav_msgs::msg::OccupancyGrid>(
+          "traversability_occupancy_ratio_grid", 2);
+  auto pubTraversabilityGroundConfidenceGrid =
+      nh->create_publisher<nav_msgs::msg::OccupancyGrid>(
+          "traversability_ground_confidence_grid", 2);
 
   for (int i = 0; i < kTerrainVoxelNum; i++) {
     terrainVoxelCloud[i].reset(new pcl::PointCloud<pcl::PointXYZI>());
@@ -433,6 +578,11 @@ int main(int argc, char **argv) {
         planarVoxelElev[i] = 0;
         planarVoxelConn[i] = 0;
         planarVoxelMaxRelHeight[i] = 0.0f;
+        planarVoxelMinZ[i] = std::numeric_limits<float>::infinity();
+        planarVoxelMaxZ[i] = -std::numeric_limits<float>::infinity();
+        planarVoxelHeightDiff[i] = 0.0f;
+        planarVoxelOccupancyRatio[i] = 0.0f;
+        planarVoxelGroundConfidence[i] = 0.0f;
         planarVoxelPointCount[i] = 0;
         planarPointElev[i].clear();
       }
@@ -470,39 +620,6 @@ int main(int argc, char **argv) {
         }
       }
 
-      for (int i = 0; i < terrainCloudSize; i++) {
-        point = terrainCloud->points[i];
-        float dis = sqrt((point.x - vehicleX) * (point.x - vehicleX) +
-                         (point.y - vehicleY) * (point.y - vehicleY));
-        if (point.z - vehicleZ > lowerBoundZ - disRatioZ * dis &&
-            point.z - vehicleZ < upperBoundZ + disRatioZ * dis) {
-          int indX =
-              static_cast<int>((point.x - vehicleX + planarVoxelSize / 2) /
-                               planarVoxelSize) +
-              planarVoxelHalfWidth;
-          int indY =
-              static_cast<int>((point.y - vehicleY + planarVoxelSize / 2) /
-                               planarVoxelSize) +
-              planarVoxelHalfWidth;
-
-          if (point.x - vehicleX + planarVoxelSize / 2 < 0)
-            indX--;
-          if (point.y - vehicleY + planarVoxelSize / 2 < 0)
-            indY--;
-
-          if (indX >= 0 && indX < planarVoxelWidth && indY >= 0 &&
-              indY < planarVoxelWidth) {
-            const int ind = planarVoxelWidth * indX + indY;
-            const float relHeight = point.z - planarVoxelElev[ind];
-            if (relHeight >= 0.0f) {
-              planarVoxelMaxRelHeight[ind] =
-                  std::max(planarVoxelMaxRelHeight[ind], relHeight);
-            }
-            planarVoxelPointCount[ind]++;
-          }
-        }
-      }
-
       if (useSorting) {
         for (int i = 0; i < kPlanarVoxelNum; i++) {
           int planarPointElevSize = planarPointElev[i].size();
@@ -536,6 +653,67 @@ int main(int argc, char **argv) {
             }
           }
         }
+      }
+
+      for (int i = 0; i < terrainCloudSize; i++) {
+        point = terrainCloud->points[i];
+        float dis = sqrt((point.x - vehicleX) * (point.x - vehicleX) +
+                         (point.y - vehicleY) * (point.y - vehicleY));
+        if (point.z - vehicleZ > lowerBoundZ - disRatioZ * dis &&
+            point.z - vehicleZ < upperBoundZ + disRatioZ * dis) {
+          int indX =
+              static_cast<int>((point.x - vehicleX + planarVoxelSize / 2) /
+                               planarVoxelSize) +
+              planarVoxelHalfWidth;
+          int indY =
+              static_cast<int>((point.y - vehicleY + planarVoxelSize / 2) /
+                               planarVoxelSize) +
+              planarVoxelHalfWidth;
+
+          if (point.x - vehicleX + planarVoxelSize / 2 < 0)
+            indX--;
+          if (point.y - vehicleY + planarVoxelSize / 2 < 0)
+            indY--;
+
+          if (indX >= 0 && indX < planarVoxelWidth && indY >= 0 &&
+              indY < planarVoxelWidth) {
+            const int ind = planarVoxelWidth * indX + indY;
+            const float relHeight = point.z - planarVoxelElev[ind];
+            if (relHeight >= 0.0f) {
+              planarVoxelMaxRelHeight[ind] =
+                  std::max(planarVoxelMaxRelHeight[ind], relHeight);
+            }
+            planarVoxelMinZ[ind] = std::min(planarVoxelMinZ[ind], point.z);
+            planarVoxelMaxZ[ind] = std::max(planarVoxelMaxZ[ind], point.z);
+            planarVoxelPointCount[ind]++;
+          }
+        }
+      }
+
+      for (int i = 0; i < kPlanarVoxelNum; ++i) {
+        if (planarVoxelPointCount[i] <= 0 ||
+            !std::isfinite(planarVoxelMinZ[i]) ||
+            !std::isfinite(planarVoxelMaxZ[i])) {
+          continue;
+        }
+
+        planarVoxelHeightDiff[i] =
+            std::max(0.0f, planarVoxelMaxZ[i] - planarVoxelMinZ[i]);
+        const double height_metric = std::max(
+            static_cast<double>(planarVoxelHeightDiff[i]),
+            static_cast<double>(planarVoxelMaxRelHeight[i]));
+        if (height_metric <= 0.5 * traversabilitySafeHeightThre) {
+          planarVoxelOccupancyRatio[i] = 0.0f;
+          continue;
+        }
+
+        const double vertical_span =
+            std::max(height_metric, static_cast<double>(scanVoxelSize));
+        const double occupancy_ratio = clampUnit(
+            ((static_cast<double>(planarVoxelPointCount[i]) + 1.0) *
+             static_cast<double>(scanVoxelSize)) /
+            vertical_span);
+        planarVoxelOccupancyRatio[i] = static_cast<float>(occupancy_ratio);
       }
 
       // check terrain connectivity to remove ceiling
@@ -639,7 +817,11 @@ int main(int argc, char **argv) {
           rclcpp::Time(static_cast<uint64_t>(laserCloudTime * 1e9));
       terrainCloud2.header.frame_id = "odom";
       pubTerrainCloud->publish(terrainCloud2);
-      publishTraversabilityGrid(pubTraversabilityGrid, terrainCloud2.header.stamp);
+      publishTraversabilityGrid(pubTraversabilityGrid,
+                                pubTraversabilityHeightDiffGrid,
+                                pubTraversabilityOccupancyRatioGrid,
+                                pubTraversabilityGroundConfidenceGrid,
+                                terrainCloud2.header.stamp);
     }
 
     status = rclcpp::ok();

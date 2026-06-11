@@ -104,6 +104,7 @@ private:
   double terrain_esdf_inflation_radius_{0.08};
   double terrain_esdf_min_intensity_{0.0};
   int traversability_obstacle_value_threshold_{50};
+  int traversability_lethal_value_threshold_{90};
   bool traversability_unknown_is_obstacle_{false};
   unsigned char max_path_cost_{96};
   unsigned char footprint_collision_cost_threshold_{253};

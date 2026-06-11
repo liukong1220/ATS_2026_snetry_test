@@ -34,7 +34,8 @@ struct GridNodeCompare
 void TraversabilityEsdfProvider::updateGrid(
   const nav_msgs::msg::OccupancyGrid & grid,
   int obstacle_value_threshold,
-  bool unknown_is_obstacle)
+  bool unknown_is_obstacle,
+  int lethal_value_threshold)
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -62,19 +63,25 @@ void TraversabilityEsdfProvider::updateGrid(
   std::priority_queue<GridNode, std::vector<GridNode>, GridNodeCompare> open;
   bool has_obstacle_seed = false;
   const int safe_threshold = std::max(0, std::min(100, obstacle_value_threshold));
+  const int lethal_threshold =
+    std::max(safe_threshold, std::min(100, lethal_value_threshold));
   for (unsigned int my = 0; my < height_; ++my) {
     for (unsigned int mx = 0; mx < width_; ++mx) {
       const int8_t value = grid.data[indexOf(mx, my)];
       const bool is_unknown = value < 0;
-      const bool is_obstacle =
-        value >= safe_threshold || (unknown_is_obstacle && is_unknown);
+      const bool is_lethal_obstacle =
+        value >= lethal_threshold || (unknown_is_obstacle && is_unknown);
+      const bool is_risk_obstacle =
+        value >= safe_threshold;
+      const bool is_obstacle = is_lethal_obstacle || is_risk_obstacle;
       if (!is_obstacle) {
         continue;
       }
 
       const auto idx = indexOf(mx, my);
-      distance_field_[idx] = 0.0;
-      open.push(GridNode {mx, my, 0.0});
+      const double seed_distance = is_lethal_obstacle ? 0.0 : 0.5 * resolution_;
+      distance_field_[idx] = seed_distance;
+      open.push(GridNode {mx, my, seed_distance});
       has_obstacle_seed = true;
     }
   }
