@@ -205,7 +205,7 @@ def generate_launch_description():
             default_value=os.path.join(
                 behavior_dir, "params", "sentry_behavior_decision_vision_test.yaml"
             ),
-            description="Behavior parameters for referee-free decision and vision follow test.",
+            description="Behavior parameters for pure vision-follow test without referee or decision fallback.",
         )
     )
     ld.add_action(

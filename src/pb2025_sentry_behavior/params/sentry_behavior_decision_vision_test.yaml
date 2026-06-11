@@ -14,7 +14,8 @@ pb2025_sentry_behavior_server:
       - pb2025_sentry_behavior/behavior_trees
 
     decision:
-      # 该测试树不读取裁判系统，只通过 decision/sim_mode 测试巡逻/定点/撤退等决策。
+      # 该测试树只保留视觉跟随主链，不读取裁判系统，也不再走 simulation 决策分支。
+      # input_source 保留为 simulation，仅用于满足通用参数声明；当前树不会读取它。
       input_source: simulation
 
       goal_points:
@@ -51,7 +52,7 @@ pb2025_sentry_behavior_server:
         hit_spin_stop_after_no_hp_drop_s: 2.0
 
       mode_limits:
-        # 决策/视觉专测通常不接裁判系统，避免姿态冷却影响观察分支切换。
+        # 纯视觉专测通常不接裁判系统，避免姿态冷却影响观察 attack/move 切换。
         switch_cooldown_s: 0.0
         max_cumulative_s: 100000.0
 
