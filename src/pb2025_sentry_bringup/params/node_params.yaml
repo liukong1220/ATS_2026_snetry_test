@@ -166,7 +166,7 @@ sensor_scan_generation:
 
 terrain_analysis:
   ros__parameters:
-    scanVoxelSize: 0.022                # 75deg 下视安装时保留近场细节，同时降低单帧毛刺。
+    scanVoxelSize: 0.018                # 30cm 级小障碍需要更多近场点保留下来，略减小体素避免被过早稀疏化。
     decayTime: 0.30                     # 4m/s 下旧点 0.35s 会拖出约 1.4m 影子，继续缩短可减少障碍拖影。
     noDecayDis: 0.0                     # 点云距离阈值 小于该阈值不考虑时间差
     clearingDis: 15.0                    # 该距离外的点会被清除
@@ -182,15 +182,15 @@ terrain_analysis:
     absDyObsRelZThre: 0.2
     minDyObsVFOV: -64.0
     maxDyObsVFOV: 6.0
-    minDyObsPointNum: 3
+    minDyObsPointNum: 2
     noDataObstacle: False               # treat no data as obstacle
     noDataBlockSkipNum: 0
-    minBlockPointNum: 12
-    vehicleHeight: 0.45                 # 小于车辆高度的点才会进行处理
+    minBlockPointNum: 6                 # 30cm 级障碍在下视安装下命中点不多，降低成障最低点数门槛。
+    vehicleHeight: 0.55                 # 允许 30~40cm 级障碍在起伏地面上仍能完整进入近场障碍层。
     voxelPointUpdateThre: 100
     voxelTimeUpdateThre: 0.45
     minRelZ: -0.65                      # min_rel_z 以及 max_rel_z 限制了有效点云点的Z值范围，用于对天花板和地板进行处理
-    maxRelZ: 0.32
+    maxRelZ: 0.42                       # 给近距小障碍顶面更多 z 裕量，避免因安装姿态导致顶面被裁掉。
     disRatioZ: 0.10                     # 下视安装减少远距离高度窗口膨胀，避免天花板/远处高点混入障碍层。
 
 terrain_analysis_ext:
@@ -781,7 +781,7 @@ local_costmap:
         mark_threshold: 0
         origin_z: 0.0
         unknown_threshold: 5
-        self_filter_radius: 0.50
+        self_filter_radius: 0.32        # 0.50 会把贴近车体的小障碍一起清掉，缩到略大于底盘外接半径。
         z_resolution: 0.05
         z_voxels: 12
         min_obstacle_height: 0.0
@@ -798,7 +798,7 @@ local_costmap:
           min_obstacle_height: 0.0
           max_obstacle_height: 2.0
           obstacle_max_range: 7.0
-          obstacle_min_range: 0.50
+          obstacle_min_range: 0.22      # 允许近场 30cm 级障碍更早进入 local costmap。
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -832,7 +832,7 @@ global_costmap:
         mark_threshold: 0
         origin_z: 0.0
         unknown_threshold: 5
-        self_filter_radius: 0.50
+        self_filter_radius: 0.32
         z_resolution: 0.05
         z_voxels: 12
         min_obstacle_height: 0.0
@@ -849,7 +849,7 @@ global_costmap:
           min_obstacle_height: 0.0
           max_obstacle_height: 2.0
           obstacle_max_range: 10.0
-          obstacle_min_range: 0.50
+          obstacle_min_range: 0.22
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
