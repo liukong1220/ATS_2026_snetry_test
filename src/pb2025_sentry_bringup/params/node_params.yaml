@@ -212,6 +212,18 @@ terrain_analysis_ext:
     terrainConnThre: 0.5
     ceilingFilteringThre: 2.0
     localTerrainMapRadius: 4.0
+    traversabilityObstacleHeightThre: 0.18
+    traversabilitySafeHeightThre: 0.08
+    traversabilityOccupancyRatioThre: 0.45
+    traversabilityGroundConfidenceThre: 0.55
+    traversabilityHeightWeight: 0.55
+    traversabilityOccupancyWeight: 0.30
+    traversabilityGroundWeight: 0.15
+    traversabilityDebugHeightDiffCap: 0.30
+    traversabilityDebugOccupancyRatioCap: 1.0
+    traversabilityMinPointCount: 3
+    traversabilityUnknownAsOccupied: false
+    publishTraversabilityDebugGrids: true
 
 fake_vel_transform:
   ros__parameters:
@@ -468,6 +480,7 @@ trajectory_optimizer:
     terrain_esdf_inflation_radius: 0.08
     terrain_esdf_min_intensity: 0.0
     traversability_obstacle_value_threshold: 50
+    traversability_lethal_value_threshold: 90
     traversability_unknown_is_obstacle: false
     # 控制点间距：越大越平滑，但越容易在拐角内侧切进膨胀层。
     # 当前用 0.24 保形，优先解决“转弯不跟线、抄近道”。
@@ -736,7 +749,7 @@ controller_server:
       # Parameter `visualize`
       # 建议实车联调时保持开启，方便在 RViz 中观察 rollout 形状。
       # 官方文档同时提醒：部署时保持 true 会增加算力开销，应谨慎使用。
-      visualize: false
+      visualize: true
       TrajectoryVisualizer:
         trajectory_step: 5
         time_step: 3
@@ -932,6 +945,7 @@ smoother_server:
       terrain_esdf_inflation_radius: 0.08
       terrain_esdf_min_intensity: 0.0
       traversability_obstacle_value_threshold: 50
+      traversability_lethal_value_threshold: 90
       traversability_unknown_is_obstacle: false
       # cost 超过 96 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
       obstacle_safe_cost: 96
@@ -1048,7 +1062,7 @@ behavior_server:
     monitor_lookahead_distance: 0.35
     # 若后向和侧后向都不行，允许全角域兜底搜索。
     enable_full_circle_fallback: true
-    visualize: false
+    visualize: true
 
 waypoint_follower:
   ros__parameters:

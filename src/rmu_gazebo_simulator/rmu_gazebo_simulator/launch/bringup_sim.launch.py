@@ -32,6 +32,7 @@ def generate_launch_description():
 
     world = LaunchConfiguration("world")
     gz_world_config = LaunchConfiguration("gz_world_path")
+    robot_xmacro_file = LaunchConfiguration("robot_xmacro_file")
 
     declare_world = DeclareLaunchArgument(
         "world",
@@ -43,6 +44,11 @@ def generate_launch_description():
         "gz_world_path",
         default_value=gz_world_path,
         description="Path to gz world config yaml",
+    )
+    declare_robot_xmacro_file = DeclareLaunchArgument(
+        "robot_xmacro_file",
+        default_value="",
+        description="Robot SDF xmacro file path used for Gazebo spawning",
     )
 
     world_sdf_path = [
@@ -69,6 +75,7 @@ def generate_launch_description():
         launch_arguments={
             "gz_world_path": gz_world_config,
             "world": world,
+            "robot_xmacro_file": robot_xmacro_file,
         }.items(),
     )
 
@@ -82,6 +89,7 @@ def generate_launch_description():
 
     ld.add_action(declare_world)
     ld.add_action(declare_gz_world_path)
+    ld.add_action(declare_robot_xmacro_file)
     ld.add_action(gazebo_launch)
     ld.add_action(spawn_robots_launch)
     ld.add_action(referee_system_launch)

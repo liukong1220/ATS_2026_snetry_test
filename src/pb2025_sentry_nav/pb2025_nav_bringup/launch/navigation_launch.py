@@ -24,6 +24,7 @@ def generate_launch_description():
     container_name_full = (namespace, "/", container_name)
     use_respawn = LaunchConfiguration("use_respawn")
     launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
+    launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
     log_level = LaunchConfiguration("log_level")
 
     lifecycle_nodes = [
@@ -103,6 +104,12 @@ def generate_launch_description():
         description="Whether to start non-critical trajectory visualization optimizer node",
     )
 
+    declare_launch_chassis_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_chassis_vel_transform",
+        default_value="False",
+        description="Whether to start sentry chassis velocity transform node",
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -127,6 +134,43 @@ def generate_launch_description():
         respawn_delay=2.0,
         arguments=["--ros-args", "--log-level", log_level],
         parameters=[configured_params],
+    )
+
+    static_tf_base_footprint_to_base_link_cmd = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="static_transform_publisher_base_footprint_to_base_link",
+        output="screen",
+        arguments=[
+            "--x",
+            "0.0",
+            "--y",
+            "0.0",
+            "--z",
+            "0.0",
+            "--roll",
+            "0.0",
+            "--pitch",
+            "0.0",
+            "--yaw",
+            "0.0",
+            "--frame-id",
+            "base_footprint",
+            "--child-frame-id",
+            "base_link",
+        ],
+    )
+
+    start_chassis_vel_transform_cmd = Node(
+        package="sentry_chassis_vel_transform",
+        executable="chassis_vel_transform_node",
+        name="chassis_vel_transform",
+        condition=IfCondition(launch_chassis_vel_transform),
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[configured_params],
+        arguments=["--ros-args", "--log-level", log_level],
     )
 
     load_nodes = GroupAction(
@@ -400,10 +444,13 @@ def generate_launch_description():
     ld.add_action(declare_container_name_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_launch_trajectory_optimizer_cmd)
+    ld.add_action(declare_launch_chassis_vel_transform_cmd)
     ld.add_action(declare_log_level_cmd)
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_terrain_analysis_cmd)
     ld.add_action(start_terrain_analysis_ext_cmd)
+    ld.add_action(static_tf_base_footprint_to_base_link_cmd)
+    ld.add_action(start_chassis_vel_transform_cmd)
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
     ld.add_action(load_trajectory_optimizer_node)

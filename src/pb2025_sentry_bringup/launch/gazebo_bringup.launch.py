@@ -6,6 +6,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -25,6 +26,9 @@ def generate_launch_description():
     launch_behavior = LaunchConfiguration("launch_behavior")
     launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
     launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
+    launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
+    launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
+    robot_xmacro_file = LaunchConfiguration("robot_xmacro_file")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
 
@@ -40,7 +44,7 @@ def generate_launch_description():
     )
     declare_nav_world = DeclareLaunchArgument(
         "nav_world",
-        default_value="rmul",
+        default_value="rmuc_2025",
         description="Navigation map/pcd asset basename under pb2025_sentry_bringup/{map,pcd}",
     )
     declare_use_rviz = DeclareLaunchArgument(
@@ -85,6 +89,32 @@ def generate_launch_description():
         default_value="True",
         description="Whether to start visualization trajectory optimizer node",
     )
+    declare_launch_small_gicp_relocalization = DeclareLaunchArgument(
+        "launch_small_gicp_relocalization",
+        default_value="True",
+        description=(
+            "Whether to start small_gicp map->odom relocalization. Keep it true "
+            "when validating the same localization chain as the real robot."
+        ),
+    )
+    declare_launch_chassis_vel_transform = DeclareLaunchArgument(
+        "launch_chassis_vel_transform",
+        default_value="True",
+        description=(
+            "Whether to start chassis velocity transform for simulation tests. "
+            "Keep true when validating the same velocity reference chain as the real robot."
+        ),
+    )
+    declare_robot_xmacro_file = DeclareLaunchArgument(
+        "robot_xmacro_file",
+        default_value=os.path.join(
+            get_package_share_directory("pb2025_robot_description"),
+            "resource",
+            "xmacro",
+            "simulation_nav_robot.sdf.xmacro",
+        ),
+        description="Robot SDF xmacro file used by Gazebo spawn",
+    )
     declare_use_respawn = DeclareLaunchArgument(
         "use_respawn",
         default_value="False",
@@ -101,6 +131,7 @@ def generate_launch_description():
         launch_arguments={
             "world": sim_world,
             "gz_world_path": os.path.join(simulator_dir, "config", "gz_world.yaml"),
+            "robot_xmacro_file": robot_xmacro_file,
         }.items(),
     )
 
@@ -128,6 +159,8 @@ def generate_launch_description():
             "rviz_force_software": rviz_force_software,
             "launch_joy_teleop": launch_joy_teleop,
             "launch_trajectory_optimizer": launch_trajectory_optimizer,
+            "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+            "launch_chassis_vel_transform": launch_chassis_vel_transform,
             "use_respawn": use_respawn,
             "log_level": log_level,
         }.items(),
@@ -148,6 +181,23 @@ def generate_launch_description():
         }.items(),
     )
 
+    debug_path_recorder = Node(
+        package="pb2025_sentry_bringup",
+        executable="debug_path_recorder.py",
+        namespace=namespace,
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": True,
+                "max_len": 400,
+                "odom_topic": "odometry",
+                "gt_topic": "chassis_odometry_gt",
+                "odom_path_topic": "odom_path",
+                "gt_path_topic": "chassis_odometry_gt_path",
+            }
+        ],
+    )
+
     ld = LaunchDescription()
     ld.add_action(declare_namespace)
     ld.add_action(declare_sim_world)
@@ -160,9 +210,13 @@ def generate_launch_description():
     ld.add_action(declare_launch_behavior)
     ld.add_action(declare_launch_joy_teleop)
     ld.add_action(declare_launch_trajectory_optimizer)
+    ld.add_action(declare_launch_small_gicp_relocalization)
+    ld.add_action(declare_launch_chassis_vel_transform)
+    ld.add_action(declare_robot_xmacro_file)
     ld.add_action(declare_use_respawn)
     ld.add_action(declare_log_level)
     ld.add_action(simulator_launch)
     ld.add_action(navigation_launch)
     ld.add_action(behavior_launch)
+    ld.add_action(debug_path_recorder)
     return ld

@@ -171,7 +171,7 @@ def generate_launch_description():
 
     declare_launch_small_gicp_relocalization_cmd = DeclareLaunchArgument(
         "launch_small_gicp_relocalization",
-        default_value="False",
+        default_value="True",
         description="Whether to start small_gicp map->odom relocalization",
     )
 

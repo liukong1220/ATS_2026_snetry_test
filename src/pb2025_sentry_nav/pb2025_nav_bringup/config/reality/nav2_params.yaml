@@ -150,8 +150,17 @@ terrain_analysis_ext:
     ceilingFilteringThre: 2.0
     localTerrainMapRadius: 4.0
     traversabilityObstacleHeightThre: 0.18
+    traversabilitySafeHeightThre: 0.08
+    traversabilityOccupancyRatioThre: 0.45
+    traversabilityGroundConfidenceThre: 0.55
+    traversabilityHeightWeight: 0.55
+    traversabilityOccupancyWeight: 0.30
+    traversabilityGroundWeight: 0.15
+    traversabilityDebugHeightDiffCap: 0.30
+    traversabilityDebugOccupancyRatioCap: 1.0
     traversabilityMinPointCount: 3
     traversabilityUnknownAsOccupied: false
+    publishTraversabilityDebugGrids: true
 
 fake_vel_transform:
   ros__parameters:
@@ -164,6 +173,26 @@ fake_vel_transform:
     output_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
     cmd_spin_topic: "cmd_spin"
     init_spin_speed: 0.0
+
+chassis_vel_transform:
+  ros__parameters:
+    use_sim_time: false
+    joint_state_topic: "serial/gimbal_joint_state"
+    input_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
+    output_cmd_vel_topic: "/cmd_vel"
+    big_yaw_joint_name: "gimbal_yaw_odom_joint"
+    linear_gain: 1.0
+    angular_gain: 1.0
+    max_linear_speed: 4.6
+    max_linear_accel: 3.6
+    max_angular_speed: 4.2
+    max_angular_accel: 5.0
+    max_yaw_transform_rate: 3.5
+    transform_linear_with_big_yaw: true
+    invert_big_yaw: false
+    invert_output_x: false
+    invert_output_y: false
+    pass_through_without_yaw: true
 
 small_gicp_relocalization:
   ros__parameters:
@@ -186,6 +215,17 @@ small_gicp_relocalization:
     #init_pose: [20.3, 0.0, 0.0, 0.0, 0.0, 3.14]   # [x, y, z, roll, pitch, yaw]
     # The prior_pcd_file does not need to be specified since it going to be set by defaults in launch.
     # prior_pcd_file: ""
+
+map_odom_initializer:
+  ros__parameters:
+    use_sim_time: false
+    map_frame: "map"
+    odom_frame: "odom"
+    robot_base_frame: "gimbal_yaw_odom"
+    publish_frequency: 20.0
+    publish_future_offset_s: 0.05
+    lookup_timeout_s: 0.2
+    init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 pointcloud_to_laserscan:
   ros__parameters:
@@ -355,6 +395,7 @@ trajectory_optimizer:
     terrain_esdf_inflation_radius: 0.08
     terrain_esdf_min_intensity: 0.0
     traversability_obstacle_value_threshold: 50
+    traversability_lethal_value_threshold: 90
     traversability_unknown_is_obstacle: false
     # 控制点间距：越大越平滑，但越容易在拐角内侧切进膨胀层。
     # 当前用 0.24 保形，优先解决“转弯不跟线、抄近道”。
@@ -584,7 +625,7 @@ controller_server:
       # Parameter `visualize`
       # 实车联调时建议保留，可配合 RViz 查看 rollout 是否发散。
       # 官方文档同时提醒：部署时保持 true 会增加算力开销，应谨慎使用。
-      visualize: false
+      visualize: true
       TrajectoryVisualizer:
         trajectory_step: 5
         time_step: 3
@@ -775,6 +816,7 @@ smoother_server:
       terrain_esdf_inflation_radius: 0.08
       terrain_esdf_min_intensity: 0.0
       traversability_obstacle_value_threshold: 50
+      traversability_lethal_value_threshold: 90
       traversability_unknown_is_obstacle: false
       # cost 超过 96 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
       obstacle_safe_cost: 96

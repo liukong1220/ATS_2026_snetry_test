@@ -59,6 +59,8 @@ private:
   double min_registration_translation_delta_;
   double min_registration_yaw_delta_;
   double initial_pose_force_registration_window_s_;
+  double transform_future_offset_s_;
+  double max_scan_stamp_lag_s_;
   std::vector<double> init_pose_;
 
   std::string map_frame_;

@@ -123,6 +123,32 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", log_level],
     )
 
+    static_tf_map_to_odom_cmd = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="static_transform_publisher_map_to_odom",
+        condition=IfCondition(PythonExpression(["not ", launch_small_gicp_relocalization])),
+        output="screen",
+        arguments=[
+            "--x",
+            "0.0",
+            "--y",
+            "0.0",
+            "--z",
+            "0.0",
+            "--roll",
+            "0.0",
+            "--pitch",
+            "0.0",
+            "--yaw",
+            "0.0",
+            "--frame-id",
+            "map",
+            "--child-frame-id",
+            "odom",
+        ],
+    )
+
     load_nodes = GroupAction(
         condition=IfCondition(PythonExpression(["not ", use_composition])),
         actions=[
@@ -162,34 +188,10 @@ def generate_launch_description():
         ],
     )
 
-    static_tf_map_to_odom_cmd = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="static_transform_publisher_map_to_odom",
-        condition=IfCondition(PythonExpression(["not ", launch_small_gicp_relocalization])),
-        output="screen",
-        arguments=[
-            "--x",
-            "0.0",
-            "--y",
-            "0.0",
-            "--z",
-            "0.0",
-            "--roll",
-            "0.0",
-            "--pitch",
-            "0.0",
-            "--yaw",
-            "0.0",
-            "--frame-id",
-            "map",
-            "--child-frame-id",
-            "odom",
-        ],
-    )
-
     load_composable_nodes = LoadComposableNodes(
-        condition=IfCondition(use_composition),
+        condition=IfCondition(
+            PythonExpression([use_composition, " and not ", launch_small_gicp_relocalization])
+        ),
         target_container=container_name_full,
         composable_node_descriptions=[
             ComposableNode(
@@ -213,12 +215,30 @@ def generate_launch_description():
         ],
     )
 
-    load_small_gicp_node = LoadComposableNodes(
+    load_composable_nodes_with_small_gicp = LoadComposableNodes(
         condition=IfCondition(
             PythonExpression([use_composition, " and ", launch_small_gicp_relocalization])
         ),
         target_container=container_name_full,
         composable_node_descriptions=[
+            ComposableNode(
+                package="nav2_map_server",
+                plugin="nav2_map_server::MapServer",
+                name="map_server",
+                parameters=[configured_params],
+            ),
+            ComposableNode(
+                package="nav2_lifecycle_manager",
+                plugin="nav2_lifecycle_manager::LifecycleManager",
+                name="lifecycle_manager_localization",
+                parameters=[
+                    {
+                        "use_sim_time": use_sim_time,
+                        "autostart": autostart,
+                        "node_names": lifecycle_nodes,
+                    }
+                ],
+            ),
             ComposableNode(
                 package="small_gicp_relocalization",
                 plugin="small_gicp_relocalization::SmallGicpRelocalizationNode",
@@ -253,6 +273,6 @@ def generate_launch_description():
     ld.add_action(static_tf_map_to_odom_cmd)
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
-    ld.add_action(load_small_gicp_node)
+    ld.add_action(load_composable_nodes_with_small_gicp)
 
     return ld

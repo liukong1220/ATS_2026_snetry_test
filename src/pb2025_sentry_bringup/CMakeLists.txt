@@ -26,5 +26,6 @@ ament_auto_package(
 install(
   PROGRAMS
   scripts/fake_decision_sim_inputs.py
+  scripts/debug_path_recorder.py
   DESTINATION lib/${PROJECT_NAME}
 )

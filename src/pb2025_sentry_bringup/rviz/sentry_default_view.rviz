@@ -581,6 +581,62 @@ Visualization Manager:
             Reliability Policy: Reliable
             Value: local_costmap/published_footprint
           Value: true
+        - Alpha: 0.8999999761581421
+          Buffer Length: 200
+          Class: rviz_default_plugins/Path
+          Color: 255; 196; 0
+          Enabled: true
+          Head Diameter: 0.05000000074505806
+          Head Length: 0.05000000074505806
+          Length: 0.30000001192092896
+          Line Style: Lines
+          Line Width: 0.02500000037252903
+          Name: Odom Path
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.029999999329447746
+          Pose Color: 255; 85; 255
+          Pose Style: None
+          Radius: 0.029999999329447746
+          Shaft Diameter: 0.019999999552965164
+          Shaft Length: 0.019999999552965164
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: odom_path
+          Value: true
+        - Alpha: 0.699999988079071
+          Buffer Length: 200
+          Class: rviz_default_plugins/Path
+          Color: 255; 64; 64
+          Enabled: true
+          Head Diameter: 0.05000000074505806
+          Head Length: 0.05000000074505806
+          Length: 0.30000001192092896
+          Line Style: Lines
+          Line Width: 0.02500000037252903
+          Name: GT Path
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.039999999105930328
+          Pose Color: 255; 85; 255
+          Pose Style: None
+          Radius: 0.029999999329447746
+          Shaft Diameter: 0.019999999552965164
+          Shaft Length: 0.019999999552965164
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: chassis_odometry_gt_path
+          Value: true
       Enabled: true
       Name: Local Planner (MPPI)
     - Class: rviz_default_plugins/MarkerArray
@@ -647,7 +703,7 @@ Visualization Manager:
         Value: back_up_free_space_markers
       Value: true
     - Class: rviz_default_plugins/MarkerArray
-      Enabled: false
+      Enabled: true
       Name: TrajectoryProfileMarkers
       Namespaces:
         {}
@@ -657,7 +713,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: trajectory_profile_markers
-      Value: false
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: TrajectoryESDFDebug

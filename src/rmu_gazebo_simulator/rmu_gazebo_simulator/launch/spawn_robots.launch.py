@@ -39,12 +39,15 @@ def launch_setup(context: LaunchContext):
         "pb2025_robot_description"
     )
 
-    robot_xmacro_path = os.path.join(
+    default_robot_xmacro_path = os.path.join(
         pkg_pb2025_robot_description,
         "resource",
         "xmacro",
-        "simulation_robot.sdf.xmacro",
+        "simulation_nav_robot.sdf.xmacro",
     )
+    robot_xmacro_path = LaunchConfiguration("robot_xmacro_file").perform(context)
+    if not robot_xmacro_path:
+        robot_xmacro_path = default_robot_xmacro_path
     bridge_config = os.path.join(pkg_simulator, "config", "ros_gz_bridge.yaml")
     robot_config = os.path.join(pkg_simulator, "config", "base_params.yaml")
 
@@ -163,7 +166,16 @@ def launch_setup(context: LaunchContext):
 
 def generate_launch_description():
     pkg_simulator = get_package_share_directory("rmu_gazebo_simulator")
+    pkg_pb2025_robot_description = get_package_share_directory(
+        "pb2025_robot_description"
+    )
     default_gz_world_path = os.path.join(pkg_simulator, "config", "gz_world.yaml")
+    default_robot_xmacro_path = os.path.join(
+        pkg_pb2025_robot_description,
+        "resource",
+        "xmacro",
+        "simulation_nav_robot.sdf.xmacro",
+    )
 
     declare_gz_world_path = DeclareLaunchArgument(
         "gz_world_path",
@@ -175,9 +187,15 @@ def generate_launch_description():
         default_value="rmuc_2025",
         description="Gazebo world name, e.g. rmuc_2025 or rmul_2025",
     )
+    declare_robot_xmacro_file = DeclareLaunchArgument(
+        "robot_xmacro_file",
+        default_value=default_robot_xmacro_path,
+        description="Robot SDF xmacro file path used for Gazebo spawning",
+    )
 
     ld = LaunchDescription()
     ld.add_action(declare_gz_world_path)
     ld.add_action(declare_world)
+    ld.add_action(declare_robot_xmacro_file)
     ld.add_action(OpaqueFunction(function=launch_setup))
     return ld

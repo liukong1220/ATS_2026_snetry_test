@@ -193,3 +193,4 @@ pb2025_sentry_nav/
 - [../../docs/mppi_parameter_tuning_guide.md](../../docs/mppi_parameter_tuning_guide.md)
 - [../../docs/omni_recovery_smoothing_optimization.md](../../docs/omni_recovery_smoothing_optimization.md)
 - [../../docs/上车测试清单.md](../../docs/上车测试清单.md)
+- [../../docs/gazebo_sim_integration.md](../../docs/gazebo_sim_integration.md)

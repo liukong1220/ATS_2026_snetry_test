@@ -31,6 +31,8 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("min_registration_translation_delta", 0.10);
   this->declare_parameter("min_registration_yaw_delta", 0.12);
   this->declare_parameter("initial_pose_force_registration_window_s", 2.0);
+  this->declare_parameter("transform_future_offset_s", 0.25);
+  this->declare_parameter("max_scan_stamp_lag_s", 0.25);
   this->declare_parameter("map_frame", "map");
   this->declare_parameter("odom_frame", "odom");
   this->declare_parameter("base_frame", "");
@@ -55,6 +57,8 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter(
     "initial_pose_force_registration_window_s",
     initial_pose_force_registration_window_s_);
+  this->get_parameter("transform_future_offset_s", transform_future_offset_s_);
+  this->get_parameter("max_scan_stamp_lag_s", max_scan_stamp_lag_s_);
   this->get_parameter("map_frame", map_frame_);
   this->get_parameter("odom_frame", odom_frame_);
   this->get_parameter("base_frame", base_frame_);
@@ -237,9 +241,22 @@ void SmallGicpRelocalizationNode::publishTransform()
   }
 
   geometry_msgs::msg::TransformStamped transform_stamped;
-  // `+ 0.1` means transform into future. according to https://robotics.stackexchange.com/a/96615
-  transform_stamped.header.stamp =
-    has_received_scan_ ? last_scan_time_ + rclcpp::Duration::from_seconds(0.1) : now();
+  // Prefer scan time for consistency, but clamp stale scan stamps to avoid Nav2 asking
+  // for transforms newer than the tf cache during simulation slowdowns.
+  const auto current_time = now();
+  rclcpp::Time tf_stamp = current_time;
+  if (has_received_scan_) {
+    tf_stamp = last_scan_time_ + rclcpp::Duration::from_seconds(transform_future_offset_s_);
+    const double lag_s = (current_time - last_scan_time_).seconds();
+    if (max_scan_stamp_lag_s_ > 0.0 && lag_s > max_scan_stamp_lag_s_) {
+      tf_stamp = current_time + rclcpp::Duration::from_seconds(transform_future_offset_s_);
+      RCLCPP_WARN_THROTTLE(
+        this->get_logger(), *this->get_clock(), 2000,
+        "small_gicp tf stamp falls behind current time by %.3fs, clamping map->odom stamp to now().",
+        lag_s);
+    }
+  }
+  transform_stamped.header.stamp = tf_stamp;
   transform_stamped.header.frame_id = map_frame_;
   transform_stamped.child_frame_id = odom_frame_;
 

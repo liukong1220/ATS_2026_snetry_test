@@ -37,6 +37,7 @@ def generate_launch_description():
     use_respawn = LaunchConfiguration("use_respawn")
     launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
     launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
+    launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
     log_level = LaunchConfiguration("log_level")
 
     # Create our own temporary YAML files that include substitutions
@@ -132,6 +133,12 @@ def generate_launch_description():
         description="Whether to start small_gicp map->odom relocalization",
     )
 
+    declare_launch_chassis_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_chassis_vel_transform",
+        default_value="False",
+        description="Whether to start sentry chassis velocity transform node",
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -196,6 +203,7 @@ def generate_launch_description():
                     "use_respawn": use_respawn,
                     "container_name": "nav2_container",
                     "launch_trajectory_optimizer": launch_trajectory_optimizer,
+                    "launch_chassis_vel_transform": launch_chassis_vel_transform,
                     "log_level": log_level,
                 }.items(),
             ),
@@ -221,6 +229,7 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_launch_trajectory_optimizer_cmd)
     ld.add_action(declare_launch_small_gicp_relocalization_cmd)
+    ld.add_action(declare_launch_chassis_vel_transform_cmd)
     ld.add_action(declare_log_level_cmd)
 
     # Add the actions to launch all of the navigation nodes

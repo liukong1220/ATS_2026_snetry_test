@@ -53,6 +53,7 @@ def generate_launch_description():
     launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
     launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
     launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
+    launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
     log_level = LaunchConfiguration("log_level")
 
     # Declare the launch arguments
@@ -166,6 +167,15 @@ def generate_launch_description():
         description="Whether to start small_gicp map->odom relocalization",
     )
 
+    declare_launch_chassis_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_chassis_vel_transform",
+        default_value="False",
+        description=(
+            "Whether to start sentry chassis velocity transform node. Keep false "
+            "when pb2025_sentry_bringup/bringup.launch.py already starts it."
+        ),
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -232,6 +242,7 @@ def generate_launch_description():
             "use_respawn": use_respawn,
             "launch_trajectory_optimizer": launch_trajectory_optimizer,
             "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+            "launch_chassis_vel_transform": launch_chassis_vel_transform,
             "log_level": log_level,
         }.items(),
     )
@@ -265,6 +276,7 @@ def generate_launch_description():
     ld.add_action(declare_launch_joy_teleop_cmd)
     ld.add_action(declare_launch_trajectory_optimizer_cmd)
     ld.add_action(declare_launch_small_gicp_relocalization_cmd)
+    ld.add_action(declare_launch_chassis_vel_transform_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(sanitize_ld_library_path)

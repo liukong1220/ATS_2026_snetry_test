@@ -30,11 +30,12 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py
 默认行为：
 
 1. `sim_world:=rmuc_2025`
-2. `nav_world:=rmul`
+2. `nav_world:=rmuc_2025`
 3. `namespace:=red_standard_robot1`
 4. `use_sim_time:=True`
 5. 默认启动当前导航主链
 6. 默认不启动行为层
+7. 默认启动 `small_gicp` 重定位与底盘速度坐标变换，优先验证与实车一致的定位/控制链
 
 ## 3. 常用参数
 
@@ -47,7 +48,7 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py sim_world:=rmul_2025
 切换导航地图资产：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py nav_world:=rmul
+ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py nav_world:=rmuc_2025
 ```
 
 启动行为层：
@@ -66,6 +67,12 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py use_rviz:=False
 
 ```bash
 ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_trajectory_optimizer:=False
+```
+
+关闭 `small_gicp` 重定位：
+
+```bash
+ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_small_gicp_relocalization:=False
 ```
 
 ## 4. 当前实际仿真链路
@@ -119,6 +126,34 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py
 
 1. 已有 Gazebo/传感器环境时，只拉起导航相关 ROS 链
 2. 便于单独调导航参数、RViz 和轨迹话题
+
+推荐两终端“实车同构”测试方式：
+
+终端 1 启动 Gazebo：
+
+```bash
+ros2 launch rmu_gazebo_simulator bringup_sim.launch.py world:=rmuc_2025
+```
+
+终端 2 启动导航：
+
+```bash
+ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py \
+  world:=rmuc_2025 \
+  use_rviz:=True \
+  launch_small_gicp_relocalization:=True \
+  launch_chassis_vel_transform:=True
+```
+
+这一路径默认从 `pb2025_nav_bringup/map/simulation` 和 `pb2025_nav_bringup/pcd/simulation` 读取同名资产，并保留与实车一致的主链：
+
+1. `small_gicp_relocalization` 持续发布 `map -> odom`
+2. `gimbal_yaw_odom` 作为定位与底盘速度参考主轴
+3. `fake_vel_transform + chassis_vel_transform` 保留实车同构速度链
+4. 更适合直接验证“仿真与实车是否吻合”
+5. `small_gicp.init_pose` 必须与 `rmu_gazebo_simulator/config/gz_world.yaml` 中该机器人的出生点一致
+
+推荐优先用这条链做算法验证；只有在隔离 TF/地图问题时，才暂时关闭 `small_gicp`。
 
 ### C. 建图模式
 
@@ -255,6 +290,33 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 2. `/cmd_vel`
 3. `trajectory_profile`
 
+## 9. 仿真 TF 约定
+
+Gazebo 导航模式保留 `gimbal_yaw_fake` 作为 Nav2 的 `robot_base_frame`，同时继续以 `gimbal_yaw_odom` 作为定位与底盘速度参考主轴。
+
+当前仿真中，TF 主链应为：
+
+`map -> odom -> gimbal_yaw_odom -> gimbal_yaw_fake`
+
+其中：
+
+1. `small_gicp_relocalization` 发布 `map -> odom`
+2. `sensor_scan_generation` 根据点云里程计发布 `odom -> gimbal_yaw_odom`
+3. `fake_vel_transform` 发布 `gimbal_yaw_odom -> gimbal_yaw_fake`
+4. `chassis_vel_transform` 把 `cmd_vel_gimbal_yaw_odom` 转成最终 `cmd_vel`
+5. Nav2 的 `bt_navigator / local_costmap / global_costmap / behavior_server` 继续使用 `gimbal_yaw_fake`
+
+如果 local costmap 报：
+
+`Timed out waiting for transform from gimbal_yaw_fake to odom`
+
+优先检查：
+
+1. `small_gicp_relocalization` 是否正常发布 `map -> odom`
+2. `sensor_scan_generation` 是否收到 `lidar_odometry` 和 `registered_scan`
+3. `fake_vel_transform` 与 `chassis_vel_transform` 是否在机器人命名空间内启动
+4. `/red_standard_robot1/tf` 中是否存在 `odom -> gimbal_yaw_odom -> gimbal_yaw_fake`
+
 ## 10. 接下来怎么把 Gazebo 用到最终迁移中
 
 推荐把仿真也按阶段推进。
@@ -288,7 +350,7 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 
 ## 11. 当前限制
 
-1. `nav_world` 仍依赖仓内现有地图资产，当前主要使用 `rmul`
+1. `nav_world` 当前已可直接使用仓内同步过来的 `rmuc_2025 / rmul_2025 / rmuc_2024 / rmul_2024`
 2. Gazebo 世界名与导航地图资产名仍是分开的
 3. 当前 `traversability_grid` 还是第一版语义输出，仅包含 `unknown / traversable / occupied`
 4. 当前过渡 ESDF 仍是从 `terrain_map_ext` 直接构图，尚未切换成 `TraversabilityEsdfProvider`

@@ -33,7 +33,6 @@ def _filtered_ld_library_path():
 def generate_launch_description():
     # Get the launch directory
     bringup_dir = get_package_share_directory("pb2025_nav_bringup")
-    assets_dir = get_package_share_directory("pb2025_sentry_bringup")
     launch_dir = os.path.join(bringup_dir, "launch")
 
     # Create the launch configuration variables
@@ -52,6 +51,8 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
     launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
+    launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
+    launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
     log_level = LaunchConfiguration("log_level")
 
     configured_params = ParameterFile(
@@ -83,14 +84,17 @@ def generate_launch_description():
 
     declare_world_cmd = DeclareLaunchArgument(
         "world",
-        default_value="rmul",
-        description="Select world. Map and PCD file share the same name as this parameter.",
+        default_value="rmuc_2025",
+        description=(
+            "Select world. Map and PCD file share the same name under "
+            "pb2025_nav_bringup/{map,pcd}/simulation."
+        ),
     )
 
     declare_map_yaml_cmd = DeclareLaunchArgument(
         "map",
         default_value=[
-            TextSubstitution(text=os.path.join(assets_dir, "map", "")),
+            TextSubstitution(text=os.path.join(bringup_dir, "map", "simulation", "")),
             world,
             TextSubstitution(text=".yaml"),
         ],
@@ -100,7 +104,7 @@ def generate_launch_description():
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
         default_value=[
-            TextSubstitution(text=os.path.join(assets_dir, "pcd", "")),
+            TextSubstitution(text=os.path.join(bringup_dir, "pcd", "simulation", "")),
             world,
             TextSubstitution(text=".pcd"),
         ],
@@ -167,6 +171,25 @@ def generate_launch_description():
         description="Whether to start non-critical trajectory visualization optimizer node",
     )
 
+    declare_launch_small_gicp_relocalization_cmd = DeclareLaunchArgument(
+        "launch_small_gicp_relocalization",
+        default_value="True",
+        description=(
+            "Whether to start small_gicp map->odom relocalization in simulation. "
+            "Keep it true when validating the same localization chain as the real robot. "
+            "Disable it only for isolated TF / map debugging."
+        ),
+    )
+
+    declare_launch_chassis_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_chassis_vel_transform",
+        default_value="True",
+        description=(
+            "Whether to start chassis velocity transform in simulation. Keep true "
+            "when validating the same velocity reference chain as the real robot."
+        ),
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -204,6 +227,8 @@ def generate_launch_description():
             "use_composition": use_composition,
             "use_respawn": use_respawn,
             "launch_trajectory_optimizer": launch_trajectory_optimizer,
+            "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+            "launch_chassis_vel_transform": launch_chassis_vel_transform,
             "log_level": log_level,
         }.items(),
     )
@@ -235,6 +260,8 @@ def generate_launch_description():
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_launch_joy_teleop_cmd)
     ld.add_action(declare_launch_trajectory_optimizer_cmd)
+    ld.add_action(declare_launch_small_gicp_relocalization_cmd)
+    ld.add_action(declare_launch_chassis_vel_transform_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(sanitize_ld_library_path)
