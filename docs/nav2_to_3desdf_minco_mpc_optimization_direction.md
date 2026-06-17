@@ -1,4 +1,4 @@
-# 从当前 2.5D ESDF 过渡到 3D ESDF + JPS / MINCO + SE2 MPC 的优化方向
+# 从当前 2.5D 语义 ESDF 过渡到 2D 栅格导航主链 + JPS / MINCO / SE2 MPC 的优化方向
 
 更新时间：2026-06-17
 
@@ -11,7 +11,32 @@
 目标不是继续把当前工程表述为“已经完成 PDF 同款导航链”，而是准确回答下面两个问题：
 
 1. 现在这套代码到底已经做到哪一步了。
-2. 如果要彻底从 `Nav2` 迁移到 `3D/2.5D ESDF + JPS / MINCO + SE2 MPC`，下一步应该怎么做。
+2. 如果要彻底从 `Nav2` 迁移到 `2.5D 语义地图 + 2D 栅格导航 + JPS / MINCO + SE2 MPC`，下一步应该怎么做。
+
+## 0. 目标流程图
+
+下面两张图对应本文档想落到的最终工程方向，核心思想和 `docs/中科大哨兵2025技术报告.pdf` 一致，但会更明确地区分：
+
+1. `2.5D` 语义建图层
+2. `2D` 栅格搜索主链
+3. 后端轨迹优化与控制层
+
+简版主流程图：
+
+![JPS MINCO MPC Simple](./jps_minco_mpc_pipeline_simple.png)
+
+分层版流程图：
+
+![JPS MINCO MPC Layered](./jps_minco_mpc_pipeline_layered.png)
+
+这两张图表达的核心结论是：
+
+1. 地面机器人总体导航仍然是 `2D` 栅格主链
+2. `2.5D` 前端负责高程、坡度、占有率和语义可通行判断
+3. signed `Traversability ESDF` 负责 clearance / gradient / slope cost 支撑
+4. `JPS` 负责主搜索
+5. `MINCO + 独立 Yaw + 局部 B-spline repair` 负责把离散路径变成可执行轨迹
+6. 最终控制目标仍然是 `SE2 MPC`
 
 ## 1. 先说结论
 
@@ -35,7 +60,7 @@
 
 所以更准确的判断是：
 
-`当前工程已经完成了“从 Nav2 纯 2D 代价地图向 2.5D ESDF 过渡”的前半段，但尚未进入自研 JPS + MINCO + MPC 主链阶段。`
+`当前工程已经完成了“从 Nav2 纯 2D 代价地图向 2.5D 语义 ESDF 过渡”的前半段，但尚未进入自研 JPS + MINCO + MPC 主链阶段。`
 
 ## 2. 结合当前代码，现状到底是什么
 
@@ -110,7 +135,67 @@
 
 `你已经能观察并利用高度差相关语义来改善地面避障，但现在的避障本质仍是“带高度语义的 2D / 2.5D 可通行判断”，不是完整 3D 规划。`
 
-### 2.4 现在是否值得立刻更新 RViz
+### 2.4 既然是 2.5D ESDF，能不能进一步识别坡道并参与加减速优化
+
+答案是：
+
+`可以，而且这正是当前 2.5D 语义前端最值得继续加强的方向之一。`
+
+对地面机器人来说，坡道信息的价值不在于把导航升级成真正 3D，而在于：
+
+1. 更早识别“能过但不该高速过”的区域
+2. 让轨迹优化和控制器提前降低纵向加速度目标
+3. 让底盘在上坡、下坡、坡顶和坡底过渡段减少打滑、冲坡和姿态扰动
+
+当前 `2.5D` 前端已经具备继续往这个方向扩展的基础，因为你已经有：
+
+1. `terrain_map_ext`
+2. `height_diff`
+3. `occupancy_ratio`
+4. `ground_confidence`
+5. signed `Traversability ESDF`
+
+下一步建议新增或显式整理的量是：
+
+1. `slope_grid`
+2. `slope_direction_grid`
+3. `local_height_gradient`
+4. `roughness_grid`
+
+其中最关键的是 `slope_grid`，因为它可以直接服务于速度/加速度调度，而不需要改变“2D 栅格导航”的本质。
+
+建议的职责划分如下：
+
+1. `traversability_grid` 决定“这里能不能走”
+2. `slope_grid` 决定“这里该以多快的速度走”
+3. signed ESDF 决定“离障碍多近、梯度往哪边推”
+
+因此更准确的系统表述应该是：
+
+`2.5D 语义前端不仅负责可通行判断，也应该负责坡度感知和速度上限感知；真正的路径拓扑仍由 2D 栅格搜索决定。`
+
+### 2.5 为什么总体导航算法仍然应该坚持 2D 格栅
+
+对于你当前的地面机器人，答案其实很明确：
+
+`总体导航仍然应该是 2D 栅格主链，这不是退而求其次，而是最符合任务与底盘本质的选择。`
+
+原因有四个：
+
+1. 你要解决的是“地面可通行拓扑”，而不是空中或多层空间拓扑。
+2. 机器人的主决策变量仍然是平面上的 `(x, y)` 路径和沿路径的 `yaw / v / a` 分配。
+3. 2.5D 高程/坡度/占有率分析已经足以表达坡道、矮墙、坎边、障碍堆和低置信区域。
+4. 真正 3D 导航引入的复杂度，当前不会给你的 RMUC / 哨兵地面场景带来等比例收益。
+
+所以后续最合理的系统定位不是：
+
+`做真正 3D 导航`
+
+而是：
+
+`做一个由 2.5D 语义地图驱动的 2D 栅格导航系统`
+
+### 2.6 现在是否值得立刻更新 RViz
 
 答案也是：
 
@@ -148,7 +233,7 @@
 
 根据 `docs/中科大哨兵2025技术报告.pdf`，最应该直接继承的是下面这条分层逻辑：
 
-`3D Occupancy Grid -> 高程/占据率可通行分析 -> 2D ESDF -> JPS -> 时间重采样 -> MINCO 两阶段优化 -> SE2 MPC`
+`3D 点云投影 -> 2.5D 高程/坡度/占有率分析 -> Traversability Grid + Slope Grid -> 2D 语义 ESDF -> JPS -> 时间重采样 -> MINCO 两阶段优化 -> SE2 MPC`
 
 其中最关键的不是算法名，而是工程组织方式：
 
@@ -188,7 +273,7 @@
 
 推荐最终目标链如下：
 
-`Batch-LIWO / 里程计 -> 3D Occupancy -> 2.5D Traversability -> 2D ESDF -> JPS -> MINCO(PRE + FINELY) -> SE2 MPC -> chassis`
+`Batch-LIWO / 里程计 -> 3D 点云投影 -> 2.5D Traversability + Slope -> 2D 语义 ESDF -> JPS -> MINCO(PRE + FINELY) -> 独立 Yaw -> 安全校验与局部重拟合 -> SE2 MPC -> chassis`
 
 其中每一层在当前仓库里的对应关系如下。
 
@@ -220,17 +305,35 @@
 3. `height_diff`
 4. `occupancy_ratio`
 5. `ground_confidence`
-6. `dynamic_obstacle_confidence`
-7. `traversable / occupied / unknown`
+6. `slope`
+7. `slope_direction`
+8. `roughness`
+9. `dynamic_obstacle_confidence`
+10. `traversable / occupied / unknown`
 
 当前已经开始落地的第一步是：
 
 1. `terrain_analysis_ext` 除了 `terrain_map_ext` 之外，新增输出 `traversability_grid`
 2. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 已经可以直接消费 `traversability_grid`
 3. `TraversabilityEsdfProvider` 已经订阅并融合 `height_diff / occupancy_ratio / ground_confidence`
-4. 当前阶段先保证 Gazebo 和现有 Nav2 主链能稳定消费 signed traversability ESDF，再逐步上 `A* -> JPS -> MINCO`
+4. 下一步应补出 `slope_grid`
+5. 当前阶段先保证 Gazebo 和现有 Nav2 主链能稳定消费 signed traversability ESDF，再逐步上 `A* -> JPS -> MINCO`
 
 这一步做完之后，ESDF 才真正有“来自地形语义”的基础。
+
+其中 `slope_grid` 的推荐用途不是做“能不能走”的唯一判据，而是：
+
+1. 参与 `traversability` 二值化阈值
+2. 参与 `MINCO` 软约束代价
+3. 参与速度上限和加速度上限的自适应调节
+
+例如可以先用最简单的策略：
+
+1. 平坡：保持 nominal `v_max / a_max`
+2. 中等坡度：压低 `v_max`
+3. 大坡度或坡顶/坡底突变：同时压低 `v_max` 和 `a_max`
+
+这样做不需要把导航变成 3D，但会显著提升地面机器人在坡道环境下的轨迹可执行性。
 
 ### 5.3 2D ESDF 层
 
@@ -248,7 +351,14 @@
 
 1. 输入不再是裸点云，而是“已判定可通行/不可通行/未知”的二维栅格和地形语义栅格
 2. 输出 signed distance，负值代表已进入障碍 / 风险区，正值代表 free space clearance
-3. 给后续 `A* / JPS`、`MINCO`、`SE2 MPC` 统一提供 `d(x,y)` 和 `grad d(x,y)`
+3. 旁路输出 `slope_cost` 或 `slope_grid`
+4. 给后续 `A* / JPS`、`MINCO`、`SE2 MPC` 统一提供 `d(x,y)`、`grad d(x,y)` 和坡度相关代价
+
+这里要明确一点：
+
+1. 主导航拓扑仍由 `2D` 搜索器在栅格图上完成
+2. ESDF 不负责把问题变成“真正 3D 导航”
+3. ESDF 负责的是在 2D 平面路径上叠加更丰富的地形语义
 
 ### 5.4 前端搜索层
 
@@ -286,8 +396,9 @@
 对 `JPS` 和 signed ESDF 的职责分工，建议明确成下面这样：
 
 1. `traversability_grid` / 二值通行栅格：给 `JPS` 做主搜索
-2. signed ESDF：给目标点拉回、tie-break、局部修补、后端优化和控制器提供 clearance / gradient 信息
-3. 如果后续确实需要风险加权搜索，也建议先做“`JPS` 主搜索 + ESDF 后验筛选/修补”，而不是一开始把 `JPS` 改造成重权图搜索器
+2. `slope_grid`：给速度/加速度自适应和 soft penalty 使用
+3. signed ESDF：给目标点拉回、tie-break、局部修补、后端优化和控制器提供 clearance / gradient 信息
+4. 如果后续确实需要风险加权搜索，也建议先做“`JPS` 主搜索 + ESDF / slope 后验筛选与修补”，而不是一开始把 `JPS` 改造成重权图搜索器
 
 ### 5.5 轨迹优化层
 
@@ -303,7 +414,8 @@
 2. 轨迹表示改为 `MINCO`
 3. 实现 `PRE_OPTIMIZATION + FINELY_OPTIMIZATION`
 4. 实现二次插值/平滑梯度接口
-5. 输出时参数轨迹与参考采样序列
+5. 在位置轨迹优化中接入 `slope` 软惩罚
+6. 输出时参数轨迹与参考采样序列
 
 建议演进方式：
 
@@ -322,6 +434,13 @@
 也就是说：
 
 `包边界现在就应该按 MINCO 时代来设计，但第一阶段的主任务仍然是把 ESDF 驱动的前端搜索和局部轻量修补跑通。`
+
+针对你现在最关心的“坡道是否能参与加减速优化”，这里建议明确成两步：
+
+1. 在 `MINCO 2D` 位置优化里，把 `slope_cost` 作为软约束项，避免轨迹在高坡区域仍然追求激进时间分配
+2. 在轨迹离散化之后，再依据 `slope_grid` 对 `v_max(s)`、`a_max(s)` 做自适应压缩
+
+这样既能保留 `MINCO` 的轨迹表示优势，也不会把坡度问题错误地塞到前端搜索里。
 
 ### 5.6 控制层
 
@@ -412,9 +531,11 @@
 
 1. 在 Gazebo / loopback / 实车中验证 signed Traversability ESDF 的方向、距离和风险点是否一致
 2. 固化 ESDF 观测指标，包括 `d_min / d_avg / risk_count` 与三类地形语义栅格的对应关系
-3. 新建 `minco_planner` 包，先落 `A* + 独立 Yaw + 局部 B-spline repair`
-4. 在 `A*` 稳定后，把前端替换成 `JPS`
-5. 设计统一的 `ReferenceTrajectory` 消息或内部结构，避免后面 `MINCO` 与 `MPC` 接口再次重写
+3. 在 `terrain_analysis_ext` 侧补出 `slope_grid`
+4. 定义坡度如何影响 `v_max / a_max`
+5. 新建 `minco_planner` 包，先落 `A* + 独立 Yaw + 局部 B-spline repair`
+6. 在 `A*` 稳定后，把前端替换成 `JPS`
+7. 设计统一的 `ReferenceTrajectory` 消息或内部结构，避免后面 `MINCO` 与 `MPC` 接口再次重写
 
 ### 7.2 MINCO 接入建议
 
@@ -486,10 +607,26 @@
 3. `yaw_spline_planner`
 4. `local_collision_repair`
 5. `planner_debug_visualizer`
+6. `trajectory_speed_adapter`
 
 这个阶段的目标不是“立刻 MINCO 化”，而是：
 
 `先把 signed ESDF 驱动的自有规划链跑起来，并能替代掉 Nav2 planner + 部分 smoother 职责。`
+
+在这之前，还应补一个前置动作：
+
+#### 阶段 P0：把 2.5D 地形语义补齐到“可导航”状态
+
+建议先完成：
+
+1. 输出 `slope_grid`
+2. 明确坡度阈值和坡度分级
+3. 明确坡度如何影响 `traversability` 二值化
+4. 明确坡度如何影响 `v_max / a_max`
+
+因为你的最终目标不是“只识别障碍”，而是：
+
+`让 2.5D 前端同时服务于路线选择和速度规划。`
 
 #### 阶段 P2：前端位置规划先用 `A*`
 
@@ -525,7 +662,8 @@
 
 1. `JPS` 负责全局或局部快速搜索
 2. signed ESDF 继续负责 clearance 判断、局部修补和后端优化
-3. `Yaw` 规划、局部 B-spline repair、MPPI 跟踪接口全部保持不变
+3. `slope_grid` 继续负责速度/加速度自适应
+4. `Yaw` 规划、局部 B-spline repair、MPPI 跟踪接口全部保持不变
 
 这样做的好处是：
 
@@ -608,18 +746,19 @@
 
 推荐接入顺序：
 
-1. 先实现 `A* -> 局部修补 -> MPPI`
-2. 跑通 `rmuc_2025` 窄门、贴边、S 弯
-3. 把前端替换成 `JPS`
-4. 固化 signed ESDF 采样接口与调试指标
-5. 再把 `MINCO PRE + FINELY` 接到 `minco_planner`
-6. 最后才决定是否替换 `MPPI`
+1. 先补齐 `slope_grid` 与坡度速度自适应
+2. 实现 `A* -> 局部修补 -> MPPI`
+3. 跑通 `rmuc_2025` 窄门、贴边、S 弯、坡道
+4. 把前端替换成 `JPS`
+5. 固化 signed ESDF 与 `slope_grid` 采样接口和调试指标
+6. 再把 `MINCO PRE + FINELY` 接到 `minco_planner`
+7. 最后才决定是否替换 `MPPI`
 
 原因很简单：
 
 1. 现在系统里最大的未知量仍然是 `2.5D traversability -> signed ESDF` 的稳定性
 2. 如果现在同时引入 `MINCO + Yaw + 局部修补 + MPC`，变量会过多
-3. 先让 `A* + repair + MPPI` 过窄门，再切 `JPS`，能够更快判断到底是 ESDF、搜索器还是轨迹表示在拖后腿
+3. 先让 `A* + repair + MPPI` 过窄门和坡道，再切 `JPS`，能够更快判断到底是 ESDF、坡度建模、搜索器还是轨迹表示在拖后腿
 
 ## 8. 这份文档对应的现实判断
 
@@ -633,17 +772,18 @@
 
 最重要的不是继续把当前链路包装成最终形态，而是承认它现在所处的位置：
 
-`当前项目处于“2.5D signed Traversability ESDF 过渡阶段”，下一步应先验证 ESDF 稳定性，再完成 A* 过渡、切到最终目标 JPS、补齐 MINCO，并最终替换 MPPI 为 SE2 MPC。`
+`当前项目处于“2.5D signed Traversability ESDF 过渡阶段”，下一步应先补齐坡度语义与速度自适应、验证 ESDF 稳定性，再完成 A* 过渡、切到最终目标 JPS、补齐 MINCO，并最终替换 MPPI 为 SE2 MPC。`
 
 ## 9. 推荐的下一版里程碑
 
 建议把后续工作拆成下面三个里程碑：
 
-1. `M1`：验证 signed Traversability ESDF 与 `traversability_grid / height_diff / occupancy_ratio / ground_confidence` 的一致性
-2. `M2`：新建 `minco_planner`，实现 `A* + 独立 Yaw + 局部 B-spline repair`，先输出给 MPPI
-3. `M3`：把前端从 `A*` 切换到 `JPS`
-4. `M4`：在 `minco_planner` 中接入 `MINCO PRE/FINELY`
-5. `M5`：若 MPPI 仍无法稳定贴轨，再实现 `SE2 MPC`
+1. `M1`：补齐 `slope_grid`，验证 signed Traversability ESDF 与 `traversability_grid / height_diff / occupancy_ratio / ground_confidence / slope` 的一致性
+2. `M2`：实现坡度参与 `v_max / a_max` 自适应
+3. `M3`：新建 `minco_planner`，实现 `A* + 独立 Yaw + 局部 B-spline repair`，先输出给 MPPI
+4. `M4`：把前端从 `A*` 切换到 `JPS`
+5. `M5`：在 `minco_planner` 中接入 `MINCO PRE/FINELY`
+6. `M6`：若 MPPI 仍无法稳定贴轨，再实现 `SE2 MPC`
 
 按这个顺序推进，风险和返工都会比“一口气全改”小很多。
 
