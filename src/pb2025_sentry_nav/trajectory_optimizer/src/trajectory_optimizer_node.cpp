@@ -135,6 +135,12 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<std::string>("esdf_source", esdf_source_);
   declare_parameter<std::string>("terrain_pointcloud_topic", terrain_pointcloud_topic_);
   declare_parameter<std::string>("traversability_grid_topic", traversability_grid_topic_);
+  declare_parameter<std::string>(
+    "traversability_height_diff_topic", traversability_height_diff_topic_);
+  declare_parameter<std::string>(
+    "traversability_occupancy_ratio_topic", traversability_occupancy_ratio_topic_);
+  declare_parameter<std::string>(
+    "traversability_ground_confidence_topic", traversability_ground_confidence_topic_);
   declare_parameter<double>("terrain_esdf_resolution", terrain_esdf_resolution_);
   declare_parameter<double>("terrain_esdf_padding", terrain_esdf_padding_);
   declare_parameter<double>("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
@@ -175,6 +181,11 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   get_parameter("esdf_source", esdf_source_);
   get_parameter("terrain_pointcloud_topic", terrain_pointcloud_topic_);
   get_parameter("traversability_grid_topic", traversability_grid_topic_);
+  get_parameter("traversability_height_diff_topic", traversability_height_diff_topic_);
+  get_parameter(
+    "traversability_occupancy_ratio_topic", traversability_occupancy_ratio_topic_);
+  get_parameter(
+    "traversability_ground_confidence_topic", traversability_ground_confidence_topic_);
   get_parameter("terrain_esdf_resolution", terrain_esdf_resolution_);
   get_parameter("terrain_esdf_padding", terrain_esdf_padding_);
   get_parameter("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
@@ -207,6 +218,20 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   traversability_grid_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
     traversability_grid_topic_, rclcpp::QoS(10).reliable(),
     std::bind(&TrajectoryOptimizerNode::traversabilityGridCallback, this, std::placeholders::_1));
+  traversability_height_diff_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_height_diff_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(
+      &TrajectoryOptimizerNode::traversabilityHeightDiffCallback, this, std::placeholders::_1));
+  traversability_occupancy_ratio_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_occupancy_ratio_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(
+      &TrajectoryOptimizerNode::traversabilityOccupancyRatioCallback,
+      this, std::placeholders::_1));
+  traversability_ground_confidence_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_ground_confidence_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(
+      &TrajectoryOptimizerNode::traversabilityGroundConfidenceCallback,
+      this, std::placeholders::_1));
 
   RCLCPP_INFO(
     get_logger(),
@@ -283,14 +308,45 @@ void TrajectoryOptimizerNode::terrainPointCloudCallback(
 void TrajectoryOptimizerNode::traversabilityGridCallback(
   const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
-  if (!traversability_esdf_provider_) {
+  traversability_grid_msg_ = msg;
+  updateTraversabilityEsdf();
+}
+
+void TrajectoryOptimizerNode::traversabilityHeightDiffCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  traversability_height_diff_msg_ = msg;
+  updateTraversabilityEsdf();
+}
+
+void TrajectoryOptimizerNode::traversabilityOccupancyRatioCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  traversability_occupancy_ratio_msg_ = msg;
+  updateTraversabilityEsdf();
+}
+
+void TrajectoryOptimizerNode::traversabilityGroundConfidenceCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  traversability_ground_confidence_msg_ = msg;
+  updateTraversabilityEsdf();
+}
+
+void TrajectoryOptimizerNode::updateTraversabilityEsdf()
+{
+  if (!traversability_esdf_provider_ || !traversability_grid_msg_) {
     return;
   }
+
   traversability_esdf_provider_->updateGrid(
-    *msg,
+    *traversability_grid_msg_,
     traversability_obstacle_value_threshold_,
     traversability_unknown_is_obstacle_,
-    traversability_lethal_value_threshold_);
+    traversability_lethal_value_threshold_,
+    traversability_height_diff_msg_ ? traversability_height_diff_msg_.get() : nullptr,
+    traversability_occupancy_ratio_msg_ ? traversability_occupancy_ratio_msg_.get() : nullptr,
+    traversability_ground_confidence_msg_ ? traversability_ground_confidence_msg_.get() : nullptr);
   if (esdf_source_ == "traversability_grid") {
     active_esdf_provider_ = traversability_esdf_provider_;
     refreshEsdfProvider();

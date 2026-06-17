@@ -865,7 +865,7 @@ bool BSplinePathOptimizer::sampleEsdfDistance(
   }
 
   distance = esdf_provider_->getDistance(point.x, point.y);
-  return std::isfinite(distance) && distance >= 0.0;
+  return std::isfinite(distance);
 }
 
 Point2D BSplinePathOptimizer::estimateObstacleGradient(

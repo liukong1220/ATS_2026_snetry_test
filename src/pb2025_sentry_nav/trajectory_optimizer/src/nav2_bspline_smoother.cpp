@@ -173,6 +173,15 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".traversability_grid_topic",
     rclcpp::ParameterValue(traversability_grid_topic_));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".traversability_height_diff_topic",
+    rclcpp::ParameterValue(traversability_height_diff_topic_));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".traversability_occupancy_ratio_topic",
+    rclcpp::ParameterValue(traversability_occupancy_ratio_topic_));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".traversability_ground_confidence_topic",
+    rclcpp::ParameterValue(traversability_ground_confidence_topic_));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".terrain_esdf_resolution",
     rclcpp::ParameterValue(terrain_esdf_resolution_));
   nav2_util::declare_parameter_if_not_declared(
@@ -258,6 +267,14 @@ void Nav2BSplineSmoother::configure(
   node->get_parameter(plugin_name_ + ".esdf_source", esdf_source_);
   node->get_parameter(plugin_name_ + ".terrain_pointcloud_topic", terrain_pointcloud_topic_);
   node->get_parameter(plugin_name_ + ".traversability_grid_topic", traversability_grid_topic_);
+  node->get_parameter(
+    plugin_name_ + ".traversability_height_diff_topic", traversability_height_diff_topic_);
+  node->get_parameter(
+    plugin_name_ + ".traversability_occupancy_ratio_topic",
+    traversability_occupancy_ratio_topic_);
+  node->get_parameter(
+    plugin_name_ + ".traversability_ground_confidence_topic",
+    traversability_ground_confidence_topic_);
   node->get_parameter(plugin_name_ + ".terrain_esdf_resolution", terrain_esdf_resolution_);
   node->get_parameter(plugin_name_ + ".terrain_esdf_padding", terrain_esdf_padding_);
   node->get_parameter(
@@ -296,6 +313,19 @@ void Nav2BSplineSmoother::configure(
   traversability_grid_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
     traversability_grid_topic_, rclcpp::QoS(10).reliable(),
     std::bind(&Nav2BSplineSmoother::traversabilityGridCallback, this, std::placeholders::_1));
+  traversability_height_diff_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_height_diff_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(
+      &Nav2BSplineSmoother::traversabilityHeightDiffCallback, this, std::placeholders::_1));
+  traversability_occupancy_ratio_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_occupancy_ratio_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(
+      &Nav2BSplineSmoother::traversabilityOccupancyRatioCallback, this, std::placeholders::_1));
+  traversability_ground_confidence_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_ground_confidence_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(
+      &Nav2BSplineSmoother::traversabilityGroundConfidenceCallback,
+      this, std::placeholders::_1));
   RCLCPP_INFO(
     logger_, "Configured Nav2BSplineSmoother plugin: %s, esdf_source=%s terrain_topic=%s traversability_topic=%s",
     plugin_name_.c_str(), esdf_source_.c_str(), terrain_pointcloud_topic_.c_str(),
@@ -454,18 +484,29 @@ void Nav2BSplineSmoother::terrainPointCloudCallback(
 void Nav2BSplineSmoother::traversabilityGridCallback(
   const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
-  if (!traversability_esdf_provider_) {
-    return;
-  }
-  traversability_esdf_provider_->updateGrid(
-    *msg,
-    traversability_obstacle_value_threshold_,
-    traversability_unknown_is_obstacle_,
-    traversability_lethal_value_threshold_);
-  if (esdf_source_ == "traversability_grid") {
-    active_esdf_provider_ = traversability_esdf_provider_;
-    refreshEsdfProvider();
-  }
+  traversability_grid_msg_ = msg;
+  refreshEsdfProvider();
+}
+
+void Nav2BSplineSmoother::traversabilityHeightDiffCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  traversability_height_diff_msg_ = msg;
+  refreshEsdfProvider();
+}
+
+void Nav2BSplineSmoother::traversabilityOccupancyRatioCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  traversability_occupancy_ratio_msg_ = msg;
+  refreshEsdfProvider();
+}
+
+void Nav2BSplineSmoother::traversabilityGroundConfidenceCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  traversability_ground_confidence_msg_ = msg;
+  refreshEsdfProvider();
 }
 
 void Nav2BSplineSmoother::refreshEsdfProvider()
@@ -488,6 +529,16 @@ void Nav2BSplineSmoother::refreshEsdfProvider()
   }
 
   if (esdf_source_ == "traversability_grid") {
+    if (traversability_esdf_provider_ && traversability_grid_msg_) {
+      traversability_esdf_provider_->updateGrid(
+        *traversability_grid_msg_,
+        traversability_obstacle_value_threshold_,
+        traversability_unknown_is_obstacle_,
+        traversability_lethal_value_threshold_,
+        traversability_height_diff_msg_ ? traversability_height_diff_msg_.get() : nullptr,
+        traversability_occupancy_ratio_msg_ ? traversability_occupancy_ratio_msg_.get() : nullptr,
+        traversability_ground_confidence_msg_ ? traversability_ground_confidence_msg_.get() : nullptr);
+    }
     if (traversability_esdf_provider_ && traversability_esdf_provider_->available()) {
       active_esdf_provider_ = traversability_esdf_provider_;
       optimizer_.setEsdfProvider(active_esdf_provider_);

@@ -19,10 +19,13 @@ public:
   TraversabilityEsdfProvider() = default;
 
   void updateGrid(
-    const nav_msgs::msg::OccupancyGrid & grid,
+    const nav_msgs::msg::OccupancyGrid & traversability_grid,
     int obstacle_value_threshold,
     bool unknown_is_obstacle,
-    int lethal_value_threshold = 100);
+    int lethal_value_threshold = 100,
+    const nav_msgs::msg::OccupancyGrid * height_diff_grid = nullptr,
+    const nav_msgs::msg::OccupancyGrid * occupancy_ratio_grid = nullptr,
+    const nav_msgs::msg::OccupancyGrid * ground_confidence_grid = nullptr);
 
   bool available() const override;
   double getDistance(double x, double y) const override;
@@ -34,9 +37,22 @@ private:
   double bilinearDistanceAt(const std::vector<double> & field, double gx, double gy) const;
   Eigen::Vector2d bilinearGradientAt(const std::vector<double> & field, double gx, double gy) const;
   void rebuildSmoothedDistanceField();
+  bool extractGridValues(
+    const nav_msgs::msg::OccupancyGrid & grid,
+    std::vector<double> & values) const;
+  double combineSemanticScore(
+    double traversability_score,
+    double height_diff_score,
+    double occupancy_ratio_score,
+    double ground_confidence_score) const;
+  void rebuildSignedDistanceField(
+    const std::vector<uint8_t> & obstacle_mask,
+    const std::vector<uint8_t> & free_mask);
 
   mutable std::mutex mutex_;
   std::vector<double> distance_field_;
+  std::vector<double> distance_to_obstacle_field_;
+  std::vector<double> distance_to_free_field_;
   std::vector<double> smoothed_distance_field_;
   unsigned int width_ = 0;
   unsigned int height_ = 0;
