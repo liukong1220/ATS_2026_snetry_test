@@ -351,9 +351,9 @@ Visualization Manager:
       Channel Name: intensity
       Class: rviz_default_plugins/PointCloud2
       Color: 255; 255; 255
-      Color Transformer: Intensity
+      Color Transformer: AxisColor
       Decay Time: 1
-      Enabled: false
+      Enabled: true
       Invert Rainbow: true
       Max Color: 255; 255; 255
       Max Intensity: 0.9942367076873779
@@ -396,6 +396,70 @@ Visualization Manager:
         Value: map_updates
       Use Timestamp: false
       Value: false
+    - Class: rviz_common/Group
+      Displays:
+        - Alpha: 0.6499999761581421
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: true
+          Name: Traversability Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_grid
+          Use Timestamp: false
+          Value: true
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
+          Name: Height Diff Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_height_diff_grid
+          Use Timestamp: false
+          Value: false
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
+          Name: Occupancy Ratio Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_occupancy_ratio_grid
+          Use Timestamp: false
+          Value: false
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
+          Name: Ground Confidence Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_ground_confidence_grid
+          Use Timestamp: false
+          Value: false
+      Enabled: true
+      Name: Terrain Semantics (2.5D)
     - Class: rviz_common/Group
       Displays:
         - Alpha: 0.30000001192092896
@@ -649,6 +713,42 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: decision/vision_follow_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: BackUpFreeSpaceMarkers
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: back_up_free_space_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: TrajectoryProfileMarkers
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: trajectory_profile_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: TrajectoryESDFDebug
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: trajectory_esdf_debug
       Value: true
   Enabled: true
   Global Options:

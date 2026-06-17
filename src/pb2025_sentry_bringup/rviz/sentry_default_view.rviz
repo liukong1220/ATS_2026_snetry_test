@@ -343,7 +343,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /terrain_map
+        Value: terrain_map_ext
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
@@ -368,6 +368,70 @@ Visualization Manager:
         Value: map_updates
       Use Timestamp: false
       Value: false
+    - Class: rviz_common/Group
+      Displays:
+        - Alpha: 0.6499999761581421
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: true
+          Name: Traversability Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_grid
+          Use Timestamp: false
+          Value: true
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
+          Name: Height Diff Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_height_diff_grid
+          Use Timestamp: false
+          Value: false
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
+          Name: Occupancy Ratio Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_occupancy_ratio_grid
+          Use Timestamp: false
+          Value: false
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
+          Name: Ground Confidence Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_ground_confidence_grid
+          Use Timestamp: false
+          Value: false
+      Enabled: true
+      Name: Terrain Semantics (2.5D)
     - Class: rviz_common/Group
       Displays:
         - Alpha: 0.23999999463558197
