@@ -1,25 +1,23 @@
-# 从当前 2.5D 语义 ESDF 过渡到 2D 栅格导航主链 + JPS / MINCO / SE2 MPC 的优化方向
+# 从 2.5D 语义 ESDF 到稳定比赛版与长期最终版导航主链
 
 更新时间：2026-06-17
 
-本文档基于三部分内容整理：
+本文档只保留两条主线：
 
-1. `docs/中科大哨兵2025技术报告.pdf`
-2. 当前仓库已经落地的 `terrain_analysis / terrain_analysis_ext / trajectory_optimizer / Gazebo` 代码
-3. 现有过渡文档与仿真接入状态
+1. `V1 稳定比赛版`
+   `2.5D 语义地图 + 2D 栅格导航主链 + JPS / MINCO / SE2 MPC`
+2. `V2 长期最终版`
+   `3D ESDF + JPS / MINCO / SE2 MPC`
 
-目标不是继续把当前工程表述为“已经完成 PDF 同款导航链”，而是准确回答下面两个问题：
-
-1. 现在这套代码到底已经做到哪一步了。
-2. 如果要彻底从 `Nav2` 迁移到 `2.5D 语义地图 + 2D 栅格导航 + JPS / MINCO + SE2 MPC`，下一步应该怎么做。
+当前优化工作优先服务于 `V1`。`V2` 是在 `V1` 稳定后再推进的长期目标。
 
 ## 0. 目标流程图
 
-下面两张图对应本文档想落到的最终工程方向，核心思想和 `docs/中科大哨兵2025技术报告.pdf` 一致，但会更明确地区分：
+下面两张图对应 `V1` 的目标工程形态，核心思想与 `docs/中科大哨兵2025技术报告.pdf` 一致，但更明确地区分了：
 
-1. `2.5D` 语义建图层
-2. `2D` 栅格搜索主链
-3. 后端轨迹优化与控制层
+1. 2.5D 语义建图
+2. 2D 栅格主链
+3. 后端轨迹优化与控制
 
 简版主流程图：
 
@@ -31,274 +29,51 @@
 
 这两张图表达的核心结论是：
 
-1. 地面机器人总体导航仍然是 `2D` 栅格主链
-2. `2.5D` 前端负责高程、坡度、占有率和语义可通行判断
-3. signed `Traversability ESDF` 负责 clearance / gradient / slope cost 支撑
-4. `JPS` 负责主搜索
-5. `MINCO + 独立 Yaw + 局部 B-spline repair` 负责把离散路径变成可执行轨迹
-6. 最终控制目标仍然是 `SE2 MPC`
+1. 地面机器人总体导航仍然是 `2D` 栅格主链。
+2. `2.5D` 前端负责高程、坡度、占有率和地形语义判断。
+3. signed `Traversability ESDF` 负责 clearance、gradient 和 slope cost 支撑。
+4. `JPS` 负责主搜索。
+5. `MINCO + 独立 Yaw + 局部 B-spline repair` 负责把离散路径变成可执行轨迹。
+6. 终局控制目标是 `SE2 MPC`。
 
 ## 1. 先说结论
 
-当前项目已经完成的部分是：
+2.5D `ESDF` 可以做两件事：
 
-`点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> traversability_grid + 地形语义调试栅格 -> signed Traversability ESDF -> Nav2 smoother / trajectory visual optimizer -> MPPI`
+1. 识别高程变化、坡道、坎边、堆叠障碍等地形语义。
+2. 将这些语义转成速度、加速度、清障距离和局部重拟合的约束。
 
-也就是说，现在仓库已经不再只是“纯 2D costmap + simple smoother”：
+它不需要把整个系统升级成真正的 3D 导航。
 
-1. 已经把 `terrain_map_ext`、`traversability_grid` 和地形语义调试栅格接入到了 `trajectory_optimizer` 和 `Nav2BSplineSmoother`。
-2. 已经支持 `esdf_source: traversability_grid`，说明 2.5D 地形分析结果开始直接参与路径回拉与近障碍代价。
-3. `TraversabilityEsdfProvider` 已从单纯二值距离场升级为 signed ESDF，并融合 `height_diff / occupancy_ratio / ground_confidence` 三类语义输入。
-4. 已经有 Gazebo 入口验证这条过渡链。
+对地面机器人来说，更合理的选择是：
 
-但当前项目还没有完成的关键部分同样需要明确：
-
-1. 还没有自有 `A* / JPS` 前端搜索器。
-2. 还没有 `MINCO` 轨迹表示与两阶段优化实现。
-3. 还没有 `SE2 MPC` 控制器实现。
-4. `Nav2` 仍然承担着 planner、controller、behavior lifecycle 的主链职责。
-
-所以更准确的判断是：
-
-`当前工程已经完成了“从 Nav2 纯 2D 代价地图向 2.5D 语义 ESDF 过渡”的前半段，但尚未进入自研 JPS + MINCO + MPC 主链阶段。`
-
-## 2. 结合当前代码，现状到底是什么
-
-### 2.1 已落地的过渡链
-
-当前仿真/实车主链仍以 `Nav2` 为骨架：
-
-`SmacPlannerHybrid -> Nav2BSplineSmoother -> MPPI -> trajectory_speed_governor -> velocity_smoother`
-
-但和最初版本相比，已经发生了两个实质变化：
-
-1. `terrain_analysis_ext` 发布 `terrain_map_ext` 与 `traversability_grid`，不再只有 costmap 视角。
-2. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 都支持 `traversability_grid` ESDF 源。
-
-从代码看，这个过渡已经落实在下面几处：
-
-1. `terrain_analysis_ext` 发布 `terrain_map_ext`
-2. `terrain_analysis_ext` 发布 `traversability_grid`
-3. `terrain_analysis_ext` 发布 `traversability_height_diff_grid`
-4. `terrain_analysis_ext` 发布 `traversability_occupancy_ratio_grid`
-5. `terrain_analysis_ext` 发布 `traversability_ground_confidence_grid`
-6. `trajectory_optimizer/src/traversability_esdf_provider.cpp` 会把 traversability 与三类语义栅格融合成 signed ESDF
-7. `trajectory_optimizer_node` 和 `Nav2BSplineSmoother` 都支持 `esdf_source: traversability_grid`
-8. Gazebo 仿真参数已经默认切到这套 traversability ESDF 过渡链
-
-### 2.2 当前这套 “traversability ESDF” 的真实定位
-
-它的价值很明确：
-
-1. 已经摆脱了完全依赖 `global_costmap` 后处理构造 fake ESDF 的状态。
-2. 已经把三维点云投影/筛选后的可通行分析结果接到了平滑器和可视化优化器上。
-3. 已经为后续替换成真正的导航前端保留了 `EsdfProvider` 接口。
-
-但它还不能等价于 PDF 里那套完整方案，原因也很明确：
-
-1. 当前 `traversability_esdf_provider` 已经消费 `traversability_grid`、`height_diff`、`occupancy_ratio`、`ground_confidence`，并输出 signed distance。
-2. 它目前仍然服务于 `B 样条平滑器` 和旁路 trajectory visual optimizer，不是 `MINCO` 两阶段优化器。
-3. 它目前服务的控制器仍然是 `MPPI`，不是“牢牢贴轨迹”的 `SE2 MPC`。
-4. 当前 ESDF 仍是二维 / 2.5D 过渡后端，不是完整 3D voxel ESDF。
-
-因此它更适合被定义为：
-
-`通向 3D/2.5D ESDF 主链的过渡型 Traversability ESDF 后端`
-
-而不是最终形态。
-
-### 2.3 既然已经切到 2.5D ESDF，现在能不能“看高度并做有效避障”
-
-答案是：
-
-`可以开始利用高度相关信息做更有效的地面避障，但还不能把它等同于完整 3D 体素避障。`
-
-更具体地说，当前已经具备的能力是：
-
-1. `terrain_map_ext` 仍然保留了点云层面的 `z` 信息，所以在 RViz 里已经可以直接观察局部障碍和地形高低。
-2. `terrain_analysis_ext` 会把每个 `(x, y)` 栅格上的 `height_diff / max_rel_height / occupancy_ratio / ground_confidence` 折算成 `traversability_grid`。
-3. `TraversabilityEsdfProvider` 会继续把这些 2.5D 语义输入融合成 signed ESDF，因此平滑器已经不只是“看二维黑白障碍”，而是在看“这个平面格子从地形语义上到底有多危险”。
-
-所以对地面机器人来说，当前已经可以有效改善下面这些场景：
-
-1. 台阶边缘、矮墙、坡坎、碎障碍堆积带来的高度差风险
-2. 狭窄通道里“虽然平面看起来能过，但两侧高度/密度风险很高”的情况
-3. 低置信度地面、稀疏点云区域导致的保守绕行
-
-但必须明确当前还做不到的事情：
-
-1. 还不能正确表达“同一个 `(x, y)` 上方有悬挑、下方可通过”这一类真正的 3D 结构
-2. 还不能表达多层空间、桥下穿行、桌下可通行这类需要 `z` 方向拓扑推理的情况
-3. `slam:=True` 时最终给 `slam_toolbox` 的仍然是 `terrain_map_ext -> obstacle_scan` 的二维投影结果，保存出来的地图资产本身不是带高度语义的地图
-
-因此当前更准确的表述应该是：
-
-`你已经能观察并利用高度差相关语义来改善地面避障，但现在的避障本质仍是“带高度语义的 2D / 2.5D 可通行判断”，不是完整 3D 规划。`
-
-### 2.4 既然是 2.5D ESDF，能不能进一步识别坡道并参与加减速优化
-
-答案是：
-
-`可以，而且这正是当前 2.5D 语义前端最值得继续加强的方向之一。`
-
-对地面机器人来说，坡道信息的价值不在于把导航升级成真正 3D，而在于：
-
-1. 更早识别“能过但不该高速过”的区域
-2. 让轨迹优化和控制器提前降低纵向加速度目标
-3. 让底盘在上坡、下坡、坡顶和坡底过渡段减少打滑、冲坡和姿态扰动
-
-当前 `2.5D` 前端已经具备继续往这个方向扩展的基础，因为你已经有：
-
-1. `terrain_map_ext`
-2. `height_diff`
-3. `occupancy_ratio`
-4. `ground_confidence`
-5. signed `Traversability ESDF`
-
-下一步建议新增或显式整理的量是：
-
-1. `slope_grid`
-2. `slope_direction_grid`
-3. `local_height_gradient`
-4. `roughness_grid`
-
-其中最关键的是 `slope_grid`，因为它可以直接服务于速度/加速度调度，而不需要改变“2D 栅格导航”的本质。
-
-建议的职责划分如下：
-
-1. `traversability_grid` 决定“这里能不能走”
-2. `slope_grid` 决定“这里该以多快的速度走”
-3. signed ESDF 决定“离障碍多近、梯度往哪边推”
-
-因此更准确的系统表述应该是：
-
-`2.5D 语义前端不仅负责可通行判断，也应该负责坡度感知和速度上限感知；真正的路径拓扑仍由 2D 栅格搜索决定。`
-
-### 2.5 为什么总体导航算法仍然应该坚持 2D 格栅
-
-对于你当前的地面机器人，答案其实很明确：
-
-`总体导航仍然应该是 2D 栅格主链，这不是退而求其次，而是最符合任务与底盘本质的选择。`
-
-原因有四个：
-
-1. 你要解决的是“地面可通行拓扑”，而不是空中或多层空间拓扑。
-2. 机器人的主决策变量仍然是平面上的 `(x, y)` 路径和沿路径的 `yaw / v / a` 分配。
-3. 2.5D 高程/坡度/占有率分析已经足以表达坡道、矮墙、坎边、障碍堆和低置信区域。
-4. 真正 3D 导航引入的复杂度，当前不会给你的 RMUC / 哨兵地面场景带来等比例收益。
-
-所以后续最合理的系统定位不是：
-
-`做真正 3D 导航`
-
-而是：
-
-`做一个由 2.5D 语义地图驱动的 2D 栅格导航系统`
-
-### 2.6 现在是否值得立刻更新 RViz
-
-答案也是：
-
-`值得，而且应该现在就做，不必等 A* / JPS / MINCO / MPC。`
-
-原因很简单：
-
-1. 现在最需要验证的是 `terrain_analysis_ext -> traversability_grid -> signed ESDF` 这条过渡链到底稳不稳。
-2. 如果 RViz 里只能看到 `plan / smoothed_path / local_costmap`，你很难区分“路径贴边”到底是规划器问题、平滑器问题，还是地形语义本身把那里判成了高风险。
-3. 在 `A* / JPS / MINCO` 尚未接入前，最值得提升的不是“轨迹炫酷程度”，而是“地图语义解释能力”。
-
-对于当前仓库，RViz 建议分成三层来看：
-
-1. 地图前端层：`terrain_map_ext`
-2. 可通行语义层：`traversability_grid`
-3. 解释层：`traversability_height_diff_grid / traversability_occupancy_ratio_grid / traversability_ground_confidence_grid`
-4. 优化反馈层：`trajectory_esdf_debug / trajectory_profile_markers`
-5. 控制跟踪层：`transformed_global_plan / trajectories / lookahead_point / footprint`
-
-如果参考 `fast_planner` 前端或者 `~/rose_navigation`，建议借鉴的是：
-
-1. `分层显示习惯`，不是 `MINCO` 本身
-2. `原始路径 / 当前优化路径 / 历史路径` 同屏对照
-3. `障碍层 / 风险层 / 轨迹层 / 起终点层` 同时存在
-4. 用 `MarkerArray` 明确展示“为什么这里危险、轨迹为什么被推开”
-
-但由于当前主线还是 `B 样条` 而不是 `MINCO`，所以短期不要追求复制 `MINCO` 特有的可视化语义，而应该优先把下面这几层看清楚：
-
-1. `terrain_map_ext` 的高度分布
-2. `traversability_grid` 的占障/可通行分区
-3. `height_diff / occupancy_ratio / ground_confidence` 到最终 risk 的映射
-4. `trajectory_esdf_debug` 的红绿点和梯度箭头是否真的与上述语义一致
-
-## 3. PDF 方案里最值得照搬的部分
-
-根据 `docs/中科大哨兵2025技术报告.pdf`，最应该直接继承的是下面这条分层逻辑：
-
-`3D 点云投影 -> 2.5D 高程/坡度/占有率分析 -> Traversability Grid + Slope Grid -> 2D 语义 ESDF -> JPS -> 时间重采样 -> MINCO 两阶段优化 -> SE2 MPC`
-
-其中最关键的不是算法名，而是工程组织方式：
-
-1. 地图前端主导规划，而不是 costmap 主导规划。
-2. 前端搜索和后端优化解耦。
-3. 轨迹表示天然支持重规划、前缀保留和时间优化。
-4. 控制器只负责贴轨迹，不再自己“发明局部轨迹”。
-
-这也是为什么后续方向不应该继续放在：
-
-1. 给 `SmacPlannerHybrid` 再打更多补丁。
-2. 把 `Nav2BSplineSmoother` 继续越堆越复杂。
-3. 长期把 `MPPI critic` 调参当成主线。
-
-## 4. 参考 EGO-Planner 时，应该借什么
-
-建议借的是工程组织，而不是照搬其地图假设。
-
-建议借鉴：
-
-1. 高频重规划组织方式。
-2. 上一条轨迹前缀保留。
-3. 热启动与局部续接。
-4. 让“搜索、优化、重规划决策”形成扁平直连链路。
-
-不建议照搬：
-
-1. `ESDF-free` 假设。
-2. 无人机 3D 自由空间模型。
-3. 无 footprint、无地形约束的碰撞模型。
+1. 总体导航仍坚持 `2D` 栅格主链。
+2. `2.5D` 前端负责把坡度、占有率和语义风险变成速度规划输入。
+3. 只有在长期版本 `V2` 中，才把地图后端升级成真正的 `3D ESDF`。
 
 一句话概括：
 
-`借 EGO-Planner 的重规划组织，借技术报告的地图建模、MINCO 和 SE2 MPC 主链。`
+`V1` 里，2.5D 语义前端服务 2D 地面导航主链。
+`V2` 里，才考虑真正 3D ESDF。
 
-## 5. 面向当前仓库的推荐目标架构
+## 2. V1 稳定比赛版
 
-推荐最终目标链如下：
+### 2.1 V1 的目标链
 
 `Batch-LIWO / 里程计 -> 3D 点云投影 -> 2.5D Traversability + Slope -> 2D 语义 ESDF -> JPS -> MINCO(PRE + FINELY) -> 独立 Yaw -> 安全校验与局部重拟合 -> SE2 MPC -> chassis`
 
-其中每一层在当前仓库里的对应关系如下。
+这条链是 `V1` 的比赛可用版本目标。
 
-### 5.1 状态估计层
+### 2.2 V1 中各层的职责
 
-当前基础：
+#### 状态估计层
 
-1. 已有 `point_lio / lidar_odometry` 相关链路
-2. `terrain_analysis_ext` 已经直接订阅 `lidar_odometry`
+1. 维持 `point_lio / lidar_odometry` 的稳定输出。
+2. 保证时间戳和 TF 链稳定。
 
-这层短期不是重构重点，只要接口稳定即可。
+#### 2.5D 地形语义层
 
-### 5.2 3D 地图与 2.5D 可通行分析层
-
-当前基础：
-
-1. `terrain_analysis`
-2. `terrain_analysis_ext`
-3. `terrain_map`
-4. `terrain_map_ext`
-5. `traversability_grid`
-
-下一阶段不要只把它当成“发点云给 costmap/ESDF”的模块，而要升级成真正的导航前端。
-
-建议为每个 `(x, y)` 栅格显式维护：
+建议每个 `(x, y)` 栅格显式维护：
 
 1. `z_min`
 2. `z_max`
@@ -311,294 +86,172 @@
 9. `dynamic_obstacle_confidence`
 10. `traversable / occupied / unknown`
 
-当前已经开始落地的第一步是：
+这层的任务不是“能不能走”的唯一判断，而是把地形语义转换成可规划、可控速、可解释的代价。
 
-1. `terrain_analysis_ext` 除了 `terrain_map_ext` 之外，新增输出 `traversability_grid`
-2. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 已经可以直接消费 `traversability_grid`
-3. `TraversabilityEsdfProvider` 已经订阅并融合 `height_diff / occupancy_ratio / ground_confidence`
-4. 下一步应补出 `slope_grid`
-5. 当前阶段先保证 Gazebo 和现有 Nav2 主链能稳定消费 signed traversability ESDF，再逐步上 `A* -> JPS -> MINCO`
+#### 2D 语义 ESDF 层
 
-这一步做完之后，ESDF 才真正有“来自地形语义”的基础。
+`TraversabilityEsdfProvider` 的职责是：
 
-其中 `slope_grid` 的推荐用途不是做“能不能走”的唯一判据，而是：
+1. 输入二维可通行栅格和地形语义栅格。
+2. 输出 signed distance。
+3. 旁路输出 `slope_grid` 或等价坡度代价。
+4. 给 `JPS / MINCO / MPC` 提供 `d(x,y)`、`grad d(x,y)` 和坡度相关代价。
 
-1. 参与 `traversability` 二值化阈值
-2. 参与 `MINCO` 软约束代价
-3. 参与速度上限和加速度上限的自适应调节
+这里要明确：
 
-例如可以先用最简单的策略：
+1. 主导航拓扑仍由 `2D` 搜索器在栅格图上完成。
+2. ESDF 不负责把问题变成真正 3D 导航。
+3. ESDF 负责的是在 2D 平面路径上叠加更丰富的地形语义。
 
-1. 平坡：保持 nominal `v_max / a_max`
-2. 中等坡度：压低 `v_max`
-3. 大坡度或坡顶/坡底突变：同时压低 `v_max` 和 `a_max`
+#### 前端搜索层
+
+`V1` 的最终目标前端是 `JPS`。
+在进入 `JPS` 之前，可以先用 `A*` 把接口跑通，验证 ESDF、坡度和可通行定义是否稳定。
+
+建议职责分工如下：
+
+1. `traversability_grid` / 二值通行栅格：给 `JPS` 做主搜索。
+2. `slope_grid`: 给速度/加速度自适应和 soft penalty 使用。
+3. signed ESDF: 给目标点拉回、tie-break、局部修补、后端优化和控制器提供 clearance / gradient 信息。
+4. 如果后续需要风险加权搜索，优先做 `JPS` 主搜索 + ESDF / slope 后验筛选与修补，不要一开始把 `JPS` 改造成重权图搜索器。
+
+#### 轨迹优化层
+
+`V1` 中建议新建独立 `minco_planner` 包，轨迹优化职责如下：
+
+1. 路径表示改为 `MINCO`。
+2. 实现 `PRE_OPTIMIZATION + FINELY_OPTIMIZATION`。
+3. 在位置轨迹优化中接入 `slope` 软惩罚。
+4. 保留独立 `Yaw` 规划。
+5. 保留局部 B-spline repair 作为轻量碰撞修补层。
+
+#### 控制层
+
+`V1` 里可以先用 `MPPI` 做执行器，但目标控制层仍然是 `SE2 MPC`。
+
+### 2.3 为什么 V1 仍然坚持 2D 栅格主链
+
+对当前地面机器人，`2D` 栅格主链是最合理的选择：
+
+1. 任务目标是地面可通行拓扑，不是空中或多层空间拓扑。
+2. 主决策变量仍然是平面路径和沿路径的 `yaw / v / a` 分配。
+3. 2.5D 高程/坡度/占有率分析已经足以表达坡道、矮墙、坎边、障碍堆和低置信区域。
+4. 真正 3D 导航引入的复杂度，当前不会给 RMUC / 哨兵地面场景带来等比例收益。
+
+所以 `V1` 的定位是：
+
+`做一个由 2.5D 语义地图驱动的 2D 栅格导航系统`
+
+### 2.4 2.5D ESDF 如何服务坡道速度优化
+
+2.5D `ESDF` 不仅可以识别坡道，还应该参与加减速优化。
+
+建议的分工如下：
+
+1. `traversability_grid` 决定“这里能不能走”。
+2. `slope_grid` 决定“这里该以多快的速度走”。
+3. signed ESDF 决定“离障碍多近、梯度往哪边推”。
+
+推荐最小实现：
+
+1. 平坡：保持 nominal `v_max / a_max`。
+2. 中等坡度：压低 `v_max`。
+3. 大坡度或坡顶/坡底突变：同时压低 `v_max` 和 `a_max`。
 
 这样做不需要把导航变成 3D，但会显著提升地面机器人在坡道环境下的轨迹可执行性。
 
-### 5.3 2D ESDF 层
+### 2.5 V1 的明确边界
 
-当前基础：
+`V1` 明确不是 `3D` 导航版本。
 
-1. `EsdfProvider` 抽象已经存在
-2. `FakeCostmapEsdfProvider` 已存在
-3. `TerrainPointCloudEsdfProvider` 已存在
+它要做的是：
 
-下一步不该直接推翻，而应该新增第三类提供器，例如：
+1. 用 `2.5D` 语义地图理解地形。
+2. 用 `2D` 栅格主链完成导航。
+3. 用 `JPS / MINCO / 独立 Yaw / 局部修补 / SE2 MPC` 提高比赛可用性和稳定性。
 
-`TraversabilityEsdfProvider`
+它不要做的是：
 
-职责：
+1. 把整个系统升级成真正 3D 导航。
+2. 把悬挑、多层空间、桥下穿行当成当前主线问题。
+3. 在 `V1` 阶段同时把地图后端和控制器一起大改。
 
-1. 输入不再是裸点云，而是“已判定可通行/不可通行/未知”的二维栅格和地形语义栅格
-2. 输出 signed distance，负值代表已进入障碍 / 风险区，正值代表 free space clearance
-3. 旁路输出 `slope_cost` 或 `slope_grid`
-4. 给后续 `A* / JPS`、`MINCO`、`SE2 MPC` 统一提供 `d(x,y)`、`grad d(x,y)` 和坡度相关代价
+## 3. V2 长期最终版
 
-这里要明确一点：
+`V2` 的目标是把 `V1` 稳定下来的规划控制接口保留下来，再把地图后端升级成真正的 `3D ESDF`。
 
-1. 主导航拓扑仍由 `2D` 搜索器在栅格图上完成
-2. ESDF 不负责把问题变成“真正 3D 导航”
-3. ESDF 负责的是在 2D 平面路径上叠加更丰富的地形语义
+### 3.1 V2 的目标链
 
-### 5.4 前端搜索层
+`Batch-LIWO / 里程计 -> 3D Occupancy / 3D ESDF -> JPS / 搜索前端 -> MINCO(PRE + FINELY) -> 独立 Yaw -> 安全校验与局部重拟合 -> SE2 MPC -> chassis`
 
-当前状态：
+### 3.2 V2 的核心变化
 
-1. 仍由 `SmacPlannerHybrid` 提供 `plan`
+1. 地图后端从 2.5D 语义 ESDF 升级到真正 3D ESDF。
+2. `JPS / MINCO / Yaw / MPC` 的上层接口尽量保持不变。
+3. `V1` 中已经稳定的坡度、速度、修补和控制逻辑尽量复用。
 
-目标状态：
+### 3.3 V2 不是当前主线
 
-1. 最终新增自有 `JPS` 前端
-2. 当前过渡阶段先实现一个自有 `A*` 前端
-3. 读取 `Traversability` 和 signed ESDF 相关接口
-4. 输出离散路径点和初始时间分配信息
-5. 支持目标点占障时的外推拉回
-6. 支持沿旧轨迹前缀局部续接
+`V2` 不是现在立刻开工的主线。
+当前主线仍然是：
 
-建议做法：
+1. 先把 `V1` 做稳定。
+2. 再考虑 `V2` 的 3D ESDF 后端升级。
 
-1. 第一版先上 `A*`，不要一开始追求 `Hybrid A*` 或 kinodynamic 搜索
-2. 对当前四驱舵轮 / 全向底盘，位置路径和底盘朝向本来就应该解耦；全局搜索层没必要先把朝向约束硬塞进去
-3. 第二版再把前端搜索替换为 `JPS`
-4. `JPS` 作为最终目标是合理的，但前提是先把“可通行栅格定义”和“ESDF 采样接口”理顺
-5. 先完成“摆脱 Nav2 planner”，再考虑更复杂前端
+## 4. 当前仓库的真实状态
 
-这里要特别说明为什么当前我支持“最终 `JPS`、当前先 `A*`”的两阶段路线：
+当前仓库已经具备继续推进 `V1` 的基础：
 
-1. 你的底盘不是典型 Dubins / Ackermann 小车，`Hybrid A*` 的核心价值没有那么大。
-2. 你已经明确希望把 `Yaw` 单独规划，因此搜索层更适合只管 `(x, y)` 位置可达性。
-3. 当前 `traversability_grid + signed ESDF` 本身带有 risk / unknown / clearance 语义，第一阶段用 `A*` 更容易把这些代价解释清楚。
-4. `JPS` 的真正优势在“复杂但仍以二值可通行为主的栅格环境”里会非常明显，这和你后期要跑非空旷复杂环境的目标是一致的。
-5. 但 `JPS` 最适合吃的是“二值可通行栅格”或接近二值的搜索图，而不是直接在带复杂权重的 signed ESDF 上做主搜索。
-6. 因此更合理的工程做法是：
-   `先用 A* 把 signed ESDF -> 可通行定义 -> 搜索接口跑通，再把最终前端切换成 JPS。`
+1. `terrain_analysis_ext` 已经输出 `traversability_grid` 和多类地形语义栅格。
+2. `TraversabilityEsdfProvider` 已经接入 signed ESDF。
+3. `trajectory_optimizer` 和 `Nav2BSplineSmoother` 已经能消费 traversability ESDF。
+4. 当前主链仍然是 Nav2，因此可以平滑过渡到 `V1`。
 
-对 `JPS` 和 signed ESDF 的职责分工，建议明确成下面这样：
+当前还缺的关键项：
 
-1. `traversability_grid` / 二值通行栅格：给 `JPS` 做主搜索
-2. `slope_grid`：给速度/加速度自适应和 soft penalty 使用
-3. signed ESDF：给目标点拉回、tie-break、局部修补、后端优化和控制器提供 clearance / gradient 信息
-4. 如果后续确实需要风险加权搜索，也建议先做“`JPS` 主搜索 + ESDF / slope 后验筛选与修补”，而不是一开始把 `JPS` 改造成重权图搜索器
+1. `slope_grid` 和坡度阈值定义。
+2. `minco_planner` 包。
+3. `A* -> JPS` 的前端演进。
+4. `MINCO + 独立 Yaw + 局部 B-spline repair` 的稳定实现。
+5. `SE2 MPC` 控制器。
 
-### 5.5 轨迹优化层
+## 5. 近期实现顺序
 
-当前状态：
+### 5.1 V1 近期待办
 
-1. 已有 `BSplinePathOptimizer`
-2. 已有曲率代价、近障碍代价、速度剖面
-3. 已有可视化与旁路验证节点
+1. 在 `terrain_analysis_ext` 侧补出 `slope_grid`。
+2. 定义坡度如何影响 `v_max / a_max`。
+3. 新建 `minco_planner` 包，先落 `A* + 独立 Yaw + 局部 B-spline repair`。
+4. 在 `A*` 稳定后，把前端替换成 `JPS`。
+5. 设计统一的 `ReferenceTrajectory` 消息或内部结构。
 
-目标状态：
+### 5.2 新对话起手任务
 
-1. 新建独立 `minco_planner` 包
-2. 轨迹表示改为 `MINCO`
-3. 实现 `PRE_OPTIMIZATION + FINELY_OPTIMIZATION`
-4. 实现二次插值/平滑梯度接口
-5. 在位置轨迹优化中接入 `slope` 软惩罚
-6. 输出时参数轨迹与参考采样序列
+如果后续要开新对话继续项目优化，建议直接从下面 5 个任务开工：
 
-建议演进方式：
+1. `任务 1`
+   在 `terrain_analysis_ext` 侧补出 `slope_grid`，并明确数据格式、阈值和可视化方式。
+2. `任务 2`
+   定义坡度如何影响 `v_max / a_max`，先把坡道速度自适应做成可配置规则。
+3. `任务 3`
+   新建 `minco_planner` 包骨架，只建目录、消息结构、配置和最小 launch。
+4. `任务 4`
+   在 `minco_planner` 中先实现 `grid_astar`，输出 `raw_path` 和调试 marker。
+5. `任务 5`
+   再实现 `yaw_spline_planner` 与 `local_collision_repair`，最后先接 `MPPI` 验证窄门和坡道。
 
-1. 保留现有 `BSplinePathOptimizer` 作为 baseline
-2. 新建并行 `MINCO` 实验链
-3. 先实现“输入路标点 -> MINCO 优化 -> RViz 可视化”
-4. 再接动作执行和重规划
+### 5.3 V1 的阶段划分
 
-如果按当前项目的真实节奏推进，还需要再加一个更务实的补充判断：
-
-1. `minco_planner` 这个包现在就值得新建。
-2. 但第一阶段不要强迫自己“新包一建好就必须用 MINCO 接管全部位置轨迹”。
-3. 更稳的路线是：`minco_planner` 先承载 `A* + 独立 Yaw + 局部 B-spline 碰撞修补 + 调试消息`。
-4. 等 signed ESDF 和窄门场景稳定以后，再把 `MINCO PRE/FINELY` 接进同一个包。
-
-也就是说：
-
-`包边界现在就应该按 MINCO 时代来设计，但第一阶段的主任务仍然是把 ESDF 驱动的前端搜索和局部轻量修补跑通。`
-
-针对你现在最关心的“坡道是否能参与加减速优化”，这里建议明确成两步：
-
-1. 在 `MINCO 2D` 位置优化里，把 `slope_cost` 作为软约束项，避免轨迹在高坡区域仍然追求激进时间分配
-2. 在轨迹离散化之后，再依据 `slope_grid` 对 `v_max(s)`、`a_max(s)` 做自适应压缩
-
-这样既能保留 `MINCO` 的轨迹表示优势，也不会把坡度问题错误地塞到前端搜索里。
-
-### 5.6 控制层
-
-当前状态：
-
-1. 仍由 `nav2_mppi_controller::MPPIController` 承担主控制
-2. `trajectory_speed_governor` 只是给 MPPI 输出限速辅助
-
-目标状态：
-
-1. 自研 `SE2 MPC` 控制器替换 MPPI 主链
-2. 直接跟踪时参数轨迹
-3. 输入包含 `x y yaw vx vy wz` 与参考状态序列
-4. 支持“底盘是否需要强跟随轨迹朝向”的控制模式切换
-
-这一步完成后，`velocity_smoother` 和大量 MPPI critic 的职责会显著收缩。
-
-## 6. 推荐迁移顺序
-
-不建议一次性推翻。当前应把已经完成的过渡成果冻结成可验证基线，再继续替换 Nav2 的 planner、smoother 和 controller。
-
-### 阶段 A：已完成的 2.5D ESDF 过渡基线
-
-当前状态：
-
-1. 保留 Nav2 主链。
-2. `terrain_map_ext`、`traversability_grid` 与三类地形语义栅格已经接入轨迹优化链。
-3. `TraversabilityEsdfProvider` 已经替代 fake costmap ESDF 成为当前主线后端。
-4. fake costmap ESDF 与 terrain pointcloud ESDF 仍保留为 fallback / 对照路径。
-
-保留价值：
-
-1. 在不推翻 Nav2 的前提下，验证地形语义是否能稳定影响平滑路径。
-2. 给后续 `A* / JPS / MINCO / MPC` 提供统一的 `EsdfProvider` 抽象。
-3. 保留 loopback、Gazebo 和实车之间可对比的调试入口。
-
-### 阶段 B：当前应优先完成的 traversability ESDF 稳定性验证
+#### 阶段 P0：补齐 2.5D 地形语义
 
 目标：
 
-1. 在 Gazebo、loopback 和实车中验证 signed distance、梯度方向和风险点分布是否一致。
-2. 固化 `d_min / d_avg / |g|avg / risk` 与 `height_diff / occupancy_ratio / ground_confidence` 的对应关系。
-3. 确认可通行、不可通行和未知区域在 ESDF 中的符号与安全距离表现符合预期。
-4. 保持 obstacle 权重保守，不在验证阶段同时大改 MPPI critic 和 governor。
+1. 输出 `slope_grid`。
+2. 明确坡度阈值和坡度分级。
+3. 明确坡度如何影响 `traversability` 二值化。
+4. 明确坡度如何影响 `v_max / a_max`。
 
-产出：
-
-1. 可重复的仿真测试场景。
-2. 更稳定的 `terrain_analysis_ext` 参数。
-3. signed Traversability ESDF 的上车观察清单。
-4. 进入 `A* / JPS / MINCO` 前的地图前端验收基线。
-
-### 阶段 C：替换 Nav2 planner/smoother
-
-目标：
-
-1. 新增 `A*` 前端搜索，先验证 ESDF 与搜索接口
-2. 新增独立 `Yaw` 规划与局部 B-spline repair
-3. 再把前端搜索替换成 `JPS`
-4. 后续接入 `MINCO` 两阶段优化
-5. 先并联输出调试，不抢控制权
-
-产出：
-
-1. `goal -> A* -> oriented path -> local repair` 的第一阶段规划链
-2. `goal -> JPS -> oriented path -> local repair` 的第二阶段规划链
-3. 后续 `goal -> JPS -> MINCO trajectory` 的完整规划链
-4. 重规划、前缀保留、热启动逻辑
-
-### 阶段 D：替换 Nav2 controller
-
-目标：
-
-1. 新增 `SE2 MPC`
-2. 从 MPPI 切换到“严格贴轨迹”的控制器
-3. 最后再逐步剥离 Nav2 action/lifecycle 依赖
-
-产出：
-
-1. 自研导航主链闭环
-2. Nav2 从主系统退为对照组和兜底链
-
-## 7. 面向当前仓库的具体开发任务建议
-
-### 7.1 近期待办
-
-建议优先做下面几项，而不是直接开写 MPC：
-
-1. 在 Gazebo / loopback / 实车中验证 signed Traversability ESDF 的方向、距离和风险点是否一致
-2. 固化 ESDF 观测指标，包括 `d_min / d_avg / risk_count` 与三类地形语义栅格的对应关系
-3. 在 `terrain_analysis_ext` 侧补出 `slope_grid`
-4. 定义坡度如何影响 `v_max / a_max`
-5. 新建 `minco_planner` 包，先落 `A* + 独立 Yaw + 局部 B-spline repair`
-6. 在 `A*` 稳定后，把前端替换成 `JPS`
-7. 设计统一的 `ReferenceTrajectory` 消息或内部结构，避免后面 `MINCO` 与 `MPC` 接口再次重写
-
-### 7.2 MINCO 接入建议
-
-推荐单独建包，而不是塞进现有 `trajectory_optimizer`：
-
-1. `minco_core`
-2. `minco_planner_node`
-3. `trajectory_sampler`
-
-原因：
-
-1. 当前 `trajectory_optimizer` 强绑定 B 样条语义
-2. 继续在同一个类里揉会让过渡逻辑越来越难维护
-
-### 7.3 MPC 接入建议
-
-推荐单独建控制包，例如：
-
-1. `se2_mpc_controller`
-
-输入建议统一为：
-
-1. 当前底盘状态
-2. 参考点序列
-3. 参考速度/加速度/朝向
-4. 轨迹跟随模式位
-
-不要一开始就继续挂在 Nav2 controller plugin 接口里实现全部逻辑；先做独立节点验证会更快。
-
-不过对“下一阶段马上要不要上 MPC”这件事，需要再说得更细：
-
-1. 当前位置最适合先保留 `MPPI` 做执行器。
-2. 但不要再把 `MPPI` 当成“自己生成局部轨迹”的主体，而是把它降级成“沿上游给定 path / orientation 尽量稳定跟踪”的执行层。
-3. 等 `A* / JPS + 独立 Yaw + 局部修补` 这一层稳定后，再判断 `MPPI` 是否已经足够通过狭窄地形。
-4. 如果那时仍然出现“路径很好但底盘贴不住”的问题，再上 `SE2 MPC` 才是合理顺序。
-
-### 7.4 RViz 继续升级时应该补什么
-
-当前已经值得补齐的显示项是：
-
-1. `terrain_map_ext` 按 `Z` 着色显示
-2. `traversability_grid`
-3. `traversability_height_diff_grid`
-4. `traversability_occupancy_ratio_grid`
-5. `traversability_ground_confidence_grid`
-6. `trajectory_profile_markers`
-7. `trajectory_esdf_debug`
-
-后续如果要继续向 `fast_planner` / `rose_navigation` 的前端效果靠拢，建议再补：
-
-1. 原始 planner path
-2. smoothed / optimized path
-3. 历史 path 或前缀保留 path
-4. 局部 corridor / tunnel / safe band marker
-5. 起点、目标点、当前参考点 marker
-
-其中第 1 到第 4 项需要新增调试发布器，当前仓库不是没有思路，而是还缺稳定的发布话题。
-
-### 7.5 针对当前项目，更合适的下一阶段计划
-
-如果完全按当前仓库状态、底盘构型和你的目标来排优先级，我认为下面这条路线更合适：
-
-#### 阶段 P1：不碰 `trajectory_optimizer`，新建 `minco_planner`
+#### 阶段 P1：新建 `minco_planner`
 
 包内第一阶段建议只放这些模块：
 
@@ -609,263 +262,94 @@
 5. `planner_debug_visualizer`
 6. `trajectory_speed_adapter`
 
-这个阶段的目标不是“立刻 MINCO 化”，而是：
-
-`先把 signed ESDF 驱动的自有规划链跑起来，并能替代掉 Nav2 planner + 部分 smoother 职责。`
-
-在这之前，还应补一个前置动作：
-
-#### 阶段 P0：把 2.5D 地形语义补齐到“可导航”状态
-
-建议先完成：
-
-1. 输出 `slope_grid`
-2. 明确坡度阈值和坡度分级
-3. 明确坡度如何影响 `traversability` 二值化
-4. 明确坡度如何影响 `v_max / a_max`
-
-因为你的最终目标不是“只识别障碍”，而是：
-
-`让 2.5D 前端同时服务于路线选择和速度规划。`
+这个阶段的目标不是“立刻 MINCO 化”，而是先把 signed ESDF 驱动的自有规划链跑起来。
 
 #### 阶段 P2：前端位置规划先用 `A*`
 
-建议输入：
+输入：
 
-1. `TraversabilityEsdfProvider` 或等价的独立 ESDF 采样接口
-2. 当前起点、目标点
-3. clearance / risk / unknown 代价参数
+1. `TraversabilityEsdfProvider` 或等价的独立 ESDF 采样接口。
+2. 当前起点、目标点。
+3. clearance / risk / unknown 代价参数。
 
-建议输出：
+输出：
 
-1. 离散 `path points`
-2. 每个点的累计弧长
-3. 初始时间分配
-4. 调试用 `raw_path`
+1. 离散 `path points`。
+2. 每个点的累计弧长。
+3. 初始时间分配。
+4. 调试用 `raw_path`。
 
-这里先不上 `Hybrid A*` 的原因前面已经说了，再补一句最现实的：
+#### 阶段 P2.5：把前端替换成 `JPS`
 
-`你当前真正缺的是“能稳定穿窄门的可解释路径”，不是“在搜索阶段就把朝向约束建得很复杂”。`
+切换条件建议是：
 
-#### 阶段 P2.5：当前端接口稳定后，把 `A*` 替换成 `JPS`
+1. `traversability_grid` 的二值可通行定义已经稳定。
+2. 目标点拉回和 unknown 策略已经稳定。
+3. `A*` 版本已经能稳定穿过 `rmuc_2025` 窄门。
+4. 你已经确认真正想让 `JPS` 吃的是哪一层搜索图，而不是临时混合各种 risk 权重。
 
-这一步就是你最终目标真正落地的位置。
+切换后的职责：
 
-建议切换条件是：
+1. `JPS` 负责全局或局部快速搜索。
+2. signed ESDF 继续负责 clearance 判断、局部修补和后端优化。
+3. `slope_grid` 继续负责速度/加速度自适应。
+4. `Yaw` 规划、局部 B-spline repair、控制器接口保持不变。
 
-1. `traversability_grid` 的二值可通行定义已经稳定
-2. 目标点拉回和 unknown 策略已经稳定
-3. `A*` 版本已经能稳定穿过 `rmuc_2025` 窄门
-4. 你已经确认真正想让 `JPS` 吃的是哪一层搜索图，而不是临时混合各种 risk 权重
+#### 阶段 P3：独立 `Yaw` 规划
 
-切换后的推荐职责是：
+`Yaw` 只惩罚角速度和角加速度还不够，建议增加：
 
-1. `JPS` 负责全局或局部快速搜索
-2. signed ESDF 继续负责 clearance 判断、局部修补和后端优化
-3. `slope_grid` 继续负责速度/加速度自适应
-4. `Yaw` 规划、局部 B-spline repair、MPPI 跟踪接口全部保持不变
+1. 转向电机转速上限。
+2. 狭窄区域内的路径切向轻量参考。
+3. 起点 yaw 边界项。
 
-这样做的好处是：
+#### 阶段 P4：局部安全修补
 
-1. 你后面换搜索器不会把整个规划栈再打散一遍
-2. 能先把复杂问题拆开，不把“JPS 是否更快”和“ESDF 是否稳定”混在一起调
+建议按局部支撑语义实现：
 
-#### 阶段 P3：独立 `Yaw` 规划可以做，但代价函数不能只有平滑项
+1. 采样车体矩形 footprint。
+2. 发现碰撞后，不做全局重算。
+3. 只动碰撞段影响到的 3 到 4 个局部控制点。
+4. 沿安全方向拖动一小步。
+5. 重新局部拟合并再次校验。
 
-你提出的“5次均匀 B 样条拟合 `Yaw`，只惩罚角速度和角加速度”方向基本对，但如果真的只有这两项，会有一个问题：
+#### 阶段 P5：先下发给 `MPPI`
 
-1. 最优解很容易退化成“几乎常值 yaw”
-2. 它未必会在进入窄门前主动对齐通道切向
-3. 这样 MPPI 最后拿到的 orientation 参考不一定真的有用
+`MPPI` 先作为执行器，目标仍然是过渡到 `SE2 MPC`。
 
-因此更推荐的 `Yaw` 代价应当是：
+#### 阶段 P6：V1 稳定后再上 `MINCO` 和 `SE2 MPC`
 
-1. 主项：角速度惩罚
-2. 主项：角加速度惩罚
-3. 约束项：转向电机转速上限
-4. 轻量参考项：在狭窄区域或低 clearance 区域，对路径切向 `yaw_tangent` 施加弱到中等权重
-5. 边界项：起点 `yaw` 必须贴当前车体实际朝向
+推荐顺序：
 
-一句话：
+1. 先补齐 `slope_grid`。
+2. 实现 `A* -> 局部修补 -> MPPI`。
+3. 跑通窄门、贴边、S 弯和坡道。
+4. 切到 `JPS`。
+5. 固化 signed ESDF 与 `slope_grid` 的接口和调试指标。
+6. 再把 `MINCO PRE + FINELY` 接到 `minco_planner`。
+7. 最后再用 `SE2 MPC` 替换执行器。
 
-`Yaw 可以独立规划，但不能完全无参考；至少在狭窄环境里要被“通道切向”轻度牵引。`
+## 6. 旧补丁和旧叙述的处理原则
 
-#### 阶段 P4：局部安全修补值得做，但要按“局部支撑”语义来实现
+为了让文档真正服务于当前项目优化，下面这些内容不再作为主线叙述：
 
-你说的这一步我认为是当前方案里最有价值的部分之一，而且确实很接近 `EGO-Planner` 最值得借的工程思想：
+1. 把 fake costmap ESDF 当主线的旧描述。
+2. 把 Nav2 的旧参数调优写成长期主方向的叙述。
+3. 把过渡链和历史对照写成与当前目标同等重要的内容。
 
-1. 先对轨迹按固定时间或弧长采样
-2. 对每个采样点做车体矩形 footprint collision check
-3. 发现碰撞后，不做全局重算
-4. 只取碰撞段影响到的 `3~4` 个局部控制点
-5. 沿安全方向拖动一小步
-6. 重新局部拟合并再次校验
+文档只保留两类内容：
 
-但这里有一个实现细节必须说清：
+1. `V1` 现在应该做什么。
+2. `V2` 未来应该怎么升级。
 
-1. 这套“拖动 3~4 个控制点”的轻量修补，与 `uniform B-spline` 的局部支撑性天然契合。
-2. 它和 `MINCO` 的“经过路标点”特性不是同一种局部修改语义。
-3. 所以第一阶段你完全可以在 `minco_planner` 包里使用一个“局部 B-spline repair layer”，并不矛盾。
+## 7. 结论
 
-也就是说，第一阶段最合理的形式不是：
+当前最合理的推进方式是：
 
-`A* -> MINCO -> 再硬改 MINCO 控制点`
+1. 先按 `V1 稳定比赛版` 做。
+2. 把 `2.5D` 语义地图、坡度、速度自适应、`JPS`、`MINCO`、`SE2 MPC` 跑稳定。
+3. 等比赛版稳定后，再升级到 `V2 长期最终版` 的真正 `3D ESDF` 后端。
 
-而更像是：
+如果一句话总结：
 
-`A* / JPS -> 初始轨迹/采样点 -> 局部 B-spline repair -> oriented path -> MPPI`
-
-等这一层稳定后，再考虑把中间的“初始轨迹表示”替换成真正的 `MINCO`。
-
-#### 阶段 P5：先下发给 `MPPI`，但要明确它能跟什么、不能跟什么
-
-这一步可以做，而且对当前项目最务实。
-
-但需要明确边界：
-
-1. 当前 Nav2 `MPPI` 主接口消费的是 `nav_msgs/Path`，不是完整时参数轨迹。
-2. 它能比较好地做的是“路径 + orientation” 跟踪。
-3. 它做不了真正意义上的“严格按你给定的时间参数和 yaw 速度边界执行”。
-
-因此当前更准确的目标应该写成：
-
-1. 把 `minco_planner` 输出成带 orientation 的 path
-2. 在 MPPI 侧打开对 path orientation 更敏感的跟踪配置
-3. 把 MPPI 先用成“参考路径跟踪器”，不是“最终版轨迹控制器”
-
-这一步特别适合先在 `rmuc_2025` 的窄门场景验证：
-
-1. 是否更早对齐通道切向
-2. 是否减少门前左右试探
-3. 是否减少局部贴障时的抖动
-4. 是否比当前 `Smac + bspline` 更可解释
-
-#### 阶段 P6：ESDF 稳定后再上 MINCO
-
-这一步我赞成，而且比“现在立刻把 MINCO 和控制器一起接上”更稳。
-
-推荐接入顺序：
-
-1. 先补齐 `slope_grid` 与坡度速度自适应
-2. 实现 `A* -> 局部修补 -> MPPI`
-3. 跑通 `rmuc_2025` 窄门、贴边、S 弯、坡道
-4. 把前端替换成 `JPS`
-5. 固化 signed ESDF 与 `slope_grid` 采样接口和调试指标
-6. 再把 `MINCO PRE + FINELY` 接到 `minco_planner`
-7. 最后才决定是否替换 `MPPI`
-
-原因很简单：
-
-1. 现在系统里最大的未知量仍然是 `2.5D traversability -> signed ESDF` 的稳定性
-2. 如果现在同时引入 `MINCO + Yaw + 局部修补 + MPC`，变量会过多
-3. 先让 `A* + repair + MPPI` 过窄门和坡道，再切 `JPS`，能够更快判断到底是 ESDF、坡度建模、搜索器还是轨迹表示在拖后腿
-
-## 8. 这份文档对应的现实判断
-
-如果以“是否已经彻底改成技术报告里的方案”为标准，答案是：
-
-`还没有。`
-
-如果以“是否已经朝那个方向完成了关键过渡基础设施”为标准，答案是：
-
-`已经完成了一部分，而且方向是对的。`
-
-最重要的不是继续把当前链路包装成最终形态，而是承认它现在所处的位置：
-
-`当前项目处于“2.5D signed Traversability ESDF 过渡阶段”，下一步应先补齐坡度语义与速度自适应、验证 ESDF 稳定性，再完成 A* 过渡、切到最终目标 JPS、补齐 MINCO，并最终替换 MPPI 为 SE2 MPC。`
-
-## 9. 推荐的下一版里程碑
-
-建议把后续工作拆成下面三个里程碑：
-
-1. `M1`：补齐 `slope_grid`，验证 signed Traversability ESDF 与 `traversability_grid / height_diff / occupancy_ratio / ground_confidence / slope` 的一致性
-2. `M2`：实现坡度参与 `v_max / a_max` 自适应
-3. `M3`：新建 `minco_planner`，实现 `A* + 独立 Yaw + 局部 B-spline repair`，先输出给 MPPI
-4. `M4`：把前端从 `A*` 切换到 `JPS`
-5. `M5`：在 `minco_planner` 中接入 `MINCO PRE/FINELY`
-6. `M6`：若 MPPI 仍无法稳定贴轨，再实现 `SE2 MPC`
-
-按这个顺序推进，风险和返工都会比“一口气全改”小很多。
-
-## 10. Gazebo 仿真地图的直接建议
-
-既然你现在最需要验证的是 `2.5D traversability -> signed ESDF -> bspline smoothing / MPPI`，那么场景选择应该优先服务于“高度差、狭窄通道、近障碍贴边、局部重规划观察”，而不是一开始就追求超大场景。
-
-### 10.1 第一优先级：先把你自己的 Gazebo 世界改造成“语义压力测试场”
-
-最推荐的第一步不是立刻换掉整套世界，而是基于当前仓库已有的：
-
-1. `rmuc_2025`
-2. `rmul_2025`
-
-直接加几类障碍构型：
-
-1. 高低台阶
-2. 斜向窄门
-3. 两侧贴边通道
-4. 低矮障碍簇
-5. 一侧可通、一侧高度差明显的 S 弯
-
-原因：
-
-1. 你已经有现成机器人、桥接、出生点、导航地图资产和 TF 链
-2. 这样最容易看出 `traversability_grid` 与 `trajectory_esdf_debug` 的变化
-3. 比一开始迁移外部大世界更省时间
-
-### 10.2 第二优先级：优先参考 Gazebo Sim / Ignition 路线的现成世界
-
-更适合直接参考或迁移的是 `Open-RMF` 的 Gazebo Sim 世界：
-
-1. `rmf_demos_gz office`
-2. `rmf_demos_gz clinic`
-3. `rmf_demos_gz airport_terminal`
-
-推荐理由：
-
-1. `office` 是单层室内环境，带走廊、门、补给点，最适合先压测局部避障和转角贴边
-2. `clinic` 有更复杂的房间组织和多层结构，适合后面验证更长路径与复杂拓扑
-3. `airport_terminal` 场景更大，而且官方示例里明确包含 crowd sim 和只读车辆避让，更适合后期压力测试重规划
-
-对当前阶段的优先顺序建议是：
-
-1. 先 `office`
-2. 再 `airport_terminal`
-3. 最后再考虑 `clinic / hotel` 这类多层世界
-
-原因不是这些世界不好，而是你当前链路仍然是单层地面导航 + 2.5D 语义前端，多层世界暂时不会把你的核心问题暴露得更清楚。
-
-### 10.3 第三优先级：Classic 世界只作为参考资源
-
-网上有两类很经典的 Gazebo Classic 世界仍然值得拿来参考布局：
-
-1. `aws-robomaker-small-warehouse-world`
-2. `aws-robomaker-bookstore-world`
-
-它们的价值主要在于：
-
-1. 仓储窄通道、货架夹缝、遮挡关系清晰
-2. 书店货架和桌椅混排，适合看局部路径回拉
-
-但当前不建议把它们当第一优先级直接深度接入，原因是：
-
-1. Gazebo Classic 已在 `2025-01` 进入 EOL
-2. 你当前仓库主线是 `Gazebo Sim / Ignition`
-3. 直接接 Classic 资产，往往会把时间花在迁移材质、插件和 world 兼容性上
-
-因此更合理的用法是：
-
-1. 参考其世界布局
-2. 按同样的“货架-窄通道-拐角-半开区域”结构，在你自己的 `Gazebo Sim` 世界里重建轻量版本
-
-### 10.4 对你现在最有效的落地建议
-
-如果只做一轮最务实的推进，我建议按这个顺序：
-
-1. 先更新 RViz，把 `terrain_map_ext + traversability_grid + 三类语义栅格 + trajectory_esdf_debug` 看清楚
-2. 在当前 `rmuc_2025 / rmul_2025` 世界里人工加几个“高度差 + 贴边 + 狭窄通道”测试构型
-3. 跑 `Gazebo + Nav2 + bspline + MPPI`，先把 `2.5D` 语义链验证透
-4. 然后再挑 `rmf_demos_gz office` 这类 Gazebo Sim 场景做第二轮外部世界验证
-
-这样推进的收益最高，因为你现在最缺的不是“更大的世界”，而是：
-
-`一个能稳定解释为什么轨迹被推开、为什么某处被判成 risk、以及这些判定是否真的来自高度语义的观察闭环。`
+`V1 解决比赛能用，V2 解决体系最终形态。`
