@@ -1,30 +1,30 @@
 # 全向导航、平滑与 ESDF 优化交接文档
 
-更新时间：2026-05-10
+更新时间：2026-06-17
 
-本文档用于交接当前 `loopback_sim` 与实车导航链路的轨迹优化进度。下一轮对话可以直接从本文档继续，不需要再重新确认 ESDF 是否接通、MPPI 是否跟踪平滑路径、RViz 是否能观察到 fake ESDF、实车主参数是否已经接入 ESDF。
+本文档用于交接 `loopback_sim` 与实车导航链路的轨迹优化进度。当前主线已经推进到 `signed Traversability ESDF`，本文保留 fake ESDF 相关内容，主要用于回溯历史基线、对照 costmap fallback 和解释旧日志。当前阅读本文时，应把 `signed Traversability ESDF` 视为主线，把 fake ESDF 视为历史对照与兜底后端。
 
 ## 1. 当前结论
 
-当前系统已经从“能规划但跟踪不稳定”推进到“平滑路径进入 Nav2 主链，fake ESDF 可调用、可观测，loopback 与实车主链均已接入，实车可稳定导航”的阶段。
+当前系统已经从“能规划但跟踪不稳定”推进到“平滑路径进入 Nav2 主链，ESDF 可调用、可观测，loopback 与实车主链均已接入，实车可稳定导航”的阶段。
 
 阶段状态：
 
 1. `SmacPlannerHybrid -> Nav2BSplineSmoother -> MPPI -> trajectory_speed_governor -> velocity_smoother` 主链已接通。
 2. MPPI 当前跟随的是 `SmoothPath` 后输出给 controller 的路径，不再只是 RViz 中旁路青色线。
 3. `trajectory_profile` 已成为正式接口，`trajectory_speed_governor` 已基于该 profile 对 controller 输出做二次限速。
-4. fake ESDF 已经不是单纯 stub，当前基于 costmap 做 2D distance transform，并接入 optimizer 与 Nav2 smoother。
+4. fake costmap ESDF 已保留为 fallback / 对照后端，当前主线优先使用 signed Traversability ESDF。
 5. loopback 与实车主参数 `node_params.yaml` 都已开启 `use_esdf_obstacle_cost: true`，`obstacle_safe_distance: 0.30`。
-6. loopback 中 fake ESDF 已达到当前目标：RViz 可稳定看到贴墙/弯角处红色近障碍采样点，梯度箭头方向可解释，青色路径在贴边段比之前更早回拉。
+6. `TraversabilityEsdfProvider` 已接入 optimizer 与 Nav2 smoother，RViz 可继续通过 `trajectory_esdf_debug` 观察红绿点和梯度箭头。
 7. 实车已完成一轮“速度过慢 / cmd_vel 过小”排查，当前基线把曲率源、近端曲率限速、速度平滑和全向底盘转弯半径重新对齐。
-8. 按当前观察，暂时不增强 fake ESDF 作用强度，避免在已可用状态下继续堆参数导致行为不可控。
+8. 按当前观察，暂时不增强 ESDF obstacle 强度，优先验证 traversability 语义栅格和 ESDF debug 是否一致。
 
 当前需要保留的判断：
 
 1. 现阶段主要问题已经不是“链路没接通”，而是“轨迹连续性、控制耦合、实车调试一致性”。
 2. 后续不要优先继续把 B 样条磨圆；过度平滑会让弯角内切、终端段拉直、MPPI 跟踪变慢。
 3. 速度过慢时先看 `/trajectory_profile.max_abs_curvature` 和 `/cmd_vel_controller`，不要只看最终 `/cmd_vel`。
-4. fake ESDF 的作用已经可见，下一步应先稳定接口、观测和上车记录，再考虑真实 ESDF 后端。
+4. ESDF 的作用已经可见，下一步应先稳定 signed Traversability ESDF 的接口、观测和上车记录，再考虑 JPS / MINCO。
 
 ## 2. 关键代码与配置索引
 
@@ -37,11 +37,13 @@
 5. [trajectory_optimizer_node.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/trajectory_optimizer_node.cpp)
 6. [trajectory_speed_governor.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/trajectory_speed_governor.cpp)
 
-ESDF 接口与 fake provider：
+ESDF 接口与 provider：
 
 1. [esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/esdf_provider.hpp)
 2. [fake_costmap_esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/fake_costmap_esdf_provider.hpp)
 3. [fake_costmap_esdf_provider.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/fake_costmap_esdf_provider.cpp)
+4. [traversability_esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/traversability_esdf_provider.hpp)
+5. [traversability_esdf_provider.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/traversability_esdf_provider.cpp)
 
 loopback 配置：
 
@@ -72,8 +74,8 @@ RViz：
 
 参考文档：
 
-1. [中科大哨兵2025技术报告.pdf](../sentry_doc/中科大哨兵2025技术报告.pdf)
-2. [Batch-LIWO.pdf](../sentry_doc/Batch-LIWO.pdf)
+1. [中科大哨兵2025技术报告.pdf](./中科大哨兵2025技术报告.pdf)
+2. Batch-LIWO 参考材料当前未保存在仓库内
 
 ## 3. loopback 链路状态
 
@@ -163,7 +165,7 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py
 4. `trajectory_speed_governor` 已接入 controller 与 velocity smoother 中间。
 5. `BackUpFreeSpace` recovery 搜索半径与走廊参数已收紧。
 6. 视觉跟随候选点筛选已同步 loopback 与实车行为参数。
-7. fake ESDF 已接入实车 `trajectory_optimizer` 与 `smoother_server.bspline_smoother`。
+7. signed Traversability ESDF 已接入实车 `trajectory_optimizer` 与 `smoother_server.bspline_smoother`，fake ESDF 仅保留为 fallback / 历史对照。
 8. velocity smoother 实车上限已打开到 `[4.5, 4.5, 5.0]`，避免速度链后段把 MPPI 输出过度夹小。
 
 当前实车速度过慢排查结论：
@@ -181,7 +183,7 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py
 
 ## 5. 当前参数基线
 
-loopback 与实车中 fake ESDF 均已开启：
+loopback 与实车中 ESDF obstacle cost 均已开启，当前主线优先走 `TraversabilityEsdfProvider`：
 
 ```yaml
 trajectory_optimizer:
@@ -250,7 +252,7 @@ Recovery 当前同步参数：
 9. `far_corridor_lateral_step: 0.10`
 10. `minimum_release_distance: 0.14`
 
-## 6. fake ESDF 当前实现
+## 6. ESDF 当前实现
 
 抽象接口：
 
@@ -267,20 +269,21 @@ Eigen::Vector2d getGradient(double x, double y);
 4. 梯度在世界坐标系下表达。
 5. optimizer 内部会对梯度方向做归一化使用。
 
-当前 fake provider：
+当前已有 provider：
 
-1. 输入 `global_costmap/costmap_raw`。
-2. 将高代价值栅格视为障碍。
-3. 在二维 costmap 上做 distance transform。
-4. `getDistance(x, y)` 使用 bilinear interpolation 返回到最近障碍的近似欧氏距离。
-5. `getGradient(x, y)` 在平滑后的距离场上取插值梯度，减少中心差分跳变。
-6. debug marker 会统计 `d_min`、`d_avg`、`|g|avg`、`risk=a/b`。
+1. `FakeCostmapEsdfProvider`：输入 `global_costmap/costmap_raw`，用于 costmap fallback 和历史对照。
+2. `TerrainPointCloudEsdfProvider`：输入 `terrain_map_ext`，用于点云直栅格化过渡。
+3. `TraversabilityEsdfProvider`：输入 `traversability_grid`，并融合 `traversability_height_diff_grid / traversability_occupancy_ratio_grid / traversability_ground_confidence_grid`。
+4. 当前主线 `esdf_source: traversability_grid` 优先使用 `TraversabilityEsdfProvider`，fake costmap 只在 traversability 不可用时兜底。
+5. `getDistance(x, y)` 使用 bilinear interpolation 返回 signed distance，负值表示已进入障碍 / 风险区。
+6. `getGradient(x, y)` 在平滑后的距离场上取插值梯度，减少中心差分跳变。
+7. debug marker 会统计 `d_min`、`d_avg`、`|g|avg`、`risk=a/b`。
 
 optimizer 当前分支逻辑：
 
 1. 若 `use_esdf_obstacle_cost=true` 且 provider 可用，优先使用 `d(x)` 与 `grad d(x)`。
 2. 若 ESDF 不可用，退回 costmap-cost obstacle penalty。
-3. 当前实现保留 costmap fallback，因此 fake ESDF 不会破坏原主链。
+3. 当前实现保留 costmap fallback，因此 traversability ESDF 不可用时不会直接破坏原主链。
 
 当前 obstacle cost 目标形式：
 
@@ -290,12 +293,11 @@ J_obstacle = sum(max(0, d_safe - d(x))^2)
 
 当前观察结论：
 
-1. fake ESDF 已经能达到阶段目标。
-2. 红色近障碍点主要集中在弯角内侧或贴墙段。
-3. 黄色梯度箭头方向基本可解释，用于判断路径应被推向哪侧。
-4. 青色 `smoothed_path_visual` 在贴边段相较之前更早回拉。
-5. 实车已接入 fake ESDF，但仍按保守强度运行。
-6. 暂时不增强作用强度，避免把一个已可观察、可调试的基线打乱。
+1. signed Traversability ESDF 已经接入 optimizer 与 smoother。
+2. 红色近障碍点应主要集中在弯角内侧、贴墙段或地形语义风险高的栅格。
+3. 黄色梯度箭头方向应基本可解释，用于判断路径应被推向哪侧。
+4. 青色 `smoothed_path_visual` 在贴边段应相对 `plan` 有轻微安全侧回拉。
+5. 当前仍建议保守调参，优先验证地形语义与 ESDF debug 的一致性。
 
 ## 7. RViz 观察说明
 
@@ -310,16 +312,21 @@ J_obstacle = sum(max(0, d_safe - d(x))^2)
 5. `/trajectory_esdf_debug`
 6. `/global_costmap/costmap`
 7. `/local_costmap/costmap`
+8. `/traversability_grid`
+9. `/traversability_height_diff_grid`
+10. `/traversability_occupancy_ratio_grid`
+11. `/traversability_ground_confidence_grid`
 
 读取规则：
 
 1. `/plan`：看 Smac 原始路径是否终端直线化、是否贴墙。
 2. `/smoothed_path_visual`：看 B 样条与 obstacle refinement 后是否仍内切。
 3. `/trajectory_profile_markers`：看速度 profile 是否在弯角处过度收缩。
-4. `/trajectory_esdf_debug` 红/绿点：红点表示离障碍近，绿点表示离障碍远。
+4. `/trajectory_esdf_debug` 红/绿点：红点表示距离低或已进入 signed ESDF 负值区域，绿点表示 clearance 更充足。
 5. `/trajectory_esdf_debug` 黄色箭头：表示 `grad d(x)`，也就是局部远离障碍的方向。
-6. costmap：确认红点是否确实对应膨胀层、墙角或局部高代价区域。
-7. `trajectory_profile_markers` 文字 `kappa_max / cost` 与 `trajectory_esdf_debug` 文字 `d_min / d_avg / |g|avg / risk` 已错开显示，避免 RViz 尾部文字重叠。
+6. traversability 语义栅格：确认红点是否能被 height diff、occupancy ratio 或 ground confidence 解释。
+7. costmap：确认红点是否确实对应膨胀层、墙角或局部高代价区域。
+8. `trajectory_profile_markers` 文字 `kappa_max / cost` 与 `trajectory_esdf_debug` 文字 `d_min / d_avg / |g|avg / risk` 已错开显示，避免 RViz 尾部文字重叠。
 
 当前 RViz 已修复：
 
@@ -362,10 +369,12 @@ ESDF：
 
 1. `EsdfProvider` 抽象接口完成。
 2. fake costmap ESDF provider 完成。
-3. optimizer 与 smoother 都可调用 fake ESDF。
-4. loopback 与实车参数均已开启 fake ESDF。
-5. bilinear distance interpolation、gradient smoothing、ESDF debug statistics 已完成。
-6. `trajectory_esdf_debug` 文本与 profile 文本已错开显示。
+3. terrain pointcloud ESDF provider 完成。
+4. signed Traversability ESDF provider 完成。
+5. optimizer 与 smoother 都可调用 traversability ESDF。
+6. loopback、Gazebo 与实车参数均可通过 `esdf_source: traversability_grid` 使用该后端。
+7. bilinear distance interpolation、gradient smoothing、ESDF debug statistics 已完成。
+8. `trajectory_esdf_debug` 文本与 profile 文本已错开显示。
 
 ## 9. 仍需关注的问题
 
@@ -374,7 +383,7 @@ ESDF：
 1. 某些终端段仍可能被 Smac analytic expansion 拉直。
 2. B 样条过度平滑时仍可能把真实转角抹成近似直线。
 3. MPPI 在弯前可能因为速度 profile、path alignment 和障碍 critic 耦合表现为转弯慢。
-4. fake ESDF 当前来自二维 costmap，不是严格连续 signed distance field。
+4. 当前主链 ESDF 仍是 2D / 2.5D signed traversability distance field，不是完整 3D voxel ESDF。
 5. 实车定位、底盘延迟、轮速反馈和云台/底盘坐标链误差可能放大 loopback 中不明显的问题。
 
 当前不要优先做的事：
@@ -399,11 +408,11 @@ ESDF：
 映射到当前项目：
 
 1. 当前 B 样条 + profile 已经承担了“轨迹表示 + 时间参数化”的角色。
-2. fake ESDF 已经承担了“距离与梯度观测”的入口角色。
-3. fake ESDF-lite 第一版已经完成 bilinear distance、平滑梯度和统计输出。
+2. 历史上的 fake ESDF 曾承担“距离与梯度观测”的入口角色，当前主线已切到 signed Traversability ESDF。
+3. 历史上的 fake ESDF-lite 第一版完成了 bilinear distance、平滑梯度和统计输出，这些能力已被当前 Traversability ESDF 继承。
 4. 后续重点是继续观察二阶段 refinement 与速度 profile 的耦合，而不是马上换真实 ESDF 库。
 
-### 10.2 从 `Batch-LIWO.pdf` 得到的实车链路启发
+### 10.2 从 `Batch-LIWO` 得到的实车链路启发
 
 Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 
@@ -425,7 +434,7 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 
 第一优先级：文档与基线冻结
 
-1. 保留当前 loopback fake ESDF 参数，不增强作用强度。
+1. 保留当前 loopback / 实车 traversability ESDF 参数，不增强 obstacle 强度。
 2. 以 `loopback_nav_only.launch.py` 作为纯导航观察入口。
 3. 以 `bringup.launch.py + node_params.yaml` 作为实车链路唯一主入口。
 4. 新对话开始后先读本文档，不重新翻旧日志。
@@ -438,9 +447,9 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 4. 若实车比 loopback 抖，优先排查 odom / TF / 下位机响应延迟。
 5. 若实车速度再次只有 `0.0x`，按 `/trajectory_profile -> /cmd_vel_controller -> /cmd_vel_controller_governed -> /cmd_vel_nav2_result -> /cmd_vel` 顺序定位速度在哪一级被压低。
 
-第三优先级：trajectory-grade fake ESDF-lite
+第三优先级：trajectory-grade signed Traversability ESDF
 
-1. `已完成` 给 fake ESDF provider 增加 bilinear interpolation。
+1. `已完成` 给 traversability ESDF provider 增加 bilinear interpolation。
 2. `已完成` 对 `getGradient(x, y)` 做平滑距离场上的插值梯度，减少中心差分跳变。
 3. `已完成` 增加 `d_min`、`d_avg`、平均梯度、危险采样点数量等统计输出。
 4. `已完成` 保持 `EsdfProvider` 抽象不变，只替换 provider 内部质量。
@@ -454,7 +463,7 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 
 第五优先级：真实 ESDF 后端
 
-1. 在 fake ESDF-lite 调顺后再考虑真实后端。
+1. 在 current traversability ESDF 调顺后再考虑完整 3D voxel ESDF。
 2. 可选方向包括自建 2D ESDF、ROG-Map 输出适配、FIESTA / voxel ESDF 等。
 3. 真实后端接入时仍只实现 `getDistance(x, y)` 和 `getGradient(x, y)`，不要让 optimizer 绑定具体库。
 4. 先做只读 provider，再考虑增量更新、线程缓存和动态障碍。
@@ -465,9 +474,9 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 
 ```text
 请先阅读 docs/omni_recovery_smoothing_optimization.md。
-当前 fake ESDF 在 loopback 已达到阶段目标，先不要增强 obstacle 强度。
+当前 traversability ESDF 在 loopback 已达到阶段目标，先不要增强 obstacle 强度。
 实车主参数是 src/pb2025_sentry_bringup/params/node_params.yaml。
-目前 loopback 与实车主链一致性、实车 ESDF 接入、fake ESDF-lite 第一版、二阶段 optimizer refinement 第一版都已经完成。
+目前 loopback 与实车主链一致性、实车 ESDF 接入、signed Traversability ESDF 第一版、二阶段 optimizer refinement 第一版都已经完成。
 实车已能稳定导航；如果出现速度慢，优先看 trajectory_profile 曲率和速度链分级 topic。
 请下一步优先做：
 1. loopback 运行时观察是否稳定
@@ -479,10 +488,10 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 当前工程判断：
 
 1. `ESDF interface`: 已完成。
-2. `fake ESDF provider`: 已完成并可观测。
-3. `loopback fake ESDF`: 当前效果达到阶段目标，暂不加权。
+2. `fake ESDF provider`: 已完成并保留为 fallback / 历史对照。
+3. `loopback traversability ESDF`: 当前效果达到阶段目标，暂不加权。
 4. `real chain ESDF`: 已接入 `node_params.yaml` 与 reality 备份参数。
-5. `fake ESDF-lite`: 已完成第一轮连续性升级，包括 bilinear distance、平滑梯度、debug statistics。
+5. `signed Traversability ESDF`: 已完成第一轮连续性升级，包括 bilinear distance、平滑梯度、debug statistics。
 6. `optimizer refinement`: 已完成第一轮二阶段化，当前版本重点是抑制沿轨迹切向的 ESDF 推动。
 7. `RViz debug`: 已修正 ESDF 统计文本与 `trajectory_profile_markers` 的尾部文字重叠，改为沿终点局部法向偏移显示。
 8. `real speed baseline`: 已针对曲率过大导致的 `cmd_vel` 过小做过一轮修正。

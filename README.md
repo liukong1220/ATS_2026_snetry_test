@@ -32,6 +32,26 @@ pb2025_sentry_bringup/bringup.launch.py
   -> 下位机底盘 / loopback_sim
 ```
 
+当前导航地图/轨迹优化过渡链为：
+
+```text
+registered_scan / lidar_odometry
+  -> terrain_analysis
+  -> terrain_analysis_ext
+  -> terrain_map_ext
+  -> traversability_grid
+  -> traversability_height_diff_grid / traversability_occupancy_ratio_grid / traversability_ground_confidence_grid
+  -> signed Traversability ESDF
+  -> Nav2BSplineSmoother / trajectory_optimizer_node
+  -> trajectory_profile / trajectory_esdf_debug
+```
+
+当前 `trajectory_optimizer` 主线分工是：
+
+1. `Nav2BSplineSmoother` 和 `trajectory_optimizer_node` 都支持 `esdf_source: traversability_grid`
+2. `TraversabilityEsdfProvider` 会融合 `traversability_grid` 与三类地形语义调试栅格
+3. `fake_costmap` 和 `terrain_pointcloud` ESDF 仍保留为 fallback / 对照后端
+
 当前导航恢复链为：
 
 ```text
@@ -123,6 +143,24 @@ rosdep install -r --from-paths src --ignore-src --rosdistro humble -y
 colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 ```
+
+### 低性能机器单包构建
+
+如果电脑内存或 CPU 余量较小，不建议直接全工作区并行构建。可以按依赖顺序单包构建，并同时限制 colcon worker 和 CMake 底层并行度：
+
+```bash
+source /opt/ros/humble/setup.bash
+export CMAKE_BUILD_PARALLEL_LEVEL=1
+colcon build --symlink-install --packages-select sp_msgs \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 1
+source install/setup.bash
+export CMAKE_BUILD_PARALLEL_LEVEL=1
+colcon build --symlink-install --packages-select trajectory_optimizer \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 1
+source install/setup.bash
+```
+
+注意：`--parallel-workers 1` 只限制 colcon 同时构建几个包，`CMAKE_BUILD_PARALLEL_LEVEL=1` 才会限制单个包内部的 `cmake --build` 并行度。低性能机器上两者都建议设置。
 
 ## 当前主要参数入口
 
@@ -250,6 +288,10 @@ ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 - `smoothed_path_visual`
 - `trajectory_profile_markers`
 - `trajectory_esdf_debug`
+- `traversability_grid`
+- `traversability_height_diff_grid`
+- `traversability_occupancy_ratio_grid`
+- `traversability_ground_confidence_grid`
 - `back_up_free_space_markers`
 - `/cmd_vel_controller`
 - `/cmd_vel_controller_governed`
@@ -297,14 +339,16 @@ ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 当前建议阅读顺序：
 
 1. [docs/总览.md](./docs/总览.md)
-2. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
-3. [docs/omni_recovery_smoothing_optimization.md](./docs/omni_recovery_smoothing_optimization.md)
-4. [docs/融合.md](./docs/融合.md)
-5. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
-6. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
-7. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
-8. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
-9. [docs/上车测试清单.md](./docs/上车测试清单.md)
+2. [docs/nav2_to_3desdf_minco_mpc_optimization_direction.md](./docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)
+3. [docs/gazebo_sim_integration.md](./docs/gazebo_sim_integration.md)
+4. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
+5. [docs/omni_recovery_smoothing_optimization.md](./docs/omni_recovery_smoothing_optimization.md)
+6. [docs/融合.md](./docs/融合.md)
+7. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
+8. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
+9. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
+10. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
+11. [docs/上车测试清单.md](./docs/上车测试清单.md)
 
 说明：
 

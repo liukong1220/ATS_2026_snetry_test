@@ -5,7 +5,7 @@
 本包系在当前工作区中的职责不是“整车总入口”，而是提供被总入口调用的导航能力，包括：
 
 1. `pb2025_nav_bringup`：Nav2、定位、RViz、传感器链路启动
-2. `trajectory_optimizer`：B 样条平滑、trajectory profile、governor
+2. `trajectory_optimizer`：B 样条平滑、trajectory profile、signed Traversability ESDF、governor
 3. `pb_nav2_plugins`：恢复行为与 costmap 插件
 4. `fake_vel_transform`：速度坐标系变换与自旋叠加
 5. `small_gicp_relocalization`、`point_lio`、`loam_interface`、`sensor_scan_generation`：定位与点云接口
@@ -33,6 +33,19 @@ FollowPath 失败
   -> 主走廊搜索
   -> 必要时 centroid fallback
   -> 平均走廊代价高时自动降速
+```
+
+当前地形语义到 ESDF 的过渡链为：
+
+```text
+terrain_analysis_ext
+  -> terrain_map_ext
+  -> traversability_grid
+  -> traversability_height_diff_grid
+  -> traversability_occupancy_ratio_grid
+  -> traversability_ground_confidence_grid
+  -> TraversabilityEsdfProvider
+  -> Nav2BSplineSmoother / trajectory_optimizer_node
 ```
 
 ## 当前入口
@@ -113,7 +126,14 @@ pb2025_sentry_nav/
 3. 障碍距离限速
 4. trajectory profile 发布
 5. trajectory profile marker
-6. fake ESDF 调试 marker
+6. FakeCostmap / TerrainPointCloud / Traversability 三类 ESDF provider
+7. signed Traversability ESDF 调试 marker
+
+当前 ESDF 主线说明：
+
+1. `trajectory_optimizer_node` 与 `Nav2BSplineSmoother` 当前都支持 `esdf_source: traversability_grid`。
+2. `TraversabilityEsdfProvider` 会融合 `traversability_grid`、`traversability_height_diff_grid`、`traversability_occupancy_ratio_grid`、`traversability_ground_confidence_grid`。
+3. fake costmap ESDF 与 terrain pointcloud ESDF 仍保留为 fallback / 历史对照路径。
 
 ### `pb_nav2_plugins`
 
@@ -166,6 +186,10 @@ pb2025_sentry_nav/
 - `trajectory_profile_visual`
 - `trajectory_profile_markers`
 - `trajectory_esdf_debug`
+- `traversability_grid`
+- `traversability_height_diff_grid`
+- `traversability_occupancy_ratio_grid`
+- `traversability_ground_confidence_grid`
 - `cmd_vel_controller`
 - `cmd_vel_controller_governed`
 - `cmd_vel_nav2_result`

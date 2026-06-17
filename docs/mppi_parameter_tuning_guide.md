@@ -886,12 +886,14 @@ prediction_horizon = time_steps * model_dt
 - `lateral_accel_limit` / `longitudinal_accel_limit` 已提高到 `1.8`
 - `velocity_smoother.max_velocity` 为 `[4.5, 4.5, 5.0]`
 - `trajectory_speed_governor` 使用近端曲率窗口，而不是整条路径最大曲率
-- fake ESDF 已接入实车 optimizer 和 smoother，但暂不建议继续增强 obstacle 强度
+- signed Traversability ESDF 已接入实车 optimizer 和 smoother，但暂不建议继续增强 obstacle 强度
 
 ## 与其他文档的关系
 
 可配合阅读：
 
+- `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`
+  - 记录从当前 Nav2 主链迁移到 3D/2.5D ESDF + JPS + MINCO + MPC 的路线
 - `docs/omni_recovery_smoothing_optimization.md`
   - 记录当前平滑、ESDF、trajectory profile 和速度链基线
 - `docs/navigate_through_poses_migration_checklist.md`

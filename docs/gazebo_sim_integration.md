@@ -79,7 +79,7 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_small_gicp_rel
 
 当前 Gazebo 仿真验证的并不是“最终版 JPS + MINCO + MPC”，而是下面这条过渡主链：
 
-`Gazebo robot -> 点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> terrain_map_ext + traversability_grid -> traversability ESDF -> Nav2(Smac + bspline smoother + MPPI)`
+`Gazebo robot -> 点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> terrain_map_ext + traversability_grid + 地形语义调试栅格 -> signed Traversability ESDF -> Nav2(Smac + bspline smoother + MPPI)`
 
 更细一点是：
 
@@ -90,11 +90,14 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_small_gicp_rel
 5. `terrain_analysis_ext`
 6. `terrain_map_ext`
 7. `traversability_grid`
-8. `TraversabilityEsdfProvider`
-9. `planner_server: SmacPlannerHybrid`
-10. `smoother_server: Nav2BSplineSmoother`
-11. `controller_server: MPPIController`
-12. 可选 `trajectory_optimizer_node` 作为旁路可视化与剖面调试
+8. `traversability_height_diff_grid`
+9. `traversability_occupancy_ratio_grid`
+10. `traversability_ground_confidence_grid`
+11. `TraversabilityEsdfProvider`
+12. `planner_server: SmacPlannerHybrid`
+13. `smoother_server: Nav2BSplineSmoother`
+14. `controller_server: MPPIController`
+15. 可选 `trajectory_optimizer_node` 作为旁路可视化与剖面调试
 
 ## 5.1 当前完整仿真模式
 
@@ -195,14 +198,17 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 
 1. `trajectory_optimizer.esdf_source: traversability_grid`
 2. `trajectory_optimizer.traversability_grid_topic: traversability_grid`
-3. `smoother_server.bspline_smoother.esdf_source: traversability_grid`
-4. `smoother_server.bspline_smoother.traversability_grid_topic: traversability_grid`
-5. `terrain_analysis_ext` 新增 `traversability_grid`
+3. `trajectory_optimizer.traversability_height_diff_topic: traversability_height_diff_grid`
+4. `trajectory_optimizer.traversability_occupancy_ratio_topic: traversability_occupancy_ratio_grid`
+5. `trajectory_optimizer.traversability_ground_confidence_topic: traversability_ground_confidence_grid`
+6. `smoother_server.bspline_smoother.esdf_source: traversability_grid`
+7. `smoother_server.bspline_smoother.traversability_grid_topic: traversability_grid`
+8. `terrain_analysis_ext` 发布 traversability 与三类地形语义调试栅格
 
 这意味着 Gazebo 现在验证的不是旧版 `costmap fake ESDF` 单一路线，而是：
 
 1. `terrain_analysis_ext` 输出的扩展地形点云和可通行栅格
-2. `traversability_esdf_provider` 构造出的二维 ESDF
+2. `traversability_esdf_provider` 构造出的 signed 2D ESDF
 3. `bspline smoother` 利用该 ESDF 做近障碍回拉
 
 ## 7. 这套仿真目前能验证什么
@@ -212,10 +218,11 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 1. Gazebo 点云是否能正确进入 `terrain_analysis` 与 `terrain_analysis_ext`
 2. `terrain_map_ext` 是否与地图障碍位置基本一致
 3. `traversability_grid` 是否已经把“可通行 / 不可通行 / 未知”分出来
-4. `traversability` ESDF 是否能在 RViz 中表现出合理的近障碍风险分布
-5. `Nav2BSplineSmoother` 是否会把贴边路径往安全侧回拉
-6. `trajectory_profile` 的曲率、速度限制和近障碍代价是否合理
-7. MPPI 在上述过渡路径上的跟踪是否连续稳定
+4. `traversability_height_diff_grid / traversability_occupancy_ratio_grid / traversability_ground_confidence_grid` 是否能解释 risk 区域来源
+5. signed `traversability` ESDF 是否能在 RViz 中表现出合理的近障碍风险分布
+6. `Nav2BSplineSmoother` 是否会把贴边路径往安全侧回拉
+7. `trajectory_profile` 的曲率、速度限制和近障碍代价是否合理
+8. MPPI 在上述过渡路径上的跟踪是否连续稳定
 
 尤其适合验证的场景：
 
@@ -253,15 +260,19 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
 1. `terrain_map`
 2. `terrain_map_ext`
 3. `traversability_grid`
-4. `global_costmap/costmap_raw`
-5. `smoothed_path_visual`
-6. `trajectory_profile_visual`
+4. `traversability_height_diff_grid`
+5. `traversability_occupancy_ratio_grid`
+6. `traversability_ground_confidence_grid`
+7. `global_costmap/costmap_raw`
+8. `smoothed_path_visual`
+9. `trajectory_profile_visual`
 
 目标：
 
 1. 确认 `terrain_map_ext` 真正覆盖到狭窄通道边界
 2. 确认 `traversability_grid` 中可通行区域没有被大面积误杀
-3. 确认 ESDF 风险高的区域和障碍位置一致
+3. 确认 height / occupancy / ground confidence 能解释 ESDF 风险高的区域
+4. 确认 ESDF 风险高的区域和障碍位置一致
 
 ### 8.2 路径回拉效果
 
@@ -325,13 +336,13 @@ Gazebo 导航模式保留 `gimbal_yaw_fake` 作为 Nav2 的 `robot_base_frame`�
 
 验证：
 
-1. `terrain_map_ext -> traversability_grid -> traversability ESDF -> bspline smoother -> MPPI`
+1. `terrain_map_ext -> traversability_grid + 地形语义栅格 -> signed traversability ESDF -> bspline smoother -> MPPI`
 
 ### 阶段 B：下一阶段
 
 验证：
 
-1. `traversability_grid -> Traversability ESDF`
+1. `signed Traversability ESDF -> JPS/A*`
 2. 先不抢控制权，只做可视化对照
 
 ### 阶段 C：再下一阶段
@@ -352,8 +363,8 @@ Gazebo 导航模式保留 `gimbal_yaw_fake` 作为 Nav2 的 `robot_base_frame`�
 
 1. `nav_world` 当前已可直接使用仓内同步过来的 `rmuc_2025 / rmul_2025 / rmuc_2024 / rmul_2024`
 2. Gazebo 世界名与导航地图资产名仍是分开的
-3. 当前 `traversability_grid` 还是第一版语义输出，仅包含 `unknown / traversable / occupied`
-4. 当前过渡 ESDF 仍是从 `terrain_map_ext` 直接构图，尚未切换成 `TraversabilityEsdfProvider`
+3. 当前过渡 ESDF 已切换到 `TraversabilityEsdfProvider`，但仍属于 2D / 2.5D ESDF
+4. 当前尚未实现自有 `JPS/A*`、`MINCO` 和 `SE2 MPC`
 5. 行为层、规划层和控制层仍然深度依赖 Nav2 生命周期
 
 ## 12. 本文档的使用方式

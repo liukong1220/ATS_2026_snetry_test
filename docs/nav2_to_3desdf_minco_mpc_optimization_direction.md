@@ -1,6 +1,6 @@
 # 从当前 2.5D ESDF 过渡到 3D ESDF + JPS + MINCO + SE2 MPC 的优化方向
 
-更新时间：2026-06-06
+更新时间：2026-06-17
 
 本文档基于三部分内容整理：
 
@@ -17,13 +17,14 @@
 
 当前项目已经完成的部分是：
 
-`点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> traversability_grid -> traversability ESDF -> Nav2 smoother / trajectory visual optimizer -> MPPI`
+`点云/里程计 -> terrain_analysis -> terrain_analysis_ext -> traversability_grid + 地形语义调试栅格 -> signed Traversability ESDF -> Nav2 smoother / trajectory visual optimizer -> MPPI`
 
 也就是说，现在仓库已经不再只是“纯 2D costmap + simple smoother”：
 
-1. 已经把 `terrain_map_ext` 和 `traversability_grid` 接入到了 `trajectory_optimizer` 和 `Nav2BSplineSmoother`。
+1. 已经把 `terrain_map_ext`、`traversability_grid` 和地形语义调试栅格接入到了 `trajectory_optimizer` 和 `Nav2BSplineSmoother`。
 2. 已经支持 `esdf_source: traversability_grid`，说明 2.5D 地形分析结果开始直接参与路径回拉与近障碍代价。
-3. 已经有 Gazebo 入口验证这条过渡链。
+3. `TraversabilityEsdfProvider` 已从单纯二值距离场升级为 signed ESDF，并融合 `height_diff / occupancy_ratio / ground_confidence` 三类语义输入。
+4. 已经有 Gazebo 入口验证这条过渡链。
 
 但当前项目还没有完成的关键部分同样需要明确：
 
@@ -53,9 +54,12 @@
 
 1. `terrain_analysis_ext` 发布 `terrain_map_ext`
 2. `terrain_analysis_ext` 发布 `traversability_grid`
-3. `trajectory_optimizer/src/traversability_esdf_provider.cpp` 会把 `traversability_grid` 转成二维距离场
-4. `trajectory_optimizer_node` 和 `Nav2BSplineSmoother` 都支持 `esdf_source: traversability_grid`
-5. Gazebo 仿真参数已经默认切到这套 traversability ESDF 过渡链
+3. `terrain_analysis_ext` 发布 `traversability_height_diff_grid`
+4. `terrain_analysis_ext` 发布 `traversability_occupancy_ratio_grid`
+5. `terrain_analysis_ext` 发布 `traversability_ground_confidence_grid`
+6. `trajectory_optimizer/src/traversability_esdf_provider.cpp` 会把 traversability 与三类语义栅格融合成 signed ESDF
+7. `trajectory_optimizer_node` 和 `Nav2BSplineSmoother` 都支持 `esdf_source: traversability_grid`
+8. Gazebo 仿真参数已经默认切到这套 traversability ESDF 过渡链
 
 ### 2.2 当前这套 “traversability ESDF” 的真实定位
 
@@ -67,10 +71,10 @@
 
 但它还不能等价于 PDF 里那套完整方案，原因也很明确：
 
-1. 当前 `traversability_esdf_provider` 已经从点云直栅格化前进一步，但仍然只消费 `unknown / traversable / occupied` 三值语义。
-2. 它还没有显式维护 PDF 里强调的 `height_diff / occupancy_ratio / ground_confidence` 这些更丰富的中间层语义。
-3. 它目前服务的仍然是 `B 样条平滑器`，不是 `MINCO` 两阶段优化器。
-4. 它目前服务的控制器仍然是 `MPPI`，不是“牢牢贴轨迹”的 `SE2 MPC`。
+1. 当前 `traversability_esdf_provider` 已经消费 `traversability_grid`、`height_diff`、`occupancy_ratio`、`ground_confidence`，并输出 signed distance。
+2. 它目前仍然服务于 `B 样条平滑器` 和旁路 trajectory visual optimizer，不是 `MINCO` 两阶段优化器。
+3. 它目前服务的控制器仍然是 `MPPI`，不是“牢牢贴轨迹”的 `SE2 MPC`。
+4. 当前 ESDF 仍是二维 / 2.5D 过渡后端，不是完整 3D voxel ESDF。
 
 因此它更适合被定义为：
 
@@ -161,8 +165,8 @@
 
 1. `terrain_analysis_ext` 除了 `terrain_map_ext` 之外，新增输出 `traversability_grid`
 2. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 已经可以直接消费 `traversability_grid`
-3. 第一版语义先收敛为 `unknown / traversable / occupied`
-4. 先保证 Gazebo 和现有导航链能稳定消费，再逐步补 `height_diff / occupancy_ratio / ground_confidence`
+3. `TraversabilityEsdfProvider` 已经订阅并融合 `height_diff / occupancy_ratio / ground_confidence`
+4. 当前阶段先保证 Gazebo 和现有 Nav2 主链能稳定消费 signed traversability ESDF，再逐步上 JPS / MINCO
 
 这一步做完之后，ESDF 才真正有“来自地形语义”的基础。
 
@@ -180,8 +184,8 @@
 
 职责：
 
-1. 输入不再是裸点云，而是“已判定可通行/不可通行/未知”的二维栅格
-2. 显式支持静态障碍与动态障碍融合
+1. 输入不再是裸点云，而是“已判定可通行/不可通行/未知”的二维栅格和地形语义栅格
+2. 输出 signed distance，负值代表已进入障碍 / 风险区，正值代表 free space clearance
 3. 给后续 `JPS`、`MINCO`、`SE2 MPC` 统一提供 `d(x,y)` 和 `grad d(x,y)`
 
 ### 5.4 前端搜索层
@@ -243,35 +247,38 @@
 
 ## 6. 推荐迁移顺序
 
-不建议一次性推翻。推荐分四阶段推进。
+不建议一次性推翻。当前应把已经完成的过渡成果冻结成可验证基线，再继续替换 Nav2 的 planner、smoother 和 controller。
 
-### 阶段 A：把 2.5D ESDF 过渡链做扎实
+### 阶段 A：已完成的 2.5D ESDF 过渡基线
+
+当前状态：
+
+1. 保留 Nav2 主链。
+2. `terrain_map_ext`、`traversability_grid` 与三类地形语义栅格已经接入轨迹优化链。
+3. `TraversabilityEsdfProvider` 已经替代 fake costmap ESDF 成为当前主线后端。
+4. fake costmap ESDF 与 terrain pointcloud ESDF 仍保留为 fallback / 对照路径。
+
+保留价值：
+
+1. 在不推翻 Nav2 的前提下，验证地形语义是否能稳定影响平滑路径。
+2. 给后续 JPS / MINCO / MPC 提供统一的 `EsdfProvider` 抽象。
+3. 保留 loopback、Gazebo 和实车之间可对比的调试入口。
+
+### 阶段 B：当前应优先完成的 traversability ESDF 稳定性验证
 
 目标：
 
-1. 保留 Nav2 主链
-2. 继续使用 `terrain_map_ext -> terrain_pointcloud ESDF`
-3. 在 Gazebo 和 loopback 中验证“贴边回拉、狭窄通道、安全侧偏移”是否稳定
+1. 在 Gazebo、loopback 和实车中验证 signed distance、梯度方向和风险点分布是否一致。
+2. 固化 `d_min / d_avg / |g|avg / risk` 与 `height_diff / occupancy_ratio / ground_confidence` 的对应关系。
+3. 确认可通行、不可通行和未知区域在 ESDF 中的符号与安全距离表现符合预期。
+4. 保持 obstacle 权重保守，不在验证阶段同时大改 MPPI critic 和 governor。
 
 产出：
 
-1. 可重复的仿真测试场景
-2. 更稳定的 `terrain_analysis_ext` 参数
-3. 更准确的 ESDF 调试指标
-
-### 阶段 B：从点云 ESDF 过渡到 Traversability ESDF
-
-目标：
-
-1. 把 `terrain_analysis_ext` 升级为可通行分析前端
-2. 输出二维 traversability grid
-3. 基于 traversability 构建新的 ESDF provider
-
-产出：
-
-1. `traversability_grid` 第一版
-2. `TraversabilityEsdfProvider`
-3. 独立于 Nav2 costmap 的地图前端
+1. 可重复的仿真测试场景。
+2. 更稳定的 `terrain_analysis_ext` 参数。
+3. signed Traversability ESDF 的上车观察清单。
+4. 进入 JPS / MINCO 前的地图前端验收基线。
 
 ### 阶段 C：替换 Nav2 planner/smoother
 
@@ -305,8 +312,8 @@
 
 建议优先做下面几项，而不是直接开写 MPC：
 
-1. 给 `terrain_analysis_ext` 增加可通行栅格输出，而不是只发点云
-2. 抽象新的 `TraversabilityEsdfProvider`
+1. 在 Gazebo / loopback / 实车中验证 signed Traversability ESDF 的方向、距离和风险点是否一致
+2. 固化 ESDF 观测指标，包括 `d_min / d_avg / risk_count` 与三类地形语义栅格的对应关系
 3. 新建 `planner_core` 包，先落 `JPS/A*`
 4. 设计统一的 `ReferenceTrajectory` 消息或内部结构，避免后面 `MINCO` 与 `MPC` 接口再次重写
 
@@ -350,13 +357,13 @@
 
 最重要的不是继续把当前链路包装成最终形态，而是承认它现在所处的位置：
 
-`当前项目处于“2.5D ESDF 过渡阶段”，下一步应优先补齐 traversability、JPS、MINCO，再替换 MPPI 为 SE2 MPC。`
+`当前项目处于“2.5D signed Traversability ESDF 过渡阶段”，下一步应先验证 ESDF 稳定性，再补齐 JPS、MINCO，并最终替换 MPPI 为 SE2 MPC。`
 
 ## 9. 推荐的下一版里程碑
 
 建议把后续工作拆成下面三个里程碑：
 
-1. `M1`：完善 `terrain_analysis_ext`，输出 traversability grid，并在 Gazebo 中验证 ESDF 与地形分析一致
+1. `M1`：验证 signed Traversability ESDF 与 `traversability_grid / height_diff / occupancy_ratio / ground_confidence` 的一致性
 2. `M2`：实现 `JPS + MINCO` 并联规划链，只做可视化和轨迹发布，不接控制权
 3. `M3`：实现 `SE2 MPC`，在 Gazebo 中完成闭环跟踪，最后再逐步摘除 Nav2 主链
 
