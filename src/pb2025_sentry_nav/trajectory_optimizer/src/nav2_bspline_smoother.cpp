@@ -92,6 +92,33 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".min_control_points",
     rclcpp::ParameterValue(params.min_control_points));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".use_continuous_optimization",
+    rclcpp::ParameterValue(params.use_continuous_optimization));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".continuous_max_iterations",
+    rclcpp::ParameterValue(params.continuous_max_iterations));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".continuous_lbfgs_memory",
+    rclcpp::ParameterValue(params.continuous_lbfgs_memory));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".continuous_gradient_tolerance",
+    rclcpp::ParameterValue(params.continuous_gradient_tolerance));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".continuous_initial_step",
+    rclcpp::ParameterValue(params.continuous_initial_step));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".smoothness_weight",
+    rclcpp::ParameterValue(params.smoothness_weight));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".fitness_weight",
+    rclcpp::ParameterValue(params.fitness_weight));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".endpoint_tangent_weight",
+    rclcpp::ParameterValue(params.endpoint_tangent_weight));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".corridor_weight",
+    rclcpp::ParameterValue(params.corridor_weight));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".curvature_limit",
     rclcpp::ParameterValue(params.curvature_limit));
   nav2_util::declare_parameter_if_not_declared(
@@ -208,6 +235,21 @@ void Nav2BSplineSmoother::configure(
   node->get_parameter(plugin_name_ + ".min_input_point_spacing", params.min_input_point_spacing);
   node->get_parameter(plugin_name_ + ".max_lateral_deviation", params.max_lateral_deviation);
   node->get_parameter(plugin_name_ + ".min_control_points", params.min_control_points);
+  node->get_parameter(
+    plugin_name_ + ".use_continuous_optimization", params.use_continuous_optimization);
+  node->get_parameter(
+    plugin_name_ + ".continuous_max_iterations", params.continuous_max_iterations);
+  node->get_parameter(
+    plugin_name_ + ".continuous_lbfgs_memory", params.continuous_lbfgs_memory);
+  node->get_parameter(
+    plugin_name_ + ".continuous_gradient_tolerance", params.continuous_gradient_tolerance);
+  node->get_parameter(
+    plugin_name_ + ".continuous_initial_step", params.continuous_initial_step);
+  node->get_parameter(plugin_name_ + ".smoothness_weight", params.smoothness_weight);
+  node->get_parameter(plugin_name_ + ".fitness_weight", params.fitness_weight);
+  node->get_parameter(
+    plugin_name_ + ".endpoint_tangent_weight", params.endpoint_tangent_weight);
+  node->get_parameter(plugin_name_ + ".corridor_weight", params.corridor_weight);
   node->get_parameter(plugin_name_ + ".curvature_limit", params.curvature_limit);
   node->get_parameter(plugin_name_ + ".curvature_weight", params.curvature_weight);
   node->get_parameter(

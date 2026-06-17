@@ -406,6 +406,15 @@ trajectory_optimizer:
     # 当前压到 0.12，避免平滑器把路径抹进障碍膨胀层。
     max_lateral_deviation: 0.16
     min_control_points: 5
+    use_continuous_optimization: true
+    continuous_max_iterations: 30
+    continuous_lbfgs_memory: 8
+    continuous_gradient_tolerance: 1.0e-4
+    continuous_initial_step: 0.20
+    smoothness_weight: 8.0
+    fitness_weight: 1.5
+    endpoint_tangent_weight: 2.0
+    corridor_weight: 10.0
     # 曲率上限：当前不是追求极圆，而是避免曲率约束过硬导致路径贴墙。
     curvature_limit: 1.60
     curvature_weight: 10.0
@@ -801,6 +810,15 @@ smoother_server:
       min_input_point_spacing: 0.02
       max_lateral_deviation: 0.16
       min_control_points: 5
+      use_continuous_optimization: true
+      continuous_max_iterations: 30
+      continuous_lbfgs_memory: 8
+      continuous_gradient_tolerance: 1.0e-4
+      continuous_initial_step: 0.20
+      smoothness_weight: 8.0
+      fitness_weight: 1.5
+      endpoint_tangent_weight: 2.0
+      corridor_weight: 10.0
       curvature_limit: 1.60
       curvature_weight: 10.0
       curvature_refinement_iterations: 4

@@ -31,6 +31,15 @@ struct OptimizerParams
   double min_input_point_spacing = 0.02;
   double max_lateral_deviation = 0.18;
   int min_control_points = 5;
+  bool use_continuous_optimization = true;
+  int continuous_max_iterations = 30;
+  int continuous_lbfgs_memory = 8;
+  double continuous_gradient_tolerance = 1e-4;
+  double continuous_initial_step = 0.20;
+  double smoothness_weight = 8.0;
+  double fitness_weight = 1.5;
+  double endpoint_tangent_weight = 2.0;
+  double corridor_weight = 10.0;
   double curvature_limit = 1.2;
   double curvature_weight = 20.0;
   int curvature_refinement_iterations = 3;
@@ -135,12 +144,39 @@ public:
   TrajectoryProfile2D evaluateProfile(const nav_msgs::msg::Path & path) const;
 
 private:
+  struct ContinuousOptimizeResult
+  {
+    bool success = false;
+    std::vector<Point2D> control_points;
+    double initial_cost = 0.0;
+    double final_cost = 0.0;
+    int iterations = 0;
+  };
+
+  struct ContinuousCostBreakdown
+  {
+    double total = 0.0;
+    double smoothness = 0.0;
+    double obstacle = 0.0;
+    double fitness = 0.0;
+    double corridor = 0.0;
+    double endpoint_tangent = 0.0;
+  };
+
   std::vector<Point2D> extractPolyline(const nav_msgs::msg::Path & path) const;
   std::vector<Point2D> filterClosePoints(const std::vector<Point2D> & points) const;
   std::vector<Point2D> resamplePolyline(
     const std::vector<Point2D> & points, double spacing) const;
   CubicBSpline2D buildSpline(const std::vector<Point2D> & points) const;
   std::vector<Point2D> sampleSplineDense(const CubicBSpline2D & spline) const;
+  ContinuousOptimizeResult optimizeControlPointsContinuous(
+    const std::vector<Point2D> & warm_control_points,
+    const std::vector<Point2D> & reference) const;
+  ContinuousCostBreakdown evaluateContinuousCost(
+    const std::vector<Point2D> & control_points,
+    const std::vector<Point2D> & warm_control_points,
+    const std::vector<Point2D> & reference,
+    std::vector<Point2D> * gradient) const;
   std::vector<Point2D> refinePathForCurvature(
     const std::vector<Point2D> & dense_points,
     const std::vector<Point2D> & reference) const;
@@ -179,6 +215,7 @@ private:
     unsigned char cost) const;
   double computeObstaclePenaltyFromDistance(
     double distance) const;
+  double computeAllowedCorridorDeviation(const Point2D & candidate) const;
   Point2D clampToCorridor(
     const Point2D & candidate, const std::vector<Point2D> & reference) const;
   std::pair<Point2D, double> closestPointOnPolyline(

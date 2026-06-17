@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
+#include <vector>
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 
@@ -17,6 +19,138 @@ namespace
 constexpr size_t kSplineDegree = 3;
 constexpr double kEpsilon = 1e-9;
 constexpr size_t kArcLengthSamples = 400;
+
+double pointDot(const Point2D & a, const Point2D & b)
+{
+  return a.x * b.x + a.y * b.y;
+}
+
+void addScaled(Point2D & target, const Point2D & value, double scale)
+{
+  target.x += value.x * scale;
+  target.y += value.y * scale;
+}
+
+std::vector<double> scaledVector(const std::vector<double> & values, double scale)
+{
+  std::vector<double> result(values.size(), 0.0);
+  for (size_t i = 0; i < values.size(); ++i) {
+    result[i] = values[i] * scale;
+  }
+  return result;
+}
+
+std::vector<double> addVector(
+  const std::vector<double> & a,
+  const std::vector<double> & b,
+  double b_scale = 1.0)
+{
+  std::vector<double> result(a.size(), 0.0);
+  for (size_t i = 0; i < a.size(); ++i) {
+    result[i] = a[i] + b[i] * b_scale;
+  }
+  return result;
+}
+
+double dotVector(const std::vector<double> & a, const std::vector<double> & b)
+{
+  double value = 0.0;
+  for (size_t i = 0; i < a.size(); ++i) {
+    value += a[i] * b[i];
+  }
+  return value;
+}
+
+double normVector(const std::vector<double> & values)
+{
+  return std::sqrt(dotVector(values, values));
+}
+
+Point2D thirdDifference(
+  const std::vector<Point2D> & points,
+  size_t index)
+{
+  return Point2D {
+    points[index + 3].x - 3.0 * points[index + 2].x + 3.0 * points[index + 1].x - points[index].x,
+    points[index + 3].y - 3.0 * points[index + 2].y + 3.0 * points[index + 1].y - points[index].y};
+}
+
+size_t firstEditableIndex(const std::vector<Point2D> & points)
+{
+  return points.size() > 6 ? 3u : 1u;
+}
+
+size_t lastEditableExclusive(const std::vector<Point2D> & points)
+{
+  return points.size() > 6 ? points.size() - 3u : points.size() - 1u;
+}
+
+std::vector<double> packEditableControlPoints(const std::vector<Point2D> & points)
+{
+  std::vector<double> values;
+  for (size_t i = firstEditableIndex(points); i < lastEditableExclusive(points); ++i) {
+    values.push_back(points[i].x);
+    values.push_back(points[i].y);
+  }
+  return values;
+}
+
+void unpackEditableControlPoints(
+  const std::vector<double> & values,
+  std::vector<Point2D> & points)
+{
+  size_t cursor = 0;
+  for (size_t i = firstEditableIndex(points); i < lastEditableExclusive(points); ++i) {
+    points[i].x = values[cursor++];
+    points[i].y = values[cursor++];
+  }
+}
+
+std::vector<double> packEditableGradient(
+  const std::vector<Point2D> & points,
+  const std::vector<Point2D> & gradient)
+{
+  std::vector<double> values;
+  for (size_t i = firstEditableIndex(points); i < lastEditableExclusive(points); ++i) {
+    values.push_back(gradient[i].x);
+    values.push_back(gradient[i].y);
+  }
+  return values;
+}
+
+std::vector<double> lbfgsDirection(
+  const std::vector<double> & gradient,
+  const std::vector<std::vector<double>> & s_history,
+  const std::vector<std::vector<double>> & y_history)
+{
+  if (s_history.empty()) {
+    return scaledVector(gradient, -1.0);
+  }
+
+  std::vector<double> q = gradient;
+  std::vector<double> alpha(s_history.size(), 0.0);
+  std::vector<double> rho(s_history.size(), 0.0);
+  for (int i = static_cast<int>(s_history.size()) - 1; i >= 0; --i) {
+    const double sy = dotVector(s_history[static_cast<size_t>(i)], y_history[static_cast<size_t>(i)]);
+    rho[static_cast<size_t>(i)] = sy > 0.0 ? 1.0 / sy : 0.0;
+    alpha[static_cast<size_t>(i)] =
+      rho[static_cast<size_t>(i)] * dotVector(s_history[static_cast<size_t>(i)], q);
+    q = addVector(q, y_history[static_cast<size_t>(i)], -alpha[static_cast<size_t>(i)]);
+  }
+
+  const auto & last_s = s_history.back();
+  const auto & last_y = y_history.back();
+  const double yy = dotVector(last_y, last_y);
+  const double gamma = yy > 0.0 ? dotVector(last_s, last_y) / yy : 1.0;
+  std::vector<double> r = scaledVector(q, gamma);
+
+  for (size_t i = 0; i < s_history.size(); ++i) {
+    const double beta = rho[i] * dotVector(y_history[i], r);
+    r = addVector(r, s_history[i], alpha[i] - beta);
+  }
+
+  return scaledVector(r, -1.0);
+}
 
 }  // namespace
 
@@ -453,9 +587,16 @@ std::vector<Point2D> BSplinePathOptimizer::refinePathForCurvature(
 std::vector<Point2D> BSplinePathOptimizer::buildSmoothedPolyline(
   const std::vector<Point2D> & points) const
 {
-  const auto control_points = resamplePolyline(points, params_.control_point_spacing);
+  auto control_points = resamplePolyline(points, params_.control_point_spacing);
   if (control_points.size() < std::max(kSplineDegree + 1, static_cast<size_t>(params_.min_control_points))) {
     return resamplePolyline(points, params_.output_path_spacing);
+  }
+
+  if (params_.use_continuous_optimization) {
+    const auto optimized = optimizeControlPointsContinuous(control_points, points);
+    if (optimized.success && optimized.control_points.size() >= control_points.size()) {
+      control_points = optimized.control_points;
+    }
   }
 
   const auto spline = buildSpline(control_points);
@@ -468,6 +609,244 @@ std::vector<Point2D> BSplinePathOptimizer::buildSmoothedPolyline(
   dense_points.front() = points.front();
   dense_points.back() = points.back();
   return resamplePolyline(dense_points, params_.output_path_spacing);
+}
+
+BSplinePathOptimizer::ContinuousOptimizeResult
+BSplinePathOptimizer::optimizeControlPointsContinuous(
+  const std::vector<Point2D> & warm_control_points,
+  const std::vector<Point2D> & reference) const
+{
+  ContinuousOptimizeResult result;
+  result.control_points = warm_control_points;
+
+  if (warm_control_points.size() < std::max(kSplineDegree + 1, static_cast<size_t>(params_.min_control_points))) {
+    return result;
+  }
+
+  std::vector<Point2D> gradient;
+  const auto initial =
+    evaluateContinuousCost(result.control_points, warm_control_points, reference, &gradient);
+  result.initial_cost = initial.total;
+
+  std::vector<double> x = packEditableControlPoints(result.control_points);
+  std::vector<double> grad = packEditableGradient(result.control_points, gradient);
+  if (x.empty()) {
+    result.success = true;
+    result.final_cost = result.initial_cost;
+    return result;
+  }
+
+  std::vector<std::vector<double>> s_history;
+  std::vector<std::vector<double>> y_history;
+  ContinuousCostBreakdown current = initial;
+
+  for (int iteration = 0; iteration < params_.continuous_max_iterations; ++iteration) {
+    result.iterations = iteration + 1;
+    if (normVector(grad) < params_.continuous_gradient_tolerance) {
+      break;
+    }
+
+    std::vector<double> direction = lbfgsDirection(grad, s_history, y_history);
+    if (dotVector(direction, grad) >= 0.0) {
+      direction = scaledVector(grad, -1.0);
+    }
+
+    const double directional_derivative = dotVector(grad, direction);
+    double step = params_.continuous_initial_step;
+    bool accepted = false;
+    std::vector<double> next_x;
+    std::vector<Point2D> next_points;
+    std::vector<Point2D> next_gradient;
+    ContinuousCostBreakdown next_cost;
+
+    for (int line_search = 0; line_search < 20; ++line_search) {
+      next_x = addVector(x, direction, step);
+      next_points = result.control_points;
+      unpackEditableControlPoints(next_x, next_points);
+      next_cost =
+        evaluateContinuousCost(next_points, warm_control_points, reference, &next_gradient);
+      if (std::isfinite(next_cost.total) &&
+        next_cost.total <= current.total + 1e-4 * step * directional_derivative)
+      {
+        accepted = true;
+        break;
+      }
+      step *= 0.5;
+    }
+
+    if (!accepted) {
+      break;
+    }
+
+    const std::vector<double> next_grad = packEditableGradient(next_points, next_gradient);
+    const std::vector<double> s = addVector(next_x, x, -1.0);
+    const std::vector<double> y = addVector(next_grad, grad, -1.0);
+    if (dotVector(s, y) > 1e-10) {
+      s_history.push_back(s);
+      y_history.push_back(y);
+      if (s_history.size() > static_cast<size_t>(params_.continuous_lbfgs_memory)) {
+        s_history.erase(s_history.begin());
+        y_history.erase(y_history.begin());
+      }
+    }
+
+    x = std::move(next_x);
+    grad = next_grad;
+    result.control_points = std::move(next_points);
+    current = next_cost;
+  }
+
+  result.final_cost = current.total;
+  result.success = std::isfinite(result.final_cost) && result.final_cost <= result.initial_cost + 1e-6;
+  return result;
+}
+
+BSplinePathOptimizer::ContinuousCostBreakdown
+BSplinePathOptimizer::evaluateContinuousCost(
+  const std::vector<Point2D> & control_points,
+  const std::vector<Point2D> & warm_control_points,
+  const std::vector<Point2D> & reference,
+  std::vector<Point2D> * gradient) const
+{
+  ContinuousCostBreakdown cost;
+  if (gradient) {
+    gradient->assign(control_points.size(), {});
+  }
+
+  if (control_points.size() >= 4) {
+    for (size_t i = 0; i + 3 < control_points.size(); ++i) {
+      const Point2D d = thirdDifference(control_points, i);
+      const double raw = pointDot(d, d);
+      cost.smoothness += raw;
+      if (gradient) {
+        addScaled((*gradient)[i], d, -2.0 * params_.smoothness_weight);
+        addScaled((*gradient)[i + 1], d, 6.0 * params_.smoothness_weight);
+        addScaled((*gradient)[i + 2], d, -6.0 * params_.smoothness_weight);
+        addScaled((*gradient)[i + 3], d, 2.0 * params_.smoothness_weight);
+      }
+    }
+    cost.smoothness *= params_.smoothness_weight;
+  }
+
+  for (size_t i = 0; i < control_points.size() && i < warm_control_points.size(); ++i) {
+    if (i < firstEditableIndex(control_points) || i >= lastEditableExclusive(control_points)) {
+      continue;
+    }
+    const Point2D delta {
+      control_points[i].x - warm_control_points[i].x,
+      control_points[i].y - warm_control_points[i].y};
+    cost.fitness += pointDot(delta, delta);
+    if (gradient) {
+      addScaled((*gradient)[i], delta, 2.0 * params_.fitness_weight);
+    }
+  }
+  cost.fitness *= params_.fitness_weight;
+
+  if (control_points.size() >= 2 && warm_control_points.size() >= 2) {
+    const Point2D start_delta {
+      (control_points[1].x - control_points[0].x) - (warm_control_points[1].x - warm_control_points[0].x),
+      (control_points[1].y - control_points[0].y) - (warm_control_points[1].y - warm_control_points[0].y)};
+    const size_t last = control_points.size() - 1;
+    const Point2D end_delta {
+      (control_points[last].x - control_points[last - 1].x) -
+      (warm_control_points[last].x - warm_control_points[last - 1].x),
+      (control_points[last].y - control_points[last - 1].y) -
+      (warm_control_points[last].y - warm_control_points[last - 1].y)};
+    cost.endpoint_tangent = params_.endpoint_tangent_weight *
+      (pointDot(start_delta, start_delta) + pointDot(end_delta, end_delta));
+    if (gradient) {
+      addScaled((*gradient)[0], start_delta, -2.0 * params_.endpoint_tangent_weight);
+      addScaled((*gradient)[1], start_delta, 2.0 * params_.endpoint_tangent_weight);
+      addScaled((*gradient)[last - 1], end_delta, -2.0 * params_.endpoint_tangent_weight);
+      addScaled((*gradient)[last], end_delta, 2.0 * params_.endpoint_tangent_weight);
+    }
+  }
+
+  const CubicBSpline2D spline(control_points, params_.derivative_step);
+  if (!spline.valid()) {
+    cost.total = std::numeric_limits<double>::infinity();
+    return cost;
+  }
+
+  const double sample_step = std::max(params_.output_path_spacing, params_.control_point_spacing * 0.5);
+  const double total_length = spline.totalLength();
+  const size_t sample_count = std::max<size_t>(4, static_cast<size_t>(std::ceil(total_length / sample_step)) + 1);
+  for (size_t sample_index = 1; sample_index + 1 < sample_count; ++sample_index) {
+    const double s = total_length * static_cast<double>(sample_index) /
+      static_cast<double>(sample_count - 1);
+    const Point2D sample = spline.getPoint(s);
+
+    if (params_.use_esdf_obstacle_cost) {
+      double esdf_distance = 0.0;
+      if (sampleEsdfDistance(sample, esdf_distance)) {
+        const double violation = params_.obstacle_safe_distance - esdf_distance;
+        if (violation > 0.0) {
+          cost.obstacle += violation * violation;
+          if (gradient) {
+            const Point2D obstacle_grad = estimateEsdfGradient(sample);
+            const Point2D sample_grad {
+              -2.0 * params_.obstacle_weight * violation * obstacle_grad.x,
+              -2.0 * params_.obstacle_weight * violation * obstacle_grad.y};
+            const size_t nearest = std::min(
+              control_points.size() - 2,
+              std::max<size_t>(1, static_cast<size_t>(std::lround(
+                static_cast<double>(sample_index) *
+                static_cast<double>(control_points.size() - 1) /
+                static_cast<double>(sample_count - 1)))));
+            addScaled((*gradient)[nearest], sample_grad, 1.0);
+          }
+        }
+      }
+    } else {
+      unsigned char obstacle_cost = 0;
+      if (sampleObstacleCost(sample, obstacle_cost)) {
+        const double penalty = computeObstaclePenalty(obstacle_cost);
+        cost.obstacle += penalty;
+        if (gradient && penalty > 0.0) {
+          const Point2D obstacle_grad = estimateObstacleGradient(sample);
+          const size_t nearest = std::min(
+            control_points.size() - 2,
+            std::max<size_t>(1, static_cast<size_t>(std::lround(
+              static_cast<double>(sample_index) *
+              static_cast<double>(control_points.size() - 1) /
+              static_cast<double>(sample_count - 1)))));
+          addScaled((*gradient)[nearest], obstacle_grad, params_.obstacle_weight * penalty);
+        }
+      }
+    }
+
+    if (reference.size() >= 2) {
+      const auto corridor_projection = closestPointOnPolyline(sample, reference);
+      const double allowed_deviation = computeAllowedCorridorDeviation(sample);
+      if (corridor_projection.second > allowed_deviation) {
+        const Point2D delta {
+          sample.x - corridor_projection.first.x,
+          sample.y - corridor_projection.first.y};
+        const double excess = corridor_projection.second - allowed_deviation;
+        cost.corridor += excess * excess;
+        if (gradient) {
+          const double inv = 1.0 / std::max(kEpsilon, corridor_projection.second);
+          const Point2D direction {delta.x * inv, delta.y * inv};
+          const Point2D corridor_grad {
+            2.0 * params_.corridor_weight * excess * direction.x,
+            2.0 * params_.corridor_weight * excess * direction.y};
+          const size_t nearest = std::min(
+            control_points.size() - 2,
+            std::max<size_t>(1, static_cast<size_t>(std::lround(
+              static_cast<double>(sample_index) *
+              static_cast<double>(control_points.size() - 1) /
+              static_cast<double>(sample_count - 1)))));
+          addScaled((*gradient)[nearest], corridor_grad, 1.0);
+        }
+      }
+    }
+  }
+
+  cost.obstacle *= params_.obstacle_weight;
+  cost.corridor *= params_.corridor_weight;
+  cost.total =
+    cost.smoothness + cost.obstacle + cost.fitness + cost.corridor + cost.endpoint_tangent;
+  return cost;
 }
 
 TrajectoryProfile2D BSplinePathOptimizer::buildTrajectoryProfile(
@@ -947,13 +1326,8 @@ double BSplinePathOptimizer::computeObstaclePenaltyFromDistance(double distance)
   return violation * violation;
 }
 
-Point2D BSplinePathOptimizer::clampToCorridor(
-  const Point2D & candidate, const std::vector<Point2D> & reference) const
+double BSplinePathOptimizer::computeAllowedCorridorDeviation(const Point2D & candidate) const
 {
-  if (params_.max_lateral_deviation <= 0.0 || reference.size() < 2) {
-    return candidate;
-  }
-
   double allowed_deviation = params_.max_lateral_deviation;
   if (params_.use_esdf_obstacle_cost && esdf_provider_ && esdf_provider_->available()) {
     const double distance = esdf_provider_->getDistance(candidate.x, candidate.y);
@@ -963,6 +1337,17 @@ Point2D BSplinePathOptimizer::clampToCorridor(
       allowed_deviation += std::min(0.10, clearance_bonus * 0.30);
     }
   }
+  return allowed_deviation;
+}
+
+Point2D BSplinePathOptimizer::clampToCorridor(
+  const Point2D & candidate, const std::vector<Point2D> & reference) const
+{
+  if (params_.max_lateral_deviation <= 0.0 || reference.size() < 2) {
+    return candidate;
+  }
+
+  const double allowed_deviation = computeAllowedCorridorDeviation(candidate);
 
   const auto closest_result = closestPointOnPolyline(candidate, reference);
   if (closest_result.second <= allowed_deviation) {

@@ -494,6 +494,16 @@ trajectory_optimizer:
     max_lateral_deviation: 0.16
     # 最低控制点数。通常保持默认即可。
     min_control_points: 5
+    # 连续优化主开关：启用控制点级 L-BFGS，启发式稠密点修正作为后处理保留。
+    use_continuous_optimization: true
+    continuous_max_iterations: 30
+    continuous_lbfgs_memory: 8
+    continuous_gradient_tolerance: 1.0e-4
+    continuous_initial_step: 0.20
+    smoothness_weight: 8.0
+    fitness_weight: 1.5
+    endpoint_tangent_weight: 2.0
+    corridor_weight: 10.0
     # 曲率上限：当前不是追求极圆，而是避免曲率约束过硬导致路径贴墙。
     curvature_limit: 1.90
     # 曲率超限惩罚权重。大：更强压弯；小：更允许急弯存在。

@@ -114,6 +114,16 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<double>("min_input_point_spacing", params_.min_input_point_spacing);
   declare_parameter<double>("max_lateral_deviation", params_.max_lateral_deviation);
   declare_parameter<int>("min_control_points", params_.min_control_points);
+  declare_parameter<bool>("use_continuous_optimization", params_.use_continuous_optimization);
+  declare_parameter<int>("continuous_max_iterations", params_.continuous_max_iterations);
+  declare_parameter<int>("continuous_lbfgs_memory", params_.continuous_lbfgs_memory);
+  declare_parameter<double>(
+    "continuous_gradient_tolerance", params_.continuous_gradient_tolerance);
+  declare_parameter<double>("continuous_initial_step", params_.continuous_initial_step);
+  declare_parameter<double>("smoothness_weight", params_.smoothness_weight);
+  declare_parameter<double>("fitness_weight", params_.fitness_weight);
+  declare_parameter<double>("endpoint_tangent_weight", params_.endpoint_tangent_weight);
+  declare_parameter<double>("corridor_weight", params_.corridor_weight);
   declare_parameter<double>("curvature_limit", params_.curvature_limit);
   declare_parameter<double>("curvature_weight", params_.curvature_weight);
   declare_parameter<int>(
@@ -161,6 +171,16 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   get_parameter("min_input_point_spacing", params_.min_input_point_spacing);
   get_parameter("max_lateral_deviation", params_.max_lateral_deviation);
   get_parameter("min_control_points", params_.min_control_points);
+  get_parameter("use_continuous_optimization", params_.use_continuous_optimization);
+  get_parameter("continuous_max_iterations", params_.continuous_max_iterations);
+  get_parameter("continuous_lbfgs_memory", params_.continuous_lbfgs_memory);
+  get_parameter(
+    "continuous_gradient_tolerance", params_.continuous_gradient_tolerance);
+  get_parameter("continuous_initial_step", params_.continuous_initial_step);
+  get_parameter("smoothness_weight", params_.smoothness_weight);
+  get_parameter("fitness_weight", params_.fitness_weight);
+  get_parameter("endpoint_tangent_weight", params_.endpoint_tangent_weight);
+  get_parameter("corridor_weight", params_.corridor_weight);
   get_parameter("curvature_limit", params_.curvature_limit);
   get_parameter("curvature_weight", params_.curvature_weight);
   get_parameter("curvature_refinement_iterations", params_.curvature_refinement_iterations);
