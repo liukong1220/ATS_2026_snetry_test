@@ -132,35 +132,41 @@ terrain_analysis:
 
 terrain_analysis_ext:
   ros__parameters:
-    scanVoxelSize: 0.03
-    decayTime: 0.2
-    noDecayDis: 0.0
-    clearingDis: 20.0
-    useSorting: true
-    quantileZ: 0.2
-    vehicleHeight: 1.0
-    voxelPointUpdateThre: 100
-    voxelTimeUpdateThre: 2.0
-    lowerBoundZ: -1.5
-    upperBoundZ: 0.5
-    disRatioZ: 0.2
-    checkTerrainConn: False
-    terrainUnderVehicle: -0.75
-    terrainConnThre: 0.5
-    ceilingFilteringThre: 2.0
-    localTerrainMapRadius: 4.0
-    traversabilityObstacleHeightThre: 0.18
-    traversabilitySafeHeightThre: 0.08
-    traversabilityOccupancyRatioThre: 0.45
-    traversabilityGroundConfidenceThre: 0.55
-    traversabilityHeightWeight: 0.55
-    traversabilityOccupancyWeight: 0.30
-    traversabilityGroundWeight: 0.15
-    traversabilityDebugHeightDiffCap: 0.30
-    traversabilityDebugOccupancyRatioCap: 1.0
-    traversabilityMinPointCount: 3
-    traversabilityUnknownAsOccupied: false
-    publishTraversabilityDebugGrids: true
+    scanVoxelSize: 0.03                  # 点云体素降采样分辨率；越小越细，但噪声和算力开销越高。
+    decayTime: 0.2                       # 远场堆叠点云保留时长，越大越平滑，但动态残影越明显。
+    noDecayDis: 0.0                      # 距离机器人多近的点不做时间衰减；0 表示全部按 decayTime 管理。
+    clearingDis: 20.0                    # 触发 clearing 时清空的半径范围。
+    useSorting: true                     # true 用分位数估计地面；false 用最小值估计地面。
+    quantileZ: 0.2                       # 地面分位数；越小越贴近“最低地面”，越大越抗离群低点。
+    vehicleHeight: 1.0                   # 高于地面的可接受点高度上限，超出后会被视为非地面障碍候选。
+    voxelPointUpdateThre: 100            # 单个 terrain voxel 累积多少点后触发更新。
+    voxelTimeUpdateThre: 2.0             # 即使点数不够，超过该时间也强制刷新 terrain voxel。
+    lowerBoundZ: -1.5                    # 相对车体允许的最低点云高度窗口。
+    upperBoundZ: 0.5                     # 相对车体允许的最高点云高度窗口。
+    disRatioZ: 0.2                       # 距离越远，高度窗口按该比例放宽，兼顾坡面远距观测。
+    checkTerrainConn: False              # 是否做地形连通性 flood fill，过滤悬空/天花板类表面。
+    terrainUnderVehicle: -0.75           # 车下无点时的默认地面高度先验。
+    terrainConnThre: 0.5                 # 连通性判断时，相邻栅格允许的最大高差。
+    ceilingFilteringThre: 2.0            # 高差超过该值时直接视为断连，常用于过滤天花板/高悬点。
+    localTerrainMapRadius: 4.0           # 近场 terrain_map 与远场 terrain_map_ext 的拼接半径。
+    traversabilityObstacleHeightThre: 0.18  # 高差硬障碍阈值；超过它直接把 traversability 判为障碍。
+    traversabilitySafeHeightThre: 0.08      # 高差安全阈值；低于它时 height cost 基本不激活。
+    traversabilityOccupancyRatioThre: 0.45  # 占有率代价进入强惩罚的参考阈值。
+    traversabilityGroundConfidenceThre: 0.55  # 地面置信度低于该值时开始增加惩罚。
+    traversabilityHeightWeight: 0.55         # traversability 综合得分里高度项权重。
+    traversabilityOccupancyWeight: 0.30      # traversability 综合得分里占有率项权重。
+    traversabilityGroundWeight: 0.15         # traversability 综合得分里地面置信度项权重。
+    traversabilityDebugHeightDiffCap: 0.30   # 高差调试图映射到 100 的上限。
+    traversabilityDebugOccupancyRatioCap: 1.0  # 占有率调试图映射到 100 的上限。
+    traversabilityMinPointCount: 3           # 单格至少多少点才认为该格有效。
+    traversabilityUnknownAsOccupied: false   # 无点格是否直接按障碍处理。
+    publishTraversabilityDebugGrids: true    # 是否发布 height/occupancy/ground 三张调试语义图。
+    slopeGridMaxDeg: 45.0                # slope_grid 中 100 对应的最大坡度角，主要用于可视化编码。
+    slopeGentleDegThre: 8.0              # gentle 坡度分级阈值。
+    slopeModerateDegThre: 15.0           # moderate 坡度分级阈值。
+    slopeSteepDegThre: 25.0              # steep 坡度分级阈值。
+    useSlopeAsObstacle: false            # false: 坡度只做语义输出；true: 超阈值坡度直接判为障碍。
+    slopeObstacleDegThre: 28.0           # 开启 useSlopeAsObstacle 后，超过该坡度角的栅格判为障碍。
 
 fake_vel_transform:
   ros__parameters:

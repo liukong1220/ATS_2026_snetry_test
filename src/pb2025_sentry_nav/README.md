@@ -44,6 +44,8 @@ terrain_analysis_ext
   -> traversability_height_diff_grid
   -> traversability_occupancy_ratio_grid
   -> traversability_ground_confidence_grid
+  -> traversability_slope_grid
+  -> traversability_slope_band_grid
   -> TraversabilityEsdfProvider
   -> Nav2BSplineSmoother / trajectory_optimizer_node
 ```
@@ -135,6 +137,13 @@ pb2025_sentry_nav/
 2. `TraversabilityEsdfProvider` 会融合 `traversability_grid`、`traversability_height_diff_grid`、`traversability_occupancy_ratio_grid`、`traversability_ground_confidence_grid`。
 3. fake costmap ESDF 与 terrain pointcloud ESDF 仍保留为 fallback / 历史对照路径。
 
+当前坡度语义说明：
+
+1. `traversability_slope_grid` 使用 `nav_msgs/OccupancyGrid` 编码，`-1` 表示 unknown，`0~100` 线性对应 `0 ~ slopeGridMaxDeg` 的坡度角。
+2. `traversability_slope_band_grid` 同样使用 `nav_msgs/OccupancyGrid` 编码，按 `slopeGentleDegThre / slopeModerateDegThre / slopeSteepDegThre` 分成平缓、中坡、陡坡三档。
+3. 默认这两张图优先用于任务 2 的坡道速度规则与 RViz 观测，不直接改写当前 `traversability_grid` 的二值通行逻辑。
+4. 如果希望“坡太陡就直接绕开”，把 `terrain_analysis_ext.useSlopeAsObstacle` 设为 `true`，再用 `slopeObstacleDegThre` 调整坡度障碍阈值。
+
 ### `pb_nav2_plugins`
 
 关键文件：
@@ -190,6 +199,8 @@ pb2025_sentry_nav/
 - `traversability_height_diff_grid`
 - `traversability_occupancy_ratio_grid`
 - `traversability_ground_confidence_grid`
+- `traversability_slope_grid`
+- `traversability_slope_band_grid`
 - `cmd_vel_controller`
 - `cmd_vel_controller_governed`
 - `cmd_vel_nav2_result`

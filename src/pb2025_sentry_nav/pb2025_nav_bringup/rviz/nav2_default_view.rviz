@@ -448,6 +448,36 @@ Visualization Manager:
           Color Scheme: costmap
           Draw Behind: false
           Enabled: false
+          Name: Slope Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_slope_grid
+          Use Timestamp: false
+          Value: false
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
+          Name: Slope Band Grid
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: traversability_slope_band_grid
+          Use Timestamp: false
+          Value: false
+        - Alpha: 0.5
+          Class: rviz_default_plugins/Map
+          Color Scheme: costmap
+          Draw Behind: false
+          Enabled: false
           Name: Ground Confidence Grid
           Topic:
             Depth: 1

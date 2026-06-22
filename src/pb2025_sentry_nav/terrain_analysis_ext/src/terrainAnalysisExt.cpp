@@ -50,6 +50,12 @@ double traversabilityDebugOccupancyRatioCap = 1.0;
 int traversabilityMinPointCount = 3;
 bool traversabilityUnknownAsOccupied = false;
 bool publishTraversabilityDebugGrids = true;
+double slopeGridMaxDeg = 45.0;
+double slopeGentleDegThre = 8.0;
+double slopeModerateDegThre = 15.0;
+double slopeSteepDegThre = 25.0;
+bool useSlopeAsObstacle = false;
+double slopeObstacleDegThre = 28.0;
 
 // terrain voxel parameters
 float terrainVoxelSize = 2.0;
@@ -89,6 +95,8 @@ float planarVoxelMaxZ[kPlanarVoxelNum] = {0};
 float planarVoxelHeightDiff[kPlanarVoxelNum] = {0};
 float planarVoxelOccupancyRatio[kPlanarVoxelNum] = {0};
 float planarVoxelGroundConfidence[kPlanarVoxelNum] = {0};
+float planarVoxelSlopeDeg[kPlanarVoxelNum] = {0};
+float planarVoxelSlopeBand[kPlanarVoxelNum] = {0};
 int planarVoxelPointCount[kPlanarVoxelNum] = {0};
 std::vector<float> planarPointElev[kPlanarVoxelNum];
 std::queue<int> planarVoxelQueue;
@@ -187,6 +195,115 @@ int8_t normalizedToOccupancy(double value) {
   return static_cast<int8_t>(std::round(clampUnit(value) * 100.0));
 }
 
+// Convert a continuous slope angle into a few coarse bands so RViz can quickly
+// show "gentle / moderate / steep" terrain without requiring custom messages.
+double slopeDegToBand(double slope_deg) {
+  if (slope_deg >= slopeSteepDegThre) {
+    return 1.0;
+  }
+  if (slope_deg >= slopeModerateDegThre) {
+    return 0.67;
+  }
+  if (slope_deg >= slopeGentleDegThre) {
+    return 0.34;
+  }
+  return 0.0;
+}
+
+// Estimate the local slope from neighboring ground elevations on the 2D planar
+// grid. This keeps V1 in a 2D navigation topology while still exposing 2.5D
+// terrain semantics to later speed planning and obstacle policies.
+void computeSlopeGrid() {
+  const double resolution = std::max(static_cast<double>(planarVoxelSize), 1e-3);
+
+  for (int indX = 0; indX < planarVoxelWidth; ++indX) {
+    for (int indY = 0; indY < planarVoxelWidth; ++indY) {
+      const int ind = planarVoxelWidth * indX + indY;
+      const bool has_points =
+          planarVoxelPointCount[ind] >= traversabilityMinPointCount;
+      const bool is_connected = !checkTerrainConn || planarVoxelConn[ind] == 2;
+      if (!has_points || !is_connected) {
+        planarVoxelSlopeDeg[ind] = 0.0f;
+        planarVoxelSlopeBand[ind] = 0.0f;
+        continue;
+      }
+
+      const auto sample_elev = [&](int sx, int sy, float &elev) -> bool {
+        if (sx < 0 || sx >= planarVoxelWidth || sy < 0 || sy >= planarVoxelWidth) {
+          return false;
+        }
+        const int sample_ind = planarVoxelWidth * sx + sy;
+        const bool sample_has_points =
+            planarVoxelPointCount[sample_ind] >= traversabilityMinPointCount;
+        const bool sample_is_connected =
+            !checkTerrainConn || planarVoxelConn[sample_ind] == 2;
+        if (!sample_has_points || !sample_is_connected) {
+          return false;
+        }
+        elev = planarVoxelElev[sample_ind];
+        return true;
+      };
+
+      float left = 0.0f;
+      float right = 0.0f;
+      float down = 0.0f;
+      float up = 0.0f;
+      const bool has_left = sample_elev(indX - 1, indY, left);
+      const bool has_right = sample_elev(indX + 1, indY, right);
+      const bool has_down = sample_elev(indX, indY - 1, down);
+      const bool has_up = sample_elev(indX, indY + 1, up);
+
+      double dzdx = 0.0;
+      double dzdy = 0.0;
+      bool valid_dx = false;
+      bool valid_dy = false;
+
+      if (has_left && has_right) {
+        dzdx = (static_cast<double>(right) - static_cast<double>(left)) /
+               (2.0 * resolution);
+        valid_dx = true;
+      } else if (has_right) {
+        dzdx = (static_cast<double>(right) -
+                static_cast<double>(planarVoxelElev[ind])) /
+               resolution;
+        valid_dx = true;
+      } else if (has_left) {
+        dzdx = (static_cast<double>(planarVoxelElev[ind]) -
+                static_cast<double>(left)) /
+               resolution;
+        valid_dx = true;
+      }
+
+      if (has_down && has_up) {
+        dzdy = (static_cast<double>(up) - static_cast<double>(down)) /
+               (2.0 * resolution);
+        valid_dy = true;
+      } else if (has_up) {
+        dzdy = (static_cast<double>(up) -
+                static_cast<double>(planarVoxelElev[ind])) /
+               resolution;
+        valid_dy = true;
+      } else if (has_down) {
+        dzdy = (static_cast<double>(planarVoxelElev[ind]) -
+                static_cast<double>(down)) /
+               resolution;
+        valid_dy = true;
+      }
+
+      if (!valid_dx && !valid_dy) {
+        planarVoxelSlopeDeg[ind] = 0.0f;
+        planarVoxelSlopeBand[ind] = 0.0f;
+        continue;
+      }
+
+      const double gradient_norm = std::sqrt(dzdx * dzdx + dzdy * dzdy);
+      const double slope_deg = std::atan(gradient_norm) * 180.0 / M_PI;
+      planarVoxelSlopeDeg[ind] = static_cast<float>(slope_deg);
+      planarVoxelSlopeBand[ind] = static_cast<float>(slopeDegToBand(slope_deg));
+    }
+  }
+}
+
 nav_msgs::msg::OccupancyGrid makePlanarGridMessage(const rclcpp::Time &stamp) {
   nav_msgs::msg::OccupancyGrid grid;
   grid.header.stamp = stamp;
@@ -233,6 +350,10 @@ void publishTraversabilityGrid(
         &occupancy_ratio_publisher,
     const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr
         &ground_confidence_publisher,
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr
+        &slope_publisher,
+    const rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr
+        &slope_band_publisher,
     const rclcpp::Time &stamp) {
   nav_msgs::msg::OccupancyGrid grid = makePlanarGridMessage(stamp);
 
@@ -277,13 +398,20 @@ void publishTraversabilityGrid(
     const double ground_penalty = clampUnit(
         (traversabilityGroundConfidenceThre - ground_confidence) /
         std::max(traversabilityGroundConfidenceThre, 1e-3));
+    const double slope_deg = static_cast<double>(planarVoxelSlopeDeg[i]);
+    const bool slope_blocked =
+        useSlopeAsObstacle && slope_deg >= slopeObstacleDegThre;
 
+    // V1 default: slope is published as terrain semantics for later velocity
+    // adaptation. If `useSlopeAsObstacle` is enabled, steep cells are upgraded
+    // to hard obstacles here so the 2D planner will route around them directly.
     double combined_score =
         (traversabilityHeightWeight * height_score +
          traversabilityOccupancyWeight * occupancy_score +
          traversabilityGroundWeight * ground_penalty) /
         weight_sum;
-    if (!is_connected || height_metric >= traversabilityObstacleHeightThre) {
+    if (!is_connected || height_metric >= traversabilityObstacleHeightThre ||
+        slope_blocked) {
       combined_score = 1.0;
     }
 
@@ -292,6 +420,9 @@ void publishTraversabilityGrid(
   }
 
   publisher->publish(grid);
+  publishScalarGrid(slope_publisher, stamp, planarVoxelSlopeDeg,
+                    std::max(slopeGridMaxDeg, 1e-3));
+  publishScalarGrid(slope_band_publisher, stamp, planarVoxelSlopeBand, 1.0);
   if (publishTraversabilityDebugGrids) {
     publishScalarGrid(height_diff_publisher, stamp, planarVoxelHeightDiff,
                       traversabilityDebugHeightDiffCap);
@@ -347,6 +478,12 @@ int main(int argc, char **argv) {
                               traversabilityUnknownAsOccupied);
   nh->declare_parameter<bool>("publishTraversabilityDebugGrids",
                               publishTraversabilityDebugGrids);
+  nh->declare_parameter<double>("slopeGridMaxDeg", slopeGridMaxDeg);
+  nh->declare_parameter<double>("slopeGentleDegThre", slopeGentleDegThre);
+  nh->declare_parameter<double>("slopeModerateDegThre", slopeModerateDegThre);
+  nh->declare_parameter<double>("slopeSteepDegThre", slopeSteepDegThre);
+  nh->declare_parameter<bool>("useSlopeAsObstacle", useSlopeAsObstacle);
+  nh->declare_parameter<double>("slopeObstacleDegThre", slopeObstacleDegThre);
 
   nh->get_parameter("scanVoxelSize", scanVoxelSize);
   nh->get_parameter("decayTime", decayTime);
@@ -386,6 +523,12 @@ int main(int argc, char **argv) {
                     traversabilityUnknownAsOccupied);
   nh->get_parameter("publishTraversabilityDebugGrids",
                     publishTraversabilityDebugGrids);
+  nh->get_parameter("slopeGridMaxDeg", slopeGridMaxDeg);
+  nh->get_parameter("slopeGentleDegThre", slopeGentleDegThre);
+  nh->get_parameter("slopeModerateDegThre", slopeModerateDegThre);
+  nh->get_parameter("slopeSteepDegThre", slopeSteepDegThre);
+  nh->get_parameter("useSlopeAsObstacle", useSlopeAsObstacle);
+  nh->get_parameter("slopeObstacleDegThre", slopeObstacleDegThre);
 
   auto subOdometry = nh->create_subscription<nav_msgs::msg::Odometry>(
       "lidar_odometry", 5, odometryHandler);
@@ -416,6 +559,12 @@ int main(int argc, char **argv) {
   auto pubTraversabilityGroundConfidenceGrid =
       nh->create_publisher<nav_msgs::msg::OccupancyGrid>(
           "traversability_ground_confidence_grid", 2);
+  auto pubTraversabilitySlopeGrid =
+      nh->create_publisher<nav_msgs::msg::OccupancyGrid>(
+          "traversability_slope_grid", 2);
+  auto pubTraversabilitySlopeBandGrid =
+      nh->create_publisher<nav_msgs::msg::OccupancyGrid>(
+          "traversability_slope_band_grid", 2);
 
   for (int i = 0; i < kTerrainVoxelNum; i++) {
     terrainVoxelCloud[i].reset(new pcl::PointCloud<pcl::PointXYZI>());
@@ -573,7 +722,8 @@ int main(int argc, char **argv) {
         }
       }
 
-      // estimate ground and compute elevation for each point
+      // Reset all per-cell semantic statistics, then rebuild them from the
+      // latest aggregated terrain cloud.
       for (int i = 0; i < kPlanarVoxelNum; i++) {
         planarVoxelElev[i] = 0;
         planarVoxelConn[i] = 0;
@@ -583,6 +733,8 @@ int main(int argc, char **argv) {
         planarVoxelHeightDiff[i] = 0.0f;
         planarVoxelOccupancyRatio[i] = 0.0f;
         planarVoxelGroundConfidence[i] = 0.0f;
+        planarVoxelSlopeDeg[i] = 0.0f;
+        planarVoxelSlopeBand[i] = 0.0f;
         planarVoxelPointCount[i] = 0;
         planarPointElev[i].clear();
       }
@@ -620,6 +772,8 @@ int main(int argc, char **argv) {
         }
       }
 
+      // Estimate ground elevation by a low quantile so sparse obstacle tops do
+      // not easily drag the local ground plane upward.
       if (useSorting) {
         for (int i = 0; i < kPlanarVoxelNum; i++) {
           int planarPointElevSize = planarPointElev[i].size();
@@ -655,6 +809,7 @@ int main(int argc, char **argv) {
         }
       }
 
+      // Revisit raw points and accumulate per-cell vertical extent statistics.
       for (int i = 0; i < terrainCloudSize; i++) {
         point = terrainCloud->points[i];
         float dis = sqrt((point.x - vehicleX) * (point.x - vehicleX) +
@@ -690,6 +845,8 @@ int main(int argc, char **argv) {
         }
       }
 
+      // Convert raw point count and vertical spread into a simple occupancy
+      // ratio. This is still a 2D cost input, not a full 3D occupancy model.
       for (int i = 0; i < kPlanarVoxelNum; ++i) {
         if (planarVoxelPointCount[i] <= 0 ||
             !std::isfinite(planarVoxelMinZ[i]) ||
@@ -716,7 +873,8 @@ int main(int argc, char **argv) {
         planarVoxelOccupancyRatio[i] = static_cast<float>(occupancy_ratio);
       }
 
-      // check terrain connectivity to remove ceiling
+      // Optional connectivity flood-fill to reject disconnected ceiling-like
+      // surfaces and preserve only terrain connected to the robot vicinity.
       if (checkTerrainConn) {
         int ind =
             planarVoxelWidth * planarVoxelHalfWidth + planarVoxelHalfWidth;
@@ -754,6 +912,10 @@ int main(int argc, char **argv) {
           }
         }
       }
+
+      // Compute slope only after ground elevation and connectivity have been
+      // stabilized, so invalid neighbors do not contaminate the gradient.
+      computeSlopeGrid();
 
       // compute terrain map beyond localTerrainMapRadius
       terrainCloudElev->clear();
@@ -821,6 +983,8 @@ int main(int argc, char **argv) {
                                 pubTraversabilityHeightDiffGrid,
                                 pubTraversabilityOccupancyRatioGrid,
                                 pubTraversabilityGroundConfidenceGrid,
+                                pubTraversabilitySlopeGrid,
+                                pubTraversabilitySlopeBandGrid,
                                 terrainCloud2.header.stamp);
     }
 
