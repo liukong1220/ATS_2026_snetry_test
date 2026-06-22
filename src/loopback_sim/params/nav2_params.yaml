@@ -166,7 +166,7 @@ controller_server:
       xy_goal_tolerance: 0.35
       # Parameter `yaw_goal_tolerance`
       # 当前巡逻任务不强调终点朝向，因此保持 2*pi，相当于不约束最终 yaw。
-      yaw_goal_tolerance: 6.28
+      yaw_goal_tolerance: 0.3
     # MPPI controller parameters (loopback simulation)
     # 这套参数是 loopback 决策仿真默认读取的 MPPI 配置，用于观察：
     # 1. trajectories 是否稳定贴近 transformed_global_plan
@@ -195,7 +195,7 @@ controller_server:
       # 50Hz 时约 1000，30Hz 时约 2000；本项目需结合算力和频率折中。
       # 更大通常更稳，但更吃算力；过小会让最佳轨迹抖动明显。
       # 每周期采样轨迹数：适度提高有助于在弯角附近找到“贴线且不撞边”的候选。
-      batch_size: 1400
+      batch_size: 1700
       # Parameter `temperature`
       # 官方定义：越接近 0 越偏向最低代价控制，越大越接近对全部轨迹取平均。
       # 小：更激进，只盯最优样本，容易抖。
@@ -261,18 +261,18 @@ controller_server:
         # 惩罚轨迹偏离路径中心线。
         # 大了会更“贴线”，但转角和障碍附近容易僵硬、来回修正。
         # 提高贴线意愿，减少“只朝目标大方向推进、不真贴曲线”的现象。
-        cost_weight: 12.0
+        cost_weight: 15.0
         # Parameter `PathAlignCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         # 在本项目中可将它理解为：路径贴合项在终段还要不要继续强势介入。
-        threshold_to_consider: 0.8
+        threshold_to_consider: 1.4
         # Parameter `PathAlignCritic.offset_from_furthest`
         # 用路径前方多远的位置做贴线参考。大了看得更远，容易切弯；小了更保守。
         # 缩短前视，避免在弯口直接追远点形成 shortcut。
         offset_from_furthest: 6
         # Parameter `PathAlignCritic.trajectory_point_step`
         # rollout 取样步长，越大越粗略但更省计算。
-        trajectory_point_step: 4
+        trajectory_point_step: 3
         # Parameter `PathAlignCritic.max_path_occupancy_ratio`
         # 当局部路径大量落在高占用区域时，不再强行贴线，避免“为贴线去撞障”。
         max_path_occupancy_ratio: 0.05
@@ -287,7 +287,7 @@ controller_server:
         # 鼓励沿路径整体往前推进，而不是只盯着贴中心线。
         # 它比 PathAlign 更“宽松”，更像“顺着大方向走”。
         # 降一点，避免它只想着“往前推”而在转角抄近道。
-        cost_weight: 3.2
+        cost_weight: 4.0
         # Parameter `PathFollowCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         # 在本项目中可理解为：终段时 PathFollow 还要不要继续主导推进。
@@ -302,17 +302,17 @@ controller_server:
         # 处理“轨迹朝向与路径前进方向严重不一致”的情况。
         # 它通常是抑制反向试探、横着切弯的重要项。
         # 再增强方向一致性，抑制拐角前后横切和迟钝转向。
-        cost_weight: 6.0
+        cost_weight: 10.0
         # Parameter `PathAngleCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        threshold_to_consider: 0.7
+        threshold_to_consider: 1.3
         # Parameter `PathAngleCritic.offset_from_furthest`
         offset_from_furthest: 3
         # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 允许的最大夹角，越小越严格。
         # 太小可能导致拐弯发僵；太大则反向/横漂更容易出现。
         # 再收紧一点，让 controller 更愿意沿曲线方向转，而不是拖后大修正。
-        max_angle_to_furthest: 0.55
+        max_angle_to_furthest: 0.4
         # Parameter `PathAngleCritic.forward_preference`
         # loopback 仿真阶段优先减少“先反一下再转”的试探，因此打开前向偏好。
         forward_preference: true
@@ -332,7 +332,7 @@ controller_server:
         cost_power: 1
         # Parameter `GoalAngleCritic.cost_weight`
         # 这里虽然不严格要求终点朝向，但保留适度角度约束能减少末端乱摆。
-        cost_weight: 3.0
+        cost_weight: 2.0
         # Parameter `GoalAngleCritic.threshold_to_consider`
         # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
         threshold_to_consider: 0.5
@@ -347,19 +347,19 @@ controller_server:
         # Parameter `ObstaclesCritic.repulsion_weight`
         # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
         # 越大越早躲障，但也更容易把可视化 trajectories 顶得离路径很远。
-        repulsion_weight: 7.0
+        repulsion_weight: 5.0
         # Parameter `ObstaclesCritic.critical_weight`
         # 近碰撞区域的重惩罚，通常保持远大于一般路径 critic。
-        critical_weight: 90.0
+        critical_weight: 13.0
         # Parameter `ObstaclesCritic.collision_margin_distance`
         # 在真实碰撞边界外再加一层“心理安全距离”。
-        collision_margin_distance: 0.20
+        collision_margin_distance: 0.25
         # Parameter `ObstaclesCritic.near_goal_distance`
         # 终点附近降低障碍回避敏感度，避免“最后贴点时被微小代价场推开”。
-        near_goal_distance: 0.35
+        near_goal_distance: 0.5
         # Parameter `ObstaclesCritic.inflation_radius`
         # 官方文档明确要求：这里要与 costmap inflation layer 一致，否则 critic 语义会错位。
-        inflation_radius: 0.45
+        inflation_radius: 0.55
         cost_scaling_factor: 5.0
       ConstraintCritic:
         enabled: true
@@ -372,14 +372,14 @@ controller_server:
         cost_power: 1
         # Parameter `TwirlingCritic.cost_weight`
         # 抑制原地乱转。若看到临近终点疯狂转圈，可以适当增大。
-        cost_weight: 10.0
+        cost_weight: 7.0
       VelocityDeadbandCritic:
         enabled: true
         cost_power: 1
         # Parameter `VelocityDeadbandCritic.cost_weight`
         # 惩罚“很小但非零”的速度，防止控制输出在死区附近来回抖。
         # 终点附近轻微抽搐时，这项通常很有用。
-        cost_weight: 35.0
+        cost_weight: 11.0
         # Parameter `VelocityDeadbandCritic.deadband_velocities`
         deadband_velocities: [0.05, 0.05, 0.05]
 
@@ -415,7 +415,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 5.0
-        inflation_radius: 0.45
+        inflation_radius: 0.55
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
