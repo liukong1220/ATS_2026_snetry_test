@@ -195,35 +195,41 @@ terrain_analysis:
 
 terrain_analysis_ext:
   ros__parameters:
-    scanVoxelSize: 0.035
-    decayTime: 0.30
-    noDecayDis: 0.0
-    clearingDis: 20.0
-    useSorting: true
-    quantileZ: 0.16
-    vehicleHeight: 0.80
-    voxelPointUpdateThre: 100
-    voxelTimeUpdateThre: 2.0
-    lowerBoundZ: -1.15
-    upperBoundZ: 0.42
-    disRatioZ: 0.10
-    checkTerrainConn: False
-    terrainUnderVehicle: -0.75
-    terrainConnThre: 0.5
-    ceilingFilteringThre: 2.0
-    localTerrainMapRadius: 4.0
-    traversabilityObstacleHeightThre: 0.18
-    traversabilitySafeHeightThre: 0.08
-    traversabilityOccupancyRatioThre: 0.45
-    traversabilityGroundConfidenceThre: 0.55
-    traversabilityHeightWeight: 0.55
-    traversabilityOccupancyWeight: 0.30
-    traversabilityGroundWeight: 0.15
-    traversabilityDebugHeightDiffCap: 0.30
-    traversabilityDebugOccupancyRatioCap: 1.0
-    traversabilityMinPointCount: 3
-    traversabilityUnknownAsOccupied: false
-    publishTraversabilityDebugGrids: true
+    scanVoxelSize: 0.035                 # 实机主入口默认远场体素尺寸；越小细节越多，但噪声更敏感。
+    decayTime: 0.30                      # 点云残留时间；过大易拖尾，过小易闪烁。
+    noDecayDis: 0.0                      # 近场永久保留半径，0 表示不额外保留。
+    clearingDis: 20.0                    # clearing 半径。
+    useSorting: true                     # 用分位数地面估计，通常比最小值更稳。
+    quantileZ: 0.16                      # 更贴地的分位数，适合下视安装的 mid360。
+    vehicleHeight: 0.80                  # 接受为可通行地形的相对高度上限。
+    voxelPointUpdateThre: 100            # terrain voxel 刷新点数阈值。
+    voxelTimeUpdateThre: 2.0             # terrain voxel 刷新时间阈值。
+    lowerBoundZ: -1.15                   # 相对车体最低高度窗口。
+    upperBoundZ: 0.42                    # 相对车体最高高度窗口。
+    disRatioZ: 0.10                      # 远距离高度窗口扩张比例，实机下视场景适当收紧。
+    checkTerrainConn: False              # 是否启用连通性过滤。
+    terrainUnderVehicle: -0.75           # 车下无点时的地面先验。
+    terrainConnThre: 0.5                 # 连通性允许高差。
+    ceilingFilteringThre: 2.0            # 断连阈值，用于滤掉高悬点面。
+    localTerrainMapRadius: 4.0           # 近远场 terrain map 拼接半径。
+    traversabilityObstacleHeightThre: 0.18  # 高差硬障碍阈值。
+    traversabilitySafeHeightThre: 0.08      # 高差安全阈值。
+    traversabilityOccupancyRatioThre: 0.45  # 占有率参考阈值。
+    traversabilityGroundConfidenceThre: 0.55  # 地面置信度惩罚阈值。
+    traversabilityHeightWeight: 0.55         # 高度项权重。
+    traversabilityOccupancyWeight: 0.30      # 占有率项权重。
+    traversabilityGroundWeight: 0.15         # 地面置信度项权重。
+    traversabilityDebugHeightDiffCap: 0.30   # 高差调试图显示上限。
+    traversabilityDebugOccupancyRatioCap: 1.0  # 占有率调试图显示上限。
+    traversabilityMinPointCount: 3           # 单格最小有效点数。
+    traversabilityUnknownAsOccupied: false   # 无点格是否按障碍处理。
+    publishTraversabilityDebugGrids: true    # 是否发布旧三张语义调试图。
+    slopeGridMaxDeg: 45.0                # slope_grid 可视化编码上限。
+    slopeGentleDegThre: 8.0              # gentle 坡度分级阈值。
+    slopeModerateDegThre: 15.0           # moderate 坡度分级阈值。
+    slopeSteepDegThre: 25.0              # steep 坡度分级阈值。
+    useSlopeAsObstacle: false            # true 后，超过坡度阈值的格子直接进 traversability 障碍。
+    slopeObstacleDegThre: 30.0           # 坡度障碍阈值；建议先从 25~30 deg 试起。
 
 fake_vel_transform:
   ros__parameters:
