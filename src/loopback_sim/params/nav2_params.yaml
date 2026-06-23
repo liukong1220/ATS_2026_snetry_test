@@ -242,6 +242,14 @@ controller_server:
       # --- Critics ---
       # critics 是代价项列表。MPPI 会综合这些 critic 给每条采样轨迹打分。
       # 一般不要一口气同时改很多 critic，建议一次只改 1~2 个核心项。
+      # 权重速记：
+      # - `cost_weight` / `repulsion_weight` / `critical_weight` 都是乘到对应代价上的权重。
+      #   所以“权重调大”就是把数值调大，轨迹会更强烈地避开该 critic 惩罚的行为。
+      # - `cost_power` 会改变代价曲线形状，通常保持 1；调权重时优先改 weight，不先改 power。
+      # - `threshold_to_consider` 不是权重，而是距离目标点的生效窗口：
+      #   PathAlign / PathFollow / PathAngle / PreferForward 在进入该距离后关闭；
+      #   Goal / GoalAngle 在进入该距离后开启；Obstacles 的 near_goal_distance 会关闭普通斥力项。
+      # - `offset_from_furthest` 是沿路径参考点的前视偏移，调大通常更积极，但更容易切弯。
       critics: [
         "PathAlignCritic",
         "PathFollowCritic",
@@ -258,16 +266,17 @@ controller_server:
         enabled: true
         cost_power: 1
         # Parameter `PathAlignCritic.cost_weight`
-        # 惩罚轨迹偏离路径中心线。
-        # 大了会更“贴线”，但转角和障碍附近容易僵硬、来回修正。
-        # 提高贴线意愿，减少“只朝目标大方向推进、不真贴曲线”的现象。
-        cost_weight: 15.0
+        # 惩罚 rollout 偏离局部路径中心线。权重调大=数值调大，会更强制贴线；
+        # 但转角、障碍边缘和终段更容易僵硬、来回修正。
+        # 当前比 15.0 略降，减少弯口被旧路径强拽，又保留基本贴线意愿。
+        cost_weight: 13.0
         # Parameter `PathAlignCritic.threshold_to_consider`
-        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        # 在本项目中可将它理解为：路径贴合项在终段还要不要继续强势介入。
+        # 距目标小于该值时 PathAlign 关闭，让终段交给 GoalCritic。
+        # 调大=更早放弃强制贴线；调小=更晚才退出，终点附近仍会被路径拉住。
         threshold_to_consider: 1.4
         # Parameter `PathAlignCritic.offset_from_furthest`
-        # 用路径前方多远的位置做贴线参考。大了看得更远，容易切弯；小了更保守。
+        # 从当前 rollout 已到达的最远路径点继续向前偏移多少个 path point 作为对齐范围。
+        # 调大=看得更远、速度感更强，但更容易在弯口 shortcut；调小=更保守。
         # 缩短前视，避免在弯口直接追远点形成 shortcut。
         offset_from_furthest: 6
         # Parameter `PathAlignCritic.trajectory_point_step`
@@ -284,13 +293,13 @@ controller_server:
         enabled: true
         cost_power: 1
         # Parameter `PathFollowCritic.cost_weight`
-        # 鼓励沿路径整体往前推进，而不是只盯着贴中心线。
-        # 它比 PathAlign 更“宽松”，更像“顺着大方向走”。
+        # 鼓励轨迹末端追向路径前方的 follow 点，而不是只贴中心线。
+        # 权重调大=数值调大，会更积极沿路径推进；过大可能在转角抄近道。
         # 降一点，避免它只想着“往前推”而在转角抄近道。
         cost_weight: 4.0
         # Parameter `PathFollowCritic.threshold_to_consider`
-        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        # 在本项目中可理解为：终段时 PathFollow 还要不要继续主导推进。
+        # 距目标小于该值时 PathFollow 关闭，避免终点附近继续“往前推”。
+        # 调大=更早退出推进项；调小=更接近终点仍保持推进。
         threshold_to_consider: 1.4
         # Parameter `PathFollowCritic.offset_from_furthest`
         # 越大越倾向追逐更远的 follow 点，速度会快，但转角更容易 shortcut。
@@ -299,14 +308,16 @@ controller_server:
         enabled: true
         cost_power: 1
         # Parameter `PathAngleCritic.cost_weight`
-        # 处理“轨迹朝向与路径前进方向严重不一致”的情况。
-        # 它通常是抑制反向试探、横着切弯的重要项。
+        # 惩罚轨迹朝向与路径前方参考点方向不一致。权重调大=数值调大，
+        # 会更强烈抑制反向试探和横切；过大时转角会发僵。
         # 再增强方向一致性，抑制拐角前后横切和迟钝转向。
         cost_weight: 10.0
         # Parameter `PathAngleCritic.threshold_to_consider`
-        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
+        # 距目标小于该值时 PathAngle 关闭，让终段由 GoalAngle/Twirling 控制。
+        # 调大=更早停止路径方向约束；调小=更靠近终点仍要求沿路径方向。
         threshold_to_consider: 1.3
         # Parameter `PathAngleCritic.offset_from_furthest`
+        # 判断朝向一致性时使用的前方路径点偏移；调大更看远方，调小更看近处。
         offset_from_furthest: 3
         # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 允许的最大夹角，越小越严格。
@@ -320,21 +331,23 @@ controller_server:
         enabled: true
         cost_power: 1
         # Parameter `GoalCritic.cost_weight`
-        # 惩罚轨迹末端离目标点的距离，是“终点收敛”的第一核心参数。
+        # 惩罚 rollout 与最终目标点的距离，是终点收敛核心项。
+        # 权重调大=数值调大，接近目标后更急着贴终点；过大可能提前压过路径项。
         # 如果接近目标时还在左右晃，优先考虑提高它或提高它的生效距离。
         cost_weight: 9.0
         # Parameter `GoalCritic.threshold_to_consider`
-        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
-        # 在本项目中可理解为：从多早开始让“贴终点”优先于“贴路径”。
+        # 距目标小于该值时 GoalCritic 才开启。
+        # 调大=更早进入“贴终点”阶段；调小=更晚才由目标主导。
         threshold_to_consider: 1.8
       GoalAngleCritic:
         enabled: true
         cost_power: 1
         # Parameter `GoalAngleCritic.cost_weight`
-        # 这里虽然不严格要求终点朝向，但保留适度角度约束能减少末端乱摆。
+        # 终点姿态约束权重。权重调大=数值调大，会更重视最终 yaw；
+        # 当前不严格要求终点朝向，只保留适度角度约束来减少末端乱摆。
         cost_weight: 2.0
         # Parameter `GoalAngleCritic.threshold_to_consider`
-        # 官方文档将其定义为一个距离阈值，用于决定该 critic 的作用范围。
+        # 距目标小于该值时 GoalAngleCritic 才开启；调大=更早开始收终点姿态。
         threshold_to_consider: 0.5
         # Parameter `GoalAngleCritic.symmetric_yaw_tolerance`
         # true 表示朝向误差按对称方式处理，适合这里“不关心最终面朝哪边”的场景。
@@ -346,16 +359,19 @@ controller_server:
         cost_power: 1
         # Parameter `ObstaclesCritic.repulsion_weight`
         # 官方文档说明这项调节与 inflation layer 半径成比例，应联合调整。
-        # 越大越早躲障，但也更容易把可视化 trajectories 顶得离路径很远。
+        # 普通障碍斥力权重。权重调大=数值调大，会更早远离膨胀层；
+        # 过大也更容易把可视化 trajectories 顶得离路径很远。
         repulsion_weight: 5.0
         # Parameter `ObstaclesCritic.critical_weight`
-        # 近碰撞区域的重惩罚，通常保持远大于一般路径 critic。
+        # 碰撞边界/安全余量内的重惩罚。权重调大=数值调大，会更强烈避开近碰撞轨迹；
+        # 通常应明显大于一般路径 critic。
         critical_weight: 13.0
         # Parameter `ObstaclesCritic.collision_margin_distance`
-        # 在真实碰撞边界外再加一层“心理安全距离”。
+        # 在真实碰撞边界外再加一层安全余量；调大更保守，窄通道更难过。
         collision_margin_distance: 0.25
         # Parameter `ObstaclesCritic.near_goal_distance`
-        # 终点附近降低障碍回避敏感度，避免“最后贴点时被微小代价场推开”。
+        # 距目标小于该值时关闭普通 repulsion 斥力，只保留碰撞/近碰撞惩罚；
+        # 调大可减少最后贴点被代价场推开，但目标附近真实障碍多时会更冒险。
         near_goal_distance: 0.5
         # Parameter `ObstaclesCritic.inflation_radius`
         # 官方文档明确要求：这里要与 costmap inflation layer 一致，否则 critic 语义会错位。
@@ -365,20 +381,23 @@ controller_server:
         enabled: true
         cost_power: 1
         # Parameter `ConstraintCritic.cost_weight`
-        # 惩罚违反速度/加速度等运动学约束的轨迹，通常保持中等权重即可。
+        # 惩罚违反速度/加速度等运动学约束的轨迹。
+        # 权重调大=数值调大，会更强烈排除越界控制；通常保持中等权重即可。
         cost_weight: 4.0
       TwirlingCritic:
         enabled: true
         cost_power: 1
         # Parameter `TwirlingCritic.cost_weight`
-        # 抑制原地乱转。若看到临近终点疯狂转圈，可以适当增大。
+        # 抑制不必要自转。权重调大=数值调大，自转会更少；
+        # 若看到临近终点疯狂转圈，可以适当增大。
         cost_weight: 7.0
       VelocityDeadbandCritic:
         enabled: true
         cost_power: 1
         # Parameter `VelocityDeadbandCritic.cost_weight`
-        # 惩罚“很小但非零”的速度，防止控制输出在死区附近来回抖。
-        # 终点附近轻微抽搐时，这项通常很有用。
+        # 惩罚落在 deadband 内的“小但非零”速度。
+        # 权重调大=数值调大，会更不愿输出死区小速度，终点附近轻微抽搐时通常有用；
+        # 过大可能让低速细调不够柔和。
         cost_weight: 11.0
         # Parameter `VelocityDeadbandCritic.deadband_velocities`
         deadband_velocities: [0.05, 0.05, 0.05]

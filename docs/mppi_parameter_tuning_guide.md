@@ -73,6 +73,24 @@ MPPI 不是单一 PID 参数，而是：
 
 调 MPPI 时，最容易犯的错误不是“参数调错了”，而是“一次改太多，不知道哪项在起作用”。
 
+## 权重调大到底是数值调大还是调小
+
+结论很简单：
+
+- 对 `cost_weight`、`repulsion_weight`、`critical_weight` 这类真正的权重参数，调大权重就是把数值调大。
+- 数值越大，该 critic 对总 cost 的影响越强，MPPI 越不愿选择被它惩罚的轨迹。
+- `cost_power` 不是普通权重，它会改变代价曲线形状；通常先保持 `1`，不要把它当作第一调参旋钮。
+
+需要特别区分的是，很多 MPPI 参数名字里没有 `weight`，它们不是“权重”：
+
+- `threshold_to_consider` 是距离目标点的生效窗口。
+  - `PathAlignCritic`、`PathFollowCritic`、`PathAngleCritic`、`PreferForwardCritic`：进入该距离后关闭，把终点段交给 goal 类 critic。
+  - `GoalCritic`、`GoalAngleCritic`：进入该距离后开启，开始主导终点收敛。
+  - `ObstaclesCritic.near_goal_distance`：进入该距离后关闭普通 repulsion 斥力，只保留碰撞/近碰撞惩罚。
+- `offset_from_furthest` 是沿路径向前看的 point 偏移，调大通常更积极、更快，但也更容易 shortcut。
+- `temperature` 是 MPPI softmax 温度，调小更偏向最低代价样本，调大更像对多条样本平均。
+- `vx_std / vy_std / wz_std` 是采样扰动标准差，不是速度上限；调大探索更强，但 rollout 更容易散。
+
 ## 先看什么可视化
 
 调 MPPI 时，推荐同时观察：
