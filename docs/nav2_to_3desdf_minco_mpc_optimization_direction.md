@@ -5,7 +5,7 @@
 本文档只保留两条主线：
 
 1. `V1 稳定比赛版`
-   `2.5D 语义地图 + 2D 栅格导航主链 + RC-ESDF + A* / JPS + MINCO + 独立 Yaw + 局部修补 + SE2 MPC`
+   `2.5D 语义地图 + 2D 栅格导航主链 + RC-ESDF + A* / JPS + MINCO + 独立 Yaw+ 轮廓安全校验 + 局部重拟合 + SE2 MPC`
 2. `V2 长期最终版`
    `3D ESDF + 2D / 2.5D 地面导航主链 + JPS + MINCO + 独立 Yaw + 轮廓安全校验 + 局部重拟合 + SE2 MPC`
 

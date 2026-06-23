@@ -43,7 +43,30 @@ double normalizedSemanticValue(int8_t value)
   return clamp01(static_cast<double>(value) / 100.0);
 }
 
+double decodeScalarGridValue(int8_t value, double max_value)
+{
+  if (value < 0) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return clamp01(static_cast<double>(value) / 100.0) * std::max(max_value, 0.0);
+}
+
 }  // namespace
+
+void TraversabilityEsdfProvider::configureRollingWindow(bool enabled, double size_x, double size_y)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  rolling_window_enabled_ = enabled;
+  rolling_window_size_x_ = std::max(0.0, size_x);
+  rolling_window_size_y_ = std::max(0.0, size_y);
+  updateRollingWindowBoundsUnlocked();
+}
+
+void TraversabilityEsdfProvider::setSlopeGridMaxDegrees(double max_degrees)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  slope_grid_max_degrees_ = std::max(1e-3, max_degrees);
+}
 
 void TraversabilityEsdfProvider::updateGrid(
   const nav_msgs::msg::OccupancyGrid & traversability_grid,
@@ -52,7 +75,8 @@ void TraversabilityEsdfProvider::updateGrid(
   int lethal_value_threshold,
   const nav_msgs::msg::OccupancyGrid * height_diff_grid,
   const nav_msgs::msg::OccupancyGrid * occupancy_ratio_grid,
-  const nav_msgs::msg::OccupancyGrid * ground_confidence_grid)
+  const nav_msgs::msg::OccupancyGrid * ground_confidence_grid,
+  const nav_msgs::msg::OccupancyGrid * slope_grid)
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -61,11 +85,13 @@ void TraversabilityEsdfProvider::updateGrid(
   distance_to_obstacle_field_.clear();
   distance_to_free_field_.clear();
   smoothed_distance_field_.clear();
+  slope_field_.clear();
   width_ = traversability_grid.info.width;
   height_ = traversability_grid.info.height;
   resolution_ = traversability_grid.info.resolution;
   origin_x_ = traversability_grid.info.origin.position.x;
   origin_y_ = traversability_grid.info.origin.position.y;
+  updateRollingWindowBoundsUnlocked();
 
   if (width_ == 0 || height_ == 0 || resolution_ <= 0.0 || traversability_grid.data.empty()) {
     return;
@@ -80,6 +106,7 @@ void TraversabilityEsdfProvider::updateGrid(
   std::vector<double> height_values;
   std::vector<double> occupancy_values;
   std::vector<double> ground_values;
+  std::vector<double> slope_values;
   if (height_diff_grid && !extractGridValues(*height_diff_grid, height_values)) {
     height_values.clear();
   }
@@ -88,6 +115,14 @@ void TraversabilityEsdfProvider::updateGrid(
   }
   if (ground_confidence_grid && !extractGridValues(*ground_confidence_grid, ground_values)) {
     ground_values.clear();
+  }
+  if (slope_grid && !extractSlopeValues(*slope_grid, slope_values)) {
+    slope_values.clear();
+  }
+  if (!slope_values.empty()) {
+    slope_field_ = slope_values;
+  } else {
+    slope_field_.assign(cell_count, std::numeric_limits<double>::quiet_NaN());
   }
 
   std::vector<uint8_t> obstacle_mask(cell_count, 0);
@@ -162,9 +197,96 @@ Eigen::Vector2d TraversabilityEsdfProvider::getGradient(double x, double y) cons
   return bilinearGradientAt(field, gx, gy);
 }
 
+double TraversabilityEsdfProvider::getSlope(double x, double y) const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  double gx = 0.0;
+  double gy = 0.0;
+  if (!available_ || !worldToGrid(x, y, gx, gy) || slope_field_.empty()) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return bilinearDistanceAt(slope_field_, gx, gy);
+}
+
+bool TraversabilityEsdfProvider::isInsideLocalWindow(double x, double y) const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return isInsideRollingWindowUnlocked(x, y);
+}
+
+bool TraversabilityEsdfProvider::query(double x, double y, EsdfQueryResult & result) const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  result = EsdfQueryResult {};
+  result.inside_local_window = isInsideRollingWindowUnlocked(x, y);
+  if (!available_ || !result.inside_local_window) {
+    return false;
+  }
+
+  double gx = 0.0;
+  double gy = 0.0;
+  if (!worldToGrid(x, y, gx, gy)) {
+    return false;
+  }
+
+  const auto & gradient_field =
+    smoothed_distance_field_.empty() ? distance_field_ : smoothed_distance_field_;
+  result.distance = bilinearDistanceAt(distance_field_, gx, gy);
+  result.gradient = bilinearGradientAt(gradient_field, gx, gy);
+  if (!slope_field_.empty()) {
+    result.slope = bilinearDistanceAt(slope_field_, gx, gy);
+  }
+  result.valid = std::isfinite(result.distance);
+  return result.valid;
+}
+
+RollingWindowBounds TraversabilityEsdfProvider::getRollingWindowBounds() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return rolling_window_bounds_;
+}
+
+double TraversabilityEsdfProvider::getFootprintClearance(
+  const Eigen::Vector2d & position,
+  double yaw,
+  const std::vector<Eigen::Vector2d> & footprint_samples) const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!available_ || footprint_samples.empty() ||
+    !isInsideRollingWindowUnlocked(position.x(), position.y()))
+  {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  const double cos_yaw = std::cos(yaw);
+  const double sin_yaw = std::sin(yaw);
+  double min_clearance = std::numeric_limits<double>::infinity();
+  for (const auto & sample : footprint_samples) {
+    const double wx = position.x() + cos_yaw * sample.x() - sin_yaw * sample.y();
+    const double wy = position.y() + sin_yaw * sample.x() + cos_yaw * sample.y();
+    double gx = 0.0;
+    double gy = 0.0;
+    if (!worldToGrid(wx, wy, gx, gy)) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    const double distance = bilinearDistanceAt(distance_field_, gx, gy);
+    if (!std::isfinite(distance)) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    min_clearance = std::min(min_clearance, distance);
+  }
+
+  return std::isfinite(min_clearance) ?
+    min_clearance : std::numeric_limits<double>::quiet_NaN();
+}
+
 bool TraversabilityEsdfProvider::worldToGrid(double wx, double wy, double & gx, double & gy) const
 {
   if (resolution_ <= 0.0 || width_ == 0 || height_ == 0) {
+    return false;
+  }
+
+  if (!isInsideRollingWindowUnlocked(wx, wy)) {
     return false;
   }
 
@@ -191,6 +313,15 @@ bool TraversabilityEsdfProvider::extractGridValues(
   const nav_msgs::msg::OccupancyGrid & grid,
   std::vector<double> & values) const
 {
+  if (
+    grid.info.width != width_ || grid.info.height != height_ ||
+    std::abs(grid.info.resolution - resolution_) > 1e-6 ||
+    std::abs(grid.info.origin.position.x - origin_x_) > 1e-6 ||
+    std::abs(grid.info.origin.position.y - origin_y_) > 1e-6)
+  {
+    return false;
+  }
+
   const std::size_t cell_count =
     static_cast<std::size_t>(grid.info.width) * static_cast<std::size_t>(grid.info.height);
   if (grid.data.size() < cell_count || cell_count == 0) {
@@ -200,6 +331,32 @@ bool TraversabilityEsdfProvider::extractGridValues(
   values.assign(cell_count, 0.0);
   for (std::size_t i = 0; i < cell_count; ++i) {
     values[i] = normalizedSemanticValue(grid.data[i]);
+  }
+  return true;
+}
+
+bool TraversabilityEsdfProvider::extractSlopeValues(
+  const nav_msgs::msg::OccupancyGrid & grid,
+  std::vector<double> & values) const
+{
+  if (
+    grid.info.width != width_ || grid.info.height != height_ ||
+    std::abs(grid.info.resolution - resolution_) > 1e-6 ||
+    std::abs(grid.info.origin.position.x - origin_x_) > 1e-6 ||
+    std::abs(grid.info.origin.position.y - origin_y_) > 1e-6)
+  {
+    return false;
+  }
+
+  const std::size_t cell_count =
+    static_cast<std::size_t>(grid.info.width) * static_cast<std::size_t>(grid.info.height);
+  if (grid.data.size() < cell_count || cell_count == 0) {
+    return false;
+  }
+
+  values.assign(cell_count, std::numeric_limits<double>::quiet_NaN());
+  for (std::size_t i = 0; i < cell_count; ++i) {
+    values[i] = decodeScalarGridValue(grid.data[i], slope_grid_max_degrees_);
   }
   return true;
 }
@@ -412,6 +569,58 @@ void TraversabilityEsdfProvider::rebuildSmoothedDistanceField()
     }
   }
   smoothed_distance_field_.swap(scratch);
+}
+
+bool TraversabilityEsdfProvider::isInsideRollingWindowUnlocked(double wx, double wy) const
+{
+  if (!rolling_window_bounds_.valid) {
+    return false;
+  }
+
+  return
+    wx >= rolling_window_bounds_.min_x && wx <= rolling_window_bounds_.max_x &&
+    wy >= rolling_window_bounds_.min_y && wy <= rolling_window_bounds_.max_y;
+}
+
+void TraversabilityEsdfProvider::updateRollingWindowBoundsUnlocked()
+{
+  rolling_window_bounds_ = RollingWindowBounds {};
+  if (width_ == 0 || height_ == 0 || resolution_ <= 0.0) {
+    return;
+  }
+
+  const double grid_min_x = origin_x_;
+  const double grid_min_y = origin_y_;
+  const double grid_max_x = origin_x_ + static_cast<double>(width_) * resolution_;
+  const double grid_max_y = origin_y_ + static_cast<double>(height_) * resolution_;
+
+  rolling_window_bounds_.valid = true;
+  rolling_window_bounds_.min_x = grid_min_x;
+  rolling_window_bounds_.min_y = grid_min_y;
+  rolling_window_bounds_.max_x = grid_max_x;
+  rolling_window_bounds_.max_y = grid_max_y;
+
+  if (!rolling_window_enabled_) {
+    return;
+  }
+
+  if (rolling_window_size_x_ <= 0.0 && rolling_window_size_y_ <= 0.0) {
+    return;
+  }
+
+  const double grid_size_x = grid_max_x - grid_min_x;
+  const double grid_size_y = grid_max_y - grid_min_y;
+  const double effective_size_x =
+    rolling_window_size_x_ > 0.0 ? std::min(rolling_window_size_x_, grid_size_x) : grid_size_x;
+  const double effective_size_y =
+    rolling_window_size_y_ > 0.0 ? std::min(rolling_window_size_y_, grid_size_y) : grid_size_y;
+  const double center_x = 0.5 * (grid_min_x + grid_max_x);
+  const double center_y = 0.5 * (grid_min_y + grid_max_y);
+
+  rolling_window_bounds_.min_x = center_x - 0.5 * effective_size_x;
+  rolling_window_bounds_.max_x = center_x + 0.5 * effective_size_x;
+  rolling_window_bounds_.min_y = center_y - 0.5 * effective_size_y;
+  rolling_window_bounds_.max_y = center_y + 0.5 * effective_size_y;
 }
 
 }  // namespace trajectory_optimizer

@@ -32,6 +32,7 @@ private:
   void traversabilityHeightDiffCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   void traversabilityOccupancyRatioCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   void traversabilityGroundConfidenceCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+  void traversabilitySlopeCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   void publishEsdfDebugMarkers(const nav_msgs::msg::Path & path);
   void refreshEsdfProvider();
   void updateTraversabilityEsdf();
@@ -43,6 +44,7 @@ private:
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr traversability_height_diff_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr traversability_occupancy_ratio_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr traversability_ground_confidence_sub_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr traversability_slope_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr smoothed_path_pub_;
   rclcpp::Publisher<sp_msgs::msg::TrajectoryProfileMsg>::SharedPtr profile_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr esdf_marker_pub_;
@@ -64,10 +66,15 @@ private:
   std::string traversability_height_diff_topic_{"traversability_height_diff_grid"};
   std::string traversability_occupancy_ratio_topic_{"traversability_occupancy_ratio_grid"};
   std::string traversability_ground_confidence_topic_{"traversability_ground_confidence_grid"};
+  std::string traversability_slope_topic_{"traversability_slope_grid"};
   double terrain_esdf_resolution_{0.05};
   double terrain_esdf_padding_{0.60};
   double terrain_esdf_inflation_radius_{0.08};
   double terrain_esdf_min_intensity_{0.0};
+  bool rc_esdf_rolling_window_enabled_{true};
+  double rc_esdf_query_window_size_x_{0.0};
+  double rc_esdf_query_window_size_y_{0.0};
+  double traversability_slope_max_degrees_{45.0};
   int traversability_obstacle_value_threshold_{50};
   int traversability_lethal_value_threshold_{90};
   bool traversability_unknown_is_obstacle_{false};
@@ -75,6 +82,7 @@ private:
   nav_msgs::msg::OccupancyGrid::SharedPtr traversability_height_diff_msg_;
   nav_msgs::msg::OccupancyGrid::SharedPtr traversability_occupancy_ratio_msg_;
   nav_msgs::msg::OccupancyGrid::SharedPtr traversability_ground_confidence_msg_;
+  nav_msgs::msg::OccupancyGrid::SharedPtr traversability_slope_msg_;
 };
 
 }  // namespace trajectory_optimizer

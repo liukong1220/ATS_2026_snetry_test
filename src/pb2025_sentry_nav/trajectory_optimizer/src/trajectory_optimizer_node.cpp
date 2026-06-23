@@ -151,10 +151,15 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
     "traversability_occupancy_ratio_topic", traversability_occupancy_ratio_topic_);
   declare_parameter<std::string>(
     "traversability_ground_confidence_topic", traversability_ground_confidence_topic_);
+  declare_parameter<std::string>("traversability_slope_topic", traversability_slope_topic_);
   declare_parameter<double>("terrain_esdf_resolution", terrain_esdf_resolution_);
   declare_parameter<double>("terrain_esdf_padding", terrain_esdf_padding_);
   declare_parameter<double>("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
   declare_parameter<double>("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
+  declare_parameter<bool>("rc_esdf_rolling_window_enabled", rc_esdf_rolling_window_enabled_);
+  declare_parameter<double>("rc_esdf_query_window_size_x", rc_esdf_query_window_size_x_);
+  declare_parameter<double>("rc_esdf_query_window_size_y", rc_esdf_query_window_size_y_);
+  declare_parameter<double>("traversability_slope_max_degrees", traversability_slope_max_degrees_);
   declare_parameter<int>(
     "traversability_obstacle_value_threshold", traversability_obstacle_value_threshold_);
   declare_parameter<int>(
@@ -206,10 +211,15 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
     "traversability_occupancy_ratio_topic", traversability_occupancy_ratio_topic_);
   get_parameter(
     "traversability_ground_confidence_topic", traversability_ground_confidence_topic_);
+  get_parameter("traversability_slope_topic", traversability_slope_topic_);
   get_parameter("terrain_esdf_resolution", terrain_esdf_resolution_);
   get_parameter("terrain_esdf_padding", terrain_esdf_padding_);
   get_parameter("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
   get_parameter("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
+  get_parameter("rc_esdf_rolling_window_enabled", rc_esdf_rolling_window_enabled_);
+  get_parameter("rc_esdf_query_window_size_x", rc_esdf_query_window_size_x_);
+  get_parameter("rc_esdf_query_window_size_y", rc_esdf_query_window_size_y_);
+  get_parameter("traversability_slope_max_degrees", traversability_slope_max_degrees_);
   get_parameter(
     "traversability_obstacle_value_threshold", traversability_obstacle_value_threshold_);
   get_parameter(
@@ -222,6 +232,11 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
   traversability_esdf_provider_ = std::make_shared<TraversabilityEsdfProvider>();
+  traversability_esdf_provider_->configureRollingWindow(
+    rc_esdf_rolling_window_enabled_,
+    rc_esdf_query_window_size_x_,
+    rc_esdf_query_window_size_y_);
+  traversability_esdf_provider_->setSlopeGridMaxDegrees(traversability_slope_max_degrees_);
   optimizer_.clearEsdfProvider();
 
   smoothed_path_pub_ = create_publisher<nav_msgs::msg::Path>(output_path_topic_, 10);
@@ -252,12 +267,18 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
     std::bind(
       &TrajectoryOptimizerNode::traversabilityGroundConfidenceCallback,
       this, std::placeholders::_1));
+  traversability_slope_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+    traversability_slope_topic_, rclcpp::QoS(10).reliable(),
+    std::bind(
+      &TrajectoryOptimizerNode::traversabilitySlopeCallback,
+      this, std::placeholders::_1));
 
   RCLCPP_INFO(
     get_logger(),
-    "Trajectory optimizer active: %s -> %s, esdf_source=%s terrain_topic=%s traversability_topic=%s",
+    "Trajectory optimizer active: %s -> %s, esdf_source=%s terrain_topic=%s traversability_topic=%s slope_topic=%s",
     input_path_topic_.c_str(), output_path_topic_.c_str(), esdf_source_.c_str(),
-    terrain_pointcloud_topic_.c_str(), traversability_grid_topic_.c_str());
+    terrain_pointcloud_topic_.c_str(), traversability_grid_topic_.c_str(),
+    traversability_slope_topic_.c_str());
 }
 
 void TrajectoryOptimizerNode::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
@@ -353,6 +374,13 @@ void TrajectoryOptimizerNode::traversabilityGroundConfidenceCallback(
   updateTraversabilityEsdf();
 }
 
+void TrajectoryOptimizerNode::traversabilitySlopeCallback(
+  const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  traversability_slope_msg_ = msg;
+  updateTraversabilityEsdf();
+}
+
 void TrajectoryOptimizerNode::updateTraversabilityEsdf()
 {
   if (!traversability_esdf_provider_ || !traversability_grid_msg_) {
@@ -366,7 +394,8 @@ void TrajectoryOptimizerNode::updateTraversabilityEsdf()
     traversability_lethal_value_threshold_,
     traversability_height_diff_msg_ ? traversability_height_diff_msg_.get() : nullptr,
     traversability_occupancy_ratio_msg_ ? traversability_occupancy_ratio_msg_.get() : nullptr,
-    traversability_ground_confidence_msg_ ? traversability_ground_confidence_msg_.get() : nullptr);
+    traversability_ground_confidence_msg_ ? traversability_ground_confidence_msg_.get() : nullptr,
+    traversability_slope_msg_ ? traversability_slope_msg_.get() : nullptr);
   if (esdf_source_ == "traversability_grid") {
     active_esdf_provider_ = traversability_esdf_provider_;
     refreshEsdfProvider();

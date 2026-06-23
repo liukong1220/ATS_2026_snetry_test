@@ -387,10 +387,15 @@ trajectory_optimizer:
     esdf_source: "traversability_grid"
     terrain_pointcloud_topic: "terrain_map_ext"
     traversability_grid_topic: "traversability_grid"
+    traversability_slope_topic: "traversability_slope_grid"
     terrain_esdf_resolution: 0.05
     terrain_esdf_padding: 0.60
     terrain_esdf_inflation_radius: 0.08
     terrain_esdf_min_intensity: 0.0
+    rc_esdf_rolling_window_enabled: true
+    rc_esdf_query_window_size_x: 0.0
+    rc_esdf_query_window_size_y: 0.0
+    traversability_slope_max_degrees: 45.0
     traversability_obstacle_value_threshold: 50
     traversability_lethal_value_threshold: 90
     traversability_unknown_is_obstacle: false
@@ -824,10 +829,15 @@ smoother_server:
       esdf_source: "traversability_grid"
       terrain_pointcloud_topic: "terrain_map_ext"
       traversability_grid_topic: "traversability_grid"
+      traversability_slope_topic: "traversability_slope_grid"
       terrain_esdf_resolution: 0.05
       terrain_esdf_padding: 0.60
       terrain_esdf_inflation_radius: 0.08
       terrain_esdf_min_intensity: 0.0
+      rc_esdf_rolling_window_enabled: true
+      rc_esdf_query_window_size_x: 0.0
+      rc_esdf_query_window_size_y: 0.0
+      traversability_slope_max_degrees: 45.0
       traversability_obstacle_value_threshold: 50
       traversability_lethal_value_threshold: 90
       traversability_unknown_is_obstacle: false
