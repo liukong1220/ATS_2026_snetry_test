@@ -1,6 +1,6 @@
 # 从 2.5D 语义 ESDF 到稳定比赛版与长期最终版导航主链
 
-更新时间：2026-06-22
+更新时间：2026-06-23
 
 本文档只保留两条主线：
 
@@ -423,6 +423,17 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 2. 先保留 `MPPI`，可以降低控制层同时更换带来的调试风险。
 3. 等 RC-ESDF、搜索器、轨迹和安全校验都跑稳后，再切 `SE2 MPC` 最合理。
 
+### 5.1A 工作流规则
+
+从 2026-06-23 起，后续实现统一增加下面这条工程规则，方便多轮对话阅读、交接与回退：
+
+1. 每次开始一个新任务前，必须先对上一个任务按内容分块 `git commit`，不要把多个任务揉成一个提交。
+2. 每次开始一个新任务前，必须同步更新本文档，至少说明：
+   上一个任务完成了什么；
+   当前仓库状态变化了什么；
+   下一个任务从哪里继续最自然。
+3. 参数、实现、注释和路线文档应保持同频更新，避免代码已经演进但文档仍停留在旧状态。
+
 ### 5.2 新对话起手任务
 
 如果后续要开新对话继续项目优化，建议直接从下面 8 个任务开工：
@@ -444,6 +455,19 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 8. `任务 8`
    先接 `MPPI` 验证窄门、贴边、S 弯、坡道和高速转角，再规划 `SE2 MPC` 替换。
 
+当前进度更新：
+
+1. `任务 1` 已完成首版实现：
+   已将当前 `TraversabilityEsdfProvider` 演进为 `RC-ESDF-lite` 形态；
+   已补齐 rolling window 显式配置、统一查询接口、`slope_grid` 输入和 footprint-clearance 扩展接口；
+   已保持现有 `LBFGS + MPPI` 过渡主链兼容；
+   已对关键代码与参数补充传承型注释。
+2. 当前推荐直接进入 `任务 2`：
+   将 `slope_grid` 正式接入 `v_max / a_max` 规则；
+   做成可配置坡度速度自适应；
+   接入现有 profile / governor 链；
+   保持现有 smoother / trajectory_optimizer 主链可继续工作。
+
 ### 5.3 V1 的阶段划分
 
 #### 阶段 P0：固化 2.5D 地形语义与坡度速度规则
@@ -455,6 +479,12 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 3. 明确坡度如何影响 `traversability` 二值化。
 4. 明确坡度如何影响 `v_max / a_max`。
 
+当前状态补充：
+
+1. `slope_grid` 与 `slope_band_grid` 发布链已经就位。
+2. `RC-ESDF-lite` 已经能接收并查询 `slope_grid`，目前先作为语义旁路输入保留。
+3. 下一步需要做的是把坡度从“可查询语义”推进到“正式速度/加速度约束规则”。
+
 #### 阶段 P1：将当前 ESDF 演进为 `RC-ESDF-lite`
 
 目标：
@@ -464,6 +494,15 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 3. 稳定 `d(x, y)` 与 `grad d(x, y)` 查询。
 4. 为后续 footprint-aware 校验预留接口。
 5. 保持当前 `LBFGS + MPPI` 过渡主链可继续运行。
+
+当前状态补充：
+
+1. 本阶段首版已落地。
+2. 已新增统一 `query` / `slope` / local-window 接口。
+3. 已新增 `traversability_slope_topic`、`rc_esdf_rolling_window_enabled`、
+   `rc_esdf_query_window_size_x`、`rc_esdf_query_window_size_y`、
+   `traversability_slope_max_degrees` 参数并接入仿真、实机与 bringup 配置。
+4. 已补充代码与 YAML 注释，便于后续任务直接接着阅读实现。
 
 #### 阶段 P2：新建 `minco_planner`
 
