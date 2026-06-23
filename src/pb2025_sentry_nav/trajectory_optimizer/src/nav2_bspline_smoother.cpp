@@ -196,6 +196,8 @@ void Nav2BSplineSmoother::configure(
   nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".terrain_pointcloud_topic",
     rclcpp::ParameterValue(terrain_pointcloud_topic_));
+  // Keep the smoother's ESDF input parameters aligned with the standalone
+  // trajectory_optimizer node so debugging and BT mainline behavior stay comparable.
   nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".traversability_grid_topic",
     rclcpp::ParameterValue(traversability_grid_topic_));
@@ -223,6 +225,9 @@ void Nav2BSplineSmoother::configure(
   nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".terrain_esdf_min_intensity",
     rclcpp::ParameterValue(terrain_esdf_min_intensity_));
+  // Same RC-ESDF-lite configuration as the standalone node:
+  // this avoids the common handover bug where RViz visualization and Nav2 mainline
+  // appear to use "the same ESDF source" but are actually configured differently.
   nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".rc_esdf_rolling_window_enabled",
     rclcpp::ParameterValue(rc_esdf_rolling_window_enabled_));
@@ -368,6 +373,8 @@ void Nav2BSplineSmoother::configure(
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
   traversability_esdf_provider_ = std::make_shared<TraversabilityEsdfProvider>();
+  // Configure before subscriptions start delivering data so the first grid update
+  // already reflects the intended local-window / slope semantics.
   traversability_esdf_provider_->configureRollingWindow(
     rc_esdf_rolling_window_enabled_,
     rc_esdf_query_window_size_x_,
@@ -398,6 +405,9 @@ void Nav2BSplineSmoother::configure(
     std::bind(
       &Nav2BSplineSmoother::traversabilityGroundConfidenceCallback,
       this, std::placeholders::_1));
+  // Pre-subscribe slope semantics here even though the current smoother mainly
+  // consumes distance / gradient. This makes later speed-governor integration
+  // and debugging much less invasive.
   traversability_slope_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
     traversability_slope_topic_, rclcpp::QoS(10).reliable(),
     std::bind(
@@ -613,6 +623,8 @@ void Nav2BSplineSmoother::refreshEsdfProvider()
 
   if (esdf_source_ == "traversability_grid") {
     if (traversability_esdf_provider_ && traversability_grid_msg_) {
+      // Rebuild from the latest local semantic snapshot each time a side grid arrives.
+      // This favors clarity and deterministic behavior over micro-optimizing updates.
       traversability_esdf_provider_->updateGrid(
         *traversability_grid_msg_,
         traversability_obstacle_value_threshold_,

@@ -48,6 +48,9 @@ double decodeScalarGridValue(int8_t value, double max_value)
   if (value < 0) {
     return std::numeric_limits<double>::quiet_NaN();
   }
+  // terrain_analysis_ext publishes scalar debug / semantic grids in 0~100.
+  // Decode them back into a physical quantity here so all downstream modules
+  // consume meaningful units instead of transport-specific encodings.
   return clamp01(static_cast<double>(value) / 100.0) * std::max(max_value, 0.0);
 }
 
@@ -80,6 +83,8 @@ void TraversabilityEsdfProvider::updateGrid(
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
+  // Treat each incoming traversability grid as a fresh local snapshot.
+  // This keeps behavior deterministic and avoids stale semantics surviving across updates.
   available_ = false;
   distance_field_.clear();
   distance_to_obstacle_field_.clear();
@@ -122,6 +127,8 @@ void TraversabilityEsdfProvider::updateGrid(
   if (!slope_values.empty()) {
     slope_field_ = slope_values;
   } else {
+    // Missing slope data is not fatal for task 1. We keep ESDF available and simply
+    // report slope as NaN so task 2 can decide whether to treat that as "unknown" or "flat".
     slope_field_.assign(cell_count, std::numeric_limits<double>::quiet_NaN());
   }
 
@@ -142,6 +149,9 @@ void TraversabilityEsdfProvider::updateGrid(
 
       double semantic_score = normalizedSemanticValue(value);
       if (!height_values.empty()) {
+        // The traversability_grid is still the primary "can pass / cannot pass" source.
+        // Height / occupancy / ground confidence only refine this semantic score so the
+        // ESDF obstacle set better matches terrain-analysis intent.
         semantic_score = combineSemanticScore(
           semantic_score,
           height_values[idx],
@@ -231,6 +241,8 @@ bool TraversabilityEsdfProvider::query(double x, double y, EsdfQueryResult & res
 
   const auto & gradient_field =
     smoothed_distance_field_.empty() ? distance_field_ : smoothed_distance_field_;
+  // Keep distance from the raw signed field, but use the smoothed field for gradients.
+  // This preserves collision meaning while avoiding noisy finite-difference directions.
   result.distance = bilinearDistanceAt(distance_field_, gx, gy);
   result.gradient = bilinearGradientAt(gradient_field, gx, gy);
   if (!slope_field_.empty()) {
@@ -258,6 +270,9 @@ double TraversabilityEsdfProvider::getFootprintClearance(
     return std::numeric_limits<double>::quiet_NaN();
   }
 
+  // Sample each footprint point after rigidly transforming it by (x, y, yaw).
+  // This is intentionally simple for V1: once a collision segment is found later,
+  // upper layers can choose whether to only warn, slow down, or locally repair.
   const double cos_yaw = std::cos(yaw);
   const double sin_yaw = std::sin(yaw);
   double min_clearance = std::numeric_limits<double>::infinity();
@@ -286,6 +301,8 @@ bool TraversabilityEsdfProvider::worldToGrid(double wx, double wy, double & gx, 
     return false;
   }
 
+  // Rolling-window rejection happens before interpolation lookup so callers can
+  // distinguish "outside local domain" from "inside domain but close to obstacle".
   if (!isInsideRollingWindowUnlocked(wx, wy)) {
     return false;
   }
@@ -313,6 +330,8 @@ bool TraversabilityEsdfProvider::extractGridValues(
   const nav_msgs::msg::OccupancyGrid & grid,
   std::vector<double> & values) const
 {
+  // All semantic side grids must align exactly with the traversability grid.
+  // We fail closed here so later debugging can immediately detect mis-wired topics.
   if (
     grid.info.width != width_ || grid.info.height != height_ ||
     std::abs(grid.info.resolution - resolution_) > 1e-6 ||
@@ -356,6 +375,8 @@ bool TraversabilityEsdfProvider::extractSlopeValues(
 
   values.assign(cell_count, std::numeric_limits<double>::quiet_NaN());
   for (std::size_t i = 0; i < cell_count; ++i) {
+    // Store slope in degrees rather than normalized 0~1 so the next speed-governor
+    // stage can work directly with human-readable thresholds.
     values[i] = decodeScalarGridValue(grid.data[i], slope_grid_max_degrees_);
   }
   return true;
@@ -371,6 +392,9 @@ double TraversabilityEsdfProvider::combineSemanticScore(
   const double occupancy = clamp01(occupancy_ratio_score);
   const double ground = clamp01(ground_confidence_score);
   const double traversability = clamp01(traversability_score);
+  // Current weights intentionally favor traversability + height difference.
+  // The goal in task 1 is not perfect semantic classification, but to build an
+  // obstacle set that is conservative enough for smoothing in narrow passages.
   return clamp01(
     0.45 * traversability +
     0.30 * safe_height +
@@ -456,6 +480,8 @@ void TraversabilityEsdfProvider::rebuildSignedDistanceField(
   distance_field_.assign(cell_count, std::numeric_limits<double>::quiet_NaN());
 
   auto propagate = [&](const std::vector<uint8_t> & source_mask, std::vector<double> & field) {
+      // Dijkstra-style propagation is slower than a highly optimized EDT, but is easy
+      // to maintain and sufficient for the current local grid sizes used in V1 task 1.
       std::priority_queue<GridNode, std::vector<GridNode>, GridNodeCompare> open;
       bool has_seed = false;
       for (unsigned int my = 0; my < height_; ++my) {
@@ -529,12 +555,16 @@ void TraversabilityEsdfProvider::rebuildSignedDistanceField(
       distance_field_[i] = d_free;
       continue;
     }
+    // Standard signed-distance construction:
+    // positive in free space, negative in obstacle space, zero near the boundary.
     distance_field_[i] = d_free - d_occ;
   }
 }
 
 void TraversabilityEsdfProvider::rebuildSmoothedDistanceField()
 {
+  // Only the gradient field is smoothed. The signed distance itself stays raw so
+  // obstacle penetration semantics do not drift due to filtering.
   smoothed_distance_field_ = distance_field_;
   if (distance_field_.empty()) {
     return;
@@ -589,6 +619,7 @@ void TraversabilityEsdfProvider::updateRollingWindowBoundsUnlocked()
     return;
   }
 
+  // By default the whole received grid is queryable.
   const double grid_min_x = origin_x_;
   const double grid_min_y = origin_y_;
   const double grid_max_x = origin_x_ + static_cast<double>(width_) * resolution_;
@@ -605,9 +636,12 @@ void TraversabilityEsdfProvider::updateRollingWindowBoundsUnlocked()
   }
 
   if (rolling_window_size_x_ <= 0.0 && rolling_window_size_y_ <= 0.0) {
+    // Zero means "use the whole grid even though rolling-window mode is conceptually enabled".
     return;
   }
 
+  // For task 1 we center the explicit local window on the received grid bounds.
+  // If later we switch to a robot-centered buffer, only this helper should need to change.
   const double grid_size_x = grid_max_x - grid_min_x;
   const double grid_size_y = grid_max_y - grid_min_y;
   const double effective_size_x =

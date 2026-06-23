@@ -387,15 +387,15 @@ trajectory_optimizer:
     esdf_source: "traversability_grid"
     terrain_pointcloud_topic: "terrain_map_ext"
     traversability_grid_topic: "traversability_grid"
-    traversability_slope_topic: "traversability_slope_grid"
+    traversability_slope_topic: "traversability_slope_grid"  # task1: 先把坡度接进 ESDF 语义侧，供后续限速策略复用。
     terrain_esdf_resolution: 0.05
     terrain_esdf_padding: 0.60
     terrain_esdf_inflation_radius: 0.08
     terrain_esdf_min_intensity: 0.0
-    rc_esdf_rolling_window_enabled: true
-    rc_esdf_query_window_size_x: 0.0
+    rc_esdf_rolling_window_enabled: true  # 仿真中也保持与实机同样的局部查询语义，避免参数迁移时行为突变。
+    rc_esdf_query_window_size_x: 0.0      # 0 = 不做额外裁剪，直接沿用收到的 local grid 全范围。
     rc_esdf_query_window_size_y: 0.0
-    traversability_slope_max_degrees: 45.0
+    traversability_slope_max_degrees: 45.0  # 要与 slopeGridMaxDeg 保持一致，否则解码出来的坡度会失真。
     traversability_obstacle_value_threshold: 50
     traversability_lethal_value_threshold: 90
     traversability_unknown_is_obstacle: false
@@ -829,15 +829,15 @@ smoother_server:
       esdf_source: "traversability_grid"
       terrain_pointcloud_topic: "terrain_map_ext"
       traversability_grid_topic: "traversability_grid"
-      traversability_slope_topic: "traversability_slope_grid"
+      traversability_slope_topic: "traversability_slope_grid"  # smoother 与旁路优化器共用同一坡度输入。
       terrain_esdf_resolution: 0.05
       terrain_esdf_padding: 0.60
       terrain_esdf_inflation_radius: 0.08
       terrain_esdf_min_intensity: 0.0
-      rc_esdf_rolling_window_enabled: true
-      rc_esdf_query_window_size_x: 0.0
+      rc_esdf_rolling_window_enabled: true  # 主链与调试链保持同一 rolling-window 定义。
+      rc_esdf_query_window_size_x: 0.0      # 需要缩小查询域时优先从这里试，不要先改代码。
       rc_esdf_query_window_size_y: 0.0
-      traversability_slope_max_degrees: 45.0
+      traversability_slope_max_degrees: 45.0  # 和 terrain_analysis_ext 发布侧编码上限对应。
       traversability_obstacle_value_threshold: 50
       traversability_lethal_value_threshold: 90
       traversability_unknown_is_obstacle: false

@@ -144,6 +144,8 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<std::string>("esdf_debug_topic", esdf_debug_topic_);
   declare_parameter<std::string>("esdf_source", esdf_source_);
   declare_parameter<std::string>("terrain_pointcloud_topic", terrain_pointcloud_topic_);
+  // The traversability-grid ESDF path is the V1 task-1 bridge from 2.5D semantics
+  // into the existing smoother / optimizer chain.
   declare_parameter<std::string>("traversability_grid_topic", traversability_grid_topic_);
   declare_parameter<std::string>(
     "traversability_height_diff_topic", traversability_height_diff_topic_);
@@ -156,6 +158,10 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   declare_parameter<double>("terrain_esdf_padding", terrain_esdf_padding_);
   declare_parameter<double>("terrain_esdf_inflation_radius", terrain_esdf_inflation_radius_);
   declare_parameter<double>("terrain_esdf_min_intensity", terrain_esdf_min_intensity_);
+  // RC-ESDF-lite parameters:
+  // - rolling_window_enabled controls whether queries are restricted to an explicit local box
+  // - query_window_size_x / y let us expose local-query intent without changing map transport
+  // - slope_max_degrees decodes 0~100 slope_grid values back into physical degrees
   declare_parameter<bool>("rc_esdf_rolling_window_enabled", rc_esdf_rolling_window_enabled_);
   declare_parameter<double>("rc_esdf_query_window_size_x", rc_esdf_query_window_size_x_);
   declare_parameter<double>("rc_esdf_query_window_size_y", rc_esdf_query_window_size_y_);
@@ -232,6 +238,8 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
   traversability_esdf_provider_ = std::make_shared<TraversabilityEsdfProvider>();
+  // Configure the provider once here so every subsequent grid update reuses the same
+  // policy about local-window bounds and slope decoding.
   traversability_esdf_provider_->configureRollingWindow(
     rc_esdf_rolling_window_enabled_,
     rc_esdf_query_window_size_x_,
@@ -267,6 +275,8 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
     std::bind(
       &TrajectoryOptimizerNode::traversabilityGroundConfidenceCallback,
       this, std::placeholders::_1));
+  // slope_grid is not yet used for speed control in task 1, but subscribing now keeps
+  // the ESDF-side semantic API stable before task 2 touches the governor.
   traversability_slope_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
     traversability_slope_topic_, rclcpp::QoS(10).reliable(),
     std::bind(
@@ -387,6 +397,9 @@ void TrajectoryOptimizerNode::updateTraversabilityEsdf()
     return;
   }
 
+  // The traversability grid is the required backbone; other semantic grids are optional
+  // enrichments. If a side grid is absent or misaligned, updateGrid will gracefully
+  // keep ESDF alive and mark the missing semantic channel as unavailable.
   traversability_esdf_provider_->updateGrid(
     *traversability_grid_msg_,
     traversability_obstacle_value_threshold_,

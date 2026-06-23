@@ -12,6 +12,10 @@
 namespace trajectory_optimizer
 {
 
+// Unified query result for the RC-ESDF-lite direction:
+// - distance / gradient keep compatibility with the current smoother / optimizer chain
+// - slope prepares the next step where speed and acceleration limits become terrain-aware
+// - inside_local_window exposes whether the query was rejected by local rolling-window policy
 struct EsdfQueryResult
 {
   bool valid = false;
@@ -26,19 +30,26 @@ class EsdfProvider
 public:
   virtual ~EsdfProvider() = default;
 
+  // Minimal legacy interface used by the current optimizer chain.
   virtual bool available() const = 0;
   virtual double getDistance(double x, double y) const = 0;
   virtual Eigen::Vector2d getGradient(double x, double y) const = 0;
+
+  // Optional semantic channel. Existing providers can ignore it and still compile.
   virtual double getSlope(double, double) const
   {
     return std::numeric_limits<double>::quiet_NaN();
   }
 
+  // For costmap-style global providers this can stay always true.
+  // RC-ESDF-lite uses it to expose the fact that the query domain is local and rolling.
   virtual bool isInsideLocalWindow(double, double) const
   {
     return true;
   }
 
+  // Default adapter so new callers can request all available semantics in one shot
+  // while old providers only need to implement distance / gradient.
   virtual bool query(double x, double y, EsdfQueryResult & result) const
   {
     result = EsdfQueryResult {};
@@ -58,6 +69,7 @@ public:
 class NullEsdfProvider : public EsdfProvider
 {
 public:
+  // Explicit "not available" implementation used when upper layers disable ESDF cost.
   bool available() const override
   {
     return false;
