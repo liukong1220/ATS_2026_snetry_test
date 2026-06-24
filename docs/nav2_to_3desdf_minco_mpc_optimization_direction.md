@@ -462,11 +462,15 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    已补齐 rolling window 显式配置、统一查询接口、`slope_grid` 输入和 footprint-clearance 扩展接口；
    已保持现有 `LBFGS + MPPI` 过渡主链兼容；
    已对关键代码与参数补充传承型注释。
-2. 当前推荐直接进入 `任务 2`：
-   将 `slope_grid` 正式接入 `v_max / a_max` 规则；
-   做成可配置坡度速度自适应；
-   接入现有 profile / governor 链；
-   保持现有 smoother / trajectory_optimizer 主链可继续工作。
+2. `任务 2` 已完成首版实现：
+   已将 `slope_grid` 正式接入 `v_max / a_max` 规则；
+   已接入现有 profile / governor 链；
+   已将坡度速度规则改为“低于坡度障碍阈值时可加速、超过阈值后逐步保守”的三段式；
+   已补充中文注释与参数说明，便于后续传承与场地调参。
+3. 当前推荐直接进入“专项仿真观察与对比验证”：
+   先把 Gazebo / loopback 上的 ESDF 可观测性做强；
+   用同一套场景对比任务 1/2 改动前后效果；
+   再决定是否继续推进 `任务 3`。
 
 ### 5.3 V1 的阶段划分
 
@@ -483,7 +487,8 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 
 1. `slope_grid` 与 `slope_band_grid` 发布链已经就位。
 2. `RC-ESDF-lite` 已经能接收并查询 `slope_grid`，目前先作为语义旁路输入保留。
-3. 下一步需要做的是把坡度从“可查询语义”推进到“正式速度/加速度约束规则”。
+3. 坡度已经从“可查询语义”推进到“正式速度/加速度约束规则”。
+4. 下一步更适合优先做专项仿真观察，而不是继续叠更多规划模块。
 
 #### 阶段 P1：将当前 ESDF 演进为 `RC-ESDF-lite`
 
@@ -503,6 +508,19 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    `rc_esdf_query_window_size_x`、`rc_esdf_query_window_size_y`、
    `traversability_slope_max_degrees` 参数并接入仿真、实机与 bringup 配置。
 4. 已补充代码与 YAML 注释，便于后续任务直接接着阅读实现。
+
+#### 阶段 P1.5：坡度速度规则与仿真对比观察
+
+当前状态补充：
+
+1. 已完成 `slope_grid -> speed_limit / longitudinal_accel_limit / governor` 首版接入。
+2. 当前坡度规则采用三段式：
+   低于坡度障碍阈值时允许加速增益；
+   接近阈值时回落到 `1.0`；
+   超过阈值后逐步降到保守速度与加速度比例。
+3. 当前最值得优先推进的不是立刻上 `任务 3`，而是先把 Gazebo / loopback 中的
+   `traversability_*_grid`、`trajectory_esdf_debug`、`trajectory_profile_markers`
+   和 `cmd_vel_controller_governed` 观察链做成标准测试流程。
 
 #### 阶段 P2：新建 `minco_planner`
 
