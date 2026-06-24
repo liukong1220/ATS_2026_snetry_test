@@ -341,14 +341,15 @@ ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 1. [docs/总览.md](./docs/总览.md)
 2. [docs/nav2_to_3desdf_minco_mpc_optimization_direction.md](./docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)
 3. [docs/gazebo_sim_integration.md](./docs/gazebo_sim_integration.md)
-4. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
-5. [docs/omni_recovery_smoothing_optimization.md](./docs/omni_recovery_smoothing_optimization.md)
-6. [docs/融合.md](./docs/融合.md)
-7. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
-8. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
-9. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
-10. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
-11. [docs/上车测试清单.md](./docs/上车测试清单.md)
+4. [docs/esdf_special_sim_observation_plan.md](./docs/esdf_special_sim_observation_plan.md)
+5. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
+6. [docs/omni_recovery_smoothing_optimization.md](./docs/omni_recovery_smoothing_optimization.md)
+7. [docs/融合.md](./docs/融合.md)
+8. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
+9. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
+10. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
+11. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
+12. [docs/上车测试清单.md](./docs/上车测试清单.md)
 
 说明：
 

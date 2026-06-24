@@ -467,9 +467,14 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    已接入现有 profile / governor 链；
    已将坡度速度规则改为“低于坡度障碍阈值时可加速、超过阈值后逐步保守”的三段式；
    已补充中文注释与参数说明，便于后续传承与场地调参。
-3. 当前推荐直接进入“专项仿真观察与对比验证”：
-   先把 Gazebo / loopback 上的 ESDF 可观测性做强；
-   用同一套场景对比任务 1/2 改动前后效果；
+3. “专项仿真观察与对比验证”首版已完成：
+   已新增 `docs/esdf_special_sim_observation_plan.md`；
+   已新增 `nav2_esdf_observe_view.rviz` 专项观察视图；
+   已把主 README 与 Gazebo 集成文档补上跳转入口。
+4. 当前推荐直接进入“仿真启动解耦与 TF 稳定化”：
+   优先解决 Gazebo / 导航链一起拉起时的 TF 断树与时序问题；
+   增强手动控制 Gazebo、导航链、行为链的开关能力；
+   先把仿真启动过程稳定下来，再做持续的 ESDF 对比测试；
    再决定是否继续推进 `任务 3`。
 
 ### 5.3 V1 的阶段划分
@@ -521,6 +526,18 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 3. 当前最值得优先推进的不是立刻上 `任务 3`，而是先把 Gazebo / loopback 中的
    `traversability_*_grid`、`trajectory_esdf_debug`、`trajectory_profile_markers`
    和 `cmd_vel_controller_governed` 观察链做成标准测试流程。
+
+#### 阶段 P1.6：仿真启动解耦与 TF 稳定化
+
+当前状态补充：
+
+1. Gazebo / loopback 的 ESDF 专项观察文档和 RViz 视图已经补齐。
+2. 当前仿真主痛点已从“看不清 ESDF 效果”转为：
+   Gazebo 世界与导航链同时启动时，`map / odom / gimbal_yaw_fake` TF 树时序不稳定。
+3. 下一步更值得优先做的是：
+   把 Gazebo 世界、导航链、行为链改成可手动分开启动；
+   显式暴露 `autostart`、导航链开关和专项 RViz 入口；
+   减少“每次切世界就重启整条导航链”带来的 TF 断树问题。
 
 #### 阶段 P2：新建 `minco_planner`
 

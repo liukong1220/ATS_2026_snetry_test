@@ -7,6 +7,11 @@
 1. 当前仓库的 Gazebo 仿真链到底接入到了哪里。
 2. 以现在的代码状态，仿真能验证哪些内容，不能验证哪些内容。
 
+如果当前目标是专门观察 `2.5D ESDF / traversability / trajectory_profile / governor`
+这条链，而不是泛泛地跑一遍仿真，请优先继续阅读：
+
+1. [./esdf_special_sim_observation_plan.md](./esdf_special_sim_observation_plan.md)
+
 ## 1. 当前已接入的 Gazebo 组件
 
 当前项目已接入：
