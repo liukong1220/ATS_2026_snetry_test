@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "std_msgs/msg/color_rgba.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
@@ -56,6 +57,9 @@ TrajectorySpeedGovernor::TrajectorySpeedGovernor(const rclcpp::NodeOptions & opt
   declare_parameter<double>("curvature_brake_gain", curvature_brake_gain_);
   declare_parameter<int>("curvature_window_points", curvature_window_points_);
   declare_parameter<double>("curvature_peak_weight", curvature_peak_weight_);
+  declare_parameter<bool>("use_profile_target_speed_limit", use_profile_target_speed_limit_);
+  declare_parameter<double>(
+    "profile_target_speed_limit_margin", profile_target_speed_limit_margin_);
   declare_parameter<double>("speed_scale_filter_gain", speed_scale_filter_gain_);
   declare_parameter<double>("speed_scale_rise_rate", speed_scale_rise_rate_);
   declare_parameter<double>("speed_scale_fall_rate", speed_scale_fall_rate_);
@@ -69,6 +73,8 @@ TrajectorySpeedGovernor::TrajectorySpeedGovernor(const rclcpp::NodeOptions & opt
   get_parameter("curvature_brake_gain", curvature_brake_gain_);
   get_parameter("curvature_window_points", curvature_window_points_);
   get_parameter("curvature_peak_weight", curvature_peak_weight_);
+  get_parameter("use_profile_target_speed_limit", use_profile_target_speed_limit_);
+  get_parameter("profile_target_speed_limit_margin", profile_target_speed_limit_margin_);
   get_parameter("speed_scale_filter_gain", speed_scale_filter_gain_);
   get_parameter("speed_scale_rise_rate", speed_scale_rise_rate_);
   get_parameter("speed_scale_fall_rate", speed_scale_fall_rate_);
@@ -92,6 +98,7 @@ void TrajectorySpeedGovernor::profileCallback(
 {
   if (msg->points.empty()) {
     current_speed_scale_ = 1.0;
+    profile_speed_cap_ = std::numeric_limits<double>::infinity();
     return;
   }
 
@@ -104,6 +111,7 @@ void TrajectorySpeedGovernor::profileCallback(
   double window_max_abs_curvature = 0.0;
   double window_avg_abs_curvature = 0.0;
   double profile_speed_scale = 1.0;
+  double window_min_target_speed = std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < window_points; ++i) {
     const double abs_curvature = std::abs(msg->points[i].curvature);
     window_max_abs_curvature = std::max(window_max_abs_curvature, abs_curvature);
@@ -114,8 +122,12 @@ void TrajectorySpeedGovernor::profileCallback(
         std::max(0.0, std::min(1.0, msg->points[i].speed / speed_limit));
       profile_speed_scale = std::min(profile_speed_scale, point_speed_scale);
     }
+    if (msg->points[i].speed_limit > 1e-3) {
+      window_min_target_speed = std::min(window_min_target_speed, msg->points[i].speed_limit);
+    }
   }
   window_avg_abs_curvature /= static_cast<double>(window_points);
+  profile_speed_cap_ = window_min_target_speed;
 
   const double peak_weight = std::max(0.0, std::min(1.0, curvature_peak_weight_));
   const double effective_curvature =
@@ -130,12 +142,13 @@ void TrajectorySpeedGovernor::profileCallback(
 
   RCLCPP_INFO_THROTTLE(
     get_logger(), *get_clock(), 1000,
-    "Speed governor scale: target=%.3f filtered=%.3f applied=%.3f profile=%.3f curvature=%.3f kappa_avg=%.3f kappa_max=%.3f window_points=%zu",
+    "Speed governor scale: target=%.3f filtered=%.3f applied=%.3f profile=%.3f curvature=%.3f v_cap=%.3f kappa_avg=%.3f kappa_max=%.3f window_points=%zu",
     target_speed_scale,
     current_speed_scale_,
     applied_speed_scale_,
     profile_speed_scale,
     curvature_scale,
+    std::isfinite(profile_speed_cap_) ? profile_speed_cap_ : -1.0,
     window_avg_abs_curvature,
     window_max_abs_curvature,
     window_points);
@@ -177,6 +190,21 @@ void TrajectorySpeedGovernor::publishGovernedCmd()
   governed.linear.x *= applied_speed_scale_;
   governed.linear.y *= applied_speed_scale_;
   governed.angular.z *= std::sqrt(applied_speed_scale_);
+
+  if (use_profile_target_speed_limit_ && std::isfinite(profile_speed_cap_)) {
+    // profile 已经综合了曲率 / 障碍 / 坡度限速。
+    // 这里再做一次“近端绝对速度硬上限”，避免这些限制只体现在 profile，
+    // 却在 controller 输出波动时被实际 cmd_vel 放大掉。
+    const double margin = std::max(0.0, profile_target_speed_limit_margin_);
+    const double allowed_linear_speed = std::max(0.0, profile_speed_cap_ + margin);
+    const double linear_norm = std::hypot(governed.linear.x, governed.linear.y);
+    if (linear_norm > allowed_linear_speed && linear_norm > 1e-6) {
+      const double scale = allowed_linear_speed / linear_norm;
+      governed.linear.x *= scale;
+      governed.linear.y *= scale;
+    }
+  }
+
   governed_cmd_pub_->publish(governed);
 }
 

@@ -529,6 +529,19 @@ trajectory_optimizer:
     lateral_accel_limit: 3.0
     # 纵向加速度上限。决定 profile 自身起步/提速有多快。
     longitudinal_accel_limit: 3.8
+    # 任务2：把 slope_grid 正式接入速度/加速度规则。
+    use_slope_speed_limits: true
+    slope_speed_boost_start_deg: 8.0      # 低于该值时视为平缓地形，允许速度增益。
+    slope_speed_obstacle_deg: 30.0        # 以 terrain_analysis 的坡度障碍阈值为拐点；低于它先加速，高于它再逐步保守。
+    slope_speed_limit_full_deg: 38.0      # 超过该值后，速度缩放压到 slope_speed_min_scale。
+    slope_speed_max_scale: 1.10           # 平缓区域允许的最高速度增益比例。
+    slope_speed_min_scale: 0.62           # 陡坡区域保留的最低速度比例。
+    use_slope_accel_limits: true
+    slope_accel_boost_start_deg: 8.0      # 平缓区域允许更积极的纵向加速度。
+    slope_accel_obstacle_deg: 30.0        # 低于该阈值先加速，高于该阈值开始压缩纵向加速度。
+    slope_accel_limit_full_deg: 38.0
+    slope_accel_max_scale: 1.12
+    slope_accel_min_scale: 0.68
     # 速度 profile 平滑增益。大：更平滑但更肉；小：更敢提速。
     velocity_smoothing_gain: 0.18
     # 数值求导步长。一般与 output_path_spacing 同量级。
@@ -995,6 +1008,18 @@ smoother_server:
       global_speed_limit: 4.2
       lateral_accel_limit: 3.0
       longitudinal_accel_limit: 3.8
+      use_slope_speed_limits: true
+      slope_speed_boost_start_deg: 8.0
+      slope_speed_obstacle_deg: 30.0
+      slope_speed_limit_full_deg: 38.0
+      slope_speed_max_scale: 1.10
+      slope_speed_min_scale: 0.62
+      use_slope_accel_limits: true
+      slope_accel_boost_start_deg: 8.0
+      slope_accel_obstacle_deg: 30.0
+      slope_accel_limit_full_deg: 38.0
+      slope_accel_max_scale: 1.12
+      slope_accel_min_scale: 0.68
       velocity_smoothing_gain: 0.16
       derivative_step: 0.02
       profile_topic: "trajectory_profile"
@@ -1159,6 +1184,10 @@ trajectory_speed_governor:
     curvature_window_points: 10
     # 峰值曲率权重。大：更怕单个尖弯；小：更看平均曲率。
     curvature_peak_weight: 0.30
+    # profile 已经综合了曲率/障碍/坡度限速；这里再对近端目标速度做一次硬上限，
+    # 保证这些限速不会只停留在可视化 profile 里。
+    use_profile_target_speed_limit: true
+    profile_target_speed_limit_margin: 0.05
     # 目标速度比例低通增益。大：更跟手；小：更稳。
     speed_scale_filter_gain: 0.12
     # 速度比例上升斜率。大：恢复更快；小：更柔和。

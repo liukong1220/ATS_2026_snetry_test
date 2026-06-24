@@ -880,9 +880,17 @@ TrajectoryProfile2D BSplinePathOptimizer::buildTrajectoryProfile(
     sample.first_derivative = first;
     sample.second_derivative = second;
     sample.curvature = curvature;
+    sample.slope_degrees = 0.0;
     sample.speed_limit = params_.global_speed_limit;
     sample.speed = params_.global_speed_limit;
     sample.acceleration = 0.0;
+
+    // 任务2：把 slope_grid 语义直接写进轨迹 profile，
+    // 后面的限速、限加速度、governor 都从这一份统一参考出发。
+    double slope_degrees = 0.0;
+    if (sampleSlopeDegrees(sample.point, slope_degrees) && std::isfinite(slope_degrees)) {
+      sample.slope_degrees = std::max(0.0, slope_degrees);
+    }
 
     profile.max_abs_curvature = std::max(profile.max_abs_curvature, std::abs(curvature));
     profile.curvature_penalty += curvature_violation * curvature_violation;
@@ -891,6 +899,7 @@ TrajectoryProfile2D BSplinePathOptimizer::buildTrajectoryProfile(
 
   profile.curvature_penalty *= params_.curvature_weight;
   applyCurvatureSpeedLimits(profile);
+  applySlopeSpeedLimits(profile);
   applyObstacleSpeedLimits(profile);
   applyAccelerationLimits(profile);
   smoothVelocityProfile(profile);
@@ -1055,6 +1064,8 @@ std::vector<Point2D> BSplinePathOptimizer::refinePathSecondStageEsdf(
 
 void BSplinePathOptimizer::applyCurvatureSpeedLimits(TrajectoryProfile2D & profile) const
 {
+  // 曲率仍然是第一层几何限速：
+  // 即使地面很平，横向加速度也必须处在底盘可跟踪范围内。
   for (auto & sample : profile.samples) {
     const double abs_curvature = std::abs(sample.curvature);
     if (abs_curvature <= 1e-6) {
@@ -1065,6 +1076,29 @@ void BSplinePathOptimizer::applyCurvatureSpeedLimits(TrajectoryProfile2D & profi
         std::sqrt(params_.lateral_accel_limit / abs_curvature));
     }
     sample.speed = sample.speed_limit;
+  }
+}
+
+void BSplinePathOptimizer::applySlopeSpeedLimits(TrajectoryProfile2D & profile) const
+{
+  if (!params_.use_slope_speed_limits) {
+    return;
+  }
+
+  // 坡度限速放在“曲率之后、障碍之前”：
+  // 1. 曲率先决定弯道几何能跑多快
+  // 2. 坡度再决定这段地形上是否该更激进或更保守
+  // 3. 最后再由障碍物距离做贴边保守化
+  for (auto & sample : profile.samples) {
+    const double slope_scale = computeSlopeAdaptiveScale(
+      sample.slope_degrees,
+      params_.slope_speed_boost_start_deg,
+      params_.slope_speed_obstacle_deg,
+      params_.slope_speed_limit_full_deg,
+      params_.slope_speed_max_scale,
+      params_.slope_speed_min_scale);
+    sample.speed_limit = std::min(sample.speed_limit, params_.global_speed_limit * slope_scale);
+    sample.speed = std::min(sample.speed, sample.speed_limit);
   }
 }
 
@@ -1126,16 +1160,56 @@ void BSplinePathOptimizer::applyAccelerationLimits(TrajectoryProfile2D & profile
   for (size_t i = 1; i < profile.samples.size(); ++i) {
     const double ds = std::max(kEpsilon, arc_lengths[i] - arc_lengths[i - 1]);
     const double prev_v = profile.samples[i - 1].speed;
+    double accel_limit = params_.longitudinal_accel_limit;
+    if (params_.use_slope_accel_limits) {
+      // 前向传播时取相邻两点里更保守的坡度缩放，
+      // 避免在进入更陡坡段前一拍还在猛加速。
+      const double slope_scale = std::min(
+        computeSlopeAdaptiveScale(
+          profile.samples[i - 1].slope_degrees,
+          params_.slope_accel_boost_start_deg,
+          params_.slope_accel_obstacle_deg,
+          params_.slope_accel_limit_full_deg,
+          params_.slope_accel_max_scale,
+          params_.slope_accel_min_scale),
+        computeSlopeAdaptiveScale(
+          profile.samples[i].slope_degrees,
+          params_.slope_accel_boost_start_deg,
+          params_.slope_accel_obstacle_deg,
+          params_.slope_accel_limit_full_deg,
+          params_.slope_accel_max_scale,
+          params_.slope_accel_min_scale));
+      accel_limit *= slope_scale;
+    }
     const double reachable = std::sqrt(
-      std::max(0.0, prev_v * prev_v + 2.0 * params_.longitudinal_accel_limit * ds));
+      std::max(0.0, prev_v * prev_v + 2.0 * accel_limit * ds));
     profile.samples[i].speed = std::min(profile.samples[i].speed, reachable);
   }
 
   for (size_t i = profile.samples.size() - 1; i > 0; --i) {
     const double ds = std::max(kEpsilon, arc_lengths[i] - arc_lengths[i - 1]);
     const double next_v = profile.samples[i].speed;
+    double accel_limit = params_.longitudinal_accel_limit;
+    if (params_.use_slope_accel_limits) {
+      const double slope_scale = std::min(
+        computeSlopeAdaptiveScale(
+          profile.samples[i - 1].slope_degrees,
+          params_.slope_accel_boost_start_deg,
+          params_.slope_accel_obstacle_deg,
+          params_.slope_accel_limit_full_deg,
+          params_.slope_accel_max_scale,
+          params_.slope_accel_min_scale),
+        computeSlopeAdaptiveScale(
+          profile.samples[i].slope_degrees,
+          params_.slope_accel_boost_start_deg,
+          params_.slope_accel_obstacle_deg,
+          params_.slope_accel_limit_full_deg,
+          params_.slope_accel_max_scale,
+          params_.slope_accel_min_scale));
+      accel_limit *= slope_scale;
+    }
     const double reachable = std::sqrt(
-      std::max(0.0, next_v * next_v + 2.0 * params_.longitudinal_accel_limit * ds));
+      std::max(0.0, next_v * next_v + 2.0 * accel_limit * ds));
     profile.samples[i - 1].speed = std::min(profile.samples[i - 1].speed, reachable);
   }
 }
@@ -1247,6 +1321,18 @@ bool BSplinePathOptimizer::sampleEsdfDistance(
   return std::isfinite(distance);
 }
 
+bool BSplinePathOptimizer::sampleSlopeDegrees(
+  const Point2D & point,
+  double & slope_degrees) const
+{
+  if (!esdf_provider_ || !esdf_provider_->available()) {
+    return false;
+  }
+
+  slope_degrees = esdf_provider_->getSlope(point.x, point.y);
+  return std::isfinite(slope_degrees);
+}
+
 Point2D BSplinePathOptimizer::estimateObstacleGradient(
   const Point2D & point) const
 {
@@ -1324,6 +1410,45 @@ double BSplinePathOptimizer::computeObstaclePenaltyFromDistance(double distance)
 
   const double violation = std::max(0.0, params_.obstacle_safe_distance - distance);
   return violation * violation;
+}
+
+double BSplinePathOptimizer::computeSlopeAdaptiveScale(
+  double slope_degrees,
+  double boost_start_degrees,
+  double obstacle_degrees,
+  double full_degrees,
+  double max_scale,
+  double min_scale) const
+{
+  if (!std::isfinite(slope_degrees) || slope_degrees <= 0.0) {
+    return 1.0;
+  }
+
+  const double clamped_min_scale = clampValue(min_scale, 0.05, 1.0);
+  const double clamped_max_scale = std::max(1.0, max_scale);
+  const double boost_start = std::max(0.0, boost_start_degrees);
+  const double obstacle = std::max(boost_start + 1e-3, obstacle_degrees);
+  const double full = std::max(obstacle + 1e-3, full_degrees);
+
+  if (slope_degrees <= boost_start) {
+    return clamped_max_scale;
+  }
+
+  if (slope_degrees < obstacle) {
+    // 低于“坡度障碍阈值”时做加速处理：
+    // 坡度越小，加速增益越大；靠近障碍阈值时，增益逐步回落到 1.0。
+    const double ratio = (slope_degrees - boost_start) / std::max(kEpsilon, obstacle - boost_start);
+    return clamped_max_scale - ratio * (clamped_max_scale - 1.0);
+  }
+
+  if (slope_degrees >= full) {
+    return clamped_min_scale;
+  }
+
+  // 超过“坡度障碍阈值”后，逐步进入保守限速/限加速度区。
+  // 这里继续保持线性规则，方便现场快速调参和交接理解。
+  const double ratio = (slope_degrees - obstacle) / std::max(kEpsilon, full - obstacle);
+  return 1.0 - ratio * (1.0 - clamped_min_scale);
 }
 
 double BSplinePathOptimizer::computeAllowedCorridorDeviation(const Point2D & candidate) const

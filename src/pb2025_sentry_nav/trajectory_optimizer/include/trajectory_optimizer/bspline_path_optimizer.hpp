@@ -47,6 +47,20 @@ struct OptimizerParams
   double global_speed_limit = 1.6;
   double lateral_accel_limit = 1.0;
   double longitudinal_accel_limit = 0.8;
+  // 任务2：坡度速度/加速度规则，把 slope_grid 从“可查询语义”
+  // 推进到“真正参与速度规划”的一层。
+  bool use_slope_speed_limits = false;
+  double slope_speed_boost_start_deg = 8.0;
+  double slope_speed_obstacle_deg = 28.0;
+  double slope_speed_limit_full_deg = 35.0;
+  double slope_speed_max_scale = 1.10;
+  double slope_speed_min_scale = 0.55;
+  bool use_slope_accel_limits = false;
+  double slope_accel_boost_start_deg = 8.0;
+  double slope_accel_obstacle_deg = 28.0;
+  double slope_accel_limit_full_deg = 35.0;
+  double slope_accel_max_scale = 1.15;
+  double slope_accel_min_scale = 0.60;
   double velocity_smoothing_gain = 0.2;
   double derivative_step = 0.02;
   unsigned char obstacle_safe_cost = 64;
@@ -68,6 +82,8 @@ struct TrajectorySample2D
   Point2D first_derivative;
   Point2D second_derivative;
   double curvature = 0.0;
+  // 直接保存物理坡度角（度），避免后续模块再去理解 0~100 编码。
+  double slope_degrees = 0.0;
   double speed_limit = 0.0;
   double speed = 0.0;
   double acceleration = 0.0;
@@ -189,6 +205,7 @@ private:
   std::vector<Point2D> buildSmoothedPolyline(const std::vector<Point2D> & points) const;
   TrajectoryProfile2D buildTrajectoryProfile(const std::vector<Point2D> & points) const;
   void applyCurvatureSpeedLimits(TrajectoryProfile2D & profile) const;
+  void applySlopeSpeedLimits(TrajectoryProfile2D & profile) const;
   void applyObstacleSpeedLimits(TrajectoryProfile2D & profile) const;
   void applyAccelerationLimits(TrajectoryProfile2D & profile) const;
   void smoothVelocityProfile(TrajectoryProfile2D & profile) const;
@@ -205,6 +222,9 @@ private:
   bool sampleEsdfDistance(
     const Point2D & point,
     double & distance) const;
+  bool sampleSlopeDegrees(
+    const Point2D & point,
+    double & slope_degrees) const;
   Point2D estimateObstacleGradient(
     const Point2D & point) const;
   Point2D estimateEsdfGradient(
@@ -215,6 +235,13 @@ private:
     unsigned char cost) const;
   double computeObstaclePenaltyFromDistance(
     double distance) const;
+  double computeSlopeAdaptiveScale(
+    double slope_degrees,
+    double boost_start_degrees,
+    double obstacle_degrees,
+    double full_degrees,
+    double max_scale,
+    double min_scale) const;
   double computeAllowedCorridorDeviation(const Point2D & candidate) const;
   Point2D clampToCorridor(
     const Point2D & candidate, const std::vector<Point2D> & reference) const;

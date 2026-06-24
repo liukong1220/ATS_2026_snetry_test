@@ -420,6 +420,18 @@ trajectory_optimizer:
     global_speed_limit: 2.0
     lateral_accel_limit: 1.8
     longitudinal_accel_limit: 1.8
+    use_slope_speed_limits: true          # 仿真中也先沿用同一套坡度速度规则，便于迁移到实机。
+    slope_speed_boost_start_deg: 8.0
+    slope_speed_obstacle_deg: 28.0
+    slope_speed_limit_full_deg: 35.0
+    slope_speed_max_scale: 1.10
+    slope_speed_min_scale: 0.68
+    use_slope_accel_limits: true
+    slope_accel_boost_start_deg: 8.0
+    slope_accel_obstacle_deg: 28.0
+    slope_accel_limit_full_deg: 35.0
+    slope_accel_max_scale: 1.12
+    slope_accel_min_scale: 0.72
     velocity_smoothing_gain: 0.28
     derivative_step: 0.02
     obstacle_safe_cost: 96
@@ -823,6 +835,18 @@ smoother_server:
       global_speed_limit: 2.4
       lateral_accel_limit: 2.2
       longitudinal_accel_limit: 2.6
+      use_slope_speed_limits: true
+      slope_speed_boost_start_deg: 8.0
+      slope_speed_obstacle_deg: 28.0
+      slope_speed_limit_full_deg: 35.0
+      slope_speed_max_scale: 1.10
+      slope_speed_min_scale: 0.68
+      use_slope_accel_limits: true
+      slope_accel_boost_start_deg: 8.0
+      slope_accel_obstacle_deg: 28.0
+      slope_accel_limit_full_deg: 35.0
+      slope_accel_max_scale: 1.12
+      slope_accel_min_scale: 0.72
       velocity_smoothing_gain: 0.28
       derivative_step: 0.02
       profile_topic: "trajectory_profile"

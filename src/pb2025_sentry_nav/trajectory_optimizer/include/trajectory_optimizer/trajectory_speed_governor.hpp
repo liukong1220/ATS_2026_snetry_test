@@ -41,11 +41,15 @@ private:
   double curvature_brake_gain_ = 0.7;
   int curvature_window_points_ = 12;
   double curvature_peak_weight_ = 0.35;
+  // 任务2：不仅看曲率缩放比例，还要真正服从 profile 给出的近端绝对目标速度。
+  bool use_profile_target_speed_limit_ = true;
+  double profile_target_speed_limit_margin_ = 0.05;
   double speed_scale_filter_gain_ = 0.25;
   double speed_scale_rise_rate_ = 4.0;
   double speed_scale_fall_rate_ = 1.8;
   double current_speed_scale_ = 1.0;
   double applied_speed_scale_ = 1.0;
+  double profile_speed_cap_ = std::numeric_limits<double>::infinity();
   geometry_msgs::msg::Twist latest_cmd_vel_;
   bool has_cmd_vel_ = false;
   std::chrono::steady_clock::time_point last_publish_steady_time_;

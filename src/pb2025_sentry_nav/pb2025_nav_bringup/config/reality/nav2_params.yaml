@@ -435,6 +435,18 @@ trajectory_optimizer:
     global_speed_limit: 2.0
     lateral_accel_limit: 1.8
     longitudinal_accel_limit: 1.8
+    use_slope_speed_limits: true          # 坡度开始正式进入 speed_limit 规则。
+    slope_speed_boost_start_deg: 8.0      # 低于该值时视为平缓地形，允许速度增益。
+    slope_speed_obstacle_deg: 28.0        # 与 terrain_analysis_ext.slopeObstacleDegThre 对齐，低于它先加速，高于它再减速。
+    slope_speed_limit_full_deg: 35.0      # 达到该值时，速度缩放压到 slope_speed_min_scale。
+    slope_speed_max_scale: 1.08           # 平缓区域允许的最高速度增益比例。
+    slope_speed_min_scale: 0.72           # 实机先保守一些，减少坡道上姿态波动与打滑风险。
+    use_slope_accel_limits: true          # 同时压缩纵向加速度，避免坡道上“速度虽低但推力仍猛”。
+    slope_accel_boost_start_deg: 8.0
+    slope_accel_obstacle_deg: 28.0
+    slope_accel_limit_full_deg: 35.0
+    slope_accel_max_scale: 1.10
+    slope_accel_min_scale: 0.75
     velocity_smoothing_gain: 0.18
     derivative_step: 0.02
     # J_obs 参数：cost 超过 48 就开始推离障碍，权重比之前更强。
@@ -866,6 +878,18 @@ smoother_server:
       global_speed_limit: 2.4
       lateral_accel_limit: 2.2
       longitudinal_accel_limit: 2.6
+      use_slope_speed_limits: true
+      slope_speed_boost_start_deg: 8.0
+      slope_speed_obstacle_deg: 28.0
+      slope_speed_limit_full_deg: 35.0
+      slope_speed_max_scale: 1.08
+      slope_speed_min_scale: 0.72
+      use_slope_accel_limits: true
+      slope_accel_boost_start_deg: 8.0
+      slope_accel_obstacle_deg: 28.0
+      slope_accel_limit_full_deg: 35.0
+      slope_accel_max_scale: 1.10
+      slope_accel_min_scale: 0.75
       velocity_smoothing_gain: 0.28
       derivative_step: 0.02
       profile_topic: "trajectory_profile"
@@ -1015,6 +1039,8 @@ trajectory_speed_governor:
     curvature_brake_gain: 0.12
     curvature_window_points: 10
     curvature_peak_weight: 0.30
+    use_profile_target_speed_limit: true   # 把 profile 的近端绝对目标速度真正执行出来。
+    profile_target_speed_limit_margin: 0.05
     speed_scale_filter_gain: 0.22
     speed_scale_rise_rate: 4.0
     speed_scale_fall_rate: 1.8

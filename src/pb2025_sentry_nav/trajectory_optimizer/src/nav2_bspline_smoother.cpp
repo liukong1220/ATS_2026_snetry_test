@@ -140,6 +140,42 @@ void Nav2BSplineSmoother::configure(
     node.get(), plugin_name_ + ".longitudinal_accel_limit",
     rclcpp::ParameterValue(params.longitudinal_accel_limit));
   nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".use_slope_speed_limits",
+    rclcpp::ParameterValue(params.use_slope_speed_limits));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_speed_boost_start_deg",
+    rclcpp::ParameterValue(params.slope_speed_boost_start_deg));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_speed_obstacle_deg",
+    rclcpp::ParameterValue(params.slope_speed_obstacle_deg));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_speed_limit_full_deg",
+    rclcpp::ParameterValue(params.slope_speed_limit_full_deg));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_speed_max_scale",
+    rclcpp::ParameterValue(params.slope_speed_max_scale));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_speed_min_scale",
+    rclcpp::ParameterValue(params.slope_speed_min_scale));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".use_slope_accel_limits",
+    rclcpp::ParameterValue(params.use_slope_accel_limits));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_accel_boost_start_deg",
+    rclcpp::ParameterValue(params.slope_accel_boost_start_deg));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_accel_obstacle_deg",
+    rclcpp::ParameterValue(params.slope_accel_obstacle_deg));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_accel_limit_full_deg",
+    rclcpp::ParameterValue(params.slope_accel_limit_full_deg));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_accel_max_scale",
+    rclcpp::ParameterValue(params.slope_accel_max_scale));
+  nav2_util::declare_parameter_if_not_declared(
+    node.get(), plugin_name_ + ".slope_accel_min_scale",
+    rclcpp::ParameterValue(params.slope_accel_min_scale));
+  nav2_util::declare_parameter_if_not_declared(
     node.get(), plugin_name_ + ".velocity_smoothing_gain",
     rclcpp::ParameterValue(params.velocity_smoothing_gain));
   nav2_util::declare_parameter_if_not_declared(
@@ -283,6 +319,42 @@ void Nav2BSplineSmoother::configure(
   node->get_parameter(
     plugin_name_ + ".longitudinal_accel_limit",
     params.longitudinal_accel_limit);
+  node->get_parameter(
+    plugin_name_ + ".use_slope_speed_limits",
+    params.use_slope_speed_limits);
+  node->get_parameter(
+    plugin_name_ + ".slope_speed_boost_start_deg",
+    params.slope_speed_boost_start_deg);
+  node->get_parameter(
+    plugin_name_ + ".slope_speed_obstacle_deg",
+    params.slope_speed_obstacle_deg);
+  node->get_parameter(
+    plugin_name_ + ".slope_speed_limit_full_deg",
+    params.slope_speed_limit_full_deg);
+  node->get_parameter(
+    plugin_name_ + ".slope_speed_max_scale",
+    params.slope_speed_max_scale);
+  node->get_parameter(
+    plugin_name_ + ".slope_speed_min_scale",
+    params.slope_speed_min_scale);
+  node->get_parameter(
+    plugin_name_ + ".use_slope_accel_limits",
+    params.use_slope_accel_limits);
+  node->get_parameter(
+    plugin_name_ + ".slope_accel_boost_start_deg",
+    params.slope_accel_boost_start_deg);
+  node->get_parameter(
+    plugin_name_ + ".slope_accel_obstacle_deg",
+    params.slope_accel_obstacle_deg);
+  node->get_parameter(
+    plugin_name_ + ".slope_accel_limit_full_deg",
+    params.slope_accel_limit_full_deg);
+  node->get_parameter(
+    plugin_name_ + ".slope_accel_max_scale",
+    params.slope_accel_max_scale);
+  node->get_parameter(
+    plugin_name_ + ".slope_accel_min_scale",
+    params.slope_accel_min_scale);
   node->get_parameter(
     plugin_name_ + ".velocity_smoothing_gain",
     params.velocity_smoothing_gain);
