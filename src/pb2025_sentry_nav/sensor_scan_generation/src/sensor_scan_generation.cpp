@@ -11,10 +11,12 @@ namespace sensor_scan_generation
 SensorScanGenerationNode::SensorScanGenerationNode(const rclcpp::NodeOptions & options)
 : Node("sensor_scan_generation", options)
 {
+  this->declare_parameter<std::string>("odom_frame", "odom");
   this->declare_parameter<std::string>("lidar_frame", "");
   this->declare_parameter<std::string>("base_frame", "");
   this->declare_parameter<std::string>("robot_base_frame", "");
 
+  this->get_parameter("odom_frame", odom_frame_);
   this->get_parameter("lidar_frame", lidar_frame_);
   this->get_parameter("base_frame", base_frame_);
   this->get_parameter("robot_base_frame", robot_base_frame_);
@@ -40,6 +42,8 @@ SensorScanGenerationNode::SensorScanGenerationNode(const rclcpp::NodeOptions & o
 
   odometry_sub_.subscribe(this, "lidar_odometry", qos_profile);
   laser_cloud_sub_.subscribe(this, "registered_scan", qos_profile);
+  odometry_sub_.registerCallback(
+    std::bind(&SensorScanGenerationNode::odometryHandler, this, std::placeholders::_1));
 
   sync_ = std::make_unique<message_filters::Synchronizer<SyncPolicy>>(
     SyncPolicy(100), odometry_sub_, laser_cloud_sub_);
@@ -48,26 +52,39 @@ SensorScanGenerationNode::SensorScanGenerationNode(const rclcpp::NodeOptions & o
     std::placeholders::_2));
 }
 
+void SensorScanGenerationNode::odometryHandler(
+  const nav_msgs::msg::Odometry::ConstSharedPtr & odometry_msg)
+{
+  tf2::Transform tf_odom_to_lidar;
+  tf2::Transform tf_lidar_to_chassis;
+
+  tf2::fromMsg(odometry_msg->pose.pose, tf_odom_to_lidar);
+  tf_lidar_to_robot_base_ = getTransform(
+    lidar_frame_, robot_base_frame_, odometry_msg->header.stamp);
+  tf_lidar_to_chassis = getTransform(lidar_frame_, base_frame_, odometry_msg->header.stamp);
+
+  tf_odom_to_robot_base_ = tf_odom_to_lidar * tf_lidar_to_robot_base_;
+  tf_odom_to_chassis_ = tf_odom_to_lidar * tf_lidar_to_chassis;
+  has_robot_base_pose_ = true;
+
+  publishTransform(
+    tf_odom_to_chassis_, odom_frame_, base_frame_, odometry_msg->header.stamp);
+  publishTransform(
+    tf_odom_to_robot_base_, odom_frame_, robot_base_frame_, odometry_msg->header.stamp);
+  publishOdometry(
+    tf_odom_to_robot_base_, odom_frame_, robot_base_frame_, odometry_msg->header.stamp);
+}
+
 void SensorScanGenerationNode::laserCloudAndOdometryHandler(
   const nav_msgs::msg::Odometry::ConstSharedPtr & odometry_msg,
   const sensor_msgs::msg::PointCloud2::ConstSharedPtr & pcd_msg)
 {
-  tf2::Transform tf_lidar_to_chassis;
-  tf2::Transform tf_odom_to_chassis;
-  tf2::Transform tf_odom_to_robot_base;
   tf2::Transform tf_odom_to_lidar;
 
+  if (!has_robot_base_pose_) {
+    odometryHandler(odometry_msg);
+  }
   tf2::fromMsg(odometry_msg->pose.pose, tf_odom_to_lidar);
-  tf_lidar_to_robot_base_ = getTransform(lidar_frame_, robot_base_frame_, pcd_msg->header.stamp);
-  tf_lidar_to_chassis = getTransform(lidar_frame_, base_frame_, pcd_msg->header.stamp);
-
-  tf_odom_to_chassis = tf_odom_to_lidar * tf_lidar_to_chassis;
-  tf_odom_to_robot_base = tf_odom_to_lidar * tf_lidar_to_robot_base_;
-
-  publishTransform(
-    tf_odom_to_chassis, odometry_msg->header.frame_id, base_frame_, pcd_msg->header.stamp);
-  publishOdometry(
-    tf_odom_to_robot_base, odometry_msg->header.frame_id, robot_base_frame_, pcd_msg->header.stamp);
 
   sensor_msgs::msg::PointCloud2 out;
   pcl_ros::transformPointCloud(lidar_frame_, tf_odom_to_lidar.inverse(), *pcd_msg, out);

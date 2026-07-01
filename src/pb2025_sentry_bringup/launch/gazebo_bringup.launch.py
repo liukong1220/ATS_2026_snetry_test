@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, TextSubstitution
@@ -31,6 +31,7 @@ def generate_launch_description():
     robot_xmacro_file = LaunchConfiguration("robot_xmacro_file")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
+    navigation_start_delay = LaunchConfiguration("navigation_start_delay")
 
     declare_namespace = DeclareLaunchArgument(
         "namespace",
@@ -122,6 +123,15 @@ def generate_launch_description():
     )
     declare_log_level = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
+    )
+    declare_navigation_start_delay = DeclareLaunchArgument(
+        "navigation_start_delay",
+        default_value="18.0",
+        description=(
+            "Seconds to wait before launching the navigation stack after Gazebo starts. "
+            "This keeps the integrated bringup aligned with the recommended split-flow "
+            "where the simulator and robot TF chain come up before Nav2."
+        ),
     )
 
     simulator_launch = IncludeLaunchDescription(
@@ -216,7 +226,11 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn)
     ld.add_action(declare_log_level)
     ld.add_action(simulator_launch)
-    ld.add_action(navigation_launch)
-    ld.add_action(behavior_launch)
-    ld.add_action(debug_path_recorder)
+    delayed_navigation_group = TimerAction(
+        period=navigation_start_delay,
+        actions=[navigation_launch, behavior_launch, debug_path_recorder],
+    )
+
+    ld.add_action(declare_navigation_start_delay)
+    ld.add_action(delayed_navigation_group)
     return ld

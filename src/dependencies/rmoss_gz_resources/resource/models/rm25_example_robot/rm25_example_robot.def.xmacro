@@ -41,6 +41,8 @@
             <sensor name="chassis_imu" type="imu">
                 <always_on>1</always_on>
                 <update_rate>200</update_rate>
+                <imu>
+                </imu>
             </sensor>
         </link>
         <!--front_left wheel link and joint-->
@@ -164,6 +166,8 @@
             <sensor name="gimbal_imu" type="imu">
                 <always_on>1</always_on>
                 <update_rate>200</update_rate>
+                <imu>
+                </imu>
             </sensor>
         </link>
         <!--for referee system -->

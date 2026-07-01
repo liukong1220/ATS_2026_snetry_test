@@ -27,6 +27,8 @@
         <always_on>1</always_on>
         <update_rate>200</update_rate>
         <visualize>true</visualize>
+        <imu>
+        </imu>
       </sensor>
 
       <sensor name="${prefix}mid360_lidar" type="gpu_lidar">

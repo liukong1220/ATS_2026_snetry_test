@@ -17,7 +17,8 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, TimerAction
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 
@@ -33,6 +34,7 @@ def generate_launch_description():
     world = LaunchConfiguration("world")
     gz_world_config = LaunchConfiguration("gz_world_path")
     robot_xmacro_file = LaunchConfiguration("robot_xmacro_file")
+    auto_start_simulation = LaunchConfiguration("auto_start_simulation")
 
     declare_world = DeclareLaunchArgument(
         "world",
@@ -49,6 +51,14 @@ def generate_launch_description():
         "robot_xmacro_file",
         default_value="",
         description="Robot SDF xmacro file path used for Gazebo spawning",
+    )
+    declare_auto_start_simulation = DeclareLaunchArgument(
+        "auto_start_simulation",
+        default_value="True",
+        description=(
+            "Whether to automatically unpause Gazebo after startup so the "
+            "simulation matches the recommended split-flow without manual GUI interaction."
+        ),
     )
 
     world_sdf_path = [
@@ -85,13 +95,39 @@ def generate_launch_description():
         )
     )
 
+    unpause_world = TimerAction(
+        period=8.0,
+        condition=IfCondition(auto_start_simulation),
+        actions=[
+            ExecuteProcess(
+                cmd=[
+                    "ign",
+                    "service",
+                    "-s",
+                    "/world/default/control",
+                    "--reqtype",
+                    "ignition.msgs.WorldControl",
+                    "--reptype",
+                    "ignition.msgs.Boolean",
+                    "--timeout",
+                    "3000",
+                    "--req",
+                    "pause: false",
+                ],
+                output="screen",
+            )
+        ],
+    )
+
     ld = LaunchDescription()
 
     ld.add_action(declare_world)
     ld.add_action(declare_gz_world_path)
     ld.add_action(declare_robot_xmacro_file)
+    ld.add_action(declare_auto_start_simulation)
     ld.add_action(gazebo_launch)
     ld.add_action(spawn_robots_launch)
     ld.add_action(referee_system_launch)
+    ld.add_action(unpause_world)
 
     return ld

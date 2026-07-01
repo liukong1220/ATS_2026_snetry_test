@@ -25,6 +25,7 @@ public:
   explicit SensorScanGenerationNode(const rclcpp::NodeOptions & options);
 
 private:
+  void odometryHandler(const nav_msgs::msg::Odometry::ConstSharedPtr & odometry);
   void laserCloudAndOdometryHandler(
     const nav_msgs::msg::Odometry::ConstSharedPtr & odometry,
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr & laserCloud2);
@@ -43,6 +44,7 @@ private:
   std::string lidar_frame_;
   std::string base_frame_;
   std::string robot_base_frame_;
+  std::string odom_frame_{"odom"};
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> br_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_laser_cloud_;
@@ -59,9 +61,12 @@ private:
   std::unique_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
 
   tf2::Transform tf_lidar_to_robot_base_;
+  tf2::Transform tf_odom_to_robot_base_;
+  tf2::Transform tf_odom_to_chassis_;
   tf2::Transform previous_odom_to_robot_base_;
   rclcpp::Time previous_odom_stamp_{0, 0, RCL_ROS_TIME};
   bool has_previous_odometry_ = false;
+  bool has_robot_base_pose_ = false;
 };
 
 }  // namespace sensor_scan_generation
