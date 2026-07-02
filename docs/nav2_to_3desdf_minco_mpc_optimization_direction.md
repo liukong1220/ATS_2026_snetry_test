@@ -1,6 +1,6 @@
 # 从 2.5D 语义 ESDF 到稳定比赛版与长期最终版导航主链
 
-更新时间：2026-06-23
+更新时间：2026-07-02
 
 本文档只保留两条主线：
 
@@ -457,6 +457,11 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 
 当前进度更新：
 
+0. `RC-ESDF-lite` 已完成一次关键问题修正：
+   对照 `~/参考/src/DDR-opt/utils/plan_env` 中 `RcEsdfMap` 的 signed distance 约定后，
+   修正了当前 `TraversabilityEsdfProvider` 的符号方向；
+   现在自由空间为正 clearance、障碍内部为负 penetration、边界附近为零；
+   这与现有 smoother、footprint-clearance 和后续 MINCO / safety checker 的语义保持一致。
 1. `任务 1` 已完成首版实现：
    已将当前 `TraversabilityEsdfProvider` 演进为 `RC-ESDF-lite` 形态；
    已补齐 rolling window 显式配置、统一查询接口、`slope_grid` 输入和 footprint-clearance 扩展接口；
@@ -476,6 +481,24 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    增强手动控制 Gazebo、导航链、行为链的开关能力；
    先把仿真启动过程稳定下来，再做持续的 ESDF 对比测试；
    再决定是否继续推进 `任务 3`。
+5. 2026-07-02 起，因 Gazebo 仿真修复投入过高且仍未稳定，当前执行策略调整为：
+   Gazebo 不再阻塞主线优化，只保留为可选系统级观察入口；
+   参考 `~/参考/src/DDR-opt` 的 JPS / MINCO / RC-footprint 思路和
+   `~/参考/src/nullspace_mpc`、`~/参考/src/swerve_drive`、`~/参考/src/MuJoCo-LiDAR`
+   的控制 / MuJoCo 仿真入口，优先推进自有规划控制链。
+6. `任务 3 / 任务 4` 已开始首版落地：
+   已新增 `src/pb2025_sentry_nav/minco_planner` 包；
+   包内按职责拆分为 `planning`、`trajectory`、`safety`、`debug`、`nodes`；
+   当前 `grid_astar` 已具备基于 `traversability_grid` 的最小可用 A*；
+   当前后端先输出带弧长、时间、yaw 的 `ReferenceTrajectory` 骨架，
+   后续再把参考项目中的 GCOPTER / MINCO 内核迁移进同一接口。
+7. 代码组织已进一步整理：
+   `trajectory_optimizer` 内部已按 `bspline`、`esdf`、`nav2`、`control`、`nodes` 分层；
+   原 `traversability_esdf_provider` 已按实际职责重命名为
+   `rc_traversability_esdf_provider` / `RcTraversabilityEsdfProvider`；
+   新增包内 README 说明各层职责，后续不再把规划、控制、ESDF 逻辑堆进 node wrapper。
+8. 当前整理版本已通过相关包编译：
+   `colcon build --packages-select trajectory_optimizer minco_planner --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo`。
 
 ### 5.3 V1 的阶段划分
 
@@ -513,6 +536,10 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    `rc_esdf_query_window_size_x`、`rc_esdf_query_window_size_y`、
    `traversability_slope_max_degrees` 参数并接入仿真、实机与 bringup 配置。
 4. 已补充代码与 YAML 注释，便于后续任务直接接着阅读实现。
+5. 已修正 signed distance 符号方向：
+   原实现为 `d_free - d_occ`，会导致自由空间为负、障碍内部为正；
+   当前已改为 `d_occ - d_free`，与参考项目 `RcEsdfMap` 的“外正内负”约定一致。
+   该修正会直接影响 ESDF obstacle cost、gradient 回拉、速度距离估计和后续 footprint clearance。
 
 #### 阶段 P1.5：坡度速度规则与仿真对比观察
 
@@ -539,6 +566,13 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    显式暴露 `autostart`、导航链开关和专项 RViz 入口；
    减少“每次切世界就重启整条导航链”带来的 TF 断树问题。
 
+2026-07-02 调整：
+
+1. 由于 Gazebo 仿真链长期未稳定，当前不再把本阶段作为主线阻塞项。
+2. Gazebo 后续只作为可选系统级观察入口，用于已有 topic / RViz 回归。
+3. 主线转入 P2 / P3，先把规划链接口、A* 前端、参考轨迹结构和 safety checker 跑通。
+4. MuJoCo 作为后续控制与动力学验证入口保留，优先用于 `SE2 MPC`、底盘加减速极限、轮地接触和高带宽控制验证。
+
 #### 阶段 P2：新建 `minco_planner`
 
 包内第一阶段建议只放这些模块：
@@ -553,6 +587,19 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 8. `trajectory_bridge_mppi`
 
 这个阶段的目标不是“立刻全部终局化”，而是先把自有规划链骨架和接口跑起来。
+
+当前状态补充：
+
+1. 已新增 `minco_planner` ROS2 包。
+2. 分包原则已明确：
+   A*、轨迹后端、Yaw、安全检查、局部修补和 debug marker 分别独立文件与目录实现；
+   后续迁移参考项目代码时继续按模块进入，不允许把大段逻辑堆进单一 node 文件。
+3. 当前 `minco_trajectory_optimizer` 是接口占位和时间分配骨架，不声称已经完成真实 MINCO；
+   真实 MINCO 后端应优先参考 `~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`
+   与 `~/参考/src/DDR-opt/back_end/src/optimizer.cpp`，在保持接口不变的前提下替换内部优化器。
+4. 当前 `footprint_safety_checker` 先做栅格 footprint 采样；
+   后续应参考 `~/参考/src/DDR-opt/utils/plan_env/src/rc_footprint_collision.cpp`
+   迁移“机器人 footprint SDF + 局部 occupied cell 查询”的更强实现。
 
 #### 阶段 P3：前端位置规划先用 `A*`
 

@@ -1,6 +1,6 @@
 // Copyright 2026
 
-#include "trajectory_optimizer/trajectory_optimizer_node.hpp"
+#include "trajectory_optimizer/nodes/trajectory_optimizer_node.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -261,7 +261,7 @@ TrajectoryOptimizerNode::TrajectoryOptimizerNode(const rclcpp::NodeOptions & opt
   optimizer_.setParams(params_);
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
-  traversability_esdf_provider_ = std::make_shared<TraversabilityEsdfProvider>();
+  traversability_esdf_provider_ = std::make_shared<RcTraversabilityEsdfProvider>();
   // Configure the provider once here so every subsequent grid update reuses the same
   // policy about local-window bounds and slope decoding.
   traversability_esdf_provider_->configureRollingWindow(

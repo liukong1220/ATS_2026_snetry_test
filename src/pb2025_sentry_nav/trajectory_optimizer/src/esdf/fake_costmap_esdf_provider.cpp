@@ -1,6 +1,6 @@
 // Copyright 2026
 
-#include "trajectory_optimizer/fake_costmap_esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/fake_costmap_esdf_provider.hpp"
 
 #include <algorithm>
 #include <cmath>

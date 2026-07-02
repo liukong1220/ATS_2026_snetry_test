@@ -13,7 +13,7 @@
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/header.hpp"
-#include "trajectory_optimizer/esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {

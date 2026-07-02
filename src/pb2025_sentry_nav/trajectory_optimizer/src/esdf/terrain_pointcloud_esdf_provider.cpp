@@ -1,6 +1,6 @@
 // Copyright 2026
 
-#include "trajectory_optimizer/terrain_pointcloud_esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/terrain_pointcloud_esdf_provider.hpp"
 
 #include <algorithm>
 #include <cmath>

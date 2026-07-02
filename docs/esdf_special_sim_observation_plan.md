@@ -1,14 +1,30 @@
 # 2.5D ESDF 专项仿真观察方案
 
-更新时间：2026-06-24
+更新时间：2026-07-02
 
-本文档的目标不是讨论“最终仿真器选型”，而是解决当前一个更直接的问题：
+本文档原目标不是讨论“最终仿真器选型”，而是解决当前一个更直接的问题：
 
 1. 现在的 `RC-ESDF-lite + slope_grid + trajectory_profile + governor` 到底有没有生效。
 2. 在当前仓库基础上，怎样用最少改动把效果看清楚。
 3. 为什么当前阶段优先继续用 `Gazebo + loopback`，而不是立刻切到 `MuJoCo`。
 
 ## 1. 先说结论
+
+2026-07-02 调整：
+
+当前不再让 Gazebo 仿真链阻塞主线优化。
+Gazebo / loopback 仍可用于观察已有 `RC-ESDF-lite + slope_grid + trajectory_profile + governor`
+链路，但它已经降级为“可选系统级回归入口”。
+主线转入 `minco_planner`、A* / MINCO 接口、footprint safety 和后续 SE2 MPC。
+MuJoCo 允许作为后续动力学 / 控制验证入口，尤其是底盘加减速、轮地接触、高带宽控制器和 SE2 MPC 验证。
+
+也就是说：
+
+1. Gazebo：保留为现有 ROS2 topic / RViz 观察入口，不继续作为主线前置条件。
+2. loopback：保留为最轻量的轨迹与速度链回归入口。
+3. MuJoCo：后续用于控制与动力学验证，而不是当前 ESDF 语义链的唯一观察方式。
+4. 当前优化重心：参考 `~/参考/src/DDR-opt`、`~/参考/src/nullspace_mpc`、
+   `~/参考/src/swerve_drive` 和 `~/参考/src/MuJoCo-LiDAR`，推进规划控制链自身。
 
 当前阶段不建议为了观察 `2.5D ESDF` 效果而立刻切换到 `MuJoCo`。
 

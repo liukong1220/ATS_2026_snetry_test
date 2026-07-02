@@ -1,6 +1,6 @@
 // Copyright 2026
 
-#include "trajectory_optimizer/traversability_esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/rc_traversability_esdf_provider.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -56,7 +56,7 @@ double decodeScalarGridValue(int8_t value, double max_value)
 
 }  // namespace
 
-void TraversabilityEsdfProvider::configureRollingWindow(bool enabled, double size_x, double size_y)
+void RcTraversabilityEsdfProvider::configureRollingWindow(bool enabled, double size_x, double size_y)
 {
   std::lock_guard<std::mutex> lock(mutex_);
   rolling_window_enabled_ = enabled;
@@ -65,13 +65,13 @@ void TraversabilityEsdfProvider::configureRollingWindow(bool enabled, double siz
   updateRollingWindowBoundsUnlocked();
 }
 
-void TraversabilityEsdfProvider::setSlopeGridMaxDegrees(double max_degrees)
+void RcTraversabilityEsdfProvider::setSlopeGridMaxDegrees(double max_degrees)
 {
   std::lock_guard<std::mutex> lock(mutex_);
   slope_grid_max_degrees_ = std::max(1e-3, max_degrees);
 }
 
-void TraversabilityEsdfProvider::updateGrid(
+void RcTraversabilityEsdfProvider::updateGrid(
   const nav_msgs::msg::OccupancyGrid & traversability_grid,
   int obstacle_value_threshold,
   bool unknown_is_obstacle,
@@ -178,13 +178,13 @@ void TraversabilityEsdfProvider::updateGrid(
   available_ = true;
 }
 
-bool TraversabilityEsdfProvider::available() const
+bool RcTraversabilityEsdfProvider::available() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return available_ && !distance_field_.empty() && width_ > 1 && height_ > 1;
 }
 
-double TraversabilityEsdfProvider::getDistance(double x, double y) const
+double RcTraversabilityEsdfProvider::getDistance(double x, double y) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   double gx = 0.0;
@@ -195,7 +195,7 @@ double TraversabilityEsdfProvider::getDistance(double x, double y) const
   return bilinearDistanceAt(distance_field_, gx, gy);
 }
 
-Eigen::Vector2d TraversabilityEsdfProvider::getGradient(double x, double y) const
+Eigen::Vector2d RcTraversabilityEsdfProvider::getGradient(double x, double y) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   double gx = 0.0;
@@ -207,7 +207,7 @@ Eigen::Vector2d TraversabilityEsdfProvider::getGradient(double x, double y) cons
   return bilinearGradientAt(field, gx, gy);
 }
 
-double TraversabilityEsdfProvider::getSlope(double x, double y) const
+double RcTraversabilityEsdfProvider::getSlope(double x, double y) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   double gx = 0.0;
@@ -218,13 +218,13 @@ double TraversabilityEsdfProvider::getSlope(double x, double y) const
   return bilinearDistanceAt(slope_field_, gx, gy);
 }
 
-bool TraversabilityEsdfProvider::isInsideLocalWindow(double x, double y) const
+bool RcTraversabilityEsdfProvider::isInsideLocalWindow(double x, double y) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return isInsideRollingWindowUnlocked(x, y);
 }
 
-bool TraversabilityEsdfProvider::query(double x, double y, EsdfQueryResult & result) const
+bool RcTraversabilityEsdfProvider::query(double x, double y, EsdfQueryResult & result) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   result = EsdfQueryResult {};
@@ -252,13 +252,13 @@ bool TraversabilityEsdfProvider::query(double x, double y, EsdfQueryResult & res
   return result.valid;
 }
 
-RollingWindowBounds TraversabilityEsdfProvider::getRollingWindowBounds() const
+RollingWindowBounds RcTraversabilityEsdfProvider::getRollingWindowBounds() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return rolling_window_bounds_;
 }
 
-double TraversabilityEsdfProvider::getFootprintClearance(
+double RcTraversabilityEsdfProvider::getFootprintClearance(
   const Eigen::Vector2d & position,
   double yaw,
   const std::vector<Eigen::Vector2d> & footprint_samples) const
@@ -295,7 +295,7 @@ double TraversabilityEsdfProvider::getFootprintClearance(
     min_clearance : std::numeric_limits<double>::quiet_NaN();
 }
 
-bool TraversabilityEsdfProvider::worldToGrid(double wx, double wy, double & gx, double & gy) const
+bool RcTraversabilityEsdfProvider::worldToGrid(double wx, double wy, double & gx, double & gy) const
 {
   if (resolution_ <= 0.0 || width_ == 0 || height_ == 0) {
     return false;
@@ -320,13 +320,13 @@ bool TraversabilityEsdfProvider::worldToGrid(double wx, double wy, double & gx, 
   return true;
 }
 
-std::size_t TraversabilityEsdfProvider::indexOf(unsigned int mx, unsigned int my) const
+std::size_t RcTraversabilityEsdfProvider::indexOf(unsigned int mx, unsigned int my) const
 {
   return static_cast<std::size_t>(my) * static_cast<std::size_t>(width_) +
     static_cast<std::size_t>(mx);
 }
 
-bool TraversabilityEsdfProvider::extractGridValues(
+bool RcTraversabilityEsdfProvider::extractGridValues(
   const nav_msgs::msg::OccupancyGrid & grid,
   std::vector<double> & values) const
 {
@@ -354,7 +354,7 @@ bool TraversabilityEsdfProvider::extractGridValues(
   return true;
 }
 
-bool TraversabilityEsdfProvider::extractSlopeValues(
+bool RcTraversabilityEsdfProvider::extractSlopeValues(
   const nav_msgs::msg::OccupancyGrid & grid,
   std::vector<double> & values) const
 {
@@ -382,7 +382,7 @@ bool TraversabilityEsdfProvider::extractSlopeValues(
   return true;
 }
 
-double TraversabilityEsdfProvider::combineSemanticScore(
+double RcTraversabilityEsdfProvider::combineSemanticScore(
   double traversability_score,
   double height_diff_score,
   double occupancy_ratio_score,
@@ -402,7 +402,7 @@ double TraversabilityEsdfProvider::combineSemanticScore(
     0.10 * (1.0 - ground));
 }
 
-double TraversabilityEsdfProvider::bilinearDistanceAt(
+double RcTraversabilityEsdfProvider::bilinearDistanceAt(
   const std::vector<double> & field,
   double gx,
   double gy) const
@@ -435,7 +435,7 @@ double TraversabilityEsdfProvider::bilinearDistanceAt(
     tx * ty * d11;
 }
 
-Eigen::Vector2d TraversabilityEsdfProvider::bilinearGradientAt(
+Eigen::Vector2d RcTraversabilityEsdfProvider::bilinearGradientAt(
   const std::vector<double> & field,
   double gx,
   double gy) const
@@ -470,7 +470,7 @@ Eigen::Vector2d TraversabilityEsdfProvider::bilinearGradientAt(
   return Eigen::Vector2d {grad_x, grad_y};
 }
 
-void TraversabilityEsdfProvider::rebuildSignedDistanceField(
+void RcTraversabilityEsdfProvider::rebuildSignedDistanceField(
   const std::vector<uint8_t> & obstacle_mask,
   const std::vector<uint8_t> & free_mask)
 {
@@ -555,13 +555,14 @@ void TraversabilityEsdfProvider::rebuildSignedDistanceField(
       distance_field_[i] = d_free;
       continue;
     }
-    // Standard signed-distance construction:
+    // Standard signed-distance construction used by the planner stack:
     // positive in free space, negative in obstacle space, zero near the boundary.
-    distance_field_[i] = d_free - d_occ;
+    // The optimizer interprets larger values as safer clearance.
+    distance_field_[i] = d_occ - d_free;
   }
 }
 
-void TraversabilityEsdfProvider::rebuildSmoothedDistanceField()
+void RcTraversabilityEsdfProvider::rebuildSmoothedDistanceField()
 {
   // Only the gradient field is smoothed. The signed distance itself stays raw so
   // obstacle penetration semantics do not drift due to filtering.
@@ -601,7 +602,7 @@ void TraversabilityEsdfProvider::rebuildSmoothedDistanceField()
   smoothed_distance_field_.swap(scratch);
 }
 
-bool TraversabilityEsdfProvider::isInsideRollingWindowUnlocked(double wx, double wy) const
+bool RcTraversabilityEsdfProvider::isInsideRollingWindowUnlocked(double wx, double wy) const
 {
   if (!rolling_window_bounds_.valid) {
     return false;
@@ -612,7 +613,7 @@ bool TraversabilityEsdfProvider::isInsideRollingWindowUnlocked(double wx, double
     wy >= rolling_window_bounds_.min_y && wy <= rolling_window_bounds_.max_y;
 }
 
-void TraversabilityEsdfProvider::updateRollingWindowBoundsUnlocked()
+void RcTraversabilityEsdfProvider::updateRollingWindowBoundsUnlocked()
 {
   rolling_window_bounds_ = RollingWindowBounds {};
   if (width_ == 0 || height_ == 0 || resolution_ <= 0.0) {

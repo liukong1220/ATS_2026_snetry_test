@@ -1,6 +1,6 @@
 // Copyright 2026
 
-#include "trajectory_optimizer/bspline_path_optimizer.hpp"
+#include "trajectory_optimizer/bspline/bspline_path_optimizer.hpp"
 
 #include <algorithm>
 #include <cmath>

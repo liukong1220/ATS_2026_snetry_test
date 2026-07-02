@@ -1,14 +1,14 @@
 // Copyright 2026
 
-#ifndef TRAJECTORY_OPTIMIZER__TRAVERSABILITY_ESDF_PROVIDER_HPP_
-#define TRAJECTORY_OPTIMIZER__TRAVERSABILITY_ESDF_PROVIDER_HPP_
+#ifndef TRAJECTORY_OPTIMIZER__ESDF__RC_TRAVERSABILITY_ESDF_PROVIDER_HPP_
+#define TRAJECTORY_OPTIMIZER__ESDF__RC_TRAVERSABILITY_ESDF_PROVIDER_HPP_
 
 #include <mutex>
 #include <vector>
 
 #include <Eigen/Core>
 #include "nav_msgs/msg/occupancy_grid.hpp"
-#include "trajectory_optimizer/esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {
@@ -25,10 +25,10 @@ struct RollingWindowBounds
   double max_y = 0.0;
 };
 
-class TraversabilityEsdfProvider : public EsdfProvider
+class RcTraversabilityEsdfProvider : public EsdfProvider
 {
 public:
-  TraversabilityEsdfProvider() = default;
+  RcTraversabilityEsdfProvider() = default;
 
   // RC-ESDF-lite keeps the current traversability-grid backend, but makes the
   // "this is a local rolling field" assumption explicit through configurable bounds.
@@ -115,4 +115,4 @@ private:
 
 }  // namespace trajectory_optimizer
 
-#endif  // TRAJECTORY_OPTIMIZER__TRAVERSABILITY_ESDF_PROVIDER_HPP_
+#endif  // TRAJECTORY_OPTIMIZER__ESDF__RC_TRAVERSABILITY_ESDF_PROVIDER_HPP_

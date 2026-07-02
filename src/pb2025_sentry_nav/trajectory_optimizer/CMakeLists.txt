@@ -12,13 +12,13 @@ ament_auto_find_build_dependencies()
 find_package(Eigen3 REQUIRED)
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
-  src/bspline_path_optimizer.cpp
-  src/fake_costmap_esdf_provider.cpp
-  src/terrain_pointcloud_esdf_provider.cpp
-  src/traversability_esdf_provider.cpp
-  src/trajectory_optimizer_node.cpp
-  src/nav2_bspline_smoother.cpp
-  src/trajectory_speed_governor.cpp
+  src/bspline/bspline_path_optimizer.cpp
+  src/control/trajectory_speed_governor.cpp
+  src/esdf/fake_costmap_esdf_provider.cpp
+  src/esdf/terrain_pointcloud_esdf_provider.cpp
+  src/esdf/rc_traversability_esdf_provider.cpp
+  src/nav2/nav2_bspline_smoother.cpp
+  src/nodes/trajectory_optimizer_node.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -51,4 +51,4 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_auto_package()
+ament_auto_package(USE_SCOPED_HEADER_INSTALL_DIR)

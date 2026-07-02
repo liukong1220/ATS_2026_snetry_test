@@ -8,7 +8,7 @@
 
 #include <Eigen/Core>
 #include "sensor_msgs/msg/point_cloud2.hpp"
-#include "trajectory_optimizer/esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {

@@ -1,0 +1,30 @@
+minco_planner:
+  ros__parameters:
+    grid_topic: traversability_grid
+    goal_topic: goal_pose
+    raw_path_topic: minco/raw_path
+    reference_path_topic: minco/reference_path
+    debug_marker_topic: minco/debug_markers
+    global_frame: map
+    robot_frame: base_link
+
+    # Same obstacle convention as the current traversability / RC-ESDF bridge.
+    obstacle_value_threshold: 50
+    unknown_is_obstacle: false
+    allow_diagonal: true
+
+    # Temporary time allocation before the real GCOPTER/MINCO backend is migrated.
+    reference_speed: 1.5
+    min_segment_time: 0.05
+    sample_spacing: 0.12
+
+    # Independent yaw layer. Current implementation is rate-limited tangent yaw;
+    # the interface is prepared for the later 5th-order B-spline yaw optimizer.
+    yaw_rate_limit: 2.5
+
+    footprint_length: 0.70
+    footprint_width: 0.55
+    footprint_safety_margin: 0.05
+    local_repair_enabled: true
+    local_repair_max_iterations: 2
+    local_repair_search_radius: 0.35

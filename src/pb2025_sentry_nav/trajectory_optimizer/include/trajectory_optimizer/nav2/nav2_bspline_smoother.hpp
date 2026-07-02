@@ -15,11 +15,11 @@
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "sp_msgs/msg/trajectory_profile_msg.hpp"
-#include "trajectory_optimizer/bspline_path_optimizer.hpp"
-#include "trajectory_optimizer/esdf_provider.hpp"
-#include "trajectory_optimizer/fake_costmap_esdf_provider.hpp"
-#include "trajectory_optimizer/terrain_pointcloud_esdf_provider.hpp"
-#include "trajectory_optimizer/traversability_esdf_provider.hpp"
+#include "trajectory_optimizer/bspline/bspline_path_optimizer.hpp"
+#include "trajectory_optimizer/esdf/esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/fake_costmap_esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/terrain_pointcloud_esdf_provider.hpp"
+#include "trajectory_optimizer/esdf/rc_traversability_esdf_provider.hpp"
 
 namespace trajectory_optimizer
 {
@@ -94,7 +94,7 @@ private:
   std::shared_ptr<nav2_costmap_2d::FootprintSubscriber> footprint_sub_;
   std::shared_ptr<FakeCostmapEsdfProvider> fake_esdf_provider_;
   std::shared_ptr<TerrainPointCloudEsdfProvider> terrain_esdf_provider_;
-  std::shared_ptr<TraversabilityEsdfProvider> traversability_esdf_provider_;
+  std::shared_ptr<RcTraversabilityEsdfProvider> traversability_esdf_provider_;
   EsdfProviderPtr active_esdf_provider_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr terrain_cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr traversability_grid_sub_;

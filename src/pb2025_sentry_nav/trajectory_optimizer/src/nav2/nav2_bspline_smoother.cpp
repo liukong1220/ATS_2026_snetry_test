@@ -1,6 +1,6 @@
 // Copyright 2026
 
-#include "trajectory_optimizer/nav2_bspline_smoother.hpp"
+#include "trajectory_optimizer/nav2/nav2_bspline_smoother.hpp"
 
 #include <array>
 #include <algorithm>
@@ -444,7 +444,7 @@ void Nav2BSplineSmoother::configure(
   optimizer_.clearEsdfProvider();
   fake_esdf_provider_ = std::make_shared<FakeCostmapEsdfProvider>();
   terrain_esdf_provider_ = std::make_shared<TerrainPointCloudEsdfProvider>();
-  traversability_esdf_provider_ = std::make_shared<TraversabilityEsdfProvider>();
+  traversability_esdf_provider_ = std::make_shared<RcTraversabilityEsdfProvider>();
   // Configure before subscriptions start delivering data so the first grid update
   // already reflects the intended local-window / slope semantics.
   traversability_esdf_provider_->configureRollingWindow(

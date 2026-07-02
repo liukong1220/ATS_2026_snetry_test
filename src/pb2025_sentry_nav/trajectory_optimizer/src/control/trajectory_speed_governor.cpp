@@ -1,6 +1,6 @@
 // Copyright 2026
 
-#include "trajectory_optimizer/trajectory_speed_governor.hpp"
+#include "trajectory_optimizer/control/trajectory_speed_governor.hpp"
 
 #include <algorithm>
 #include <cmath>
