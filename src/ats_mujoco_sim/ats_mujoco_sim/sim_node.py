@@ -366,6 +366,15 @@ def _lidar_process_main(config, state_queue, stop_event):
 
     msg = _pointcloud_message(config["lidar_frame_id"])
     publisher = node.create_publisher(PointCloud2, config["lidar_topic"], 1)
+    registered_scan_topic = str(config.get("registered_scan_topic", ""))
+    registered_scan_msg = _pointcloud_message(config["registered_scan_frame_id"])
+    registered_scan_publisher = None
+    if registered_scan_topic:
+        registered_scan_publisher = node.create_publisher(
+            PointCloud2,
+            registered_scan_topic,
+            1,
+        )
 
     node.get_logger().info(
         "LiDAR process started: "
@@ -422,6 +431,20 @@ def _lidar_process_main(config, state_queue, stop_event):
                     dtype=np.float32,
                 )
             _publish_pointcloud(publisher, msg, stamp, points)
+            if registered_scan_publisher is not None:
+                site = data.site(config["lidar_site"])
+                site_pos = np.asarray(site.xpos, dtype=np.float32)
+                site_rot = np.asarray(site.xmat, dtype=np.float32).reshape(3, 3)
+                registered_points = np.ascontiguousarray(
+                    np.asarray(points, dtype=np.float32) @ site_rot.T + site_pos,
+                    dtype=np.float32,
+                )
+                _publish_pointcloud(
+                    registered_scan_publisher,
+                    registered_scan_msg,
+                    stamp,
+                    registered_points,
+                )
             next_lidar_time += lidar_period
             if rate_time - next_lidar_time >= lidar_period:
                 next_lidar_time = rate_time + lidar_period
@@ -621,6 +644,8 @@ class SwerveMujocoSim(Node):
         self.declare_parameter("lidar_site", "lidar_site")
         self.declare_parameter("lidar_topic", "/local_pointcloud")
         self.declare_parameter("lidar_frame_id", "ariy")
+        self.declare_parameter("registered_scan_topic", "/registered_scan")
+        self.declare_parameter("registered_scan_frame_id", "")
         self.declare_parameter("enable_tof", True)
         self.declare_parameter("tof_backend", "cpu")
         self.declare_parameter("tof_range", 1.0)
@@ -644,6 +669,7 @@ class SwerveMujocoSim(Node):
         self.declare_parameter("left_tof_frame_id", "left_tof_link")
         self.declare_parameter("right_tof_frame_id", "right_tof_link")
         self.declare_parameter("odom_topic", "/localization")
+        self.declare_parameter("lidar_odometry_topic", "/lidar_odometry")
         self.declare_parameter("map_frame_id", "map")
         self.declare_parameter("odom_frame_id", "odom")
         self.declare_parameter("ariy_frame_id", "ariy")
@@ -822,6 +848,16 @@ class SwerveMujocoSim(Node):
             self.odom_topic,
             10,
         )
+        self.lidar_odometry_topic = str(
+            self.get_parameter("lidar_odometry_topic").value
+        )
+        self.lidar_odometry_pub = None
+        if self.lidar_odometry_topic:
+            self.lidar_odometry_pub = self.create_publisher(
+                Odometry,
+                self.lidar_odometry_topic,
+                10,
+            )
         self.tf_broadcaster = TransformBroadcaster(self)
         if self.lidar_enabled or self.tof_enabled:
             self._init_lidar_process()
@@ -1405,6 +1441,14 @@ class SwerveMujocoSim(Node):
         self.lidar_frame_id = str(self.get_parameter("lidar_frame_id").value)
         if not self.lidar_frame_id:
             self.lidar_frame_id = self.ariy_frame_id
+        self.registered_scan_topic = str(
+            self.get_parameter("registered_scan_topic").value
+        )
+        self.registered_scan_frame_id = str(
+            self.get_parameter("registered_scan_frame_id").value
+        )
+        if not self.registered_scan_frame_id:
+            self.registered_scan_frame_id = self.odom_frame_id
         self.lidar_backend = str(self.get_parameter("lidar_backend").value)
         self.tof_backend = str(self.get_parameter("tof_backend").value)
         self.lidar_line_mode = int(self.get_parameter("lidar_line_mode").value)
@@ -1489,6 +1533,8 @@ class SwerveMujocoSim(Node):
             "lidar_site": self.lidar_site,
             "lidar_topic": self.lidar_topic,
             "lidar_frame_id": self.lidar_frame_id,
+            "registered_scan_topic": self.registered_scan_topic,
+            "registered_scan_frame_id": self.registered_scan_frame_id,
             "lidar_backend": self.lidar_backend,
             "lidar_line_mode": self.lidar_line_mode,
             "lidar_rate_hz": self.lidar_rate_hz,
@@ -2010,6 +2056,8 @@ class SwerveMujocoSim(Node):
         ]
 
         self.localization_pub.publish(odom_msg)
+        if self.lidar_odometry_pub is not None:
+            self.lidar_odometry_pub.publish(odom_msg)
         self.tf_broadcaster.sendTransform(transforms)
 
     def _publish_feedback(self):

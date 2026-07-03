@@ -526,6 +526,14 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
     当前对齐入口为 `/motion_control`、`/speed_ctrl`、`/steer_ctrl`、
     `/motion_mode`、`/control_mode` 和对应反馈话题；
     上层规划控制链后续应只依赖这些统一接口，不直接绑定 MuJoCo 或具体 CAN 驱动。
+14. MuJoCo 完整导航测试入口已补齐：
+    新增 `ats_mujoco_sim mujoco_navigation.launch.py`；
+    该入口按顺序启动 MuJoCo、随机地图、`map_server`、Nav2、trajectory optimizer、
+    `twist_to_motion_ctrl` 和 RViz2；
+    同时发布 `/lidar_odometry` 与 `/registered_scan` 兼容现有 terrain_analysis 链。
+    轻量烟测已确认 map_server 能加载随机地图，Nav2 lifecycle 能把 controller、
+    smoother、planner、behavior、BT navigator、waypoint follower 和 velocity smoother
+    拉到 active。
 
 ### 5.2B 当前总结与下一对话交接
 
@@ -550,11 +558,14 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 下一对话建议直接从下面 5 件事开始：
 
 1. `MuJoCo + RViz2 + 实车接口对齐`
-   先确认 `/motion_control`、`/localization`、`/local_pointcloud`、
-   `/perception/tof/points_merged` 在仿真和实车侧可以统一 remap；
+   先确认 `/motion_control`、`/localization`、`/lidar_odometry`、
+   `/local_pointcloud`、`/registered_scan`、`/perception/tof/points_merged`
+   在仿真和实车侧可以统一 remap；
    把真实 CAN 驱动与 MuJoCo 仿真隔离在同一套接口后面。
 2. `MuJoCo 驱动 Nav2 / trajectory_optimizer`
-   让 MuJoCo 发布的 `/localization` 和点云进入现有导航 / ESDF 观察链；
+   直接使用 `ros2 launch ats_mujoco_sim mujoco_navigation.launch.py`；
+   让 MuJoCo 发布的 `/localization`、`/lidar_odometry` 和 `/registered_scan`
+   进入现有导航 / ESDF 观察链；
    RViz2 同时看 MuJoCo 动力学视图和 ESDF 专项视图。
 3. `minco_planner 接真实 MINCO`
    参考 `~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`

@@ -36,6 +36,8 @@ def generate_launch_description():
         "lidar_horizontal_resolution_deg"
     )
     lidar_topic = LaunchConfiguration("lidar_topic")
+    registered_scan_topic = LaunchConfiguration("registered_scan_topic")
+    registered_scan_frame_id = LaunchConfiguration("registered_scan_frame_id")
     enable_tof = LaunchConfiguration("enable_tof")
     tof_backend = LaunchConfiguration("tof_backend")
     tof_range = LaunchConfiguration("tof_range")
@@ -55,6 +57,7 @@ def generate_launch_description():
     left_tof_topic = LaunchConfiguration("left_tof_topic")
     right_tof_topic = LaunchConfiguration("right_tof_topic")
     odom_topic = LaunchConfiguration("odom_topic")
+    lidar_odometry_topic = LaunchConfiguration("lidar_odometry_topic")
     pose_cmd_topic = LaunchConfiguration("pose_cmd_topic")
     start_x = LaunchConfiguration("start_x")
     start_y = LaunchConfiguration("start_y")
@@ -90,6 +93,8 @@ def generate_launch_description():
             default_value="0.4",
         ),
         DeclareLaunchArgument("lidar_topic", default_value="/local_pointcloud"),
+        DeclareLaunchArgument("registered_scan_topic", default_value="/registered_scan"),
+        DeclareLaunchArgument("registered_scan_frame_id", default_value=""),
         DeclareLaunchArgument("enable_tof", default_value="true"),
         DeclareLaunchArgument("tof_backend", default_value="cpu"),
         DeclareLaunchArgument("tof_range", default_value="1.0"),
@@ -112,6 +117,7 @@ def generate_launch_description():
         DeclareLaunchArgument("left_tof_topic", default_value="/left_tof/points"),
         DeclareLaunchArgument("right_tof_topic", default_value="/right_tof/points"),
         DeclareLaunchArgument("odom_topic", default_value="/localization"),
+        DeclareLaunchArgument("lidar_odometry_topic", default_value="/lidar_odometry"),
         DeclareLaunchArgument("pose_cmd_topic", default_value="/simulation/PoseSub"),
         DeclareLaunchArgument("start_x", default_value="0.0"),
         DeclareLaunchArgument("start_y", default_value="0.0"),
@@ -157,6 +163,8 @@ def generate_launch_description():
                     lidar_horizontal_resolution_deg
                 ),
                 "lidar_topic": lidar_topic,
+                "registered_scan_topic": registered_scan_topic,
+                "registered_scan_frame_id": registered_scan_frame_id,
                 "enable_tof": enable_tof,
                 "tof_backend": tof_backend,
                 "tof_range": tof_range,
@@ -176,6 +184,7 @@ def generate_launch_description():
                 "left_tof_topic": left_tof_topic,
                 "right_tof_topic": right_tof_topic,
                 "odom_topic": odom_topic,
+                "lidar_odometry_topic": lidar_odometry_topic,
                 "pose_cmd_topic": pose_cmd_topic,
                 "start_x": start_x,
                 "start_y": start_y,

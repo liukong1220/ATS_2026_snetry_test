@@ -118,7 +118,7 @@ ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 
 ```bash
 source install/setup.bash
-ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
   use_rviz:=true \
   use_viewer:=false \
   show_viewer:=false \
@@ -131,6 +131,7 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
 
 1. [docs/ats_mujoco_sim_integration.md](./ats_mujoco_sim_integration.md)
 2. [src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz](../src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz)
+3. [src/ats_mujoco_sim/launch/mujoco_navigation.launch.py](../src/ats_mujoco_sim/launch/mujoco_navigation.launch.py)
 
 ## 3. 推荐使用的 RViz 视图
 

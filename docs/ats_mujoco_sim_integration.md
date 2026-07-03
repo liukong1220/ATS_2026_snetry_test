@@ -34,6 +34,8 @@
 MAKEFLAGS=-j1 colcon build --packages-select carstatemsgs --parallel-workers 1
 MAKEFLAGS=-j1 colcon build --packages-select manda_can_control --parallel-workers 1
 MAKEFLAGS=-j1 colcon build --packages-select ats_mujoco_sim --parallel-workers 1
+MAKEFLAGS=-j1 colcon build --packages-select ats_sentry_nav --parallel-workers 1
+MAKEFLAGS=-j1 colcon build --packages-select ats_nav_bringup --parallel-workers 1
 ```
 
 启动随机地图 + MuJoCo 仿真：
@@ -104,6 +106,40 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
   seed:=1
 ```
 
+启动完整 MuJoCo 导航测试链：
+
+```bash
+source install/setup.bash
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
+  use_rviz:=true \
+  use_viewer:=false \
+  show_viewer:=false \
+  enable_lidar:=true \
+  enable_tof:=true \
+  lidar_backend:=cpu
+```
+
+该入口会启动：
+
+1. 随机地图 / MuJoCo scene 生成。
+2. `ats_mujoco_sim` 底盘仿真、里程计、TF、LiDAR、ToF 和反馈。
+3. `map_server`，加载同一张随机地图的 `map.yaml`。
+4. Nav2 导航链，关闭 point_lio / small_gicp，直接使用 MuJoCo 定位和地图。
+5. `trajectory_optimizer` / `Nav2BSplineSmoother` 观察链。
+6. `twist_to_motion_ctrl`，把 `cmd_vel_nav2_result` 转成 `/motion_control`。
+7. RViz2，默认使用 `nav2_esdf_observe_view.rviz` 查看地图、ESDF、路径和速度剖面。
+
+低性能电脑可先关闭传感器和 RViz，只验证 Nav2 启动：
+
+```bash
+source install/setup.bash
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
+  use_rviz:=false \
+  enable_lidar:=false \
+  enable_tof:=false \
+  launch_trajectory_optimizer:=false
+```
+
 ## 4. 与实车链路的连接方式
 
 `ats_mujoco_sim` 的目标不是做一套脱离实车的独立玩具仿真，而是让仿真端尽量复用实车控制和感知接口。
@@ -124,9 +160,12 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
 | 反馈输出 | `/system_state_fb` | `manda_can_control/msg/SystemstateFb` | 系统状态反馈 |
 | 反馈输出 | `/battery_fb` | `manda_can_control/msg/BatteryFb` | 电池状态反馈 |
 | 定位输出 | `/localization` | `nav_msgs/msg/Odometry` | 导航链定位输入 |
+| 地形链定位 | `/lidar_odometry` | `nav_msgs/msg/Odometry` | 兼容 terrain_analysis 输入 |
 | 点云输出 | `/local_pointcloud` | `sensor_msgs/msg/PointCloud2` | Mid360 / lidar 等价观察入口 |
+| 地形链点云 | `/registered_scan` | `sensor_msgs/msg/PointCloud2` | 兼容 terrain_analysis 输入，点坐标为 odom/world |
 | ToF 输出 | `/perception/tof/points_merged` | `sensor_msgs/msg/PointCloud2` | 近距离侧向避障观察入口 |
 | 位姿重置 | `/simulation/PoseSub` | `carstatemsgs/msg/CarState` | 仿真调试复位入口 |
+| Nav2 输出桥接 | `cmd_vel_nav2_result -> /motion_control` | `Twist -> MotionCtrl` | 让 Nav2 / MPPI 直接驱动 MuJoCo 底盘 |
 
 实车连接建议分两层推进：
 
@@ -149,6 +188,15 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
 3. 上层：
    `Nav2 / trajectory_optimizer / minco_planner / MPC` 使用同一套输入输出话题。
 
+现阶段为了复用已有地形链，MuJoCo 会额外发布：
+
+1. `/lidar_odometry`
+   与 `/localization` 内容一致，用于兼容 `terrain_analysis` / `terrain_analysis_ext` 的历史输入名。
+2. `/registered_scan`
+   从 LiDAR local frame 转换到 `odom` 坐标后发布，用于兼容地形分析节点对“已配准点云”的假设。
+
+后续如果重构地形链，应把这些历史话题名收敛成可配置参数，而不是长期依赖固定字符串。
+
 ## 5. RViz2 观察
 
 当前已经提供 MuJoCo 专用 RViz2 配置：
@@ -169,6 +217,29 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
   enable_tof:=true \
   lidar_backend:=cpu
 ```
+
+完整导航测试推荐使用：
+
+```bash
+source install/setup.bash
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py use_rviz:=true
+```
+
+该模式默认使用：
+
+```text
+src/ats_sentry_nav/ats_nav_bringup/rviz/nav2_esdf_observe_view.rviz
+```
+
+用于观察：
+
+1. `/map`
+2. `global_costmap` / `local_costmap`
+3. `plan`
+4. `smoothed_path_visual`
+5. `trajectory_esdf_debug`
+6. `trajectory_profile_markers`
+7. `traversability_*_grid`
 
 如果只想单独打开 RViz2：
 
@@ -216,6 +287,8 @@ LiDAR 后端说明：
 6. 新增 `use_rviz` / `rviz_config_file` launch 参数和 MuJoCo 专用 RViz2 观察配置。
 7. `lidar_backend` 默认改为 `cpu`，并增加非 CPU 后端不可用时的自动 CPU 降级。
 8. RViz2 增加 `rviz_delay_sec` 延迟启动，默认先启动 MuJoCo 控制器和传感器，再打开观察界面。
+9. 新增 `mujoco_navigation.launch.py`，用于完整拉起 MuJoCo、map_server、Nav2、
+   trajectory_optimizer、Twist->MotionCtrl 桥和 RViz2。
 
 运行环境已检查存在：
 
