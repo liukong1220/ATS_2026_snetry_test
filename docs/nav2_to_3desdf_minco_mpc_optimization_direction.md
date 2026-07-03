@@ -508,6 +508,76 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
     `ats_mujoco_sim` 内嵌 `mujoco_lidar`，可用于后续底盘动力学、
     lidar / ToF 感知和 SE2 MPC 控制验证；
     详细入口见 `docs/ats_mujoco_sim_integration.md`。
+11. 2026-07-03 已完成剩余 `pb` 前缀迁移：
+    `pb_nav2_plugins`、`pb_teleop_twist_joy`、`pb_rm_interfaces`
+    已迁移为 `ats_nav2_plugins`、`ats_teleop_twist_joy`、`ats_rm_interfaces`；
+    同步更新 C++ namespace、include 路径、pluginlib class、launch 节点名、
+    Nav2 参数和上层包依赖。
+12. MuJoCo 仿真已补齐 RViz2 观察入口：
+    新增 `src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz`；
+    `ats_mujoco_sim.launch.py` 与 `planner_mujoco.launch.py`
+    已支持 `use_rviz` 和 `rviz_config_file` 参数；
+    后续可以直接用 RViz2 观察 TF、`/localization`、`/local_pointcloud`
+    和 `/perception/tof/points_merged`。
+13. MuJoCo 与实车连接的原则已经明确：
+    仿真端优先复用实车控制 / 反馈接口；
+    当前对齐入口为 `/motion_control`、`/speed_ctrl`、`/steer_ctrl`、
+    `/motion_mode`、`/control_mode` 和对应反馈话题；
+    上层规划控制链后续应只依赖这些统一接口，不直接绑定 MuJoCo 或具体 CAN 驱动。
+
+### 5.2B 当前总结与下一对话交接
+
+截至 2026-07-03，当前仓库可以按下面状态理解：
+
+1. 项目命名已基本进入 `ATS` 体系。
+   旧 `pb2025_` 与构建相关 `pb_` 包名已经迁移；
+   新对话不要再从 `src/pb2025_sentry_nav` 路径继续工作。
+   当前导航主目录是 `src/ats_sentry_nav`。
+2. 当前 ESDF 主线不是 fake costmap ESDF。
+   `fake_costmap_esdf_provider` 只作为 costmap fallback / debug adapter；
+   主线应继续围绕 `RcTraversabilityEsdfProvider`、
+   `RC-ESDF-lite`、`slope_grid`、footprint-aware safety 和后续 MINCO 推进。
+3. Gazebo 不再阻塞主线。
+   Gazebo / loopback 仍保留为系统回归和 ESDF 观察入口；
+   但下一阶段主要精力应放在自有规划控制链和 MuJoCo 动力学验证上。
+4. MuJoCo 已经进入仓库，但它当前还是“可用入口”，不是完整实车闭环替代品。
+   下一步应把它与真实底盘接口、定位话题、雷达 / ToF 话题和 RViz2 观察流程进一步对齐。
+5. `minco_planner` 已经有包结构、A* 骨架、参考轨迹结构、Yaw/safety/debug 分层。
+   真实 MINCO 内核、JPS、footprint SDF 和 `SE2 MPC` 仍是下一阶段主任务。
+
+下一对话建议直接从下面 5 件事开始：
+
+1. `MuJoCo + RViz2 + 实车接口对齐`
+   先确认 `/motion_control`、`/localization`、`/local_pointcloud`、
+   `/perception/tof/points_merged` 在仿真和实车侧可以统一 remap；
+   把真实 CAN 驱动与 MuJoCo 仿真隔离在同一套接口后面。
+2. `MuJoCo 驱动 Nav2 / trajectory_optimizer`
+   让 MuJoCo 发布的 `/localization` 和点云进入现有导航 / ESDF 观察链；
+   RViz2 同时看 MuJoCo 动力学视图和 ESDF 专项视图。
+3. `minco_planner 接真实 MINCO`
+   参考 `~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`
+   和 `optimizer.cpp`，保持当前接口不变，替换内部占位后端。
+4. `footprint-aware safety`
+   参考 `~/参考/src/DDR-opt/utils/plan_env/src/rc_footprint_collision.cpp`，
+   把当前 footprint 栅格采样升级为更强的 RC-footprint collision / SDF 查询。
+5. `SE2 MPC 前置接口`
+   先固化 `ReferenceTrajectory`、底盘状态、控制输出和反馈话题；
+   再从 `MPPI` 过渡到 `SE2 MPC`，不要把控制器与仿真器强耦合。
+
+新对话开始时建议先运行的轻量检查：
+
+```bash
+colcon list | rg 'ats_mujoco_sim|ats_rm_interfaces|ats_nav2_plugins|ats_teleop_twist_joy|trajectory_optimizer|minco_planner'
+rg -n "pb2025|pb_rm_interfaces|pb_nav2_plugins|pb_teleop_twist_joy" src docs --glob '!build/**' --glob '!install/**' --glob '!log/**' || true
+```
+
+低性能机器继续使用单包低并发构建：
+
+```bash
+MAKEFLAGS=-j1 colcon build --packages-select ats_mujoco_sim --parallel-workers 1
+MAKEFLAGS=-j1 colcon build --packages-select trajectory_optimizer --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+MAKEFLAGS=-j1 colcon build --packages-select minco_planner --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+```
 
 ### 5.3 V1 的阶段划分
 

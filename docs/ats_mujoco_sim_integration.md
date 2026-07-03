@@ -43,6 +43,31 @@ source install/setup.bash
 ros2 launch ats_mujoco_sim planner_mujoco.launch.py use_viewer:=true
 ```
 
+启动 MuJoCo 仿真并同时打开 RViz2：
+
+```bash
+source install/setup.bash
+ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
+  use_viewer:=false \
+  show_viewer:=false \
+  use_rviz:=true \
+  enable_lidar:=true \
+  enable_tof:=true
+```
+
+默认 RViz2 配置为：
+
+```text
+src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
+```
+
+该视图默认显示：
+
+1. `TF`
+2. `/localization`
+3. `/local_pointcloud`
+4. `/perception/tof/points_merged`
+
 无界面轻量启动：
 
 ```bash
@@ -69,7 +94,87 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
   seed:=1
 ```
 
-## 4. 关键话题
+## 4. 与实车链路的连接方式
+
+`ats_mujoco_sim` 的目标不是做一套脱离实车的独立玩具仿真，而是让仿真端尽量复用实车控制和感知接口。
+这样后续调 `MPPI / SE2 MPC / 底盘限速 / 高带宽控制器` 时，可以在仿真和实车之间少改 launch 与参数。
+
+当前对齐关系如下：
+
+| 方向 | MuJoCo 仿真话题 / 服务 | 类型 | 对齐目标 |
+| --- | --- | --- | --- |
+| 控制输入 | `/motion_control` | `manda_can_control/msg/MotionCtrl` | 实车底盘速度控制入口 |
+| 控制输入 | `/speed_ctrl` | `manda_can_control/msg/SpeedCtrl` | 单轮速度控制调试入口 |
+| 控制输入 | `/steer_ctrl` | `manda_can_control/msg/SteerCtrl` | 单轮转向控制调试入口 |
+| 模式切换 | `/motion_mode` | `manda_can_control/srv/MotionMode` | 实车运动模式切换 |
+| 模式切换 | `/control_mode` | `manda_can_control/srv/ControlMode` | 实车控制模式切换 |
+| 反馈输出 | `/motion_fb` | `manda_can_control/msg/MotionFb` | 底盘运动反馈 |
+| 反馈输出 | `/speed_fb` | `manda_can_control/msg/SpeedFb` | 单轮速度反馈 |
+| 反馈输出 | `/steer_fb` | `manda_can_control/msg/SteerFb` | 单轮转向反馈 |
+| 反馈输出 | `/system_state_fb` | `manda_can_control/msg/SystemstateFb` | 系统状态反馈 |
+| 反馈输出 | `/battery_fb` | `manda_can_control/msg/BatteryFb` | 电池状态反馈 |
+| 定位输出 | `/localization` | `nav_msgs/msg/Odometry` | 导航链定位输入 |
+| 点云输出 | `/local_pointcloud` | `sensor_msgs/msg/PointCloud2` | Mid360 / lidar 等价观察入口 |
+| ToF 输出 | `/perception/tof/points_merged` | `sensor_msgs/msg/PointCloud2` | 近距离侧向避障观察入口 |
+| 位姿重置 | `/simulation/PoseSub` | `carstatemsgs/msg/CarState` | 仿真调试复位入口 |
+
+实车连接建议分两层推进：
+
+1. `接口同名层`
+   保持仿真话题、服务和消息类型尽量与实车一致。
+   上层规划控制节点只依赖 `/motion_control`、`/localization`、点云和反馈话题，
+   不直接关心当前后端是 MuJoCo 还是实车 CAN。
+2. `桥接适配层`
+   如果实车底盘实际入口不是 `manda_can_control`，则单独写桥接节点，
+   只在桥接层做消息转换。
+   不要让 `minco_planner`、`trajectory_optimizer` 或未来 `SE2 MPC`
+   直接依赖某个硬件驱动的私有字段。
+
+推荐实车 / 仿真切换方式：
+
+1. 仿真：
+   启动 `ats_mujoco_sim`，由 MuJoCo 发布 `/localization`、点云和底盘反馈。
+2. 实车：
+   不启动 `ats_mujoco_sim`，由真实定位、雷达、ToF、CAN 驱动发布同名或经 remap 后同名的话题。
+3. 上层：
+   `Nav2 / trajectory_optimizer / minco_planner / MPC` 使用同一套输入输出话题。
+
+## 5. RViz2 观察
+
+当前已经提供 MuJoCo 专用 RViz2 配置：
+
+```text
+src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
+```
+
+推荐启动：
+
+```bash
+source install/setup.bash
+ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
+  use_rviz:=true \
+  use_viewer:=false \
+  show_viewer:=false \
+  enable_lidar:=true \
+  enable_tof:=true
+```
+
+如果只想单独打开 RViz2：
+
+```bash
+source install/setup.bash
+rviz2 -d install/ats_mujoco_sim/share/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
+```
+
+RViz2 中优先确认：
+
+1. Fixed Frame 为 `map`。
+2. `map -> odom -> base_link` TF 是否连续。
+3. `/localization` 的机器人位姿是否跟 MuJoCo 中运动一致。
+4. `/local_pointcloud` 是否跟随 lidar frame。
+5. `/perception/tof/points_merged` 是否贴近车体两侧并能反映近距离障碍。
+
+## 6. 关键话题
 
 1. `/localization`
    仿真里程计。
@@ -80,7 +185,7 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
 4. `/simulation/PoseSub`
    位姿重置输入。
 
-## 5. 当前验证结果
+## 7. 当前验证结果
 
 已完成：
 
@@ -90,6 +195,7 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
 3. `ros2 launch ats_mujoco_sim planner_mujoco.launch.py --show-args`。
 4. 随机地图与 MuJoCo scene 生成。
 5. 无 viewer、无 lidar/tof 的 8 秒短启动烟测，节点能加载 MuJoCo 模型。
+6. 新增 `use_rviz` / `rviz_config_file` launch 参数和 MuJoCo 专用 RViz2 观察配置。
 
 运行环境已检查存在：
 

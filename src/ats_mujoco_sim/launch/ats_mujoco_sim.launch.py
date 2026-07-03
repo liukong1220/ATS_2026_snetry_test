@@ -2,8 +2,11 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
+from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -56,6 +59,8 @@ def generate_launch_description():
     start_y = LaunchConfiguration("start_y")
     start_z = LaunchConfiguration("start_z")
     start_yaw = LaunchConfiguration("start_yaw")
+    use_rviz = LaunchConfiguration("use_rviz")
+    rviz_config_file = LaunchConfiguration("rviz_config_file")
 
     return LaunchDescription([
         DeclareLaunchArgument("model_path", default_value=""),
@@ -110,6 +115,15 @@ def generate_launch_description():
         DeclareLaunchArgument("start_y", default_value="0.0"),
         DeclareLaunchArgument("start_z", default_value="0.18"),
         DeclareLaunchArgument("start_yaw", default_value="0.0"),
+        DeclareLaunchArgument("use_rviz", default_value="false"),
+        DeclareLaunchArgument(
+            "rviz_config_file",
+            default_value=PathJoinSubstitution([
+                FindPackageShare("ats_mujoco_sim"),
+                "rviz",
+                "mujoco_sim_observe.rviz",
+            ]),
+        ),
         Node(
             package="ats_mujoco_sim",
             executable="ats_mujoco_sim",
@@ -165,5 +179,13 @@ def generate_launch_description():
                 "start_z": start_z,
                 "start_yaw": start_yaw,
             }],
+        ),
+        Node(
+            condition=IfCondition(use_rviz),
+            package="rviz2",
+            executable="rviz2",
+            name="ats_mujoco_sim_rviz2",
+            output="screen",
+            arguments=["-d", rviz_config_file],
         ),
     ])

@@ -31,7 +31,9 @@ MuJoCo 允许作为后续动力学 / 控制验证入口，尤其是底盘加减�
 1. MuJoCo 入口已迁入当前仓库，包名为 `ats_mujoco_sim`。
 2. 迁移内容包括随机地图生成、MuJoCo scene 生成、底盘仿真节点、
    lidar / ToF 点云桥接和内嵌 `mujoco_lidar`。
-3. 详细启动与验证方式见 [ATS MuJoCo 仿真接入说明](./ats_mujoco_sim_integration.md)。
+3. 已新增 MuJoCo 专用 RViz2 观察配置：
+   `src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz`。
+4. 详细启动与验证方式见 [ATS MuJoCo 仿真接入说明](./ats_mujoco_sim_integration.md)。
 
 当前阶段不建议为了观察 `2.5D ESDF` 效果而立刻切换到 `MuJoCo`。
 
@@ -103,6 +105,32 @@ ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 1. [README.md](../README.md)
 2. [src/ats_sentry_bringup/launch/loopback_nav_only.launch.py](../src/ats_sentry_bringup/launch/loopback_nav_only.launch.py)
 
+### C. MuJoCo + RViz2：动力学与实车接口对齐验证
+
+适合验证：
+
+1. 底盘运动学 / 动力学响应是否符合实车直觉。
+2. `/motion_control` 到 `/motion_fb`、`/speed_fb`、`/steer_fb` 的闭环是否可观测。
+3. `/localization`、`/local_pointcloud`、`/perception/tof/points_merged` 是否能被 RViz2 稳定观察。
+4. 后续 `SE2 MPC` 输出是否能在仿真和实车之间复用同一控制入口。
+
+当前入口：
+
+```bash
+source install/setup.bash
+ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
+  use_rviz:=true \
+  use_viewer:=false \
+  show_viewer:=false \
+  enable_lidar:=true \
+  enable_tof:=true
+```
+
+参考：
+
+1. [docs/ats_mujoco_sim_integration.md](./ats_mujoco_sim_integration.md)
+2. [src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz](../src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz)
+
 ## 3. 推荐使用的 RViz 视图
 
 为了避免默认视图里的信息太多、太杂，当前新增了一份更聚焦的 ESDF 观察视图：
@@ -149,6 +177,20 @@ ros2 launch ats_sentry_bringup loopback_nav_only.launch.py \
 原因很简单：
 
 1. 当前要看的不是控制器采样细节，而是 ESDF 与坡度语义是否真正改变了轨迹和速度链。
+
+MuJoCo 动力学观察使用另一份更轻的 RViz2 配置：
+
+1. [src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz](../src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz)
+
+这份视图默认强调：
+
+1. `TF`
+2. `/localization`
+3. `/local_pointcloud`
+4. `/perception/tof/points_merged`
+
+原因是 MuJoCo 这一侧先要确认动力学、定位、点云和 ToF 桥接是否与实车接口一致；
+等导航链接入后，再叠加 `nav2_esdf_observe_view.rviz` 中的 plan、ESDF debug 和 profile marker。
 
 ## 4. 必看话题
 
