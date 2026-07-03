@@ -321,17 +321,36 @@ def _lidar_process_main(config, state_queue, stop_event):
 
     geomgroup = np.ones((mujoco.mjNGROUP,), dtype=np.ubyte)
     geomgroup[3] = 0
-    lidar = MjLidarWrapper(
-        model,
-        site_name=config["lidar_site"],
-        backend=config["lidar_backend"],
-        cutoff_dist=scan_gen.AIRY96_MAX_RANGE,
-        args={
-            "bodyexclude": bodyexclude,
-            "geomgroup": geomgroup,
-            "ti_init_args": {"offline_cache": False},
-        },
-    )
+    lidar_args = {
+        "bodyexclude": bodyexclude,
+        "geomgroup": geomgroup,
+        "ti_init_args": {"offline_cache": False},
+    }
+    try:
+        lidar = MjLidarWrapper(
+            model,
+            site_name=config["lidar_site"],
+            backend=config["lidar_backend"],
+            cutoff_dist=scan_gen.AIRY96_MAX_RANGE,
+            args=lidar_args,
+        )
+    except ImportError as exc:
+        requested_backend = str(config["lidar_backend"])
+        if requested_backend.lower() == "cpu":
+            raise
+        node.get_logger().warning(
+            "LiDAR backend '%s' is unavailable (%s); falling back to CPU. "
+            "Use lidar_backend:=cpu on low-power machines to avoid this warning."
+            % (requested_backend, exc)
+        )
+        config["lidar_backend"] = "cpu"
+        lidar = MjLidarWrapper(
+            model,
+            site_name=config["lidar_site"],
+            backend="cpu",
+            cutoff_dist=scan_gen.AIRY96_MAX_RANGE,
+            args=lidar_args,
+        )
 
     line_mode = config["lidar_line_mode"]
     if line_mode == 46:

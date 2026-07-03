@@ -94,6 +94,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("use_viewer", default_value="true"),
         DeclareLaunchArgument("show_viewer", default_value=LaunchConfiguration("use_viewer")),
         DeclareLaunchArgument("use_rviz", default_value="false"),
+        DeclareLaunchArgument("rviz_delay_sec", default_value="4.0"),
         DeclareLaunchArgument(
             "rviz_config_file",
             default_value=(_package_root() / "rviz" / "mujoco_sim_observe.rviz").as_posix(),
@@ -103,7 +104,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("truth_rate_hz", default_value="10.0"),
         DeclareLaunchArgument("command_timeout", default_value="0.5"),
         DeclareLaunchArgument("enable_lidar", default_value="true"),
-        DeclareLaunchArgument("lidar_backend", default_value="gpu"),
+        DeclareLaunchArgument("lidar_backend", default_value="cpu"),
         DeclareLaunchArgument("lidar_line_mode", default_value="96"),   # 48
         DeclareLaunchArgument("lidar_rate_hz", default_value="10.0"),
         DeclareLaunchArgument("lidar_rate_clock", default_value="wall"),
@@ -168,6 +169,7 @@ def generate_launch_description() -> LaunchDescription:
             "use_viewer": LaunchConfiguration("use_viewer"),
             "show_viewer": LaunchConfiguration("show_viewer"),
             "use_rviz": LaunchConfiguration("use_rviz"),
+            "rviz_delay_sec": LaunchConfiguration("rviz_delay_sec"),
             "rviz_config_file": LaunchConfiguration("rviz_config_file"),
             "sim_rate_hz": LaunchConfiguration("sim_rate_hz"),
             "feedback_rate_hz": LaunchConfiguration("feedback_rate_hz"),

@@ -2,6 +2,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.actions import TimerAction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch.substitutions import PathJoinSubstitution
@@ -61,6 +62,7 @@ def generate_launch_description():
     start_yaw = LaunchConfiguration("start_yaw")
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
+    rviz_delay_sec = LaunchConfiguration("rviz_delay_sec")
 
     return LaunchDescription([
         DeclareLaunchArgument("model_path", default_value=""),
@@ -78,7 +80,7 @@ def generate_launch_description():
         DeclareLaunchArgument("use_viewer", default_value="true"),
         DeclareLaunchArgument("viewer_rate_hz", default_value="30.0"),
         DeclareLaunchArgument("enable_lidar", default_value="false"),
-        DeclareLaunchArgument("lidar_backend", default_value="gpu"),
+        DeclareLaunchArgument("lidar_backend", default_value="cpu"),
         DeclareLaunchArgument("lidar_line_mode", default_value="96"),
         DeclareLaunchArgument("lidar_rate_hz", default_value="10.0"),
         DeclareLaunchArgument("lidar_rate_clock", default_value="wall"),
@@ -116,6 +118,7 @@ def generate_launch_description():
         DeclareLaunchArgument("start_z", default_value="0.18"),
         DeclareLaunchArgument("start_yaw", default_value="0.0"),
         DeclareLaunchArgument("use_rviz", default_value="false"),
+        DeclareLaunchArgument("rviz_delay_sec", default_value="4.0"),
         DeclareLaunchArgument(
             "rviz_config_file",
             default_value=PathJoinSubstitution([
@@ -180,12 +183,17 @@ def generate_launch_description():
                 "start_yaw": start_yaw,
             }],
         ),
-        Node(
-            condition=IfCondition(use_rviz),
-            package="rviz2",
-            executable="rviz2",
-            name="ats_mujoco_sim_rviz2",
-            output="screen",
-            arguments=["-d", rviz_config_file],
+        TimerAction(
+            period=rviz_delay_sec,
+            actions=[
+                Node(
+                    condition=IfCondition(use_rviz),
+                    package="rviz2",
+                    executable="rviz2",
+                    name="ats_mujoco_sim_rviz2",
+                    output="screen",
+                    arguments=["-d", rviz_config_file],
+                ),
+            ],
         ),
     ])

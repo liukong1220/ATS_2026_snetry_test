@@ -519,6 +519,8 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
     已支持 `use_rviz` 和 `rviz_config_file` 参数；
     后续可以直接用 RViz2 观察 TF、`/localization`、`/local_pointcloud`
     和 `/perception/tof/points_merged`。
+    当前 RViz2 默认延迟启动，先等 MuJoCo 控制器和传感器进程起来；
+    `lidar_backend` 默认使用 `cpu`，避免低性能机器缺少 Taichi 时 LiDAR 子进程直接退出。
 13. MuJoCo 与实车连接的原则已经明确：
     仿真端优先复用实车控制 / 反馈接口；
     当前对齐入口为 `/motion_control`、`/speed_ctrl`、`/steer_ctrl`、

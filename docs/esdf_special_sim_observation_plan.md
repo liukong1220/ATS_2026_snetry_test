@@ -123,7 +123,8 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
   use_viewer:=false \
   show_viewer:=false \
   enable_lidar:=true \
-  enable_tof:=true
+  enable_tof:=true \
+  lidar_backend:=cpu
 ```
 
 参考：

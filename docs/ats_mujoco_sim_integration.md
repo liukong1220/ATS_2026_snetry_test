@@ -51,8 +51,10 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
   use_viewer:=false \
   show_viewer:=false \
   use_rviz:=true \
+  rviz_delay_sec:=4.0 \
   enable_lidar:=true \
-  enable_tof:=true
+  enable_tof:=true \
+  lidar_backend:=cpu
 ```
 
 默认 RViz2 配置为：
@@ -67,6 +69,14 @@ src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
 2. `/localization`
 3. `/local_pointcloud`
 4. `/perception/tof/points_merged`
+
+默认启动顺序是：
+
+1. 生成随机地图和 MuJoCo scene。
+2. 启动 `ats_mujoco_sim` 控制器、里程计、反馈和传感器进程。
+3. 延迟 `rviz_delay_sec` 秒后启动 RViz2。
+
+这样可以避免 RViz2 比 MuJoCo 控制器更早启动时，看不到 TF、里程计或点云而误判为仿真失败。
 
 无界面轻量启动：
 
@@ -156,7 +166,8 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
   use_viewer:=false \
   show_viewer:=false \
   enable_lidar:=true \
-  enable_tof:=true
+  enable_tof:=true \
+  lidar_backend:=cpu
 ```
 
 如果只想单独打开 RViz2：
@@ -173,6 +184,13 @@ RViz2 中优先确认：
 3. `/localization` 的机器人位姿是否跟 MuJoCo 中运动一致。
 4. `/local_pointcloud` 是否跟随 lidar frame。
 5. `/perception/tof/points_merged` 是否贴近车体两侧并能反映近距离障碍。
+
+LiDAR 后端说明：
+
+1. 默认 `lidar_backend:=cpu`，低性能电脑优先使用这个配置。
+2. `lidar_backend:=gpu` 当前会尝试 Taichi 后端，需要本机安装 `taichi`。
+3. 如果用户手动传入 `gpu` / `taichi` 但环境没有 Taichi，节点会自动回退到 CPU 后端并输出 warning。
+4. 后续做高频点云或大规模场景时，再单独评估 Taichi / GPU 后端，不要让 GPU 依赖阻塞基础仿真观察。
 
 ## 6. 关键话题
 
@@ -196,6 +214,8 @@ RViz2 中优先确认：
 4. 随机地图与 MuJoCo scene 生成。
 5. 无 viewer、无 lidar/tof 的 8 秒短启动烟测，节点能加载 MuJoCo 模型。
 6. 新增 `use_rviz` / `rviz_config_file` launch 参数和 MuJoCo 专用 RViz2 观察配置。
+7. `lidar_backend` 默认改为 `cpu`，并增加非 CPU 后端不可用时的自动 CPU 降级。
+8. RViz2 增加 `rviz_delay_sec` 延迟启动，默认先启动 MuJoCo 控制器和传感器，再打开观察界面。
 
 运行环境已检查存在：
 
