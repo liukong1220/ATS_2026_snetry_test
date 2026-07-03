@@ -20,8 +20,8 @@
 当前默认主线不是 `standard_robot_pp_ros2::robot_decision`，而是：
 
 ```text
-pb2025_sentry_bringup/bringup.launch.py
-  -> pb2025_sentry_behavior
+ats_sentry_bringup/bringup.launch.py
+  -> ats_sentry_behavior
   -> SendNavThroughPoses
   -> /navigate_through_poses
   -> SmacPlannerHybrid
@@ -36,12 +36,12 @@ pb2025_sentry_bringup/bringup.launch.py
 
 关键事实：
 
-1. 默认总入口是 [`../src/pb2025_sentry_bringup/launch/bringup.launch.py`](../src/pb2025_sentry_bringup/launch/bringup.launch.py)
+1. 默认总入口是 [`../src/ats_sentry_bringup/launch/bringup.launch.py`](../src/ats_sentry_bringup/launch/bringup.launch.py)
 2. 它调用 `standard_robot_pp_ros2.launch.py` 时显式传入：
    - `launch_robot_decision := False`
-3. 当前主决策树在 [`../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml`](../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml)
+3. 当前主决策树在 [`../src/ats_sentry_behavior/behavior_trees/rmul_2026.xml`](../src/ats_sentry_behavior/behavior_trees/rmul_2026.xml)
 4. 当前真正负责给 Nav2 发 action 的是：
-   - [`../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp`](../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp)
+   - [`../src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp`](../src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp)
 
 所以如果你在排查当前哨兵主线，请不要先去改 `standard_robot_pp_ros2::robot_decision`。
 
@@ -78,8 +78,8 @@ pb2025_sentry_bringup/bringup.launch.py
 
 对应实现位置：
 
-- `src/pb2025_sentry_behavior/include/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.hpp`
-- `src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp`
+- `src/ats_sentry_behavior/include/ats_sentry_behavior/plugins/action/send_nav_through_poses.hpp`
+- `src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp`
 
 这样做的核心目的，是绕开 `RosActionNode` 在 `cancel during halt()` 这条链路上的已知问题。
 
@@ -224,17 +224,17 @@ pb2025_sentry_bringup/bringup.launch.py
 
 已经具备，并且正在使用：
 
-- [`../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp`](../src/pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp)
-- [`../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml`](../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml)
-- [`../src/pb2025_sentry_behavior/behavior_trees/vision_test.xml`](../src/pb2025_sentry_behavior/behavior_trees/vision_test.xml)
+- [`../src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp`](../src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp)
+- [`../src/ats_sentry_behavior/behavior_trees/rmul_2026.xml`](../src/ats_sentry_behavior/behavior_trees/rmul_2026.xml)
+- [`../src/ats_sentry_behavior/behavior_trees/vision_test.xml`](../src/ats_sentry_behavior/behavior_trees/vision_test.xml)
 
 ### 5.2 Nav2 配置侧
 
 当前 Nav2 配置已经包含 ThroughPoses 相关能力，主线可以直接调用：
 
 - [`../src/loopback_sim/params/nav2_params.yaml`](../src/loopback_sim/params/nav2_params.yaml)
-- [`../src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`](../src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)
-- [`../src/pb2025_sentry_bringup/params/node_params.yaml`](../src/pb2025_sentry_bringup/params/node_params.yaml)
+- [`../src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml`](../src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml)
+- [`../src/ats_sentry_bringup/params/node_params.yaml`](../src/ats_sentry_bringup/params/node_params.yaml)
 
 ### 5.3 RViz 观察
 

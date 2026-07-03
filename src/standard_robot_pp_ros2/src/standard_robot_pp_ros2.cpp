@@ -296,7 +296,7 @@ void StandardRobotPpRos2Node::getParams()
   transient_zero_cmd_angular_epsilon_ =
     declare_parameter("transient_zero_cmd_angular_epsilon", 1e-3);
   cmd_vel_watchdog_timeout_ms_ = declare_parameter("cmd_vel_watchdog_timeout_ms", 300);
-  // 上层行为树通过该话题下发姿态模式，默认值与 pb2025_sentry_behavior 保持一致。
+  // 上层行为树通过该话题下发姿态模式，默认值与 ats_sentry_behavior 保持一致。
   robot_mode_topic_ = declare_parameter("robot_mode_topic", std::string("decision/robot_mode"));
 }
 

@@ -1,4 +1,4 @@
-# pb2025_sentry_ws
+# ats_sentry_ws
 
 ![PolarBear Logo](https://raw.githubusercontent.com/SMBU-PolarBear-Robotics-Team/.github/main/.docs/image/polarbear_logo_text.png)
 
@@ -34,11 +34,11 @@ sudo pip install vcstool2
 ```
 
 ```bash
-git clone https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_ws.git
+git clone https://github.com/SMBU-PolarBear-Robotics-Team/ats_sentry_ws.git
 ```
 
 ```bash
-cd pb2025_sentry_ws
+cd ats_sentry_ws
 ```
 
 ```bash
@@ -62,14 +62,14 @@ colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release --paralle
 ```
 
 > [!NOTE]
-> 推荐使用 --symlink-install 选项来构建你的工作空间，因为 pb2025_sentry_ws 广泛使用了 launch.py 文件和 yaml 文件。这个构建参数会为那些非编译的源文件使用符号链接，这意味着当你调整参数文件时，不需要反复重建，只需要重新启动即可。
+> 推荐使用 --symlink-install 选项来构建你的工作空间，因为 ats_sentry_ws 广泛使用了 launch.py 文件和 yaml 文件。这个构建参数会为那些非编译的源文件使用符号链接，这意味着当你调整参数文件时，不需要反复重建，只需要重新启动即可。
 
 ### 2.4 Running
 
-将会运行串口通信、导航、行为树决策与 rosbag 触发节点，实车主参数读取自 [node_params](./src/pb2025_sentry_bringup/params/node_params.yaml)。
+将会运行串口通信、导航、行为树决策与 rosbag 触发节点，实车主参数读取自 [node_params](./src/ats_sentry_bringup/params/node_params.yaml)。
 
 ```bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py \
+ros2 launch ats_sentry_bringup bringup.launch.py \
 world:=<YOUR_WORLD_NAME> \
 slam:=False \
 use_rviz:=True
@@ -78,7 +78,7 @@ use_rviz:=True
 ## 3. 常用调试启动命令
 
 > [!NOTE]
-> 请自行替换 `<YOUR_WORLD_NAME>` 为你的 map / pcd 文件名；如需改整车参数，优先修改 [node_params](./src/pb2025_sentry_bringup/params/node_params.yaml)。
+> 请自行替换 `<YOUR_WORLD_NAME>` 为你的 map / pcd 文件名；如需改整车参数，优先修改 [node_params](./src/ats_sentry_bringup/params/node_params.yaml)。
 
 ### 3.1 子模块
 
@@ -97,7 +97,7 @@ ros2 launch standard_robot_pp_ros2 standard_robot_pp_ros2.launch.py use_rviz:=Tr
 Vision
 
 ```bash
-ros2 launch pb2025_vision_bringup rm_vision_reality_launch.py \
+ros2 launch ats_vision_bringup rm_vision_reality_launch.py \
 use_composition:=True \
 use_rviz:=True \
 params_file:=<YOUR_PARAMS_FILE>
@@ -106,18 +106,18 @@ params_file:=<YOUR_PARAMS_FILE>
 Navigation
 
 ```bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py \
+ros2 launch ats_sentry_bringup bringup.launch.py \
 world:=<YOUR_WORLD_NAME> \
 slam:=False \
 use_rviz:=True
 ```
 
-当前实车联调优先使用 `pb2025_sentry_bringup/bringup.launch.py`，它会同时补齐串口、TF、行为树和实车主参数；`pb2025_nav_bringup/rm_navigation_reality_launch.py` 只建议做导航子系统单独排查。
+当前实车联调优先使用 `ats_sentry_bringup/bringup.launch.py`，它会同时补齐串口、TF、行为树和实车主参数；`ats_nav_bringup/rm_navigation_reality_launch.py` 只建议做导航子系统单独排查。
 
 Behavior Tree
 
 ```bash
-ros2 launch pb2025_sentry_behavior pb2025_sentry_behavior_launch.py params_file:=<YOUR_PARAMS_FILE>
+ros2 launch ats_sentry_behavior ats_sentry_behavior_launch.py params_file:=<YOUR_PARAMS_FILE>
 ```
 
 ### 3.2 Tools
@@ -152,7 +152,7 @@ ros2 run nav2_map_server map_saver_cli -f <YOUR_WORLD_NAME>
 
 方法一：根据裁判系统数据自动触发录包
 
-设置 [node_params.yaml](./src/pb2025_sentry_bringup/params/node_params.yaml) 中的 `standard_robot_pp_ros2.record_rosbag` 参数为 `True`，设置 `rosbag_recorder.topics` 为要录制的话题，裁判系统进入 5s 倒计时阶段时自动开启录制，进入比赛结算阶段时自动结束录制并保存。
+设置 [node_params.yaml](./src/ats_sentry_bringup/params/node_params.yaml) 中的 `standard_robot_pp_ros2.record_rosbag` 参数为 `True`，设置 `rosbag_recorder.topics` 为要录制的话题，裁判系统进入 5s 倒计时阶段时自动开启录制，进入比赛结算阶段时自动结束录制并保存。
 
 方法二：命令行手动触发录包
 
@@ -180,7 +180,7 @@ ros2 bag play <YOUR_ROSBAG>.bag --clock
 Example:
 
 ```bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py \
+ros2 launch ats_sentry_bringup bringup.launch.py \
 world:=<YOUR_WORLD_NAME> \
 use_composition:=False \
 use_rviz:=True \

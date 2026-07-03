@@ -30,47 +30,47 @@
 
 轨迹优化核心：
 
-1. [bspline_path_optimizer.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/bspline_path_optimizer.hpp)
-2. [bspline_path_optimizer.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/bspline_path_optimizer.cpp)
-3. [nav2_bspline_smoother.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/nav2_bspline_smoother.hpp)
-4. [nav2_bspline_smoother.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/nav2_bspline_smoother.cpp)
-5. [trajectory_optimizer_node.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/trajectory_optimizer_node.cpp)
-6. [trajectory_speed_governor.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/trajectory_speed_governor.cpp)
+1. [bspline_path_optimizer.hpp](../src/ats_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/bspline_path_optimizer.hpp)
+2. [bspline_path_optimizer.cpp](../src/ats_sentry_nav/trajectory_optimizer/src/bspline_path_optimizer.cpp)
+3. [nav2_bspline_smoother.hpp](../src/ats_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/nav2_bspline_smoother.hpp)
+4. [nav2_bspline_smoother.cpp](../src/ats_sentry_nav/trajectory_optimizer/src/nav2_bspline_smoother.cpp)
+5. [trajectory_optimizer_node.cpp](../src/ats_sentry_nav/trajectory_optimizer/src/trajectory_optimizer_node.cpp)
+6. [trajectory_speed_governor.cpp](../src/ats_sentry_nav/trajectory_optimizer/src/trajectory_speed_governor.cpp)
 
 ESDF 接口与 provider：
 
-1. [esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/esdf_provider.hpp)
-2. [fake_costmap_esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/fake_costmap_esdf_provider.hpp)
-3. [fake_costmap_esdf_provider.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/fake_costmap_esdf_provider.cpp)
-4. [traversability_esdf_provider.hpp](../src/pb2025_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/traversability_esdf_provider.hpp)
-5. [traversability_esdf_provider.cpp](../src/pb2025_sentry_nav/trajectory_optimizer/src/traversability_esdf_provider.cpp)
+1. [esdf_provider.hpp](../src/ats_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/esdf_provider.hpp)
+2. [fake_costmap_esdf_provider.hpp](../src/ats_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/fake_costmap_esdf_provider.hpp)
+3. [fake_costmap_esdf_provider.cpp](../src/ats_sentry_nav/trajectory_optimizer/src/fake_costmap_esdf_provider.cpp)
+4. [traversability_esdf_provider.hpp](../src/ats_sentry_nav/trajectory_optimizer/include/trajectory_optimizer/traversability_esdf_provider.hpp)
+5. [traversability_esdf_provider.cpp](../src/ats_sentry_nav/trajectory_optimizer/src/traversability_esdf_provider.cpp)
 
 loopback 配置：
 
 1. [loopback_sim/params/nav2_params.yaml](../src/loopback_sim/params/nav2_params.yaml)
-2. [loopback_navigation.launch.py](../src/pb2025_sentry_bringup/launch/loopback_navigation.launch.py)
-3. [loopback_nav_only.launch.py](../src/pb2025_sentry_bringup/launch/loopback_nav_only.launch.py)
-4. [loopback_decision_sim.launch.py](../src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
-5. [loopback_vision_test.launch.py](../src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py)
+2. [loopback_navigation.launch.py](../src/ats_sentry_bringup/launch/loopback_navigation.launch.py)
+3. [loopback_nav_only.launch.py](../src/ats_sentry_bringup/launch/loopback_nav_only.launch.py)
+4. [loopback_decision_sim.launch.py](../src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py)
+5. [loopback_vision_test.launch.py](../src/ats_sentry_bringup/launch/loopback_vision_test.launch.py)
 
 实车链路配置：
 
-1. [node_params.yaml](../src/pb2025_sentry_bringup/params/node_params.yaml)
-2. [reality/nav2_params.yaml](../src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)
-3. [bringup.launch.py](../src/pb2025_sentry_bringup/launch/bringup.launch.py)
-4. [navigation_launch.py](../src/pb2025_sentry_nav/pb2025_nav_bringup/launch/navigation_launch.py)
+1. [node_params.yaml](../src/ats_sentry_bringup/params/node_params.yaml)
+2. [reality/nav2_params.yaml](../src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml)
+3. [bringup.launch.py](../src/ats_sentry_bringup/launch/bringup.launch.py)
+4. [navigation_launch.py](../src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py)
 
 行为层与视觉跟随：
 
-1. [select_vision_follow_path.cpp](../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp)
-2. [sentry_behavior.yaml](../src/pb2025_sentry_behavior/params/sentry_behavior.yaml)
-3. [sentry_behavior_loopback.yaml](../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
-4. [sentry_behavior_vision_test.yaml](../src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
+1. [select_vision_follow_path.cpp](../src/ats_sentry_behavior/plugins/action/select_vision_follow_path.cpp)
+2. [sentry_behavior.yaml](../src/ats_sentry_behavior/params/sentry_behavior.yaml)
+3. [sentry_behavior_loopback.yaml](../src/ats_sentry_behavior/params/sentry_behavior_loopback.yaml)
+4. [sentry_behavior_vision_test.yaml](../src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml)
 
 RViz：
 
 1. [loopback_nav2_view.rviz](../src/loopback_sim/rviz/loopback_nav2_view.rviz)
-2. [sentry_default_view.rviz](../src/pb2025_sentry_bringup/rviz/sentry_default_view.rviz)
+2. [sentry_default_view.rviz](../src/ats_sentry_bringup/rviz/sentry_default_view.rviz)
 
 参考文档：
 
@@ -82,25 +82,25 @@ RViz：
 推荐用于纯导航观察的入口：
 
 ```bash
-ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 ```
 
 不打开 RViz 的 smoke test 入口：
 
 ```bash
-ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=False
+ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=False
 ```
 
 带决策仿真的入口：
 
 ```bash
-ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ```
 
 视觉链路测试入口：
 
 ```bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_vision_test.launch.py use_rviz:=True
 ```
 
 注意：
@@ -137,13 +137,13 @@ loopback 已修复过的关键问题：
 实车默认入口：
 
 ```bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py
+ros2 launch ats_sentry_bringup bringup.launch.py
 ```
 
 实车默认参数入口：
 
-1. 主入口使用 [node_params.yaml](../src/pb2025_sentry_bringup/params/node_params.yaml)。
-2. Nav bringup reality 备份参数同步在 [reality/nav2_params.yaml](../src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)。
+1. 主入口使用 [node_params.yaml](../src/ats_sentry_bringup/params/node_params.yaml)。
+2. Nav bringup reality 备份参数同步在 [reality/nav2_params.yaml](../src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml)。
 
 实车当前主链：
 
@@ -475,7 +475,7 @@ Batch-LIWO 主要不是轨迹优化文档，但对实车调试有直接意义：
 ```text
 请先阅读 docs/omni_recovery_smoothing_optimization.md。
 当前 traversability ESDF 在 loopback 已达到阶段目标，先不要增强 obstacle 强度。
-实车主参数是 src/pb2025_sentry_bringup/params/node_params.yaml。
+实车主参数是 src/ats_sentry_bringup/params/node_params.yaml。
 目前 loopback 与实车主链一致性、实车 ESDF 接入、signed Traversability ESDF 第一版、二阶段 optimizer refinement 第一版都已经完成。
 实车已能稳定导航；如果出现速度慢，优先看 trajectory_profile 曲率和速度链分级 topic。
 请下一步优先做：

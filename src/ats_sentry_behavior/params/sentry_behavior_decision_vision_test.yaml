@@ -1,0 +1,144 @@
+ats_sentry_behavior_server:
+  ros__parameters:
+    use_sim_time: false
+    action_name: ats_sentry_behavior
+    tick_frequency: 5
+    groot2_port: 17777
+    ros_plugins_timeout: 1000
+    use_cout_logger: false
+
+    plugins:
+      - ats_sentry_behavior/bt_plugins
+
+    behavior_trees:
+      - ats_sentry_behavior/behavior_trees
+
+    decision:
+      # 该测试树只保留视觉跟随主链，不读取裁判系统，也不再走 simulation 决策分支。
+      # input_source 保留为 simulation，仅用于满足通用参数声明；当前树不会读取它。
+      input_source: simulation
+
+      goal_points:
+        x: [0.20, 0.0, 0.00, 1.51, 0.0]
+        y: [-0.18, 0.0, 0.00, -2.19, 0.0]
+        z: [0.00, 0.00, 0.00, 0.00, 0.00]
+
+      point_roles:
+        supply_safe_point_index: 0
+        patrol_indices: [1]
+        low_hp_candidate_indices: [1]
+        critical_time_target_index: 1
+        anchor_target_index: 2
+
+      simulation:
+        default_mode: patrol
+        mode_topic: decision/sim_mode
+
+      referee:
+        start_gate:
+          expected_game_progress: 4
+          min_remain_time: 0
+          max_remain_time: 420
+
+      topics:
+        spin: cmd_spin
+        cmd_vel: cmd_vel
+        gimbal_cmd: cmd_gimbal
+        robot_mode: decision/robot_mode
+
+      motion:
+        default_spin_speed: 5.0
+        hit_spin_speed: 5.0
+        hit_spin_stop_after_no_hp_drop_s: 2.0
+
+      mode_limits:
+        # 纯视觉专测通常不接裁判系统，避免姿态冷却影响观察 attack/move 切换。
+        switch_cooldown_s: 0.0
+        max_cumulative_s: 100000.0
+
+      mode_visualization:
+        enabled: true
+        topic: decision/robot_mode_markers
+
+      vision:
+        topic: vision/target
+        timeout_s: 0.3
+        activation_hold_s: 0.20
+        switch_target_hold_s: 0.25
+        override_hold_s: 0.6
+        attack_radius: 0.5
+        follow_occupied_threshold: 40
+        follow_sample_count: 16
+        follow_arc_half_angle_deg: 90.0
+        follow_candidate_clearance_radius_m: 0.45
+        follow_max_path_length_ratio: 1.8
+        follow_reachability_max_expansions: 5000
+        follow_reachability_top_candidates: 6
+        min_replan_interval_s: 0.35
+        min_goal_shift_m: 0.35
+        min_goal_distance_from_robot_m: 0.35
+        prefer_previous_goal_side: true
+        max_target_shift_for_side_hold_m: 0.8
+        max_goal_angle_step_deg: 20.0
+        pose_jump_reset_distance_m: 0.8
+        visualization_enabled: true
+        visualization_topic: decision/vision_follow_markers
+
+      resource_policy:
+        # 保留参数声明，当前 decision_vision_test 树不会 tick 资源门控节点。
+        defend_enter_hp: 250
+        defend_exit_hp: 300
+        resupply_enter_hp: 150
+        resupply_exit_hp: 400
+        resupply_enter_ammo: 50
+        resupply_exit_ammo: 100
+        assume_engage_when_status_missing: true
+
+      pose:
+        expected_frame: map
+        timeout_s: 0.5
+        tf_fallback_enabled: true
+
+      time_thresholds:
+        abundant: 300
+        normal: 240
+        tense: 120
+        critical: 40
+
+      hp_thresholds:
+        abundant:
+          high: 400
+          medium: 300
+          low: 120
+        normal:
+          high: 400
+          medium: 300
+          low: 150
+        tense:
+          high: 400
+          medium: 300
+          low: 150
+        critical:
+          high: 400
+          medium: 300
+          low: 150
+
+      decision_config:
+        path_tolerance: 0.2
+        nav2_action_server: "/navigate_through_poses"
+        nav2_to_pose_action_server: "/navigate_to_pose"
+        decision_period_ms: 100
+        goal_position_tolerance: 0.2
+        path_goal_reached_tolerance: 0.2
+        active_goal_hold_tolerance: 0.45
+        active_goal_min_resend_interval_s: 1.5
+        vision_active_goal_hold_tolerance: 0.24
+        vision_active_goal_min_resend_interval_s: 0.40
+        waypoint_stop_duration_s: 0.0
+        patrol_preview_points: 1
+        action_server_wait_timeout_s: 0.5
+
+ats_sentry_behavior_client:
+  ros__parameters:
+    use_sim_time: false
+    target_tree: decision_vision_test

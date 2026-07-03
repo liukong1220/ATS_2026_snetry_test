@@ -4,15 +4,15 @@
 
 本文主要说明当前项目中 MPPI 局部控制器的核心参数含义、常见现象与调参方向，优先针对：
 
-- `ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True`
-- `ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True`
+- `ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True`
+- `ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True`
 - 参数文件：`src/loopback_sim/params/nav2_params.yaml`
 
 这套说明也可以迁移到：
 
-- `src/pb2025_sentry_nav/pb2025_nav_bringup/config/simulation/nav2_params.yaml`
-- `src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`
-- `src/pb2025_sentry_bringup/params/node_params.yaml`
+- `src/ats_sentry_nav/ats_nav_bringup/config/simulation/nav2_params.yaml`
+- `src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml`
+- `src/ats_sentry_bringup/params/node_params.yaml`
 
 但建议先在 loopback 中把现象调顺，再同步到正式仿真和实车。
 
@@ -23,7 +23,7 @@
 - `loopback_decision_sim.launch.py`
   - 默认读取 `src/loopback_sim/params/nav2_params.yaml`
 - `bringup.launch.py`
-  - 默认读取 `src/pb2025_sentry_bringup/params/node_params.yaml`
+  - 默认读取 `src/ats_sentry_bringup/params/node_params.yaml`
 
 如果你在 loopback 里观察局部路径和 trajectories，却去改 `node_params.yaml`，那么大概率不会看到你预期的变化。
 
@@ -682,7 +682,7 @@ prediction_horizon = time_steps * model_dt
 
 当前项目中要特别注意：
 
-- 实车模型 `pb2025_sentry_robot.sdf.xmacro`
+- 实车模型 `ats_sentry_robot.sdf.xmacro`
   - Livox 位姿：`0.1 0.245 0.3 ${68*pi/180} 0 -${161*pi/180}`
 - 仿真模型 `simulation_robot.sdf.xmacro`
   - 应与实车保持同一位姿
@@ -899,7 +899,7 @@ prediction_horizon = time_steps * model_dt
 
 这套参数不是“最终答案”，而是一套更适合继续迭代观察的基线。
 
-当前实车 `src/pb2025_sentry_bringup/params/node_params.yaml` 的速度基线更激进：
+当前实车 `src/ats_sentry_bringup/params/node_params.yaml` 的速度基线更激进：
 
 - `lateral_accel_limit` / `longitudinal_accel_limit` 已提高到 `1.8`
 - `velocity_smoother.max_velocity` 为 `[4.5, 4.5, 5.0]`

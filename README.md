@@ -8,19 +8,19 @@
 
 当前主线由 5 层组成：
 
-1. 启动编排层：`src/pb2025_sentry_bringup`
-2. 决策层：`src/pb2025_sentry_behavior`
-3. 导航与定位层：`src/pb2025_sentry_nav`
+1. 启动编排层：`src/ats_sentry_bringup`
+2. 决策层：`src/ats_sentry_behavior`
+3. 导航与定位层：`src/ats_sentry_nav`
 4. 轻量闭环仿真层：`src/loopback_sim`
 5. 串口与裁判系统接口层：`src/standard_robot_pp_ros2`
 
 当前默认执行链为：
 
 ```text
-pb2025_sentry_bringup/bringup.launch.py
+ats_sentry_bringup/bringup.launch.py
   -> standard_robot_pp_ros2
-  -> pb2025_nav_bringup
-  -> pb2025_sentry_behavior
+  -> ats_nav_bringup
+  -> ats_sentry_behavior
   -> /navigate_through_poses
   -> SmacPlannerHybrid
   -> Nav2BSplineSmoother
@@ -73,9 +73,9 @@ FollowPath 失败
 ├── NAV2.sh                             # 实机导航辅助脚本
 ├── docs/                               # 项目专项文档
 ├── src/
-│   ├── pb2025_sentry_bringup/         # 实机与 loopback 总入口、参数、地图、RViz
-│   ├── pb2025_sentry_behavior/        # 行为树、视觉接管、姿态切换、路径输出
-│   ├── pb2025_sentry_nav/             # Nav2、平滑、定位、点云、恢复插件
+│   ├── ats_sentry_bringup/         # 实机与 loopback 总入口、参数、地图、RViz
+│   ├── ats_sentry_behavior/        # 行为树、视觉接管、姿态切换、路径输出
+│   ├── ats_sentry_nav/             # Nav2、平滑、定位、点云、恢复插件
 │   ├── loopback_sim/                  # 轻量软件闭环仿真
 │   ├── standard_robot_pp_ros2/        # 串口桥、裁判系统、底盘命令接口
 │   ├── interfaces/                    # pb_rm_interfaces / sp_msgs
@@ -167,17 +167,17 @@ source install/setup.bash
 当前最重要的参数文件如下：
 
 - 实机总入口参数：
-  [src/pb2025_sentry_bringup/params/node_params.yaml](./src/pb2025_sentry_bringup/params/node_params.yaml)
+  [src/ats_sentry_bringup/params/node_params.yaml](./src/ats_sentry_bringup/params/node_params.yaml)
 - 实机行为树参数：
-  [src/pb2025_sentry_behavior/params/sentry_behavior.yaml](./src/pb2025_sentry_behavior/params/sentry_behavior.yaml)
+  [src/ats_sentry_behavior/params/sentry_behavior.yaml](./src/ats_sentry_behavior/params/sentry_behavior.yaml)
 - loopback 行为树参数：
-  [src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml](./src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
+  [src/ats_sentry_behavior/params/sentry_behavior_loopback.yaml](./src/ats_sentry_behavior/params/sentry_behavior_loopback.yaml)
 - 视觉专测行为树参数：
-  [src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml](./src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
+  [src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml](./src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml)
 - loopback Nav2 参数：
   [src/loopback_sim/params/nav2_params.yaml](./src/loopback_sim/params/nav2_params.yaml)
-- `pb2025_nav_bringup` reality 默认参数：
-  [src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml](./src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml)
+- `ats_nav_bringup` reality 默认参数：
+  [src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml](./src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml)
 - 串口桥默认参数：
   [src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml](./src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml)
 
@@ -187,13 +187,13 @@ source install/setup.bash
 
 当前推荐的实机总入口是：
 
-- [src/pb2025_sentry_bringup/launch/bringup.launch.py](./src/pb2025_sentry_bringup/launch/bringup.launch.py)
+- [src/ats_sentry_bringup/launch/bringup.launch.py](./src/ats_sentry_bringup/launch/bringup.launch.py)
 
 示例：
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py \
+ros2 launch ats_sentry_bringup bringup.launch.py \
   world:=<YOUR_WORLD_NAME> \
   slam:=False \
   use_rviz:=True
@@ -202,8 +202,8 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py \
 这个入口会同时启动：
 
 1. `standard_robot_pp_ros2`
-2. `pb2025_nav_bringup` 实机导航链
-3. `pb2025_sentry_behavior`
+2. `ats_nav_bringup` 实机导航链
+3. `ats_sentry_behavior`
 4. RViz（可选）
 5. `rosbag2_composable_recorder`（由 `node_params.yaml` 控制）
 
@@ -218,7 +218,7 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py \
 它会调用：
 
 ```bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py \
+ros2 launch ats_sentry_bringup bringup.launch.py \
   world:=<MAP_NAME> \
   slam:=True \
   use_rviz:=True
@@ -226,33 +226,33 @@ ros2 launch pb2025_sentry_bringup bringup.launch.py \
 
 退出时脚本会提示是否：
 
-1. 保存栅格地图到 `src/pb2025_sentry_bringup/map/<MAP_NAME>.{yaml,pgm}`
-2. 复制最新 Point-LIO PCD 到 `src/pb2025_sentry_bringup/pcd/<MAP_NAME>.pcd`
+1. 保存栅格地图到 `src/ats_sentry_bringup/map/<MAP_NAME>.{yaml,pgm}`
+2. 复制最新 Point-LIO PCD 到 `src/ats_sentry_bringup/pcd/<MAP_NAME>.pcd`
 
 ### loopback 通用决策仿真
 
 入口：
 
-- [src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py](./src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
+- [src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py](./src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py)
 
 示例：
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ```
 
 ### loopback 视觉专测
 
 入口：
 
-- [src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py](./src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py)
+- [src/ats_sentry_bringup/launch/loopback_vision_test.launch.py](./src/ats_sentry_bringup/launch/loopback_vision_test.launch.py)
 
 示例：
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+ros2 launch ats_sentry_bringup loopback_vision_test.launch.py \
   use_rviz:=True \
   publish_referee_inputs:=True \
   current_hp:=400 \
@@ -273,13 +273,13 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
 
 入口：
 
-- [src/pb2025_sentry_bringup/launch/loopback_nav_only.launch.py](./src/pb2025_sentry_bringup/launch/loopback_nav_only.launch.py)
+- [src/ats_sentry_bringup/launch/loopback_nav_only.launch.py](./src/ats_sentry_bringup/launch/loopback_nav_only.launch.py)
 
 示例：
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 ```
 
 这个入口更适合单独观察：
@@ -359,8 +359,8 @@ ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 ## 维护约定
 
 1. 修改主启动逻辑、参数入口或地图/PCD 目录时，优先同步本 README 与 `docs/总览.md`
-2. 修改行为树决策、视觉接管、姿态切换时，优先同步 `pb2025_sentry_behavior/README.md` 与 `docs/融合.md`、`docs/sentry_posture_switch_logic.md`
-3. 修改 Nav2 参数、恢复行为、轨迹优化时，优先同步 `pb2025_sentry_nav/README.md` 与 `docs/mppi_parameter_tuning_guide.md`、`docs/omni_recovery_smoothing_optimization.md`
+2. 修改行为树决策、视觉接管、姿态切换时，优先同步 `ats_sentry_behavior/README.md` 与 `docs/融合.md`、`docs/sentry_posture_switch_logic.md`
+3. 修改 Nav2 参数、恢复行为、轨迹优化时，优先同步 `ats_sentry_nav/README.md` 与 `docs/mppi_parameter_tuning_guide.md`、`docs/omni_recovery_smoothing_optimization.md`
 4. 若文档内容无法从当前仓库代码、参数或 launch 中直接确认，应明确标注“待补充”或“需要人工确认”
 
 ## 待人工确认

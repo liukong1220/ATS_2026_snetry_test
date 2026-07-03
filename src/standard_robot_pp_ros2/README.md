@@ -20,7 +20,7 @@
 
 当前通常由整车总入口拉起：
 
-- [../pb2025_sentry_bringup/launch/bringup.launch.py](../pb2025_sentry_bringup/launch/bringup.launch.py)
+- [../ats_sentry_bringup/launch/bringup.launch.py](../ats_sentry_bringup/launch/bringup.launch.py)
 
 ## 当前与上层系统的对接
 
@@ -137,9 +137,9 @@
 ## 当前维护边界
 
 1. 改串口协议、模式字段映射、瞬时零速保护，在本包改
-2. 改姿态切换规则、视觉接管、受击自旋，不在本包改，去 `pb2025_sentry_behavior`
-3. 改 `/cmd_vel` 生成链，不在本包改，去 `pb2025_sentry_nav`
-4. 改整车启动和总参数入口，不在本包改，去 `pb2025_sentry_bringup`
+2. 改姿态切换规则、视觉接管、受击自旋，不在本包改，去 `ats_sentry_behavior`
+3. 改 `/cmd_vel` 生成链，不在本包改，去 `ats_sentry_nav`
+4. 改整车启动和总参数入口，不在本包改，去 `ats_sentry_bringup`
 
 ## 相关文档
 

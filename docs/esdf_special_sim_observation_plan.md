@@ -1,6 +1,6 @@
 # 2.5D ESDF 专项仿真观察方案
 
-更新时间：2026-07-02
+更新时间：2026-07-03
 
 本文档原目标不是讨论“最终仿真器选型”，而是解决当前一个更直接的问题：
 
@@ -25,6 +25,13 @@ MuJoCo 允许作为后续动力学 / 控制验证入口，尤其是底盘加减�
 3. MuJoCo：后续用于控制与动力学验证，而不是当前 ESDF 语义链的唯一观察方式。
 4. 当前优化重心：参考 `~/参考/src/DDR-opt`、`~/参考/src/nullspace_mpc`、
    `~/参考/src/swerve_drive` 和 `~/参考/src/MuJoCo-LiDAR`，推进规划控制链自身。
+
+2026-07-03 补充：
+
+1. MuJoCo 入口已迁入当前仓库，包名为 `ats_mujoco_sim`。
+2. 迁移内容包括随机地图生成、MuJoCo scene 生成、底盘仿真节点、
+   lidar / ToF 点云桥接和内嵌 `mujoco_lidar`。
+3. 详细启动与验证方式见 [ATS MuJoCo 仿真接入说明](./ats_mujoco_sim_integration.md)。
 
 当前阶段不建议为了观察 `2.5D ESDF` 效果而立刻切换到 `MuJoCo`。
 
@@ -66,7 +73,7 @@ MuJoCo 允许作为后续动力学 / 控制验证入口，尤其是底盘加减�
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py \
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py \
   use_rviz:=True \
   launch_trajectory_optimizer:=True
 ```
@@ -74,7 +81,7 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py \
 参考：
 
 1. [docs/gazebo_sim_integration.md](./gazebo_sim_integration.md)
-2. [src/pb2025_sentry_bringup/launch/gazebo_bringup.launch.py](../src/pb2025_sentry_bringup/launch/gazebo_bringup.launch.py)
+2. [src/ats_sentry_bringup/launch/gazebo_bringup.launch.py](../src/ats_sentry_bringup/launch/gazebo_bringup.launch.py)
 
 ### B. loopback：观测与回归验证
 
@@ -88,37 +95,37 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py \
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 ```
 
 参考：
 
 1. [README.md](../README.md)
-2. [src/pb2025_sentry_bringup/launch/loopback_nav_only.launch.py](../src/pb2025_sentry_bringup/launch/loopback_nav_only.launch.py)
+2. [src/ats_sentry_bringup/launch/loopback_nav_only.launch.py](../src/ats_sentry_bringup/launch/loopback_nav_only.launch.py)
 
 ## 3. 推荐使用的 RViz 视图
 
 为了避免默认视图里的信息太多、太杂，当前新增了一份更聚焦的 ESDF 观察视图：
 
-1. [src/pb2025_sentry_nav/pb2025_nav_bringup/rviz/nav2_esdf_observe_view.rviz](../src/pb2025_sentry_nav/pb2025_nav_bringup/rviz/nav2_esdf_observe_view.rviz)
+1. [src/ats_sentry_nav/ats_nav_bringup/rviz/nav2_esdf_observe_view.rviz](../src/ats_sentry_nav/ats_nav_bringup/rviz/nav2_esdf_observe_view.rviz)
 
 建议启动方式：
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py \
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py \
   use_rviz:=True \
   launch_trajectory_optimizer:=True \
-  rviz_config_file:=$(pwd)/src/pb2025_sentry_nav/pb2025_nav_bringup/rviz/nav2_esdf_observe_view.rviz
+  rviz_config_file:=$(pwd)/src/ats_sentry_nav/ats_nav_bringup/rviz/nav2_esdf_observe_view.rviz
 ```
 
 或者 loopback：
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py \
+ros2 launch ats_sentry_bringup loopback_nav_only.launch.py \
   use_rviz:=True \
-  rviz_config_file:=$(pwd)/src/pb2025_sentry_nav/pb2025_nav_bringup/rviz/nav2_esdf_observe_view.rviz
+  rviz_config_file:=$(pwd)/src/ats_sentry_nav/ats_nav_bringup/rviz/nav2_esdf_observe_view.rviz
 ```
 
 这份视图默认强调：
@@ -293,10 +300,10 @@ ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py \
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py \
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py \
   use_rviz:=True \
   launch_trajectory_optimizer:=True \
-  rviz_config_file:=$(pwd)/src/pb2025_sentry_nav/pb2025_nav_bringup/rviz/nav2_esdf_observe_view.rviz
+  rviz_config_file:=$(pwd)/src/ats_sentry_nav/ats_nav_bringup/rviz/nav2_esdf_observe_view.rviz
 ```
 
 2. 先观察地形语义是否稳定：

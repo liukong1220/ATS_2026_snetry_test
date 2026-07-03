@@ -1,4 +1,4 @@
-# pb2025_robot_description
+# ats_robot_description
 
 ![PolarBear Logo](https://raw.githubusercontent.com/SMBU-PolarBear-Robotics-Team/.github/main/.docs/image/polarbear_logo_text.png)
 
@@ -42,7 +42,7 @@ cd ~/ros_ws
 ```
 
 ```bash
-git clone https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_robot_description.git
+git clone https://github.com/SMBU-PolarBear-Robotics-Team/ats_robot_description.git
 ```
 
 ```bash
@@ -68,7 +68,7 @@ colcon build --symlink-install
 #### Option1: 在 RViz 中可视化机器人
 
 ```bash
-ros2 launch pb2025_robot_description robot_description_launch.py
+ros2 launch ats_robot_description robot_description_launch.py
 ```
 
 #### Option2: Python API
@@ -107,7 +107,7 @@ robot_urdf_xml = urdf_generator.to_string()
 ```bash
 source install/setup.bash
 
-xmacro4sdf src/pb2025_robot_description/resource/xmacro/simulation_robot.sdf.xmacro > src/pb2025_robot_description/resource/xmacro/simulation_robot.sdf
+xmacro4sdf src/ats_robot_description/resource/xmacro/simulation_robot.sdf.xmacro > src/ats_robot_description/resource/xmacro/simulation_robot.sdf
 ```
 
 ## 3. Subscribed Topics
@@ -140,7 +140,7 @@ None.
 
 - `robot_name` (str, default: "simulation_robot")
 
-    机器人 XMacro 描述文件的**名字（无需后缀）**。描述文件应位于 `package://pb2025_robot_description/resource/xmacro` 目录下。
+    机器人 XMacro 描述文件的**名字（无需后缀）**。描述文件应位于 `package://ats_robot_description/resource/xmacro` 目录下。
 
 - `robot_xmacro_file` (str, default: "[simulation_robot.sdf.xmacro](./resource/xmacro/simulation_robot.sdf.xmacro)")
 

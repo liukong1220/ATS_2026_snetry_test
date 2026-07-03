@@ -5,9 +5,9 @@ SETUP_SCRIPT="$WORKSPACE_DIR/install/setup.bash"
 MAP_NAME="${1:-}"
 USE_RVIZ="${USE_RVIZ:-True}"
 PID_FILE="$WORKSPACE_DIR/.ros/mapping_sh.pid"
-MAP_OUTPUT_PREFIX="$WORKSPACE_DIR/src/pb2025_sentry_bringup/map/$MAP_NAME"
-PCD_OUTPUT_FILE="$WORKSPACE_DIR/src/pb2025_sentry_bringup/pcd/$MAP_NAME.pcd"
-PCD_GLOB="$WORKSPACE_DIR/src/pb2025_sentry_nav/point_lio/PCD/scans_*.pcd"
+MAP_OUTPUT_PREFIX="$WORKSPACE_DIR/src/ats_sentry_bringup/map/$MAP_NAME"
+PCD_OUTPUT_FILE="$WORKSPACE_DIR/src/ats_sentry_bringup/pcd/$MAP_NAME.pcd"
+PCD_GLOB="$WORKSPACE_DIR/src/ats_sentry_nav/point_lio/PCD/scans_*.pcd"
 PCD_WAIT_TIMEOUT="${PCD_WAIT_TIMEOUT:-5}"
 PCD_WAIT_INTERVAL="${PCD_WAIT_INTERVAL:-1}"
 STOP_REQUESTED=0
@@ -186,11 +186,11 @@ watch_commands() {
 prompt_map_name
 
 declare -a commands=(
-  "ros2 launch pb2025_sentry_bringup bringup.launch.py world:=$MAP_NAME slam:=True use_rviz:=$USE_RVIZ"
+  "ros2 launch ats_sentry_bringup bringup.launch.py world:=$MAP_NAME slam:=True use_rviz:=$USE_RVIZ"
 )
 
-MAP_OUTPUT_PREFIX="$WORKSPACE_DIR/src/pb2025_sentry_bringup/map/$MAP_NAME"
-PCD_OUTPUT_FILE="$WORKSPACE_DIR/src/pb2025_sentry_bringup/pcd/$MAP_NAME.pcd"
+MAP_OUTPUT_PREFIX="$WORKSPACE_DIR/src/ats_sentry_bringup/map/$MAP_NAME"
+PCD_OUTPUT_FILE="$WORKSPACE_DIR/src/ats_sentry_bringup/pcd/$MAP_NAME.pcd"
 
 trap handle_shutdown INT TERM
 

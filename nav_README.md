@@ -1,7 +1,7 @@
-# pb2025_sentry_nav
+# ats_sentry_nav
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Build and Test](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav/actions/workflows/ci.yml/badge.svg)](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav/actions/workflows/ci.yml)
+[![Build and Test](https://github.com/SMBU-PolarBear-Robotics-Team/ats_sentry_nav/actions/workflows/ci.yml/badge.svg)](https://github.com/SMBU-PolarBear-Robotics-Team/ats_sentry_nav/actions/workflows/ci.yml)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 
 深圳北理莫斯科大学 北极熊战队 2025 赛季哨兵导航仿真/实车包
@@ -49,8 +49,8 @@ https://github.com/user-attachments/assets/ae4c19a0-4c73-46a0-95bd-909734da2a42
     ├── livox_ros_driver2                   # Livox 驱动
     ├── loam_interface                      # point_lio 等里程计算法接口
     ├── pb_teleop_twist_joy                 # 手柄控制
-    ├── pb2025_nav_bringup                  # 启动文件
-    ├── pb2025_sentry_nav                   # 本仓库功能包描述文件
+    ├── ats_nav_bringup                  # 启动文件
+    ├── ats_sentry_nav                   # 本仓库功能包描述文件
     ├── point_lio                           # 里程计
     ├── pointcloud_to_laserscan             # 将 terrain_map 转换为 laserScan 类型以表示障碍物（仅 SLAM 模式启动）
     ├── sensor_scan_generation              # 点云相关坐标变换
@@ -76,12 +76,12 @@ https://github.com/user-attachments/assets/ae4c19a0-4c73-46a0-95bd-909734da2a42
 #### 2.1.2 Create Container
 
 ```bash
-docker run -it --rm --name pb2025_sentry_nav \
+docker run -it --rm --name ats_sentry_nav \
   --network host \
   -e "DISPLAY=$DISPLAY" \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v /dev:/dev \
-  ghcr.io/smbu-polarbear-robotics-team/pb2025_sentry_nav:1.3.1
+  ghcr.io/smbu-polarbear-robotics-team/ats_sentry_nav:1.3.1
 ```
 
 ### 2.2 Option 2: Build From Source
@@ -111,7 +111,7 @@ cd ~/ros_ws
 ```
 
 ```bash
-git clone --recursive https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav.git src/pb2025_sentry_nav
+git clone --recursive https://github.com/SMBU-PolarBear-Robotics-Team/ats_sentry_nav.git src/ats_sentry_nav
 ```
 
 下载先验点云:
@@ -131,7 +131,7 @@ colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 > [!NOTE]
-> 推荐使用 --symlink-install 选项来构建你的工作空间，因为 pb2025_sentry_nav 广泛使用了 launch.py 文件和 YAML 文件。这个构建参数会为那些非编译的源文件使用符号链接，这意味着当你调整参数文件时，不需要反复重建，只需要重新启动即可。
+> 推荐使用 --symlink-install 选项来构建你的工作空间，因为 ats_sentry_nav 广泛使用了 launch.py 文件和 YAML 文件。这个构建参数会为那些非编译的源文件使用符号链接，这意味着当你调整参数文件时，不需要反复重建，只需要重新启动即可。
 
 ### 2.3 Running
 
@@ -144,7 +144,7 @@ colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 导航模式：
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py \
+ros2 launch ats_nav_bringup rm_navigation_simulation_launch.py \
 world:=rmuc_2025 \
 slam:=False
 ```
@@ -152,7 +152,7 @@ slam:=False
 建图模式：
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py \
+ros2 launch ats_nav_bringup rm_navigation_simulation_launch.py \
 slam:=True
 ```
 
@@ -163,7 +163,7 @@ slam:=True
 当前指定的初始位姿实际上是无效的。TODO: 加入 `map` -> `odom` 的变换和初始化
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_multi_navigation_simulation_launch.py \
+ros2 launch ats_nav_bringup rm_multi_navigation_simulation_launch.py \
 world:=rmul_2024 \
 robots:=" \
 red_standard_robot1={x: 0.0, y: 0.0, yaw: 0.0}; \
@@ -176,18 +176,18 @@ blue_standard_robot1={x: 5.6, y: 1.4, yaw: 3.14}; \
 在当前整车工作区中，实车联调优先使用总入口：
 
 ```bash
-ros2 launch pb2025_sentry_bringup bringup.launch.py \
+ros2 launch ats_sentry_bringup bringup.launch.py \
 world:=<YOUR_WORLD_NAME> \
 slam:=False \
 use_rviz:=True
 ```
 
-它会同时补齐串口、TF、行为树、`fake_vel_transform` 和 `node_params.yaml` 中的整车参数。下面的 `pb2025_nav_bringup` 命令仅适合导航子系统单独排查。
+它会同时补齐串口、TF、行为树、`fake_vel_transform` 和 `node_params.yaml` 中的整车参数。下面的 `ats_nav_bringup` 命令仅适合导航子系统单独排查。
 
 建图模式：
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_reality_launch.py \
+ros2 launch ats_nav_bringup rm_navigation_reality_launch.py \
 slam:=True \
 use_robot_state_pub:=True
 ```
@@ -205,7 +205,7 @@ use_robot_state_pub:=True
 注意修改 `world` 参数为实际地图的名称
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_reality_launch.py \
+ros2 launch ats_nav_bringup rm_navigation_reality_launch.py \
 world:=<YOUR_WORLD_NAME> \
 slam:=False \
 use_robot_state_pub:=True
@@ -227,21 +227,21 @@ use_robot_state_pub:=True
 | 🤖 🖥️ | `slam` | 是否启用建图模式。如果为 True，则禁用 small_gicp 并发送静态 tf（map->odom）。然后自动保存 pcd 文件到 [./point_lio/PCD/](./point_lio/PCD/)| bool | False |
 | 🤖 🖥️ | `world` | 在仿真模式，可用选项为 `rmul_2024` 或 `rmuc_2024` 或 `rmul_2025` 或 `rmuc_2025` | string | "rmuc_2025" |
 |  |  | 在实车模式，`world` 参数名称与栅格地图和先验点云图的文件名称相同 | string | "" |
-| 🤖 🖥️ | `map` | 要加载的地图文件的完整路径。默认路径自动基于 `world` 参数构建 | string | 仿真: [rmuc_2025.yaml](./pb2025_nav_bringup/map/simulation/rmuc_2025.yaml); 实车: 自动填充 |
-| 🤖 🖥️ | `prior_pcd_file` | 要加载的先验 pcd 文件的完整路径。默认路径自动基于 `world` 参数构建 | string | 仿真: [rmuc_2025.pcd](./pb2025_nav_bringup//pcd/reality/); 实车: 自动填充 |
-| 🤖 🖥️ | `params_file` | 用于所有启动节点的 ROS2 参数文件的完整路径 | string | 仿真: [nav2_params.yaml](./pb2025_nav_bringup/config/simulation/nav2_params.yaml); 实车: [nav2_params.yaml](./pb2025_nav_bringup/config/reality/nav2_params.yaml) |
-| 🤖🖥️ | `rviz_config_file` | 要使用的 RViz 配置文件的完整路径 | string | [nav2_default_view.rviz](./pb2025_nav_bringup/rviz/nav2_default_view.rviz) |
+| 🤖 🖥️ | `map` | 要加载的地图文件的完整路径。默认路径自动基于 `world` 参数构建 | string | 仿真: [rmuc_2025.yaml](./ats_nav_bringup/map/simulation/rmuc_2025.yaml); 实车: 自动填充 |
+| 🤖 🖥️ | `prior_pcd_file` | 要加载的先验 pcd 文件的完整路径。默认路径自动基于 `world` 参数构建 | string | 仿真: [rmuc_2025.pcd](./ats_nav_bringup//pcd/reality/); 实车: 自动填充 |
+| 🤖 🖥️ | `params_file` | 用于所有启动节点的 ROS2 参数文件的完整路径 | string | 仿真: [nav2_params.yaml](./ats_nav_bringup/config/simulation/nav2_params.yaml); 实车: [nav2_params.yaml](./ats_nav_bringup/config/reality/nav2_params.yaml) |
+| 🤖🖥️ | `rviz_config_file` | 要使用的 RViz 配置文件的完整路径 | string | [nav2_default_view.rviz](./ats_nav_bringup/rviz/nav2_default_view.rviz) |
 | 🤖 🖥️ | `autostart` | 自动启动 nav2 栈 | bool | True |
 | 🤖 🖥️ | `use_composition` | 是否使用 Composable Node 形式启动 | bool | True |
 | 🤖 🖥️ | `use_respawn` | 如果节点崩溃，是否重新启动。本参数仅 `use_composition:=False` 时有效 | bool | False |
 | 🤖🖥️ | `use_rviz` | 是否启动 RViz | bool | True |
-| 🤖 | `use_robot_state_pub` | 是 是否使用 `robot_state_publisher` 发布机器人的 TF 信息 <br> 1. 在仿真中，由于支持的 Gazebo 仿真器已经发布了机器人的 TF 信息，因此不需要再次发布。 <br> 2. 在实车中，**推荐**使用独立的包发布机器人的 TF 信息。例如，`gimbal_yaw` 和 `gimbal_pitch` 关节位姿由串口模块 [standard_robot_pp_ros2](https://github.com/SMBU-PolarBear-Robotics-Team/standard_robot_pp_ros2) 提供，此时应将 `use_robot_state_pub` 设置为 False。 <br> 如果没有完整的机器人系统或仅测试导航模块（此仓库）时，可将 `use_robot_state_pub` 设置为 True。此时，导航模块将发布静态的机器人关节位姿数据以维护 TF 树。 <br> *注意：需额外克隆并编译 [pb2025_robot_description](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_robot_description.git)* | bool | False |
+| 🤖 | `use_robot_state_pub` | 是 是否使用 `robot_state_publisher` 发布机器人的 TF 信息 <br> 1. 在仿真中，由于支持的 Gazebo 仿真器已经发布了机器人的 TF 信息，因此不需要再次发布。 <br> 2. 在实车中，**推荐**使用独立的包发布机器人的 TF 信息。例如，`gimbal_yaw` 和 `gimbal_pitch` 关节位姿由串口模块 [standard_robot_pp_ros2](https://github.com/SMBU-PolarBear-Robotics-Team/standard_robot_pp_ros2) 提供，此时应将 `use_robot_state_pub` 设置为 False。 <br> 如果没有完整的机器人系统或仅测试导航模块（此仓库）时，可将 `use_robot_state_pub` 设置为 True。此时，导航模块将发布静态的机器人关节位姿数据以维护 TF 树。 <br> *注意：需额外克隆并编译 [ats_robot_description](https://github.com/SMBU-PolarBear-Robotics-Team/ats_robot_description.git)* | bool | False |
 
 > [!TIP]
-> 关于本项目更多细节与实车部署指南，请前往 [Wiki](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav/wiki)
+> 关于本项目更多细节与实车部署指南，请前往 [Wiki](https://github.com/SMBU-PolarBear-Robotics-Team/ats_sentry_nav/wiki)
 
 ### 2.5 手柄控制
 
-默认情况下，PS4 手柄控制已开启。键位映射关系详见 [nav2_params.yaml](./pb2025_nav_bringup/config/simulation/nav2_params.yaml) 中的 `teleop_twist_joy_node` 部分。
+默认情况下，PS4 手柄控制已开启。键位映射关系详见 [nav2_params.yaml](./ats_nav_bringup/config/simulation/nav2_params.yaml) 中的 `teleop_twist_joy_node` 部分。
 
 ![teleop_twist_joy.gif](https://raw.githubusercontent.com/LihanChen2004/picx-images-hosting/master/teleop_twist_joy.5j4aav3v3p.gif)

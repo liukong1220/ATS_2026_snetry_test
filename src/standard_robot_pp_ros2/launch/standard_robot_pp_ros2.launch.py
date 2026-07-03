@@ -22,8 +22,8 @@ def generate_launch_description():
     pkg_standard_robot_pp_ros2_dir = get_package_share_directory(
         "standard_robot_pp_ros2"
     )
-    pkg_pb2025_robot_description_dir = get_package_share_directory(
-        "pb2025_robot_description"
+    pkg_ats_robot_description_dir = get_package_share_directory(
+        "ats_robot_description"
     )
 
     # Create the launch configuration variables
@@ -70,7 +70,7 @@ def generate_launch_description():
 
     declare_robot_name_cmd = DeclareLaunchArgument(
         "robot_name",
-        default_value="pb2025_sentry_robot",
+        default_value="ats_sentry_robot",
         description="The file name of the robot xmacro to be used",
     )
 
@@ -103,7 +103,7 @@ def generate_launch_description():
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(
-                        pkg_pb2025_robot_description_dir,
+                        pkg_ats_robot_description_dir,
                         "launch",
                         "robot_description_launch.py",
                     )

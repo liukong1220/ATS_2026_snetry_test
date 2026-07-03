@@ -15,9 +15,9 @@
 
 通常不直接单独启动本包，而是通过：
 
-- [../pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py](../pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
-- [../pb2025_sentry_bringup/launch/loopback_vision_test.launch.py](../pb2025_sentry_bringup/launch/loopback_vision_test.launch.py)
-- [../pb2025_sentry_bringup/launch/loopback_nav_only.launch.py](../pb2025_sentry_bringup/launch/loopback_nav_only.launch.py)
+- [../ats_sentry_bringup/launch/loopback_decision_sim.launch.py](../ats_sentry_bringup/launch/loopback_decision_sim.launch.py)
+- [../ats_sentry_bringup/launch/loopback_vision_test.launch.py](../ats_sentry_bringup/launch/loopback_vision_test.launch.py)
+- [../ats_sentry_bringup/launch/loopback_nav_only.launch.py](../ats_sentry_bringup/launch/loopback_nav_only.launch.py)
 
 仿真器本体：
 
@@ -36,7 +36,7 @@ fake_decision_sim_inputs.py
   -> referee/*
   -> vision/target
 
-pb2025_sentry_behavior
+ats_sentry_behavior
   -> /navigate_through_poses
   -> decision/robot_mode
   -> cmd_spin
@@ -100,14 +100,14 @@ map -> odom -> base_footprint -> base_link -> base_scan
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ```
 
 ### 视觉接管专测
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+ros2 launch ats_sentry_bringup loopback_vision_test.launch.py \
   use_rviz:=True \
   publish_referee_inputs:=True \
   current_hp:=400 \
@@ -128,7 +128,7 @@ ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 ```
 
 ## 当前注意事项
@@ -140,9 +140,9 @@ ros2 launch pb2025_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 ## 当前维护边界
 
 1. 调仿真器自身 `/odom`、TF、`/scan` 生成逻辑，在本包改
-2. 调行为树决策、视觉接管，不在本包改，去 `pb2025_sentry_behavior`
-3. 调 Nav2、MPPI、平滑、恢复行为，不在本包改，去 `pb2025_sentry_nav`
-4. 调假输入参数与组合 launch，不在本包改，去 `pb2025_sentry_bringup`
+2. 调行为树决策、视觉接管，不在本包改，去 `ats_sentry_behavior`
+3. 调 Nav2、MPPI、平滑、恢复行为，不在本包改，去 `ats_sentry_nav`
+4. 调假输入参数与组合 launch，不在本包改，去 `ats_sentry_bringup`
 
 ## 相关文档
 

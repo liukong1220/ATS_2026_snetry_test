@@ -8,7 +8,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description() -> LaunchDescription:
-    bringup_dir = get_package_share_directory("pb2025_sentry_bringup")
+    bringup_dir = get_package_share_directory("ats_sentry_bringup")
     loopback_sim_dir = get_package_share_directory("nav2_loopback_sim")
 
     map_yaml_file = LaunchConfiguration("map")

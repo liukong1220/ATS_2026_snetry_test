@@ -4,8 +4,8 @@
 
 涉及代码主要在：
 
-- `src/pb2025_sentry_behavior`
-- `src/pb2025_sentry_nav/fake_vel_transform`
+- `src/ats_sentry_behavior`
+- `src/ats_sentry_nav/fake_vel_transform`
 - `src/standard_robot_pp_ros2`
 
 ## 1. 当前这套逻辑要解决什么
@@ -101,7 +101,7 @@ send_robot_cmd_data_.data.speed_vector.mode
 
 对应实现：
 
-- [../src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp](../src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp)
+- [../src/ats_sentry_behavior/plugins/action/pub_robot_mode.cpp](../src/ats_sentry_behavior/plugins/action/pub_robot_mode.cpp)
 
 当前内部做了三步：
 
@@ -143,7 +143,7 @@ send_robot_cmd_data_.data.speed_vector.mode
 
 对应实现：
 
-- [../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp](../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp)
+- [../src/ats_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp](../src/ats_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp)
 
 当前资源模式只有三种：
 
@@ -187,7 +187,7 @@ send_robot_cmd_data_.data.speed_vector.mode
 
 对应实现：
 
-- [../src/pb2025_sentry_behavior/plugins/condition/is_attacked.cpp](../src/pb2025_sentry_behavior/plugins/condition/is_attacked.cpp)
+- [../src/ats_sentry_behavior/plugins/condition/is_attacked.cpp](../src/ats_sentry_behavior/plugins/condition/is_attacked.cpp)
 
 当前触发条件：
 
@@ -226,7 +226,7 @@ const bool is_attacked = msg->is_hp_deduced;
 
 对应节点：
 
-- [../src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp](../src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp)
+- [../src/ats_sentry_behavior/plugins/action/pub_spin_speed.cpp](../src/ats_sentry_behavior/plugins/action/pub_spin_speed.cpp)
 
 它只负责发布一个标量：
 
@@ -236,7 +236,7 @@ const bool is_attacked = msg->is_hp_deduced;
 
 对应实现：
 
-- [../src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp](../src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp)
+- [../src/ats_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp](../src/ats_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp)
 
 关键代码语义：
 
@@ -336,10 +336,10 @@ ros2 param set /fake_decision_sim_inputs is_hp_deduced true
 ### 11.5 修改姿态和自旋参数
 
 ```bash
-ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.switch_cooldown_s 3.0
-ros2 param set /pb2025_sentry_behavior_server decision.mode_limits.max_cumulative_s 120.0
-ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_speed 5.5
-ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_stop_after_no_hp_drop_s 1.5
+ros2 param set /ats_sentry_behavior_server decision.mode_limits.switch_cooldown_s 3.0
+ros2 param set /ats_sentry_behavior_server decision.mode_limits.max_cumulative_s 120.0
+ros2 param set /ats_sentry_behavior_server decision.motion.hit_spin_speed 5.5
+ros2 param set /ats_sentry_behavior_server decision.motion.hit_spin_stop_after_no_hp_drop_s 1.5
 ```
 
 ## 12. 当前实车与 loopback 是否共用这套逻辑
@@ -361,13 +361,13 @@ ros2 param set /pb2025_sentry_behavior_server decision.motion.hit_spin_stop_afte
 ## 13. 相关代码入口
 
 - 姿态裁决：  
-  `src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp`
+  `src/ats_sentry_behavior/plugins/action/pub_robot_mode.cpp`
 - 受击检测：  
-  `src/pb2025_sentry_behavior/plugins/condition/is_attacked.cpp`
+  `src/ats_sentry_behavior/plugins/condition/is_attacked.cpp`
 - 自旋速度发布：  
-  `src/pb2025_sentry_behavior/plugins/action/pub_spin_speed.cpp`
+  `src/ats_sentry_behavior/plugins/action/pub_spin_speed.cpp`
 - 速度合成：  
-  `src/pb2025_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp`
+  `src/ats_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp`
 - 串口模式下发：  
   `src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp`
 - 串口协议定义：  

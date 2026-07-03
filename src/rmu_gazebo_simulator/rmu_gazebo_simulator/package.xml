@@ -25,7 +25,7 @@
 	<depend>rmoss_gz_plugins</depend>
 	<depend>rmoss_gz_resources</depend>
 	<depend>rmoss_gz_bridge</depend>
-	<depend>pb2025_robot_description</depend>
+	<depend>ats_robot_description</depend>
 	<depend>sdformat_tools</depend>
 
   <test_depend>ament_lint_auto</test_depend>

@@ -17,11 +17,11 @@
 
 ### 2.1 通用决策仿真入口
 
-- [../src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py](../src/pb2025_sentry_bringup/launch/loopback_decision_sim.launch.py)
+- [../src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py](../src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py)
 
 ### 2.2 视觉专测入口
 
-- [../src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py](../src/pb2025_sentry_bringup/launch/loopback_vision_test.launch.py)
+- [../src/ats_sentry_bringup/launch/loopback_vision_test.launch.py](../src/ats_sentry_bringup/launch/loopback_vision_test.launch.py)
 
 ### 2.3 仿真器本体
 
@@ -29,7 +29,7 @@
 
 ### 2.4 假输入节点
 
-- [../src/pb2025_sentry_bringup/scripts/fake_decision_sim_inputs.py](../src/pb2025_sentry_bringup/scripts/fake_decision_sim_inputs.py)
+- [../src/ats_sentry_bringup/scripts/fake_decision_sim_inputs.py](../src/ats_sentry_bringup/scripts/fake_decision_sim_inputs.py)
 
 ## 3. 当前闭环结构
 
@@ -40,7 +40,7 @@ fake_decision_sim_inputs.py
   -> referee/*
   -> vision/target
 
-pb2025_sentry_behavior
+ats_sentry_behavior
   -> decision_path
   -> decision/robot_mode
   -> cmd_spin
@@ -94,7 +94,7 @@ loopback_simulator
 
 loopback 并不自己决定攻击点，仍然完全复用：
 
-- [../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp](../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp)
+- [../src/ats_sentry_behavior/plugins/action/select_vision_follow_path.cpp](../src/ats_sentry_behavior/plugins/action/select_vision_follow_path.cpp)
 
 当前算法流程：
 
@@ -112,9 +112,9 @@ loopback 并不自己决定攻击点，仍然完全复用：
 ### 5.1 行为树参数
 
 - loopback 主树：  
-  [../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml](../src/pb2025_sentry_behavior/params/sentry_behavior_loopback.yaml)
+  [../src/ats_sentry_behavior/params/sentry_behavior_loopback.yaml](../src/ats_sentry_behavior/params/sentry_behavior_loopback.yaml)
 - 视觉专测：  
-  [../src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml](../src/pb2025_sentry_behavior/params/sentry_behavior_vision_test.yaml)
+  [../src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml](../src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml)
 
 ### 5.2 Nav2 参数
 
@@ -122,7 +122,7 @@ loopback 并不自己决定攻击点，仍然完全复用：
 
 ### 5.3 RViz 配置
 
-- [../src/pb2025_sentry_bringup/rviz/sentry_default_view.rviz](../src/pb2025_sentry_bringup/rviz/sentry_default_view.rviz)
+- [../src/ats_sentry_bringup/rviz/sentry_default_view.rviz](../src/ats_sentry_bringup/rviz/sentry_default_view.rviz)
 
 当前已包含：
 
@@ -135,14 +135,14 @@ loopback 并不自己决定攻击点，仍然完全复用：
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
+ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
 ```
 
 ### 6.2 视觉接管与攻击圆周跟随
 
 ```bash
 source install/setup.bash
-ros2 launch pb2025_sentry_bringup loopback_vision_test.launch.py \
+ros2 launch ats_sentry_bringup loopback_vision_test.launch.py \
   use_rviz:=True \
   publish_referee_inputs:=True \
   current_hp:=400 \
@@ -238,12 +238,12 @@ ros2 param set /fake_decision_sim_inputs projectile_allowance_17mm 60
 ### 8.5 修改行为层视觉跟随参数
 
 ```bash
-ros2 param set /pb2025_sentry_behavior_server decision.vision.attack_radius 1.8
-ros2 param set /pb2025_sentry_behavior_server decision.vision.min_replan_interval_s 0.15
-ros2 param set /pb2025_sentry_behavior_server decision.vision.min_goal_shift_m 0.10
-ros2 param set /pb2025_sentry_behavior_server decision.vision.max_goal_angle_step_deg 25.0
-ros2 param set /pb2025_sentry_behavior_server decision.vision.pose_jump_reset_distance_m 0.8
-ros2 param set /pb2025_sentry_behavior_server decision.vision.pose_jump_reset_angle_deg 55.0
+ros2 param set /ats_sentry_behavior_server decision.vision.attack_radius 1.8
+ros2 param set /ats_sentry_behavior_server decision.vision.min_replan_interval_s 0.15
+ros2 param set /ats_sentry_behavior_server decision.vision.min_goal_shift_m 0.10
+ros2 param set /ats_sentry_behavior_server decision.vision.max_goal_angle_step_deg 25.0
+ros2 param set /ats_sentry_behavior_server decision.vision.pose_jump_reset_distance_m 0.8
+ros2 param set /ats_sentry_behavior_server decision.vision.pose_jump_reset_angle_deg 55.0
 ```
 
 ## 9. 当前重定位测试方法

@@ -12,7 +12,7 @@ export ROS_LOG_DIR="$ROS_HOME/log"
 cd "$WORKSPACE_DIR" || exit 1
 
 declare -a commands=(
-  "ros2 launch pb2025_sentry_bringup bringup.launch.py world:=$WORLD_NAME slam:=False use_rviz:=$USE_RVIZ rviz_force_software:=$RVIZ_FORCE_SOFTWARE"
+  "ros2 launch ats_sentry_bringup bringup.launch.py world:=$WORLD_NAME slam:=False use_rviz:=$USE_RVIZ rviz_force_software:=$RVIZ_FORCE_SOFTWARE"
 )
 
 start_command() {

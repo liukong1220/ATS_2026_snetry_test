@@ -15,14 +15,14 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Layer 1: Bringup (pb2025_sentry_bringup)                       │
+│  Layer 1: Bringup (ats_sentry_bringup)                       │
 │  └─ bringup.launch.py 总启动入口，加载所有子系统                   │
 ├─────────────────────────────────────────────────────────────────┤
-│  Layer 2: Behavior Decision (pb2025_sentry_behavior)             │
+│  Layer 2: Behavior Decision (ats_sentry_behavior)             │
 │  └─ BehaviorTree.CPP v4 行为树：巡逻/视觉跟随/撤退/资源管理        │
 │     31个自定义BT插件节点，rmul_2026.xml 主行为树                   │
 ├─────────────────────────────────────────────────────────────────┤
-│  Layer 3: Navigation (pb2025_sentry_nav)                        │
+│  Layer 3: Navigation (ats_sentry_nav)                        │
 │  ┌──────────┬──────────┬──────────┬──────────┬──────────┐       │
 │  │Point-LIO │small_gicp│terrain_  │trajectory│Nav2      │       │
 │  │LiDAR-惯性│重定位     │analysis  │optimizer │MPPI+Hybrid│      │
@@ -106,9 +106,9 @@ map ──(small_gicp修正)──→ odom ──(Point-LIO)──→ lidar_odom
 ```
 ATS_2026_snetry_test/
 ├── src/
-│   ├── pb2025_sentry_bringup/          # 总启动、地图、参数
-│   ├── pb2025_sentry_behavior/         # 行为树决策(31个BT插件)
-│   ├── pb2025_sentry_nav/              # 导航子系统
+│   ├── ats_sentry_bringup/          # 总启动、地图、参数
+│   ├── ats_sentry_behavior/         # 行为树决策(31个BT插件)
+│   ├── ats_sentry_nav/              # 导航子系统
 │   │   ├── point_lio/                  # LiDAR-惯性里程计
 │   │   ├── small_gicp_relocalization/  # GICP重定位
 │   │   ├── loam_interface/             # 里程计坐标转换
@@ -120,9 +120,9 @@ ATS_2026_snetry_test/
 │   │   ├── pb_nav2_plugins/            # 自定义Nav2插件
 │   │   ├── livox_ros_driver2/          # Livox驱动
 │   │   ├── pointcloud_to_laserscan/    # 点云→激光扫描
-│   │   ├── pb2025_nav_bringup/         # Nav2启动配置
+│   │   ├── ats_nav_bringup/         # Nav2启动配置
 │   │   └── sp_msgs/                    # 自定义消息
-│   ├── pb2025_robot_description/       # URDF/SDF模型
+│   ├── ats_robot_description/       # URDF/SDF模型
 │   ├── loopback_sim/                   # 软件闭环仿真
 │   ├── standard_robot_pp_ros2/         # 串口驱动+裁判系统
 │   ├── interfaces/                     # RoboMaster接口定义
@@ -1148,7 +1148,7 @@ C++通过 `public` / `protected` / `private` 三级访问控制实现封装。�
 **项目实例 — `SentryBehaviorServer`（行为树服务器）：**
 
 ```cpp
-// 文件: pb2025_sentry_behavior/include/pb2025_sentry_behavior/pb2025_sentry_behavior_server.hpp
+// 文件: ats_sentry_behavior/include/ats_sentry_behavior/ats_sentry_behavior_server.hpp
 
 class SentryBehaviorServer : public BT::TreeExecutionServer {
 public:                                          // ← 外部可访问的接口
@@ -1977,7 +1977,7 @@ def generate_launch_description():
 
         # 启动节点
         Node(
-            package='pb2025_sentry_nav',
+            package='ats_sentry_nav',
             executable='small_gicp_node',
             name='small_gicp_relocalization',
             parameters=[node_params],
@@ -2012,7 +2012,7 @@ bringup.launch.py (总入口)
 │   │   └── bt_navigator
 │   ├── trajectory_optimizer (轨迹优化)
 │   └── small_gicp_relocalization (重定位)
-└── pb2025_sentry_behavior_launch.py (行为树)
+└── ats_sentry_behavior_launch.py (行为树)
 ```
 
 **参数配置机制：**
@@ -10457,7 +10457,7 @@ void publish(const VisionTargetMsg & msg) {
 
 ```cpp
 // ATS_2026: 订阅视觉目标
-// 文件: pb2025_sentry_behavior/src/pb2025_sentry_behavior_server.cpp
+// 文件: ats_sentry_behavior/src/ats_sentry_behavior_server.cpp
 
 vision_target_sub_ = node_->create_subscription<sp_msgs::msg::VisionTargetMsg>(
     "vision/target", 10,
@@ -10490,7 +10490,7 @@ auto future = client_->async_send_request(request);
 
 ```cpp
 // 项目中的导航Action
-// 文件: pb2025_sentry_behavior/plugins/action/send_nav2_goal.hpp
+// 文件: ats_sentry_behavior/plugins/action/send_nav2_goal.hpp
 
 class SendNav2GoalAction : public BT::RosActionNode<nav2_msgs::action::NavigateToPose> {
     // 设置目标
@@ -10552,7 +10552,7 @@ map
 **2. 查找变换**
 
 ```cpp
-// 文件: pb2025_sentry_behavior/src/pb2025_sentry_behavior_server.cpp
+// 文件: ats_sentry_behavior/src/ats_sentry_behavior_server.cpp
 
 // 初始化
 tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
@@ -10581,7 +10581,7 @@ try {
 **3. 发布变换**
 
 ```cpp
-// 文件: pb2025_sentry_nav/small_gicp_relocalization/src/small_gicp_relocalization.cpp
+// 文件: ats_sentry_nav/small_gicp_relocalization/src/small_gicp_relocalization.cpp
 
 static tf2_ros::TransformBroadcaster tf_broadcaster(node);
 
@@ -10600,7 +10600,7 @@ tf_broadcaster.sendTransform(map_to_odom);
 **4. 静态变换（launch文件中）**
 
 ```python
-# 文件: pb2025_sentry_bringup/launch/bringup.launch.py
+# 文件: ats_sentry_bringup/launch/bringup.launch.py
 
 # base_footprint → base_link 的静态变换
 static_tf = Node(
@@ -10631,7 +10631,7 @@ static_tf = Node(
 **2. 机器人的SDF描述结构**
 
 ```xml
-<!-- 文件: pb2025_sentry_robot.sdf.xmacro (简化) -->
+<!-- 文件: ats_sentry_robot.sdf.xmacro (简化) -->
 
 <model name="sentry_robot">
   <!-- 底盘 -->
@@ -10729,7 +10729,7 @@ static_tf = Node(
 Gazebo仿真搭建步骤:
 
 1. 机器人模型: SDF xmacro描述底盘、云台、相机、LiDAR、装甲板
-   └── pb2025_robot_description/resource/xmacro/
+   └── ats_robot_description/resource/xmacro/
 
 2. 世界模型: RMUL竞赛场地
    └── rmoss_gz_resources/resource/models/ (场地、障碍物、NPC)
@@ -10787,7 +10787,7 @@ Gazebo (物理仿真)
   ├── sp_vision25 (视觉节点)
   │     订阅图像 → 检测 → 发布 vision/target
   │
-  ├── pb2025_sentry_behavior (决策节点)
+  ├── ats_sentry_behavior (决策节点)
   │     订阅 vision/target + odom → 行为树决策 → 发布导航目标
   │
   └── Nav2 (导航节点)
@@ -10862,7 +10862,7 @@ void receiveData() {
 **3. 行为树中的线程安全**
 
 ```cpp
-// 文件: pb2025_sentry_behavior/plugins/action/send_nav_through_poses.cpp
+// 文件: ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp
 
 std::mutex mutex_;
 rclcpp_action::ClientGoalHandle<NavigateThroughPoses>::SharedPtr goal_handle_;
@@ -10997,7 +10997,7 @@ ATS_2026_snetry_test/
 │   └── ...
 ├── CLAUDE.md                      # 项目级AI助手配置
 └── src/
-    └── pb2025_sentry_bringup/
+    └── ats_sentry_bringup/
         └── README.md              # 启动说明
 ```
 

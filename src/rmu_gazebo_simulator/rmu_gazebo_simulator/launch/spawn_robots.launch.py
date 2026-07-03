@@ -35,12 +35,12 @@ def launch_setup(context: LaunchContext):
     remappings = [("/tf", "tf"), ("/tf_static", "tf_static")]
 
     pkg_simulator = get_package_share_directory("rmu_gazebo_simulator")
-    pkg_pb2025_robot_description = get_package_share_directory(
-        "pb2025_robot_description"
+    pkg_ats_robot_description = get_package_share_directory(
+        "ats_robot_description"
     )
 
     default_robot_xmacro_path = os.path.join(
-        pkg_pb2025_robot_description,
+        pkg_ats_robot_description,
         "resource",
         "xmacro",
         "simulation_nav_robot.sdf.xmacro",
@@ -166,12 +166,12 @@ def launch_setup(context: LaunchContext):
 
 def generate_launch_description():
     pkg_simulator = get_package_share_directory("rmu_gazebo_simulator")
-    pkg_pb2025_robot_description = get_package_share_directory(
-        "pb2025_robot_description"
+    pkg_ats_robot_description = get_package_share_directory(
+        "ats_robot_description"
     )
     default_gz_world_path = os.path.join(pkg_simulator, "config", "gz_world.yaml")
     default_robot_xmacro_path = os.path.join(
-        pkg_pb2025_robot_description,
+        pkg_ats_robot_description,
         "resource",
         "xmacro",
         "simulation_nav_robot.sdf.xmacro",

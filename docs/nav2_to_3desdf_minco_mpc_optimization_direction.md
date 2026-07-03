@@ -1,6 +1,6 @@
 # 从 2.5D 语义 ESDF 到稳定比赛版与长期最终版导航主链
 
-更新时间：2026-07-02
+更新时间：2026-07-03
 
 本文档只保留两条主线：
 
@@ -487,7 +487,7 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    `~/参考/src/nullspace_mpc`、`~/参考/src/swerve_drive`、`~/参考/src/MuJoCo-LiDAR`
    的控制 / MuJoCo 仿真入口，优先推进自有规划控制链。
 6. `任务 3 / 任务 4` 已开始首版落地：
-   已新增 `src/pb2025_sentry_nav/minco_planner` 包；
+   已新增 `src/ats_sentry_nav/minco_planner` 包；
    包内按职责拆分为 `planning`、`trajectory`、`safety`、`debug`、`nodes`；
    当前 `grid_astar` 已具备基于 `traversability_grid` 的最小可用 A*；
    当前后端先输出带弧长、时间、yaw 的 `ReferenceTrajectory` 骨架，
@@ -499,6 +499,15 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
    新增包内 README 说明各层职责，后续不再把规划、控制、ESDF 逻辑堆进 node wrapper。
 8. 当前整理版本已通过相关包编译：
    `colcon build --packages-select trajectory_optimizer minco_planner --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo`。
+9. 2026-07-03 完成项目命名前缀迁移：
+   仓库内旧赛季项目前缀已统一迁移为 `ats_`；
+   相关目录与 ROS2 包名已迁移为 `ats_sentry_nav`、`ats_nav_bringup`、
+   `ats_sentry_behavior`、`ats_sentry_bringup` 和 `ats_robot_description`。
+10. 已从 `~/参考/src` 迁移 MuJoCo 仿真入口：
+    新增 `ats_mujoco_sim`、`manda_can_control` 和 `carstatemsgs`；
+    `ats_mujoco_sim` 内嵌 `mujoco_lidar`，可用于后续底盘动力学、
+    lidar / ToF 感知和 SE2 MPC 控制验证；
+    详细入口见 `docs/ats_mujoco_sim_integration.md`。
 
 ### 5.3 V1 的阶段划分
 

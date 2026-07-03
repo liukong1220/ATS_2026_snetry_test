@@ -9,7 +9,7 @@ fi
 
 WORLD_NAME="${WORLD_NAME:-${1:-rmuc}}"
 VISION_CONFIG="${VISION_CONFIG:-$WORKSPACE_DIR/src/sp_vision25/configs/sentry.yaml}"
-NAV_PARAMS_FILE="${NAV_PARAMS_FILE:-$WORKSPACE_DIR/src/pb2025_sentry_bringup/params/node_params.yaml}"
+NAV_PARAMS_FILE="${NAV_PARAMS_FILE:-$WORKSPACE_DIR/src/ats_sentry_bringup/params/node_params.yaml}"
 
 USE_RVIZ="${USE_RVIZ:-True}"
 RVIZ_FORCE_SOFTWARE="${RVIZ_FORCE_SOFTWARE:-0}"
@@ -135,7 +135,7 @@ start_nav2() {
     export OMP_NUM_THREADS="$NAV_OMP_NUM_THREADS"
     export OPENBLAS_NUM_THREADS="$NAV_OMP_NUM_THREADS"
     export MKL_NUM_THREADS="$NAV_OMP_NUM_THREADS"
-    exec "${prefix[@]}" ros2 launch pb2025_sentry_bringup bringup.launch.py\
+    exec "${prefix[@]}" ros2 launch ats_sentry_bringup bringup.launch.py\
       world:="$WORLD_NAME" \
       slam:=False \
       params_file:="$NAV_PARAMS_FILE" \

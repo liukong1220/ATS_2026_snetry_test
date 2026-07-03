@@ -144,7 +144,7 @@ python3 src/rmu_gazebo_simulator/rmu_gazebo_simulator/scripts/referee_web/main.p
 
 - 2025 SMBU PolarBear Sentry Navigation
 
-    [pb2025_sentry_nav](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav.git)
+    [ats_sentry_nav](https://github.com/SMBU-PolarBear-Robotics-Team/ats_sentry_nav.git)
 
     ![cmu_nav_v1_0](https://raw.githubusercontent.com/LihanChen2004/picx-images-hosting/master/spin_nav.1ove3nw63o.gif)
 

@@ -18,18 +18,18 @@
 
 1. `src/rmu_gazebo_simulator`
 2. `src/dependencies/rmoss_gazebo`
-3. 项目级入口 `ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py`
+3. 项目级入口 `ros2 launch ats_sentry_bringup gazebo_bringup.launch.py`
 
 职责分工：
 
 1. `rmu_gazebo_simulator` 负责 Gazebo 世界、机器人生成、桥接与仿真基础设施
 2. `rmoss_gazebo` 负责机器人底盘/云台/里程计等 Gazebo 侧接口
-3. `pb2025_nav_bringup` 负责把当前导航链挂到 Gazebo 机器人上
+3. `ats_nav_bringup` 负责把当前导航链挂到 Gazebo 机器人上
 
 ## 2. 默认启动入口
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py
 ```
 
 默认行为：
@@ -47,37 +47,37 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py
 切换 Gazebo 世界：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py sim_world:=rmul_2025
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py sim_world:=rmul_2025
 ```
 
 切换导航地图资产：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py nav_world:=rmuc_2025
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py nav_world:=rmuc_2025
 ```
 
 启动行为层：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_behavior:=True
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py launch_behavior:=True
 ```
 
 关闭 RViz：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py use_rviz:=False
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py use_rviz:=False
 ```
 
 关闭旁路 `trajectory_optimizer` 可视化节点：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_trajectory_optimizer:=False
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py launch_trajectory_optimizer:=False
 ```
 
 关闭 `small_gicp` 重定位：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_small_gicp_relocalization:=False
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py launch_small_gicp_relocalization:=False
 ```
 
 ## 4. 当前实际仿真链路
@@ -113,7 +113,7 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py launch_small_gicp_rel
 入口：
 
 ```bash
-ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py use_rviz:=False
+ros2 launch ats_sentry_bringup gazebo_bringup.launch.py use_rviz:=False
 ```
 
 用途：
@@ -127,7 +127,7 @@ ros2 launch pb2025_sentry_bringup gazebo_bringup.launch.py use_rviz:=False
 入口：
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py
+ros2 launch ats_nav_bringup rm_navigation_simulation_launch.py
 ```
 
 用途：
@@ -146,14 +146,14 @@ ros2 launch rmu_gazebo_simulator bringup_sim.launch.py world:=rmuc_2025
 终端 2 启动导航：
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py \
+ros2 launch ats_nav_bringup rm_navigation_simulation_launch.py \
   world:=rmuc_2025 \
   use_rviz:=True \
   launch_small_gicp_relocalization:=True \
   launch_chassis_vel_transform:=True
 ```
 
-这一路径默认从 `pb2025_nav_bringup/map/simulation` 和 `pb2025_nav_bringup/pcd/simulation` 读取同名资产，并保留与实车一致的主链：
+这一路径默认从 `ats_nav_bringup/map/simulation` 和 `ats_nav_bringup/pcd/simulation` 读取同名资产，并保留与实车一致的主链：
 
 1. `small_gicp_relocalization` 持续发布 `map -> odom`
 2. `gimbal_yaw_odom` 作为定位与底盘速度参考主轴
@@ -168,7 +168,7 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py \
 入口：
 
 ```bash
-ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
+ros2 launch ats_nav_bringup rm_navigation_simulation_launch.py slam:=True
 ```
 
 这条链会切到：

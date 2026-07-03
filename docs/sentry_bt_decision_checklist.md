@@ -6,15 +6,15 @@
 
 当前主树：
 
-- [../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml](../src/pb2025_sentry_behavior/behavior_trees/rmul_2026.xml)
+- [../src/ats_sentry_behavior/behavior_trees/rmul_2026.xml](../src/ats_sentry_behavior/behavior_trees/rmul_2026.xml)
 
 当前视觉专测树：
 
-- [../src/pb2025_sentry_behavior/behavior_trees/vision_test.xml](../src/pb2025_sentry_behavior/behavior_trees/vision_test.xml)
+- [../src/ats_sentry_behavior/behavior_trees/vision_test.xml](../src/ats_sentry_behavior/behavior_trees/vision_test.xml)
 
 当前行为树服务端：
 
-- [../src/pb2025_sentry_behavior/src/pb2025_sentry_behavior_server.cpp](../src/pb2025_sentry_behavior/src/pb2025_sentry_behavior_server.cpp)
+- [../src/ats_sentry_behavior/src/ats_sentry_behavior_server.cpp](../src/ats_sentry_behavior/src/ats_sentry_behavior_server.cpp)
 
 ## 2. 当前主线数据流
 
@@ -108,7 +108,7 @@
 
 对应实现：
 
-- [../src/pb2025_sentry_behavior/plugins/condition/is_vision_target_valid.cpp](../src/pb2025_sentry_behavior/plugins/condition/is_vision_target_valid.cpp)
+- [../src/ats_sentry_behavior/plugins/condition/is_vision_target_valid.cpp](../src/ats_sentry_behavior/plugins/condition/is_vision_target_valid.cpp)
 
 当前判定条件：
 
@@ -138,7 +138,7 @@
 
 对应实现：
 
-- [../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp](../src/pb2025_sentry_behavior/plugins/action/select_vision_follow_path.cpp)
+- [../src/ats_sentry_behavior/plugins/action/select_vision_follow_path.cpp](../src/ats_sentry_behavior/plugins/action/select_vision_follow_path.cpp)
 
 当前核心流程：
 
@@ -217,7 +217,7 @@
 
 对应实现：
 
-- [../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp](../src/pb2025_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp)
+- [../src/ats_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp](../src/ats_sentry_behavior/plugins/condition/is_robot_resource_mode.cpp)
 
 当前只使用两类输入：
 
@@ -280,7 +280,7 @@
 
 统一姿态裁决节点：
 
-- [../src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp](../src/pb2025_sentry_behavior/plugins/action/pub_robot_mode.cpp)
+- [../src/ats_sentry_behavior/plugins/action/pub_robot_mode.cpp](../src/ats_sentry_behavior/plugins/action/pub_robot_mode.cpp)
 
 ## 8. 当前路径执行稳定器
 
