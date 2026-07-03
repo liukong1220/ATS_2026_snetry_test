@@ -652,7 +652,7 @@ prediction_horizon = time_steps * model_dt
 
 当前项目已经额外做了一层处理：
 
-- 恢复插件使用 `pb_nav2_behaviors/BackUpFreeSpace`
+- 恢复插件使用 `ats_nav2_behaviors/BackUpFreeSpace`
 - 它会读取 costmap，搜索低代价退让方向
 - 新增了 `max_allowed_cost`
 - 高于该阈值的膨胀层区域，不再被当作“可退空间”

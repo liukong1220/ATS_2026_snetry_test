@@ -16,7 +16,7 @@ IsGameTimeStageCondition::IsGameTimeStageCondition(
 
 BT::NodeStatus IsGameTimeStageCondition::tickCondition()
 {
-  auto game_status = getInput<pb_rm_interfaces::msg::GameStatus>("key_port");
+  auto game_status = getInput<ats_rm_interfaces::msg::GameStatus>("key_port");
   if (!game_status) {
     RCLCPP_DEBUG(logger_, "GameStatus message is not available");
     return BT::NodeStatus::FAILURE;
@@ -43,7 +43,7 @@ BT::NodeStatus IsGameTimeStageCondition::tickCondition()
 BT::PortsList IsGameTimeStageCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::GameStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::GameStatus>(
       "key_port", "{@referee_gameStatus}", "GameStatus port on blackboard"),
     BT::InputPort<std::string>("stage", "normal", "Expected time stage")};
 }

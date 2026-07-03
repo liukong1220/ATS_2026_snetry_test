@@ -6,13 +6,13 @@
 #include <string>
 
 #include "behaviortree_ros2/bt_topic_pub_action_node.hpp"
-#include "pb_rm_interfaces/msg/gimbal_cmd.hpp"
+#include "ats_rm_interfaces/msg/gimbal_cmd.hpp"
 
 namespace ats_sentry_behavior
 {
 
 class PublishGimbalVelocity
-: public BT::RosTopicPubStatefulActionNode<pb_rm_interfaces::msg::GimbalCmd>
+: public BT::RosTopicPubStatefulActionNode<ats_rm_interfaces::msg::GimbalCmd>
 {
 public:
   PublishGimbalVelocity(
@@ -21,7 +21,7 @@ public:
   static BT::PortsList providedPorts();
 
 protected:
-  bool setMessage(pb_rm_interfaces::msg::GimbalCmd & msg) override;
+  bool setMessage(ats_rm_interfaces::msg::GimbalCmd & msg) override;
 };
 
 }  // namespace ats_sentry_behavior

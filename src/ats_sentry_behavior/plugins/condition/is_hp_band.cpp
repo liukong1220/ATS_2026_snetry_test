@@ -33,8 +33,8 @@ IsHpBandCondition::IsHpBandCondition(
 
 BT::NodeStatus IsHpBandCondition::tickCondition()
 {
-  auto game_status = getInput<pb_rm_interfaces::msg::GameStatus>("game_status");
-  auto robot_status = getInput<pb_rm_interfaces::msg::RobotStatus>("robot_status");
+  auto game_status = getInput<ats_rm_interfaces::msg::GameStatus>("game_status");
+  auto robot_status = getInput<ats_rm_interfaces::msg::RobotStatus>("robot_status");
   if (!game_status || !robot_status) {
     RCLCPP_DEBUG(logger_, "GameStatus or RobotStatus message is not available");
     return BT::NodeStatus::FAILURE;
@@ -62,9 +62,9 @@ BT::NodeStatus IsHpBandCondition::tickCondition()
 BT::PortsList IsHpBandCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::GameStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::GameStatus>(
       "game_status", "{@referee_gameStatus}", "GameStatus port on blackboard"),
-    BT::InputPort<pb_rm_interfaces::msg::RobotStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::RobotStatus>(
       "robot_status", "{@referee_robotStatus}", "RobotStatus port on blackboard"),
     BT::InputPort<std::string>("band", "normal", "Expected HP band")};
 }

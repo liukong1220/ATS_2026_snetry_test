@@ -4,7 +4,7 @@ import sys
 import threading
 
 import rclpy
-from pb_rm_interfaces.msg import GimbalCmd
+from ats_rm_interfaces.msg import GimbalCmd
 from rclpy.node import Node
 from std_msgs.msg import Header
 

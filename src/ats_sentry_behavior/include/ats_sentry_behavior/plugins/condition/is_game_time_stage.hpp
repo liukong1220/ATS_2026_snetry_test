@@ -5,7 +5,7 @@
 
 #include "behaviortree_cpp/condition_node.h"
 #include "ats_sentry_behavior/decision_utils.hpp"
-#include "pb_rm_interfaces/msg/game_status.hpp"
+#include "ats_rm_interfaces/msg/game_status.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace ats_sentry_behavior

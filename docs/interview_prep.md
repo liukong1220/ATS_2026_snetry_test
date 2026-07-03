@@ -84,8 +84,8 @@
 | small_gicp_relocalization | Generalized ICP + OMP并行 | scan-to-map重定位 |
 | terrain_analysis / terrain_analysis_ext | 体素化地形分类 + 分位数地面估计 | 近场/远场障碍物检测 |
 | trajectory_optimizer | 三次B-spline + 弧长参数化 + 曲率限速 | 路径平滑与轨迹规划 |
-| pb_nav2_plugins/IntensityVoxelLayer | 3D体素 + 强度过滤 | 自定义Costmap层 |
-| pb_nav2_plugins/BackUpFreeSpace | 多方向走廊搜索 + 滞回状态机 | 全向恢复行为 |
+| ats_nav2_plugins/IntensityVoxelLayer | 3D体素 + 强度过滤 | 自定义Costmap层 |
+| ats_nav2_plugins/BackUpFreeSpace | 多方向走廊搜索 + 滞回状态机 | 全向恢复行为 |
 | fake_vel_transform | 坐标旋转 + 云台角速度叠加 | 云台扫描模式速度补偿 |
 | BehaviorTree | 资源状态机 + 三层视觉平滑 | 自主决策 |
 
@@ -117,7 +117,7 @@ ATS_2026_snetry_test/
 │   │   ├── terrain_analysis_ext/       # 远场地形分析(20m)
 │   │   ├── trajectory_optimizer/       # B-spline轨迹优化
 │   │   ├── fake_vel_transform/         # 云台速度补偿
-│   │   ├── pb_nav2_plugins/            # 自定义Nav2插件
+│   │   ├── ats_nav2_plugins/            # 自定义Nav2插件
 │   │   ├── livox_ros_driver2/          # Livox驱动
 │   │   ├── pointcloud_to_laserscan/    # 点云→激光扫描
 │   │   ├── ats_nav_bringup/         # Nav2启动配置
@@ -1251,7 +1251,7 @@ public:
 | `LoamInterfaceNode` | `loam_interface/include/.../loam_interface.hpp` | LiDAR里程计坐标转换 |
 | `SensorScanGenerationNode` | `sensor_scan_generation/include/.../sensor_scan_generation.hpp` | 点云→激光扫描 |
 | `FakeVelTransform` | `fake_vel_transform/include/.../fake_vel_transform.hpp` | 云台速度补偿 |
-| `TeleopTwistJoyNode` | `pb_teleop_twist_joy/include/.../pb_teleop_twist_joy.hpp` | 手柄遥控 |
+| `TeleopTwistJoyNode` | `ats_teleop_twist_joy/include/.../ats_teleop_twist_joy.hpp` | 手柄遥控 |
 | `StandardRobotPpRos2Node` | `standard_robot_pp_ros2/include/.../standard_robot_pp_ros2.hpp` | 串口通信 |
 | `GimbalManagerNode` | `standard_robot_pp_ros2/include/.../gimbal_manager.hpp` | 云台管理 |
 
@@ -1313,7 +1313,7 @@ protected:
 };
 
 // 注册为Nav2插件
-PLUGINLIB_EXPORT_CLASS(pb_nav2_costmap_2d::IntensityVoxelLayer, nav2_costmap_2d::Layer)
+PLUGINLIB_EXPORT_CLASS(ats_nav2_costmap_2d::IntensityVoxelLayer, nav2_costmap_2d::Layer)
 ```
 
 ```cpp
@@ -4550,7 +4550,7 @@ for (auto & pt : points_in_voxel) {
 **2. 自定义Costmap层 — IntensityVoxelLayer**
 
 ```cpp
-// 文件: pb_nav2_plugins/src/layers/intensity_voxel_layer.cpp
+// 文件: ats_nav2_plugins/src/layers/intensity_voxel_layer.cpp
 
 // 该层接收terrain_map/terrain_map_ext话题的点云
 // 按intensity(离地高度)和Z坐标过滤，标记致命障碍物
@@ -6890,7 +6890,7 @@ global_costmap:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: true
       intensity_voxel_layer:
-        plugin: "pb_nav2_costmap_2d::IntensityVoxelLayer"
+        plugin: "ats_nav2_costmap_2d::IntensityVoxelLayer"
         min_obstacle_intensity: 0.1
         max_obstacle_intensity: 2.0
       inflation_layer:

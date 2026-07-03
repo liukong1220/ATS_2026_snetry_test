@@ -6,7 +6,7 @@
 
 1. `ats_nav_bringup`：Nav2、定位、RViz、传感器链路启动
 2. `trajectory_optimizer`：B 样条平滑、trajectory profile、signed Traversability ESDF、governor
-3. `pb_nav2_plugins`：恢复行为与 costmap 插件
+3. `ats_nav2_plugins`：恢复行为与 costmap 插件
 4. `fake_vel_transform`：速度坐标系变换与自旋叠加
 5. `small_gicp_relocalization`、`point_lio`、`loam_interface`、`sensor_scan_generation`：定位与点云接口
 
@@ -76,8 +76,8 @@ ats_sentry_nav/
 ├── livox_ros_driver2/             # Livox mid360 驱动
 ├── loam_interface/                # point_lio 输出转换到导航 odom
 ├── ats_nav_bringup/            # 导航 launch、RViz、simulation/reality 参数
-├── pb_nav2_plugins/               # BackUpFreeSpace、IntensityVoxelLayer 等插件
-├── pb_teleop_twist_joy/           # 手柄速度/云台控制
+├── ats_nav2_plugins/               # BackUpFreeSpace、IntensityVoxelLayer 等插件
+├── ats_teleop_twist_joy/           # 手柄速度/云台控制
 ├── pointcloud_to_laserscan/       # 建图模式下的点云转 LaserScan
 ├── point_lio/                     # 点云里程计
 ├── sensor_scan_generation/        # 点云 / odom / TF 相关速度与扫描生成
@@ -144,12 +144,12 @@ ats_sentry_nav/
 3. 默认这两张图优先用于任务 2 的坡道速度规则与 RViz 观测，不直接改写当前 `traversability_grid` 的二值通行逻辑。
 4. 如果希望“坡太陡就直接绕开”，把 `terrain_analysis_ext.useSlopeAsObstacle` 设为 `true`，再用 `slopeObstacleDegThre` 调整坡度障碍阈值。
 
-### `pb_nav2_plugins`
+### `ats_nav2_plugins`
 
 关键文件：
 
-- [pb_nav2_plugins/src/behaviors/back_up_free_space.cpp](./pb_nav2_plugins/src/behaviors/back_up_free_space.cpp)
-- [pb_nav2_plugins/include/pb_nav2_plugins/behaviors/back_up_free_space.hpp](./pb_nav2_plugins/include/pb_nav2_plugins/behaviors/back_up_free_space.hpp)
+- [ats_nav2_plugins/src/behaviors/back_up_free_space.cpp](./ats_nav2_plugins/src/behaviors/back_up_free_space.cpp)
+- [ats_nav2_plugins/include/ats_nav2_plugins/behaviors/back_up_free_space.hpp](./ats_nav2_plugins/include/ats_nav2_plugins/behaviors/back_up_free_space.hpp)
 
 当前恢复行为已实现：
 
@@ -217,7 +217,7 @@ ats_sentry_nav/
 ## 当前维护建议
 
 1. 如果问题是“速度慢、弯前过保守、贴障限速异常”，优先看 `trajectory_optimizer`
-2. 如果问题是“规划能过但恢复动作不自然”，优先看 `pb_nav2_plugins`
+2. 如果问题是“规划能过但恢复动作不自然”，优先看 `ats_nav2_plugins`
 3. 如果问题是“姿态/视觉/目标点异常”，不要先改本包，优先看 `ats_sentry_behavior`
 4. 如果问题是“最终底盘速度和 Nav2 输出不一致”，同时看 `fake_vel_transform` 与 `standard_robot_pp_ros2`
 5. 若只改了 `ats_nav_bringup/config/reality/nav2_params.yaml` 却发现总入口没变化，先确认当前是不是从 `node_params.yaml` 启动的

@@ -17,7 +17,7 @@
         <Condition ID="IsAttacked">
             <output_port name="gimbal_yaw" default="{gimbal_yaw}" type="float">Move gimbal_yaw to the direction of the hit armor plate</output_port>
             <output_port name="gimbal_pitch" default="{gimbal_pitch}" type="float">Move gimbal_pitch (const 0.0) to the direction of the hit armor plate</output_port>
-            <input_port name="key_port" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+            <input_port name="key_port" default="{@referee_robotStatus}" type="ats_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
             <input_port name="stop_after_s" default="{@decision_hit_spin_stop_after_no_hp_drop_s}" type="double">Stop spinning when no new armor-hit HP deduction arrives within this duration</input_port>
         </Condition>
         <Action ID="IsDecisionInputSource" editable="true">
@@ -30,7 +30,7 @@
             <input_port name="max_remain_time" default="420" type="int">Maximum remaining time (s)</input_port>
             <input_port name="min_remain_time" default="0" type="int">Minimum remaining time (s)</input_port>
             <input_port name="expected_game_progress" default="4" type="int">Expected game progress stage</input_port>
-            <input_port name="key_port" default="{@referee_gameStatus}" type="pb_rm_interfaces::msg::GameStatus_&lt;std::allocator&lt;void&gt; &gt;">GameStatus port on blackboard</input_port>
+            <input_port name="key_port" default="{@referee_gameStatus}" type="ats_rm_interfaces::msg::GameStatus_&lt;std::allocator&lt;void&gt; &gt;">GameStatus port on blackboard</input_port>
         </Condition>
         <Action ID="IsGameTimeStage" editable="true">
             <input_port name="stage"/>
@@ -39,11 +39,11 @@
             <input_port name="band"/>
         </Action>
         <Condition ID="IsRobotHpBelow">
-            <input_port name="robot_status" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+            <input_port name="robot_status" default="{@referee_robotStatus}" type="ats_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
             <input_port name="threshold" default="300" type="int">HP threshold for defend posture</input_port>
         </Condition>
         <Condition ID="IsRobotResourceMode">
-            <input_port name="robot_status" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+            <input_port name="robot_status" default="{@referee_robotStatus}" type="ats_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
             <input_port name="state" default="engage" type="std::string">Expected resource mode: engage / resupply / defend</input_port>
         </Condition>
         <Action ID="IsPathGoalReached" editable="true">
@@ -56,13 +56,13 @@
             <input_port name="friendly_supply_zone_non_exchange" default="false" type="bool">己方与兑换区不重叠的补给区 / RMUL 补给区</input_port>
             <input_port name="center_gain_point" default="false" type="bool">中心增益点（仅 RMUL 适用）</input_port>
             <input_port name="friendly_fortress_gain_point" default="false" type="bool">己方堡垒增益点</input_port>
-            <input_port name="key_port" default="{@referee_rfidStatus}" type="pb_rm_interfaces::msg::RfidStatus_&lt;std::allocator&lt;void&gt; &gt;">RfidStatus port on blackboard</input_port>
+            <input_port name="key_port" default="{@referee_rfidStatus}" type="ats_rm_interfaces::msg::RfidStatus_&lt;std::allocator&lt;void&gt; &gt;">RfidStatus port on blackboard</input_port>
         </Condition>
         <Condition ID="IsStatusOK">
             <input_port name="ammo_min" default="0" type="int">Lower then minimum ammo will return FAILURE</input_port>
             <input_port name="heat_max" default="350" type="int">Maximum heat. NOTE: Sentry heat limit is 400</input_port>
             <input_port name="hp_min" default="300" type="int">Minimum HP. NOTE: Sentry init/max HP is 400</input_port>
-            <input_port name="key_port" default="{@referee_robotStatus}" type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+            <input_port name="key_port" default="{@referee_robotStatus}" type="ats_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
         </Condition>
         <Condition ID="IsVisionTargetValid">
             <input_port name="key_port" default="{@sp_vision_target}" type="sp_msgs::msg::VisionTargetMsg">Vision fusion message on blackboard</input_port>
@@ -94,7 +94,7 @@
         </Action>
         <Action ID="PublishRobotMode">
             <input_port name="mode" default="move" type="std::string">Robot mode: move / attack / defend</input_port>
-            <input_port name="game_status" default="{@referee_gameStatus}" type="pb_rm_interfaces::msg::GameStatus_&lt;std::allocator&lt;void&gt; &gt;">Game status used to reset per-match posture timers</input_port>
+            <input_port name="game_status" default="{@referee_gameStatus}" type="ats_rm_interfaces::msg::GameStatus_&lt;std::allocator&lt;void&gt; &gt;">Game status used to reset per-match posture timers</input_port>
             <input_port name="cooldown_s" default="{@decision_mode_switch_cooldown_s}" type="double">Minimum interval between posture switches</input_port>
             <input_port name="max_cumulative_s" default="{@decision_mode_max_cumulative_s}" type="double">Maximum cumulative posture duration within one match</input_port>
             <input_port name="topic_name" default="__default__placeholder__" type="std::string">Topic name</input_port>

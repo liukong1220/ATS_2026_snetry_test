@@ -14,8 +14,8 @@ IsFriendlyOutpostDestroyedCondition::IsFriendlyOutpostDestroyedCondition(
 
 BT::NodeStatus IsFriendlyOutpostDestroyedCondition::tickCondition()
 {
-  auto all_robot_hp = getInput<pb_rm_interfaces::msg::GameRobotHP>("all_robot_hp");
-  auto robot_status = getInput<pb_rm_interfaces::msg::RobotStatus>("robot_status");
+  auto all_robot_hp = getInput<ats_rm_interfaces::msg::GameRobotHP>("all_robot_hp");
+  auto robot_status = getInput<ats_rm_interfaces::msg::RobotStatus>("robot_status");
   if (!all_robot_hp || !robot_status) {
     RCLCPP_DEBUG(logger_, "GameRobotHP or RobotStatus message is not available");
     return BT::NodeStatus::FAILURE;
@@ -31,9 +31,9 @@ BT::NodeStatus IsFriendlyOutpostDestroyedCondition::tickCondition()
 BT::PortsList IsFriendlyOutpostDestroyedCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::GameRobotHP>(
+    BT::InputPort<ats_rm_interfaces::msg::GameRobotHP>(
       "all_robot_hp", "{@referee_allRobotHP}", "All robot HP from referee"),
-    BT::InputPort<pb_rm_interfaces::msg::RobotStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::RobotStatus>(
       "robot_status", "{@referee_robotStatus}", "Robot status used to infer team color")};
 }
 

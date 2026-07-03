@@ -6,7 +6,7 @@
 
 ## 1. Introduction
 
-通过键盘控制，转换为云台的位置姿态话题 [pb_rm_interfaces/msg/GimbalCmd](https://github.com/SMBU-PolarBear-Robotics-Team/pb_rm_interfaces/blob/main/msg/GimbalCmd.msg) 发布。
+通过键盘控制，转换为云台的位置姿态话题 [ats_rm_interfaces/msg/GimbalCmd](https://github.com/SMBU-PolarBear-Robotics-Team/ats_rm_interfaces/blob/main/msg/GimbalCmd.msg) 发布。
 
 ### 2.1 Setup Environment
 

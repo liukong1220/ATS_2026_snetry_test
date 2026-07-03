@@ -5,7 +5,7 @@
 #include <cctype>
 
 #include "ats_sentry_behavior/decision_utils.hpp"
-#include "pb_rm_interfaces/msg/game_status.hpp"
+#include "ats_rm_interfaces/msg/game_status.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
@@ -30,7 +30,7 @@ struct RobotModeRuntimeState
   bool initialized = false;
   // 当前是否处于比赛 RUNNING 阶段，仅 RUNNING 阶段累计姿态时长。
   bool match_running = false;
-  uint8_t last_game_progress = pb_rm_interfaces::msg::GameStatus::NOT_START;
+  uint8_t last_game_progress = ats_rm_interfaces::msg::GameStatus::NOT_START;
   // 当前真正生效的姿态，不一定等于本 tick 请求的姿态。
   uint8_t active_mode = kMoveMode;
   // 上次累计时长更新的时间戳。
@@ -149,7 +149,7 @@ BT::PortsList PublishRobotModeAction::providedPorts()
     BT::InputPort<std::string>(
       "mode", "move",
       "当前分支期望的姿态字符串，支持 move / attack / defend"),
-    BT::InputPort<pb_rm_interfaces::msg::GameStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::GameStatus>(
       "game_status", "{@referee_gameStatus}",
       "比赛状态。用于识别新的一局开始，并清空单局姿态累计时长"),
     BT::InputPort<double>(
@@ -203,12 +203,12 @@ uint8_t PublishRobotModeAction::resolveModeWithConstraints(uint8_t requested_mod
   getInput("max_cumulative_s", max_cumulative_s);
 
   RobotModeRuntimeState state;
-  auto game_status = getInput<pb_rm_interfaces::msg::GameStatus>("game_status");
+  auto game_status = getInput<ats_rm_interfaces::msg::GameStatus>("game_status");
   const bool has_game_status = static_cast<bool>(game_status);
   const uint8_t current_game_progress =
-    has_game_status ? game_status->game_progress : pb_rm_interfaces::msg::GameStatus::NOT_START;
+    has_game_status ? game_status->game_progress : ats_rm_interfaces::msg::GameStatus::NOT_START;
   const bool match_running =
-    has_game_status && current_game_progress == pb_rm_interfaces::msg::GameStatus::RUNNING;
+    has_game_status && current_game_progress == ats_rm_interfaces::msg::GameStatus::RUNNING;
 
   // 注意：
   // 1. 只有比赛 RUNNING 期间才累计姿态时长；

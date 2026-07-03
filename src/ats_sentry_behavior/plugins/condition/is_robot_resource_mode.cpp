@@ -117,7 +117,7 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
     return BT::NodeStatus::FAILURE;
   }
 
-  auto robot_status = getInput<pb_rm_interfaces::msg::RobotStatus>("robot_status");
+  auto robot_status = getInput<ats_rm_interfaces::msg::RobotStatus>("robot_status");
   if (!robot_status) {
     if (assume_engage_when_status_missing_) {
       root_blackboard->set<std::string>(kResourceModeBlackboardKey, "engage");
@@ -246,7 +246,7 @@ BT::NodeStatus IsRobotResourceModeCondition::tickCondition()
 BT::PortsList IsRobotResourceModeCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::RobotStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::RobotStatus>(
       "robot_status", "{@referee_robotStatus}",
       "裁判系统 RobotStatus，读取 current_hp 与 projectile_allowance_17mm"),
     BT::InputPort<std::string>(

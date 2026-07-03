@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 import rclpy
 from geometry_msgs.msg import PointStamped
 from geometry_msgs.msg import PoseWithCovarianceStamped
-from pb_rm_interfaces.msg import GameStatus, RfidStatus, RobotStatus
+from ats_rm_interfaces.msg import GameStatus, RfidStatus, RobotStatus
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from sp_msgs.msg import VisionTargetMsg

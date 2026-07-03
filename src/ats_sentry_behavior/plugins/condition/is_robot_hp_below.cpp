@@ -11,7 +11,7 @@ IsRobotHpBelowCondition::IsRobotHpBelowCondition(
 
 BT::NodeStatus IsRobotHpBelowCondition::tickCondition()
 {
-  auto robot_status = getInput<pb_rm_interfaces::msg::RobotStatus>("robot_status");
+  auto robot_status = getInput<ats_rm_interfaces::msg::RobotStatus>("robot_status");
   if (!robot_status) {
     RCLCPP_DEBUG(logger_, "RobotStatus message is not available");
     return BT::NodeStatus::FAILURE;
@@ -32,7 +32,7 @@ BT::NodeStatus IsRobotHpBelowCondition::tickCondition()
 BT::PortsList IsRobotHpBelowCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::RobotStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::RobotStatus>(
       "robot_status", "{@referee_robotStatus}",
       "裁判系统 RobotStatus 输入，读取其中的 current_hp"),
     BT::InputPort<int>("threshold", 300, "防御姿态触发血量阈值，满足 current_hp <= threshold 即返回 SUCCESS")};

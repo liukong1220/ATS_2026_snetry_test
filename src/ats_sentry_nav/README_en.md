@@ -48,7 +48,7 @@ This project is based on the [NAV2 Navigation Framework](https://github.com/ros-
     ├── ign_sim_pointcloud_tool             # Simulator point cloud processing tool
     ├── livox_ros_driver2                   # Livox driver
     ├── loam_interface                      # Point_lio and other odometry interfaces
-    ├── pb_teleop_twist_joy                 # Gamepad control
+    ├── ats_teleop_twist_joy                 # Gamepad control
     ├── ats_nav_bringup                  # Launch files
     ├── ats_sentry_nav                   # This repository's package description
     ├── point_lio                           # Odometry

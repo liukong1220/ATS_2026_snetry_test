@@ -2,9 +2,9 @@
 # Use this for repositories that cannot be installed via rosdep.
 
 repositories:
-  pb_rm_interfaces:
+  ats_rm_interfaces:
     type: git
-    url: https://github.com/SMBU-PolarBear-Robotics-Team/pb_rm_interfaces.git
+    url: https://github.com/SMBU-PolarBear-Robotics-Team/ats_rm_interfaces.git
     version: main
 
   ats_robot_description:

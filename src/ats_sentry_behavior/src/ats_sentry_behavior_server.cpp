@@ -9,13 +9,13 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
-#include "pb_rm_interfaces/msg/buff.hpp"
-#include "pb_rm_interfaces/msg/event_data.hpp"
-#include "pb_rm_interfaces/msg/game_robot_hp.hpp"
-#include "pb_rm_interfaces/msg/game_status.hpp"
-#include "pb_rm_interfaces/msg/ground_robot_position.hpp"
-#include "pb_rm_interfaces/msg/rfid_status.hpp"
-#include "pb_rm_interfaces/msg/robot_status.hpp"
+#include "ats_rm_interfaces/msg/buff.hpp"
+#include "ats_rm_interfaces/msg/event_data.hpp"
+#include "ats_rm_interfaces/msg/game_robot_hp.hpp"
+#include "ats_rm_interfaces/msg/game_status.hpp"
+#include "ats_rm_interfaces/msg/ground_robot_position.hpp"
+#include "ats_rm_interfaces/msg/rfid_status.hpp"
+#include "ats_rm_interfaces/msg/robot_status.hpp"
 #include "sp_msgs/msg/vision_target_msg.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -61,17 +61,17 @@ bool isSupportedSimulationMode(const std::string & mode)
 const char * gameProgressName(const uint8_t progress)
 {
   switch (progress) {
-    case pb_rm_interfaces::msg::GameStatus::NOT_START:
+    case ats_rm_interfaces::msg::GameStatus::NOT_START:
       return "NOT_START";
-    case pb_rm_interfaces::msg::GameStatus::PREPARATION:
+    case ats_rm_interfaces::msg::GameStatus::PREPARATION:
       return "PREPARATION";
-    case pb_rm_interfaces::msg::GameStatus::SELF_CHECKING:
+    case ats_rm_interfaces::msg::GameStatus::SELF_CHECKING:
       return "SELF_CHECKING";
-    case pb_rm_interfaces::msg::GameStatus::COUNT_DOWN:
+    case ats_rm_interfaces::msg::GameStatus::COUNT_DOWN:
       return "COUNT_DOWN";
-    case pb_rm_interfaces::msg::GameStatus::RUNNING:
+    case ats_rm_interfaces::msg::GameStatus::RUNNING:
       return "RUNNING";
-    case pb_rm_interfaces::msg::GameStatus::GAME_OVER:
+    case ats_rm_interfaces::msg::GameStatus::GAME_OVER:
       return "GAME_OVER";
     default:
       return "UNKNOWN";
@@ -139,14 +139,14 @@ SentryBehaviorServer::SentryBehaviorServer(const rclcpp::NodeOptions & options)
   globalBlackboard()->set("decision_input_source", decision_input_source_);
   globalBlackboard()->set("decision_sim_mode", decision_sim_mode_);
 
-  subscribe<pb_rm_interfaces::msg::EventData>("referee/event_data", "referee_eventData");
-  subscribe<pb_rm_interfaces::msg::GameRobotHP>("referee/all_robot_hp", "referee_allRobotHP");
-  subscribe<pb_rm_interfaces::msg::GameStatus>("referee/game_status", "referee_gameStatus");
-  subscribe<pb_rm_interfaces::msg::GroundRobotPosition>(
+  subscribe<ats_rm_interfaces::msg::EventData>("referee/event_data", "referee_eventData");
+  subscribe<ats_rm_interfaces::msg::GameRobotHP>("referee/all_robot_hp", "referee_allRobotHP");
+  subscribe<ats_rm_interfaces::msg::GameStatus>("referee/game_status", "referee_gameStatus");
+  subscribe<ats_rm_interfaces::msg::GroundRobotPosition>(
     "referee/ground_robot_position", "referee_groundRobotPosition");
-  subscribe<pb_rm_interfaces::msg::RfidStatus>("referee/rfid_status", "referee_rfidStatus");
-  subscribe<pb_rm_interfaces::msg::RobotStatus>("referee/robot_status", "referee_robotStatus");
-  subscribe<pb_rm_interfaces::msg::Buff>("referee/buff", "referee_buff");
+  subscribe<ats_rm_interfaces::msg::RfidStatus>("referee/rfid_status", "referee_rfidStatus");
+  subscribe<ats_rm_interfaces::msg::RobotStatus>("referee/robot_status", "referee_robotStatus");
+  subscribe<ats_rm_interfaces::msg::Buff>("referee/buff", "referee_buff");
   // 视觉融合状态直接进入根黑板，供行为树条件节点统一消费。
   subscribe<sp_msgs::msg::VisionTargetMsg>(decision_vision_topic_, "sp_vision_target");
 
@@ -502,8 +502,8 @@ std::optional<BT::NodeStatus> SentryBehaviorServer::onLoopAfterTick(BT::NodeStat
 
 void SentryBehaviorServer::logDecisionSnapshot()
 {
-  pb_rm_interfaces::msg::GameStatus game_status;
-  pb_rm_interfaces::msg::RobotStatus robot_status;
+  ats_rm_interfaces::msg::GameStatus game_status;
+  ats_rm_interfaces::msg::RobotStatus robot_status;
   if (
     !globalBlackboard()->get("referee_gameStatus", game_status) ||
     !globalBlackboard()->get("referee_robotStatus", robot_status))

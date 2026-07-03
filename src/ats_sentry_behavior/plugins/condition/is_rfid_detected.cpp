@@ -15,7 +15,7 @@ BT::NodeStatus IsRfidDetectedCondition::checkRfidStatus()
 {
   bool friendly_fortress_gain_point, friendly_supply_zone_non_exchange,
     friendly_supply_zone_exchange, center_gain_point;
-  auto msg = getInput<pb_rm_interfaces::msg::RfidStatus>("key_port");
+  auto msg = getInput<ats_rm_interfaces::msg::RfidStatus>("key_port");
   if (!msg) {
     RCLCPP_DEBUG(logger_, "RfidStatus message is not available");
     return BT::NodeStatus::FAILURE;
@@ -41,7 +41,7 @@ BT::NodeStatus IsRfidDetectedCondition::checkRfidStatus()
 BT::PortsList IsRfidDetectedCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::RfidStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::RfidStatus>(
       "key_port", "{@referee_rfidStatus}", "RfidStatus port on blackboard"),
     BT::InputPort<bool>("friendly_fortress_gain_point", false, "己方堡垒增益点"),
     BT::InputPort<bool>(

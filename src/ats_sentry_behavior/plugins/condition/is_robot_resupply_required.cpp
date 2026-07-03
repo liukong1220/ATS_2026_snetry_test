@@ -31,7 +31,7 @@ IsRobotResupplyRequiredCondition::IsRobotResupplyRequiredCondition(
 
 BT::NodeStatus IsRobotResupplyRequiredCondition::tickCondition()
 {
-  auto robot_status = getInput<pb_rm_interfaces::msg::RobotStatus>("robot_status");
+  auto robot_status = getInput<ats_rm_interfaces::msg::RobotStatus>("robot_status");
   if (!robot_status) {
     RCLCPP_DEBUG(logger_, "RobotStatus message is not available");
     return BT::NodeStatus::FAILURE;
@@ -96,7 +96,7 @@ BT::NodeStatus IsRobotResupplyRequiredCondition::tickCondition()
 
 BT::PortsList IsRobotResupplyRequiredCondition::providedPorts()
 {
-  return {BT::InputPort<pb_rm_interfaces::msg::RobotStatus>(
+  return {BT::InputPort<ats_rm_interfaces::msg::RobotStatus>(
     "robot_status", "{@referee_robotStatus}", "Robot status from referee")};
 }
 

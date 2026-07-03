@@ -1,7 +1,7 @@
 #include "ats_sentry_behavior/plugins/condition/is_attacked.hpp"
 
 #include "ats_sentry_behavior/decision_utils.hpp"
-#include "pb_rm_interfaces/msg/robot_status.hpp"
+#include "ats_rm_interfaces/msg/robot_status.hpp"
 
 namespace ats_sentry_behavior
 {
@@ -13,7 +13,7 @@ IsAttackedCondition::IsAttackedCondition(const std::string & name, const BT::Nod
 
 BT::NodeStatus IsAttackedCondition::checkIsAttacked()
 {
-  auto msg = getInput<pb_rm_interfaces::msg::RobotStatus>("key_port");
+  auto msg = getInput<ats_rm_interfaces::msg::RobotStatus>("key_port");
   if (!msg) {
     RCLCPP_DEBUG(logger_, "RobotStatus message is not available");
     return BT::NodeStatus::FAILURE;
@@ -77,7 +77,7 @@ BT::NodeStatus IsAttackedCondition::checkIsAttacked()
 BT::PortsList IsAttackedCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::RobotStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::RobotStatus>(
       "key_port", "{@referee_robotStatus}",
       "裁判系统 RobotStatus 输入，内部使用 is_hp_deduced 与 armor_id"),
     BT::InputPort<double>(

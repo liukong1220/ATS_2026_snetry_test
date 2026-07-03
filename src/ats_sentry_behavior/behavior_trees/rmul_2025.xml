@@ -72,7 +72,7 @@
                   type="int">Expected game progress stage</input_port>
       <input_port name="key_port"
                   default="{@referee_gameStatus}"
-                  type="pb_rm_interfaces::msg::GameStatus_&lt;std::allocator&lt;void&gt; &gt;">GameStatus port on blackboard</input_port>
+                  type="ats_rm_interfaces::msg::GameStatus_&lt;std::allocator&lt;void&gt; &gt;">GameStatus port on blackboard</input_port>
     </Condition>
     <Condition ID="IsRfidDetected">
       <input_port name="friendly_supply_zone_exchange"
@@ -89,7 +89,7 @@
                   type="bool">己方堡垒增益点</input_port>
       <input_port name="key_port"
                   default="{@referee_rfidStatus}"
-                  type="pb_rm_interfaces::msg::RfidStatus_&lt;std::allocator&lt;void&gt; &gt;">RfidStatus port on blackboard</input_port>
+                  type="ats_rm_interfaces::msg::RfidStatus_&lt;std::allocator&lt;void&gt; &gt;">RfidStatus port on blackboard</input_port>
     </Condition>
     <Condition ID="IsStatusOK">
       <input_port name="ammo_min"
@@ -103,7 +103,7 @@
                   type="int">Minimum HP. NOTE: Sentry init/max HP is 400</input_port>
       <input_port name="key_port"
                   default="{@referee_robotStatus}"
-                  type="pb_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
+                  type="ats_rm_interfaces::msg::RobotStatus_&lt;std::allocator&lt;void&gt; &gt;">RobotStatus port on blackboard</input_port>
     </Condition>
     <Condition ID="PubNav2Goal">
       <input_port name="goal"

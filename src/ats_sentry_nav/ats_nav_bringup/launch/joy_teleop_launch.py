@@ -84,9 +84,9 @@ def generate_launch_description():
                 ],
             ),
             Node(
-                package="pb_teleop_twist_joy",
-                executable="pb_teleop_twist_joy_node",
-                name="pb_teleop_twist_joy_node",
+                package="ats_teleop_twist_joy",
+                executable="ats_teleop_twist_joy_node",
+                name="ats_teleop_twist_joy_node",
                 output="screen",
                 parameters=[configured_params],
                 remappings=[

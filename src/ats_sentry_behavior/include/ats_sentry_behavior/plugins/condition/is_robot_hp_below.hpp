@@ -4,7 +4,7 @@
 #include <string>
 
 #include "behaviortree_cpp/condition_node.h"
-#include "pb_rm_interfaces/msg/robot_status.hpp"
+#include "ats_rm_interfaces/msg/robot_status.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace ats_sentry_behavior

@@ -13,14 +13,14 @@
 #include "example_interfaces/msg/float64.hpp"
 #include "example_interfaces/msg/u_int8.hpp"
 #include "geometry_msgs/msg/twist.hpp"
-#include "pb_rm_interfaces/msg/buff.hpp"
-#include "pb_rm_interfaces/msg/event_data.hpp"
-#include "pb_rm_interfaces/msg/game_robot_hp.hpp"
-#include "pb_rm_interfaces/msg/game_status.hpp"
-#include "pb_rm_interfaces/msg/ground_robot_position.hpp"
-#include "pb_rm_interfaces/msg/rfid_status.hpp"
-#include "pb_rm_interfaces/msg/robot_state_info.hpp"
-#include "pb_rm_interfaces/msg/robot_status.hpp"
+#include "ats_rm_interfaces/msg/buff.hpp"
+#include "ats_rm_interfaces/msg/event_data.hpp"
+#include "ats_rm_interfaces/msg/game_robot_hp.hpp"
+#include "ats_rm_interfaces/msg/game_status.hpp"
+#include "ats_rm_interfaces/msg/ground_robot_position.hpp"
+#include "ats_rm_interfaces/msg/rfid_status.hpp"
+#include "ats_rm_interfaces/msg/robot_state_info.hpp"
+#include "ats_rm_interfaces/msg/robot_status.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "sensor_msgs/msg/imu.hpp"
@@ -74,17 +74,17 @@ private:
 
   // Publish
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::RobotStateInfo>::SharedPtr robot_state_info_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::EventData>::SharedPtr event_data_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::GameRobotHP>::SharedPtr all_robot_hp_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::GameStatus>::SharedPtr game_status_pub_;
+  rclcpp::Publisher<ats_rm_interfaces::msg::RobotStateInfo>::SharedPtr robot_state_info_pub_;
+  rclcpp::Publisher<ats_rm_interfaces::msg::EventData>::SharedPtr event_data_pub_;
+  rclcpp::Publisher<ats_rm_interfaces::msg::GameRobotHP>::SharedPtr all_robot_hp_pub_;
+  rclcpp::Publisher<ats_rm_interfaces::msg::GameStatus>::SharedPtr game_status_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr robot_motion_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::GroundRobotPosition>::SharedPtr
+  rclcpp::Publisher<ats_rm_interfaces::msg::GroundRobotPosition>::SharedPtr
     ground_robot_position_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::RfidStatus>::SharedPtr rfid_status_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::RobotStatus>::SharedPtr robot_status_pub_;
+  rclcpp::Publisher<ats_rm_interfaces::msg::RfidStatus>::SharedPtr rfid_status_pub_;
+  rclcpp::Publisher<ats_rm_interfaces::msg::RobotStatus>::SharedPtr robot_status_pub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
-  rclcpp::Publisher<pb_rm_interfaces::msg::Buff>::SharedPtr buff_pub_;
+  rclcpp::Publisher<ats_rm_interfaces::msg::Buff>::SharedPtr buff_pub_;
 
   // Subscribe
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;

@@ -20,11 +20,11 @@ BT::PortsList PublishGimbalAbsolute::providedPorts()
     BT::InputPort<std::string>("topic_name", "__default__placeholder__", "Topic name")};
 }
 
-bool PublishGimbalAbsolute::setMessage(pb_rm_interfaces::msg::GimbalCmd & msg)
+bool PublishGimbalAbsolute::setMessage(ats_rm_interfaces::msg::GimbalCmd & msg)
 {
   msg.header.stamp = node_->now();
-  msg.yaw_type = pb_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE;
-  msg.pitch_type = pb_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE;
+  msg.yaw_type = ats_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE;
+  msg.pitch_type = ats_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE;
 
   float pitch, yaw;
   if (!getInput("gimbal_pitch", pitch) || !getInput("gimbal_yaw", yaw)) {
@@ -34,7 +34,7 @@ bool PublishGimbalAbsolute::setMessage(pb_rm_interfaces::msg::GimbalCmd & msg)
 
   msg.position.pitch = pitch;
   msg.position.yaw = yaw;
-  msg.velocity = pb_rm_interfaces::msg::Gimbal();
+  msg.velocity = ats_rm_interfaces::msg::Gimbal();
 
   return true;
 }

@@ -13,7 +13,7 @@ GimbalManagerNode::GimbalManagerNode(const rclcpp::NodeOptions & options)
 {
   RCLCPP_INFO(get_logger(), "Start GimbalManagerNode!");
 
-  cmd_sub_ = this->create_subscription<pb_rm_interfaces::msg::GimbalCmd>(
+  cmd_sub_ = this->create_subscription<ats_rm_interfaces::msg::GimbalCmd>(
     "cmd_gimbal", 10,
     std::bind(&GimbalManagerNode::gimbalCmdCallback, this, std::placeholders::_1));
 
@@ -30,9 +30,9 @@ GimbalManagerNode::GimbalManagerNode(const rclcpp::NodeOptions & options)
   });
 }
 
-void GimbalManagerNode::gimbalCmdCallback(const pb_rm_interfaces::msg::GimbalCmd::SharedPtr msg)
+void GimbalManagerNode::gimbalCmdCallback(const ats_rm_interfaces::msg::GimbalCmd::SharedPtr msg)
 {
-  static auto last_msg = std::make_shared<pb_rm_interfaces::msg::GimbalCmd>();
+  static auto last_msg = std::make_shared<ats_rm_interfaces::msg::GimbalCmd>();
 
   if (
     msg->pitch_type == last_msg->pitch_type && msg->yaw_type == last_msg->yaw_type &&
@@ -42,10 +42,10 @@ void GimbalManagerNode::gimbalCmdCallback(const pb_rm_interfaces::msg::GimbalCmd
 
   *last_msg = *msg;
 
-  if (msg->pitch_type == pb_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE) {
+  if (msg->pitch_type == ats_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE) {
     state_.pitch = msg->position.pitch;
     state_.pitch_ctrl.mode = ControlMode::POSITION;
-  } else if (msg->pitch_type == pb_rm_interfaces::msg::GimbalCmd::VELOCITY) {
+  } else if (msg->pitch_type == ats_rm_interfaces::msg::GimbalCmd::VELOCITY) {
     state_.pitch_ctrl = {
       .mode = ControlMode::VELOCITY,
       .velocity = msg->velocity.pitch,
@@ -56,10 +56,10 @@ void GimbalManagerNode::gimbalCmdCallback(const pb_rm_interfaces::msg::GimbalCmd
         0.01};
   }
 
-  if (msg->yaw_type == pb_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE) {
+  if (msg->yaw_type == ats_rm_interfaces::msg::GimbalCmd::ABSOLUTE_ANGLE) {
     state_.yaw = msg->position.yaw;
     state_.yaw_ctrl.mode = ControlMode::POSITION;
-  } else if (msg->yaw_type == pb_rm_interfaces::msg::GimbalCmd::VELOCITY) {
+  } else if (msg->yaw_type == ats_rm_interfaces::msg::GimbalCmd::VELOCITY) {
     state_.yaw_ctrl = {
       .mode = ControlMode::VELOCITY,
       .velocity = msg->velocity.yaw,

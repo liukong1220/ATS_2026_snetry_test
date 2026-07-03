@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include "pb_rm_interfaces/msg/robot_status.hpp"
+#include "ats_rm_interfaces/msg/robot_status.hpp"
 
 namespace ats_sentry_behavior
 {

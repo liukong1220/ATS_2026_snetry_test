@@ -24,11 +24,11 @@ BT::PortsList PublishGimbalVelocity::providedPorts()
     BT::InputPort<std::string>("topic_name", "__default__placeholder__", "Topic name")};
 }
 
-bool PublishGimbalVelocity::setMessage(pb_rm_interfaces::msg::GimbalCmd & msg)
+bool PublishGimbalVelocity::setMessage(ats_rm_interfaces::msg::GimbalCmd & msg)
 {
   msg.header.stamp = node_->now();
-  msg.yaw_type = pb_rm_interfaces::msg::GimbalCmd::VELOCITY;
-  msg.pitch_type = pb_rm_interfaces::msg::GimbalCmd::VELOCITY;
+  msg.yaw_type = ats_rm_interfaces::msg::GimbalCmd::VELOCITY;
+  msg.pitch_type = ats_rm_interfaces::msg::GimbalCmd::VELOCITY;
 
   float vel_pitch, vel_yaw;
   if (!getInput("gimbal_vel_pitch", vel_pitch) || !getInput("gimbal_vel_yaw", vel_yaw)) {

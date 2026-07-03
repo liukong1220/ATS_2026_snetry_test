@@ -3,7 +3,7 @@
 #ifndef STANDARD_ROBOT_PP_ROS2__GIMBAL_MANAGER_HPP_
 #define STANDARD_ROBOT_PP_ROS2__GIMBAL_MANAGER_HPP_
 
-#include "pb_rm_interfaces/msg/gimbal_cmd.hpp"
+#include "ats_rm_interfaces/msg/gimbal_cmd.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
@@ -28,7 +28,7 @@ public:
   ~GimbalManagerNode() override = default;
 
 private:
-  void gimbalCmdCallback(const pb_rm_interfaces::msg::GimbalCmd::SharedPtr msg);
+  void gimbalCmdCallback(const ats_rm_interfaces::msg::GimbalCmd::SharedPtr msg);
 
   void updateState(double delta_time);
 
@@ -45,7 +45,7 @@ private:
     rclcpp::Time last_update;
   } state_;
 
-  rclcpp::Subscription<pb_rm_interfaces::msg::GimbalCmd>::SharedPtr cmd_sub_;
+  rclcpp::Subscription<ats_rm_interfaces::msg::GimbalCmd>::SharedPtr cmd_sub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

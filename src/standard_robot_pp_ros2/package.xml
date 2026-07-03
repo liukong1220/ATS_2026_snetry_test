@@ -22,7 +22,7 @@
   <depend>sensor_msgs</depend>
   <depend>std_srvs</depend>
   <depend>example_interfaces</depend>
-  <depend>pb_rm_interfaces</depend>
+  <depend>ats_rm_interfaces</depend>
   <depend>nav2_msgs</depend>
   <depend>rclcpp_action</depend>
   <depend>std_msgs</depend>

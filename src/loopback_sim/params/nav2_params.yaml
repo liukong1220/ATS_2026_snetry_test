@@ -622,7 +622,7 @@ behavior_server:
     spin:
       plugin: "nav2_behaviors/Spin"
     backup:
-      plugin: "pb_nav2_behaviors/BackUpFreeSpace"
+      plugin: "ats_nav2_behaviors/BackUpFreeSpace"
     drive_on_heading:
       plugin: "nav2_behaviors/DriveOnHeading"
     wait:
@@ -638,7 +638,7 @@ behavior_server:
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
     rotational_acc_lim: 3.2
-    # params for pb_nav2_behaviors/BackUpFreeSpace
+    # params for ats_nav2_behaviors/BackUpFreeSpace
     service_name: "global_costmap/get_costmap"
     max_radius: 1.6
     max_allowed_cost: 96

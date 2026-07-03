@@ -78,7 +78,7 @@ FollowPath 失败
 │   ├── ats_sentry_nav/             # Nav2、平滑、定位、点云、恢复插件
 │   ├── loopback_sim/                  # 轻量软件闭环仿真
 │   ├── standard_robot_pp_ros2/        # 串口桥、裁判系统、底盘命令接口
-│   ├── interfaces/                    # pb_rm_interfaces / sp_msgs
+│   ├── interfaces/                    # ats_rm_interfaces / sp_msgs
 │   └── tools/                         # pcd2pgm、rosbag recorder、键盘云台控制等
 ├── install/
 └── log/

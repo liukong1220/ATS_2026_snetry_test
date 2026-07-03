@@ -707,7 +707,7 @@ local_costmap:
       footprint_padding: 0.02
       plugins: ["static_layer", "intensity_voxel_layer", "inflation_layer"]
       intensity_voxel_layer:
-        plugin: pb_nav2_costmap_2d::IntensityVoxelLayer
+        plugin: ats_nav2_costmap_2d::IntensityVoxelLayer
         enabled: true
         track_unknown_space: true
         footprint_clearing_enabled: true
@@ -759,7 +759,7 @@ global_costmap:
       track_unknown_space: true
       plugins: ["static_layer", "intensity_voxel_layer", "inflation_layer"]
       intensity_voxel_layer:
-        plugin: pb_nav2_costmap_2d::IntensityVoxelLayer
+        plugin: ats_nav2_costmap_2d::IntensityVoxelLayer
         enabled: true
         track_unknown_space: true
         footprint_clearing_enabled: true
@@ -939,7 +939,7 @@ behavior_server:
     spin:
       plugin: "nav2_behaviors/Spin"
     backup:
-      plugin: "pb_nav2_behaviors/BackUpFreeSpace"
+      plugin: "ats_nav2_behaviors/BackUpFreeSpace"
     drive_on_heading:
       plugin: "nav2_behaviors/DriveOnHeading"
     wait:
@@ -954,7 +954,7 @@ behavior_server:
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
     rotational_acc_lim: 3.2
-    # params for pb_nav2_behaviors/BackUpFreeSpace
+    # params for ats_nav2_behaviors/BackUpFreeSpace
     service_name: "global_costmap/get_costmap"
     max_radius: 1.6
     # 高于该 cost 的膨胀区不再被当作“可脱困方向”，防止恢复动作继续贴墙试探。
@@ -1060,7 +1060,7 @@ velocity_smoother:
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0
 
-pb_teleop_twist_joy_node:
+ats_teleop_twist_joy_node:
   ros__parameters:
     use_sim_time: false
     robot_base_frame: gimbal_yaw_odom

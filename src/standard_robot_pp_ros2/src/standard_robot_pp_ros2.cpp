@@ -43,17 +43,17 @@ bool isNearlyZeroTwist(
 const char * gameProgressName(const uint8_t progress)
 {
   switch (progress) {
-    case pb_rm_interfaces::msg::GameStatus::NOT_START:
+    case ats_rm_interfaces::msg::GameStatus::NOT_START:
       return "NOT_START";
-    case pb_rm_interfaces::msg::GameStatus::PREPARATION:
+    case ats_rm_interfaces::msg::GameStatus::PREPARATION:
       return "PREPARATION";
-    case pb_rm_interfaces::msg::GameStatus::SELF_CHECKING:
+    case ats_rm_interfaces::msg::GameStatus::SELF_CHECKING:
       return "SELF_CHECKING";
-    case pb_rm_interfaces::msg::GameStatus::COUNT_DOWN:
+    case ats_rm_interfaces::msg::GameStatus::COUNT_DOWN:
       return "COUNT_DOWN";
-    case pb_rm_interfaces::msg::GameStatus::RUNNING:
+    case ats_rm_interfaces::msg::GameStatus::RUNNING:
       return "RUNNING";
-    case pb_rm_interfaces::msg::GameStatus::GAME_OVER:
+    case ats_rm_interfaces::msg::GameStatus::GAME_OVER:
       return "GAME_OVER";
     default:
       return "UNKNOWN";
@@ -63,17 +63,17 @@ const char * gameProgressName(const uint8_t progress)
 const char * hpDeductionReasonName(const uint8_t reason)
 {
   switch (reason) {
-    case pb_rm_interfaces::msg::RobotStatus::ARMOR_HIT:
+    case ats_rm_interfaces::msg::RobotStatus::ARMOR_HIT:
       return "ARMOR_HIT";
-    case pb_rm_interfaces::msg::RobotStatus::SYSTEM_OFFLINE:
+    case ats_rm_interfaces::msg::RobotStatus::SYSTEM_OFFLINE:
       return "SYSTEM_OFFLINE";
-    case pb_rm_interfaces::msg::RobotStatus::OVER_SHOOT_SPEED:
+    case ats_rm_interfaces::msg::RobotStatus::OVER_SHOOT_SPEED:
       return "OVER_SHOOT_SPEED";
-    case pb_rm_interfaces::msg::RobotStatus::OVER_HEAT:
+    case ats_rm_interfaces::msg::RobotStatus::OVER_HEAT:
       return "OVER_HEAT";
-    case pb_rm_interfaces::msg::RobotStatus::OVER_POWER:
+    case ats_rm_interfaces::msg::RobotStatus::OVER_POWER:
       return "OVER_POWER";
-    case pb_rm_interfaces::msg::RobotStatus::ARMOR_COLLISION:
+    case ats_rm_interfaces::msg::RobotStatus::ARMOR_COLLISION:
       return "ARMOR_COLLISION";
     default:
       return "UNKNOWN";
@@ -147,23 +147,23 @@ void StandardRobotPpRos2Node::createPublisher()
 {
   imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("serial/imu", 10);
   robot_state_info_pub_ =
-    this->create_publisher<pb_rm_interfaces::msg::RobotStateInfo>("serial/robot_state_info", 10);
+    this->create_publisher<ats_rm_interfaces::msg::RobotStateInfo>("serial/robot_state_info", 10);
   joint_state_pub_ =
     this->create_publisher<sensor_msgs::msg::JointState>("serial/gimbal_joint_state", 10);
   robot_motion_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("serial/robot_motion", 10);
   event_data_pub_ =
-    this->create_publisher<pb_rm_interfaces::msg::EventData>("referee/event_data", 10);
+    this->create_publisher<ats_rm_interfaces::msg::EventData>("referee/event_data", 10);
   all_robot_hp_pub_ =
-    this->create_publisher<pb_rm_interfaces::msg::GameRobotHP>("referee/all_robot_hp", 10);
+    this->create_publisher<ats_rm_interfaces::msg::GameRobotHP>("referee/all_robot_hp", 10);
   game_status_pub_ =
-    this->create_publisher<pb_rm_interfaces::msg::GameStatus>("referee/game_status", 10);
-  ground_robot_position_pub_ = this->create_publisher<pb_rm_interfaces::msg::GroundRobotPosition>(
+    this->create_publisher<ats_rm_interfaces::msg::GameStatus>("referee/game_status", 10);
+  ground_robot_position_pub_ = this->create_publisher<ats_rm_interfaces::msg::GroundRobotPosition>(
     "referee/ground_robot_position", 10);
   rfid_status_pub_ =
-    this->create_publisher<pb_rm_interfaces::msg::RfidStatus>("referee/rfid_status", 10);
+    this->create_publisher<ats_rm_interfaces::msg::RfidStatus>("referee/rfid_status", 10);
   robot_status_pub_ =
-    this->create_publisher<pb_rm_interfaces::msg::RobotStatus>("referee/robot_status", 10);
-  buff_pub_ = this->create_publisher<pb_rm_interfaces::msg::Buff>("referee/buff", 10);
+    this->create_publisher<ats_rm_interfaces::msg::RobotStatus>("referee/robot_status", 10);
+  buff_pub_ = this->create_publisher<ats_rm_interfaces::msg::Buff>("referee/buff", 10);
 }
 
 void StandardRobotPpRos2Node::createNewDebugPublisher(const std::string & name)
@@ -563,7 +563,7 @@ void StandardRobotPpRos2Node::publishImuData(ReceiveImuData & imu_data)
 
 void StandardRobotPpRos2Node::publishRobotInfo(ReceiveRobotInfoData & robot_info)
 {
-  pb_rm_interfaces::msg::RobotStateInfo msg;
+  ats_rm_interfaces::msg::RobotStateInfo msg;
 
   msg.header.stamp.sec = robot_info.time_stamp / 1000;
   msg.header.stamp.nanosec = (robot_info.time_stamp % 1000) * 1e6;
@@ -581,7 +581,7 @@ void StandardRobotPpRos2Node::publishRobotInfo(ReceiveRobotInfoData & robot_info
 
 void StandardRobotPpRos2Node::publishEventData(ReceiveEventData & event_data)
 {
-  pb_rm_interfaces::msg::EventData msg;
+  ats_rm_interfaces::msg::EventData msg;
 
   msg.non_overlapping_supply_zone = event_data.data.non_overlapping_supply_zone;
   msg.overlapping_supply_zone = event_data.data.overlapping_supply_zone;
@@ -600,7 +600,7 @@ void StandardRobotPpRos2Node::publishEventData(ReceiveEventData & event_data)
 
 void StandardRobotPpRos2Node::publishAllRobotHp(ReceiveAllRobotHpData & all_robot_hp)
 {
-  pb_rm_interfaces::msg::GameRobotHP msg;
+  ats_rm_interfaces::msg::GameRobotHP msg;
 
   msg.red_1_robot_hp = all_robot_hp.data.red_1_robot_hp;
   msg.red_2_robot_hp = all_robot_hp.data.red_2_robot_hp;
@@ -623,7 +623,7 @@ void StandardRobotPpRos2Node::publishAllRobotHp(ReceiveAllRobotHpData & all_robo
 
 void StandardRobotPpRos2Node::publishGameStatus(ReceiveGameStatusData & game_status)
 {
-  pb_rm_interfaces::msg::GameStatus msg;
+  ats_rm_interfaces::msg::GameStatus msg;
   msg.game_progress = game_status.data.game_progress;
   msg.stage_remain_time = game_status.data.stage_remain_time;
   game_status_pub_->publish(msg);
@@ -657,10 +657,10 @@ void StandardRobotPpRos2Node::publishGameStatus(ReceiveGameStatusData & game_sta
 
     std::string service_name;
     switch (game_status.data.game_progress) {
-      case pb_rm_interfaces::msg::GameStatus::COUNT_DOWN:
+      case ats_rm_interfaces::msg::GameStatus::COUNT_DOWN:
         service_name = "start_recording";
         break;
-      case pb_rm_interfaces::msg::GameStatus::GAME_OVER:
+      case ats_rm_interfaces::msg::GameStatus::GAME_OVER:
         service_name = "stop_recording";
         break;
       default:
@@ -687,7 +687,7 @@ void StandardRobotPpRos2Node::publishRobotMotion(ReceiveRobotMotionData & robot_
 void StandardRobotPpRos2Node::publishGroundRobotPosition(
   ReceiveGroundRobotPosition & ground_robot_position)
 {
-  pb_rm_interfaces::msg::GroundRobotPosition msg;
+  ats_rm_interfaces::msg::GroundRobotPosition msg;
 
   msg.hero_position.x = ground_robot_position.data.hero_x;
   msg.hero_position.y = ground_robot_position.data.hero_y;
@@ -706,7 +706,7 @@ void StandardRobotPpRos2Node::publishGroundRobotPosition(
 
 void StandardRobotPpRos2Node::publishRfidStatus(ReceiveRfidStatus & rfid_status)
 {
-  pb_rm_interfaces::msg::RfidStatus msg;
+  ats_rm_interfaces::msg::RfidStatus msg;
 
   msg.base_gain_point = rfid_status.data.base_gain_point;
   msg.central_highland_gain_point = rfid_status.data.central_highland_gain_point;
@@ -744,7 +744,7 @@ void StandardRobotPpRos2Node::publishRfidStatus(ReceiveRfidStatus & rfid_status)
 
 void StandardRobotPpRos2Node::publishRobotStatus(ReceiveRobotStatus & robot_status)
 {
-  pb_rm_interfaces::msg::RobotStatus msg;
+  ats_rm_interfaces::msg::RobotStatus msg;
 
   msg.robot_id = robot_status.data.robot_id;
   msg.robot_level = robot_status.data.robot_level;
@@ -851,7 +851,7 @@ void StandardRobotPpRos2Node::publishLegacyJointState(ReceiveLegacyJointState & 
 
 void StandardRobotPpRos2Node::publishBuff(ReceiveBuff & buff)
 {
-  pb_rm_interfaces::msg::Buff msg;
+  ats_rm_interfaces::msg::Buff msg;
   msg.recovery_buff = buff.data.recovery_buff;
   msg.cooling_buff = buff.data.cooling_buff;
   msg.defence_buff = buff.data.defence_buff;

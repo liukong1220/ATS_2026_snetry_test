@@ -17,7 +17,7 @@ IsGameStatusCondition::IsGameStatusCondition(
 BT::NodeStatus IsGameStatusCondition::checkGameStart()
 {
   int expected_game_progress, min_remain_time, max_remain_time;
-  auto msg = getInput<pb_rm_interfaces::msg::GameStatus>("key_port");
+  auto msg = getInput<ats_rm_interfaces::msg::GameStatus>("key_port");
   if (!msg) {
     RCLCPP_DEBUG(logger_, "GameStatus message is not available yet");
     return BT::NodeStatus::FAILURE;
@@ -61,7 +61,7 @@ BT::NodeStatus IsGameStatusCondition::checkGameStart()
 BT::PortsList IsGameStatusCondition::providedPorts()
 {
   return {
-    BT::InputPort<pb_rm_interfaces::msg::GameStatus>(
+    BT::InputPort<ats_rm_interfaces::msg::GameStatus>(
       "key_port", "{@referee_gameStatus}", "GameStatus port on blackboard"),
     BT::InputPort<int>("expected_game_progress", 4, "Expected game progress stage"),
     BT::InputPort<int>("min_remain_time", 0, "Minimum remaining time (s)"),
