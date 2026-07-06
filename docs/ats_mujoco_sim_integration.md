@@ -14,16 +14,16 @@
 
 1. `~/参考/src/swerve_drive`
 2. `~/参考/src/MuJoCo-LiDAR`
-3. `~/参考/src/manda_can_control`
+3. `~/参考/src/interfaces/manda_can_control`
 4. `~/参考/src/DDR-opt/utils/carstatemsgs`
 
 ## 2. 新增包
 
-1. `src/ats_mujoco_sim`
+1. `src/sim/ats_mujoco_sim`
    MuJoCo 仿真节点、地图生成、场景生成、模型和内嵌 `mujoco_lidar`。
-2. `src/manda_can_control`
+2. `src/interfaces/manda_can_control`
    仿真沿用的 WL100 / CAN 控制接口消息。
-3. `src/carstatemsgs`
+3. `src/interfaces/carstatemsgs`
    仿真沿用的车辆状态消息。
 
 ## 3. 启动方式
@@ -62,7 +62,7 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
 默认 RViz2 配置为：
 
 ```text
-src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
+src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
 ```
 
 该视图默认显示：
@@ -202,7 +202,7 @@ ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
 当前已经提供 MuJoCo 专用 RViz2 配置：
 
 ```text
-src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
+src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz
 ```
 
 推荐启动：

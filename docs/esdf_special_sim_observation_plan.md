@@ -32,7 +32,7 @@ MuJoCo 允许作为后续动力学 / 控制验证入口，尤其是底盘加减�
 2. 迁移内容包括随机地图生成、MuJoCo scene 生成、底盘仿真节点、
    lidar / ToF 点云桥接和内嵌 `mujoco_lidar`。
 3. 已新增 MuJoCo 专用 RViz2 观察配置：
-   `src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz`。
+   `src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz`。
 4. 详细启动与验证方式见 [ATS MuJoCo 仿真接入说明](./ats_mujoco_sim_integration.md)。
 
 当前阶段不建议为了观察 `2.5D ESDF` 效果而立刻切换到 `MuJoCo`。
@@ -130,8 +130,8 @@ ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
 参考：
 
 1. [docs/ats_mujoco_sim_integration.md](./ats_mujoco_sim_integration.md)
-2. [src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz](../src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz)
-3. [src/ats_mujoco_sim/launch/mujoco_navigation.launch.py](../src/ats_mujoco_sim/launch/mujoco_navigation.launch.py)
+2. [src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz](../src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz)
+3. [src/sim/ats_mujoco_sim/launch/mujoco_navigation.launch.py](../src/sim/ats_mujoco_sim/launch/mujoco_navigation.launch.py)
 
 ## 3. 推荐使用的 RViz 视图
 
@@ -182,7 +182,7 @@ ros2 launch ats_sentry_bringup loopback_nav_only.launch.py \
 
 MuJoCo 动力学观察使用另一份更轻的 RViz2 配置：
 
-1. [src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz](../src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz)
+1. [src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz](../src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz)
 
 这份视图默认强调：
 

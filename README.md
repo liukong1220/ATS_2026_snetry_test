@@ -11,7 +11,7 @@
 1. 启动编排层：`src/ats_sentry_bringup`
 2. 决策层：`src/ats_sentry_behavior`
 3. 导航与定位层：`src/ats_sentry_nav`
-4. 轻量闭环仿真层：`src/loopback_sim`
+4. 轻量闭环仿真层：`src/sim/loopback_sim`
 5. 串口与裁判系统接口层：`src/standard_robot_pp_ros2`
 
 当前默认执行链为：
@@ -74,11 +74,15 @@ FollowPath 失败
 ├── docs/                               # 项目专项文档
 ├── src/
 │   ├── ats_sentry_bringup/           # 根仓保留：实机与 loopback 总入口、参数、地图、RViz
-│   ├── ats_sentry_behavior/        # 行为树、视觉接管、姿态切换、路径输出
-│   ├── ats_sentry_nav/             # Nav2、平滑、定位、点云、恢复插件
-│   ├── loopback_sim/                  # 轻量软件闭环仿真
+│   ├── ats_sentry_behavior/          # 行为树、视觉接管、姿态切换、路径输出
+│   ├── ats_sentry_nav/               # Nav2、平滑、定位、点云、恢复插件、底盘速度坐标转换
+│   │   └── sentry_chassis_vel_transform/
+│   ├── sim/                          # 仿真域
+│   │   ├── ats_mujoco_sim/
+│   │   ├── loopback_sim/
+│   │   └── rmu_gazebo_simulator/
 │   ├── standard_robot_pp_ros2/        # 串口桥、裁判系统、底盘命令接口
-│   ├── interfaces/                    # ats_rm_interfaces / sp_msgs
+│   ├── interfaces/                    # ats_rm_interfaces / sp_msgs / carstatemsgs / manda_can_control
 │   └── tools/                         # pcd2pgm、rosbag recorder、键盘云台控制等
 ├── install/
 └── log/
@@ -130,14 +134,16 @@ rosdep update
 
 这部分留在根仓后，新机器克隆根仓即可获得可启动的部署入口；再通过 `dependencies.repos` 拉取行为、导航、接口、仿真和第三方依赖，工作区才完整。
 
-`dependencies.repos` 中只维护以下类型的仓库：
+`dependencies.repos` 中按功能域维护以下路径：
 
-- 自研功能域仓库：例如 `ats_sentry_nav`、`ats_sentry_behavior`、`loopback_sim`、`standard_robot_pp_ros2`
-- 自研接口/硬件适配仓库：例如 `interfaces`、`carstatemsgs`、`manda_can_control`、`sentry_chassis_vel_transform`
-- 独立仿真或描述仓库：例如 `ats_mujoco_sim`、`ats_robot_description`
+- 主线功能域：`src/ats_sentry_nav`、`src/ats_sentry_behavior`、`src/standard_robot_pp_ros2`
+- 仿真域：`src/sim/ats_mujoco_sim`、`src/sim/loopback_sim`、`src/sim/rmu_gazebo_simulator`
+- 接口域：`src/interfaces`、`src/interfaces/carstatemsgs`、`src/interfaces/manda_can_control`
+- 导航辅助域：`src/ats_sentry_nav/sentry_chassis_vel_transform`
+- 机器人描述：`src/ats_robot_description`
 - 第三方依赖仓库：继续指向原始上游，避免把外部代码重复塞进根仓
 
-分包边界按“功能完整性”确定，而不是按每个 ROS package 机械拆分。例如 `src/ats_sentry_nav` 内部同时包含 Nav2 bringup、定位、点云转换、地形分析、轨迹优化、恢复插件和底盘速度转换相关工具，这些包在导航链路中强耦合，保留为一个导航功能域仓库更利于同步修改和复现。
+分包边界按“功能完整性”确定，而不是按每个 ROS package 机械拆分。例如 `src/ats_sentry_nav` 内部同时包含 Nav2 bringup、定位、点云转换、地形分析、轨迹优化、恢复插件和底盘速度转换相关工具；`sentry_chassis_vel_transform` 负责底盘速度坐标转换和 fake yaw 相关逻辑，归入导航域后更便于和 `fake_vel_transform`、控制器输出链路一起维护。
 
 ### 快速部署
 
@@ -169,10 +175,18 @@ tools/import_workspace_repos.sh --shallow
     ├── ats_sentry_bringup/
     ├── ats_sentry_behavior/
     ├── ats_sentry_nav/
+    │   └── sentry_chassis_vel_transform/
+    ├── sim/
+    │   ├── ats_mujoco_sim/
+    │   ├── loopback_sim/
+    │   └── rmu_gazebo_simulator/
     ├── standard_robot_pp_ros2/
-    ├── loopback_sim/
     ├── dependencies/
     ├── interfaces/
+    │   ├── ats_rm_interfaces/
+    │   ├── sp_msgs/
+    │   ├── carstatemsgs/
+    │   └── manda_can_control/
     └── tools/
 ```
 
@@ -193,6 +207,12 @@ git status
 git add <files>
 git commit -m "<message>"
 git push origin develop
+```
+
+如果修改的是已经归入导航域的底盘速度坐标转换包，路径是：
+
+```bash
+cd src/ats_sentry_nav/sentry_chassis_vel_transform
 ```
 
 根仓提交这些内容：
@@ -295,6 +315,19 @@ source install/setup.bash
 4. 先单独编译重包：
    `livox_ros_driver2`、`point_lio`、`small_gicp_relocalization`、`terrain_analysis`、`terrain_analysis_ext`
 5. 再编译剩余包
+6. 默认使用低性能机器策略：`--parallel-workers 1`，单包内部 `CMAKE_BUILD_PARALLEL_LEVEL=2` / `MAKEFLAGS=-j2`
+
+如需临时调整构建强度：
+
+```bash
+COLCON_WORKERS=1 BUILD_THREADS=2 ./build.sh
+```
+
+如果整理目录或迁移工作区后遇到 CMake cache 记录旧源码路径，可清一次缓存：
+
+```bash
+CMAKE_CLEAN_CACHE=1 COLCON_WORKERS=1 BUILD_THREADS=2 ./build.sh
+```
 
 ### 手动构建
 
@@ -302,28 +335,33 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/humble/setup.bash
+export CMAKE_BUILD_PARALLEL_LEVEL=2
+export MAKEFLAGS=-j2
 rosdep install -r --from-paths src --ignore-src --rosdistro humble -y
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+colcon build --symlink-install --parallel-workers 1 \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 ```
 
 ### 低性能机器单包构建
 
-如果电脑内存或 CPU 余量较小，不建议直接全工作区并行构建。可以按依赖顺序单包构建，并同时限制 colcon worker 和 CMake 底层并行度：
+如果电脑内存或 CPU 余量较小，不建议直接全工作区并行构建。当前默认构建强度就是单包双核，也可以按依赖顺序单包构建，并同时限制 colcon worker 和 CMake 底层并行度：
 
 ```bash
 source /opt/ros/humble/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=1
+export CMAKE_BUILD_PARALLEL_LEVEL=2
+export MAKEFLAGS=-j2
 colcon build --symlink-install --packages-select sp_msgs \
   --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 1
 source install/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=1
+export CMAKE_BUILD_PARALLEL_LEVEL=2
+export MAKEFLAGS=-j2
 colcon build --symlink-install --packages-select trajectory_optimizer \
   --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 1
 source install/setup.bash
 ```
 
-注意：`--parallel-workers 1` 只限制 colcon 同时构建几个包，`CMAKE_BUILD_PARALLEL_LEVEL=1` 才会限制单个包内部的 `cmake --build` 并行度。低性能机器上两者都建议设置。
+注意：`--parallel-workers 1` 只限制 colcon 同时构建几个包，`CMAKE_BUILD_PARALLEL_LEVEL=2` 和 `MAKEFLAGS=-j2` 限制单个包内部最多使用 2 个编译任务。
 
 ## 当前主要参数入口
 
@@ -338,7 +376,7 @@ source install/setup.bash
 - 视觉专测行为树参数：
   [src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml](./src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml)
 - loopback Nav2 参数：
-  [src/loopback_sim/params/nav2_params.yaml](./src/loopback_sim/params/nav2_params.yaml)
+  [src/sim/loopback_sim/params/nav2_params.yaml](./src/sim/loopback_sim/params/nav2_params.yaml)
 - `ats_nav_bringup` reality 默认参数：
   [src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml](./src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml)
 - 串口桥默认参数：

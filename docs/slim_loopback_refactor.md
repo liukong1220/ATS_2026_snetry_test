@@ -25,7 +25,7 @@
 
 ### 2.3 仿真器本体
 
-- [../src/loopback_sim/nav2_loopback_sim/loopback_simulator.py](../src/loopback_sim/nav2_loopback_sim/loopback_simulator.py)
+- [../src/sim/loopback_sim/nav2_loopback_sim/loopback_simulator.py](../src/sim/loopback_sim/nav2_loopback_sim/loopback_simulator.py)
 
 ### 2.4 假输入节点
 
@@ -118,7 +118,7 @@ loopback 并不自己决定攻击点，仍然完全复用：
 
 ### 5.2 Nav2 参数
 
-- [../src/loopback_sim/params/nav2_params.yaml](../src/loopback_sim/params/nav2_params.yaml)
+- [../src/sim/loopback_sim/params/nav2_params.yaml](../src/sim/loopback_sim/params/nav2_params.yaml)
 
 ### 5.3 RViz 配置
 

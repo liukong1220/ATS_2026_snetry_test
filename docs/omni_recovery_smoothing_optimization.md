@@ -47,7 +47,7 @@ ESDF 接口与 provider：
 
 loopback 配置：
 
-1. [loopback_sim/params/nav2_params.yaml](../src/loopback_sim/params/nav2_params.yaml)
+1. [loopback_sim/params/nav2_params.yaml](../src/sim/loopback_sim/params/nav2_params.yaml)
 2. [loopback_navigation.launch.py](../src/ats_sentry_bringup/launch/loopback_navigation.launch.py)
 3. [loopback_nav_only.launch.py](../src/ats_sentry_bringup/launch/loopback_nav_only.launch.py)
 4. [loopback_decision_sim.launch.py](../src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py)
@@ -69,7 +69,7 @@ loopback 配置：
 
 RViz：
 
-1. [loopback_nav2_view.rviz](../src/loopback_sim/rviz/loopback_nav2_view.rviz)
+1. [loopback_nav2_view.rviz](../src/sim/loopback_sim/rviz/loopback_nav2_view.rviz)
 2. [sentry_default_view.rviz](../src/ats_sentry_bringup/rviz/sentry_default_view.rviz)
 
 参考文档：
@@ -107,7 +107,7 @@ ros2 launch ats_sentry_bringup loopback_vision_test.launch.py use_rviz:=True
 
 1. `loopback_vision_test.launch.py` 不是纯导航入口，它默认包含视觉目标发布、视觉 hold 和行为树测试逻辑。
 2. 如果只想看路径规划、平滑、MPPI 和 ESDF，不要优先用 `loopback_vision_test.launch.py`。
-3. `src/loopback_sim` 的 ROS 包名是 `nav2_loopback_sim`，不是 `loopback_sim`。
+3. `src/sim/loopback_sim` 的 ROS 包名是 `nav2_loopback_sim`，不是 `loopback_sim`。
 4. 现在包级入口可用：
 
 ```bash

@@ -16,7 +16,7 @@
 
 当前项目已接入：
 
-1. `src/rmu_gazebo_simulator`
+1. `src/sim/rmu_gazebo_simulator`
 2. `src/dependencies/rmoss_gazebo`
 3. 项目级入口 `ros2 launch ats_sentry_bringup gazebo_bringup.launch.py`
 

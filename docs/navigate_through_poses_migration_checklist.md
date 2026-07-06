@@ -232,7 +232,7 @@ ats_sentry_bringup/bringup.launch.py
 
 当前 Nav2 配置已经包含 ThroughPoses 相关能力，主线可以直接调用：
 
-- [`../src/loopback_sim/params/nav2_params.yaml`](../src/loopback_sim/params/nav2_params.yaml)
+- [`../src/sim/loopback_sim/params/nav2_params.yaml`](../src/sim/loopback_sim/params/nav2_params.yaml)
 - [`../src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml`](../src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml)
 - [`../src/ats_sentry_bringup/params/node_params.yaml`](../src/ats_sentry_bringup/params/node_params.yaml)
 

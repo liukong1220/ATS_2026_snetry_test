@@ -23,9 +23,16 @@ set +u
 source "${ROS_SETUP}"
 set -u
 
-# 读取机器总内存和 CPU 核数，用来自动决定构建并发策略。
-MEM_KB="$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
-CPU_COUNT="$(nproc)"
+# 低性能机器默认使用“单包、双核”强度：
+# - colcon 同一时间只构建 1 个包
+# - 单个 CMake 包内部最多使用 2 个编译任务
+# 如需临时调整，可在命令前覆盖：
+#   COLCON_WORKERS=2 BUILD_THREADS=4 ./build.sh
+COLCON_WORKERS="${COLCON_WORKERS:-1}"
+BUILD_THREADS="${BUILD_THREADS:-2}"
+CMAKE_CLEAN_CACHE="${CMAKE_CLEAN_CACHE:-0}"
+export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-${BUILD_THREADS}}"
+export MAKEFLAGS="${MAKEFLAGS:--j${BUILD_THREADS}}"
 
 # 这些包通常更重，先单独编译更稳，尤其适合 8G 左右内存的机器。
 HEAVY_PACKAGES=(
@@ -38,11 +45,7 @@ HEAVY_PACKAGES=(
 
 has_package() {
   local pkg="$1"
-  if command -v rg >/dev/null 2>&1; then
-    rg -q --glob 'package.xml' "<name>${pkg}</name>" src
-  else
-    grep -Rqs --include='package.xml' "<name>${pkg}</name>" src
-  fi
+  colcon list --names-only | grep -Fxq "${pkg}"
 }
 
 # 启动前先确认关键重包都在当前工作区里，避免脚本跑偏。
@@ -55,22 +58,6 @@ for pkg in "${HEAVY_PACKAGES[@]}"; do
   fi
 done
 
-# 按内存大小自动降并发。
-# 7~8G 机器保守串行，16G 以下适度并发，16G 以上再提高普通包速度。
-if (( MEM_KB < 8 * 1024 * 1024 )); then
-  HEAVY_WORKERS=1
-  OTHER_WORKERS=2
-  export CMAKE_BUILD_PARALLEL_LEVEL=1
-elif (( MEM_KB < 16 * 1024 * 1024 )); then
-  HEAVY_WORKERS=4
-  OTHER_WORKERS=8
-  export CMAKE_BUILD_PARALLEL_LEVEL=2
-else
-  HEAVY_WORKERS=8
-  OTHER_WORKERS="$(( CPU_COUNT > 8 ? 8 : CPU_COUNT ))"
-  export CMAKE_BUILD_PARALLEL_LEVEL="$(( CPU_COUNT > 8 ? 8 : CPU_COUNT ))"
-fi
-
 # 所有构建阶段都复用这一组通用参数。
 COMMON_ARGS=(
   --symlink-install
@@ -78,24 +65,26 @@ COMMON_ARGS=(
   -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )
+if [[ "${CMAKE_CLEAN_CACHE}" == "1" || "${CMAKE_CLEAN_CACHE}" == "true" ]]; then
+  COMMON_ARGS=(--cmake-clean-cache "${COMMON_ARGS[@]}")
+fi
 
 echo "[build] workspace: ${WORKSPACE_DIR}"
 echo "[build] ros distro: ${ROS_DISTRO_NAME}"
-echo "[build] mem: $(( MEM_KB / 1024 / 1024 )) GB, cpu: ${CPU_COUNT}"
-echo "[build] heavy workers: ${HEAVY_WORKERS}, other workers: ${OTHER_WORKERS}, cmake parallel: ${CMAKE_BUILD_PARALLEL_LEVEL}"
+echo "[build] colcon workers: ${COLCON_WORKERS}, cmake parallel: ${CMAKE_BUILD_PARALLEL_LEVEL}, makeflags: ${MAKEFLAGS}, clean cache: ${CMAKE_CLEAN_CACHE}"
 
 # 第一阶段先编译重包，降低 OOM 和长链路失败后重头来过的概率。
 echo "[build] step 1/2: heavy packages"
 colcon build \
   "${COMMON_ARGS[@]}" \
-  --parallel-workers "${HEAVY_WORKERS}" \
+  --parallel-workers "${COLCON_WORKERS}" \
   --packages-select "${HEAVY_PACKAGES[@]}"
 
 # 第二阶段再编译剩余包，这时依赖链已经更稳定，可适当提高并发。
 echo "[build] step 2/2: remaining packages"
 colcon build \
   "${COMMON_ARGS[@]}" \
-  --parallel-workers "${OTHER_WORKERS}" \
+  --parallel-workers "${COLCON_WORKERS}" \
   --packages-skip "${HEAVY_PACKAGES[@]}"
 
 echo "[build] done"

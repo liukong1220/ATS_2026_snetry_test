@@ -514,7 +514,7 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
     同步更新 C++ namespace、include 路径、pluginlib class、launch 节点名、
     Nav2 参数和上层包依赖。
 12. MuJoCo 仿真已补齐 RViz2 观察入口：
-    新增 `src/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz`；
+    新增 `src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz`；
     `ats_mujoco_sim.launch.py` 与 `planner_mujoco.launch.py`
     已支持 `use_rviz` 和 `rviz_config_file` 参数；
     后续可以直接用 RViz2 观察 TF、`/localization`、`/local_pointcloud`

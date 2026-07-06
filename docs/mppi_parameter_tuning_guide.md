@@ -6,7 +6,7 @@
 
 - `ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True`
 - `ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True`
-- 参数文件：`src/loopback_sim/params/nav2_params.yaml`
+- 参数文件：`src/sim/loopback_sim/params/nav2_params.yaml`
 
 这套说明也可以迁移到：
 
@@ -21,7 +21,7 @@
 - `loopback_nav_only.launch.py`
   - 适合只看导航、平滑、ESDF、trajectory profile 和速度链
 - `loopback_decision_sim.launch.py`
-  - 默认读取 `src/loopback_sim/params/nav2_params.yaml`
+  - 默认读取 `src/sim/loopback_sim/params/nav2_params.yaml`
 - `bringup.launch.py`
   - 默认读取 `src/ats_sentry_bringup/params/node_params.yaml`
 
@@ -886,7 +886,7 @@ prediction_horizon = time_steps * model_dt
 
 ## 当前 loopback 参数的调参意图
 
-当前 `src/loopback_sim/params/nav2_params.yaml` 的思路是：
+当前 `src/sim/loopback_sim/params/nav2_params.yaml` 的思路是：
 
 - 缩短预测时域
   - 减少“想太远”导致的终点和转角发散

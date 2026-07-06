@@ -11,15 +11,15 @@ GIT_USER_NAME=""
 GIT_USER_EMAIL=""
 
 REPOSITORIES=(
-  "src/ats_mujoco_sim:ats_mujoco_sim"
+  "src/sim/ats_mujoco_sim:ats_mujoco_sim"
   "src/ats_robot_description:ats_robot_description"
   "src/ats_sentry_behavior:ats_sentry_behavior"
   "src/ats_sentry_nav:ats_sentry_nav"
-  "src/carstatemsgs:carstatemsgs"
   "src/interfaces:interfaces"
-  "src/loopback_sim:loopback_sim"
-  "src/manda_can_control:manda_can_control"
-  "src/sentry_chassis_vel_transform:sentry_chassis_vel_transform"
+  "src/interfaces/carstatemsgs:carstatemsgs"
+  "src/sim/loopback_sim:loopback_sim"
+  "src/interfaces/manda_can_control:manda_can_control"
+  "src/ats_sentry_nav/sentry_chassis_vel_transform:sentry_chassis_vel_transform"
   "src/standard_robot_pp_ros2:standard_robot_pp_ros2"
 )
 

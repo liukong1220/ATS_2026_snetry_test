@@ -7,11 +7,13 @@
 # because it owns the complete robot startup entrypoints, deployment parameters,
 # maps, PCD assets and RViz views. Do not add it here as a split repository.
 #
-# Repositories under git@github.com:liukong1220 are functional split
-# repositories. They should be grouped by functional completeness instead of
-# splitting every ROS package independently.
+# Repository paths are grouped by domain:
+#   src/sim/*                  simulation repositories
+#   src/interfaces/*           message/interface repositories
+#   src/ats_sentry_nav/*       navigation-domain packages and helpers
+#   src/tools/*                workspace tools
 repositories:
-  src/ats_mujoco_sim:
+  src/sim/ats_mujoco_sim:
     type: git
     url: git@github.com:liukong1220/ats_mujoco_sim.git
     version: develop
@@ -31,27 +33,27 @@ repositories:
     url: git@github.com:liukong1220/ats_sentry_nav.git
     version: develop
 
-  src/carstatemsgs:
-    type: git
-    url: git@github.com:liukong1220/carstatemsgs.git
-    version: develop
-
   src/interfaces:
     type: git
     url: git@github.com:liukong1220/interfaces.git
     version: develop
 
-  src/loopback_sim:
+  src/interfaces/carstatemsgs:
+    type: git
+    url: git@github.com:liukong1220/carstatemsgs.git
+    version: develop
+
+  src/sim/loopback_sim:
     type: git
     url: git@github.com:liukong1220/loopback_sim.git
     version: develop
 
-  src/manda_can_control:
+  src/interfaces/manda_can_control:
     type: git
     url: git@github.com:liukong1220/manda_can_control.git
     version: develop
 
-  src/sentry_chassis_vel_transform:
+  src/ats_sentry_nav/sentry_chassis_vel_transform:
     type: git
     url: git@github.com:liukong1220/sentry_chassis_vel_transform.git
     version: develop
@@ -116,7 +118,7 @@ repositories:
     url: https://github.com/SMBU-PolarBear-Robotics-Team/BehaviorTree.ROS2.git
     version: humble
 
-  src/rmu_gazebo_simulator:
+  src/sim/rmu_gazebo_simulator:
     type: git
     url: https://github.com/SMBU-PolarBear-Robotics-Team/rmu_gazebo_simulator.git
     version: main
