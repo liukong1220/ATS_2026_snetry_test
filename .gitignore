@@ -50,6 +50,7 @@ __pycache__/
 
 # Local workspace metadata
 .marscode/
+.split-repos/
 *.pcd
 src/sp_vision25/
 *.pdf

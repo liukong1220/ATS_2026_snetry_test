@@ -112,6 +112,30 @@ sudo rosdep init
 rosdep update
 ```
 
+## 仓库清单与异地部署
+
+当前工作区支持用根目录的 [dependencies.repos](./dependencies.repos) 作为 vcstool 清单重建 `src/`。新机器上可以先 clone 这个工作区壳仓，再导入各功能仓和第三方依赖：
+
+```bash
+git clone git@github.com:liukong1220/ATS_2026_snetry_test.git
+cd ATS_2026_snetry_test
+tools/import_workspace_repos.sh --shallow
+```
+
+`--shallow` 会避免拉取完整历史，适合只部署不开发的机器；开发机可以去掉 `--shallow` 保留完整提交历史。
+
+如果要把当前大仓拆成独立仓库，先在 GitHub 的 `liukong1220` 命名空间创建 `dependencies.repos` 中列出的自有仓库，然后执行：
+
+```bash
+# 保留每个目录自己的相关历史
+tools/export_workspace_repos.sh --mode subtree --push
+
+# 或者只保留当前快照，历史最轻
+tools/export_workspace_repos.sh --mode snapshot --push
+```
+
+等这些独立仓库都能被 `vcs import` 正常拉取后，再把根仓中已拆出去的 `src/...` 目录从索引移除，只保留清单、脚本和文档。这样根仓后续 clone 的历史会明显变小；已经写进旧大仓的历史不会因为新增 `.repos` 自动消失，若要彻底缩小旧仓包体，需要另建干净壳仓或重写历史。
+
 ## 构建
 
 ### 推荐方式
