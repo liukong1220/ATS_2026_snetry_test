@@ -127,6 +127,9 @@ tools/import_workspace_repos.sh --shallow
 如果要把当前大仓拆成独立仓库，先在 GitHub 的 `liukong1220` 命名空间创建 `dependencies.repos` 中列出的自有仓库，然后执行：
 
 ```bash
+# 如果本机有带 repo 权限的 GitHub token，可以自动创建缺失仓库
+GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh
+
 # 保留每个目录自己的相关历史
 tools/export_workspace_repos.sh --mode subtree --push
 
