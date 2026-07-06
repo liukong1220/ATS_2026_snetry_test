@@ -1,0 +1,5 @@
+# Canonical deployment maps in this directory are tracked by the root
+# workspace repository. Ignore only temporary local copies.
+*.tmp
+*.bak
+*.old

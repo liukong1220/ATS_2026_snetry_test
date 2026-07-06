@@ -51,7 +51,9 @@ __pycache__/
 # Local workspace metadata
 .marscode/
 .split-repos/
-src/
+src/*
+!src/ats_sentry_bringup/
+!src/ats_sentry_bringup/**
 *.pcd
 src/sp_vision25/
 *.pdf

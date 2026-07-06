@@ -3,9 +3,13 @@
 # Import from the workspace root with:
 #   vcs import --recursive --skip-existing . < dependencies.repos
 #
-# Repositories under git@github.com:liukong1220 are intended to be split from
-# this workspace. Create/push those repositories before relying on a clean
-# machine import.
+# src/ats_sentry_bringup is intentionally kept in the root workspace repository
+# because it owns the complete robot startup entrypoints, deployment parameters,
+# maps, PCD assets and RViz views. Do not add it here as a split repository.
+#
+# Repositories under git@github.com:liukong1220 are functional split
+# repositories. They should be grouped by functional completeness instead of
+# splitting every ROS package independently.
 repositories:
   src/ats_mujoco_sim:
     type: git
@@ -20,11 +24,6 @@ repositories:
   src/ats_sentry_behavior:
     type: git
     url: git@github.com:liukong1220/ats_sentry_behavior.git
-    version: develop
-
-  src/ats_sentry_bringup:
-    type: git
-    url: git@github.com:liukong1220/ats_sentry_bringup.git
     version: develop
 
   src/ats_sentry_nav:

@@ -9,7 +9,6 @@ REPOSITORIES=(
   ats_mujoco_sim
   ats_robot_description
   ats_sentry_behavior
-  ats_sentry_bringup
   ats_sentry_nav
   carstatemsgs
   interfaces

@@ -73,7 +73,7 @@ FollowPath 失败
 ├── NAV2.sh                             # 实机导航辅助脚本
 ├── docs/                               # 项目专项文档
 ├── src/
-│   ├── ats_sentry_bringup/         # 实机与 loopback 总入口、参数、地图、RViz
+│   ├── ats_sentry_bringup/           # 根仓保留：实机与 loopback 总入口、参数、地图、RViz
 │   ├── ats_sentry_behavior/        # 行为树、视觉接管、姿态切换、路径输出
 │   ├── ats_sentry_nav/             # Nav2、平滑、定位、点云、恢复插件
 │   ├── loopback_sim/                  # 轻量软件闭环仿真
@@ -114,14 +114,30 @@ rosdep update
 
 ## 仓库组织与异地部署
 
-当前仓库已经按“壳仓 + vcstool 清单 + 多个功能仓”的方式组织：
+当前仓库采用“根仓保留总启动 + vcstool 清单 + 功能完整分包”的方式组织。
 
-- 根仓 `ATS_2026_snetry_test` 只维护工作区说明、部署脚本、构建脚本和 [dependencies.repos](./dependencies.repos)
-- `src/` 下的功能包不再由根仓直接跟踪，统一通过 `dependencies.repos` 拉取
-- 自研功能包位于 `git@github.com:liukong1220/*.git`，当前统一使用 `develop` 分支
-- 第三方依赖继续指向原始上游仓库，避免重复维护外部代码
+根仓 `ATS_2026_snetry_test` 直接保留：
 
-这样做的目的，是让异地部署机器只需要拉取一个轻量根仓，再按清单浅克隆当前版本的功能包，不再把所有项目历史线性塞进同一个 Git 仓库。
+- 工作区说明、部署脚本、构建脚本和 [dependencies.repos](./dependencies.repos)
+- `src/ats_sentry_bringup`
+
+`src/ats_sentry_bringup` 不再拆成独立仓库。原因是它不是普通算法包，而是实机和仿真的总入口，集中维护：
+
+- `bringup.launch.py`、loopback、Gazebo、视觉专测等 launch 入口
+- 实机 `node_params.yaml`、MID360 配置、RViz 视图
+- 比赛/测试地图资产，以及 PCD 的本地目录约定
+- `mapping.sh`、`NAV2.sh` 等根脚本实际依赖的路径约定
+
+这部分留在根仓后，新机器克隆根仓即可获得可启动的部署入口；再通过 `dependencies.repos` 拉取行为、导航、接口、仿真和第三方依赖，工作区才完整。
+
+`dependencies.repos` 中只维护以下类型的仓库：
+
+- 自研功能域仓库：例如 `ats_sentry_nav`、`ats_sentry_behavior`、`loopback_sim`、`standard_robot_pp_ros2`
+- 自研接口/硬件适配仓库：例如 `interfaces`、`carstatemsgs`、`manda_can_control`、`sentry_chassis_vel_transform`
+- 独立仿真或描述仓库：例如 `ats_mujoco_sim`、`ats_robot_description`
+- 第三方依赖仓库：继续指向原始上游，避免把外部代码重复塞进根仓
+
+分包边界按“功能完整性”确定，而不是按每个 ROS package 机械拆分。例如 `src/ats_sentry_nav` 内部同时包含 Nav2 bringup、定位、点云转换、地形分析、轨迹优化、恢复插件和底盘速度转换相关工具，这些包在导航链路中强耦合，保留为一个导航功能域仓库更利于同步修改和复现。
 
 ### 快速部署
 
@@ -130,13 +146,15 @@ rosdep update
 ```bash
 git clone --depth=1 -b develop git@github.com:liukong1220/ATS_2026_snetry_test.git
 cd ATS_2026_snetry_test
+git lfs install
 tools/import_workspace_repos.sh --shallow
 ```
 
 说明：
 
 - `git clone --depth=1` 只拉根仓最近一次提交，避免下载旧大仓历史
-- `tools/import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆 `src/` 下所有仓库
+- `tools/import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆除 `ats_sentry_bringup` 之外的功能仓和第三方依赖
+- `src/ats_sentry_bringup/pcd/*.pcd` 不提交到 Git；需要实机建图或从队内离线介质拷贝到本地
 - 如果你要在部署机器上长期开发，可以去掉 `--shallow`，保留各子仓库完整历史
 
 导入完成后，目录结构会变成：
@@ -160,7 +178,7 @@ tools/import_workspace_repos.sh --shallow
 
 ### 开发流程
 
-根仓和功能包是不同 Git 仓库，提交时需要区分：
+根仓和拆分功能包是不同 Git 仓库，提交时需要区分：
 
 ```bash
 # 查看所有子仓状态
@@ -177,19 +195,40 @@ git commit -m "<message>"
 git push origin develop
 ```
 
-根仓只提交这些内容：
+根仓提交这些内容：
 
 - `dependencies.repos`
 - 根目录脚本，例如 `build.sh`、`mapping.sh`、`NAV2.sh`
 - `tools/` 下的工作区维护脚本
 - `docs/` 和 README
 - `.gitignore`、`.gitattributes` 等根仓配置
+- `src/ats_sentry_bringup` 下的总启动入口、参数、地图和 RViz 配置
 
-功能包源码、第三方依赖、地图、PCD、构建产物都不应再直接提交到根仓。
+拆分功能包源码、第三方依赖、构建产物都不应直接提交到根仓。
+
+如果新增正式地图或 PCD：
+
+- 地图文件放入 `src/ats_sentry_bringup/map`
+- PCD 文件放入 `src/ats_sentry_bringup/pcd` 供本机运行使用，但不提交、不上传
+- 临时建图结果不要直接提交，先确认命名、场地版本和是否确实要作为部署资产
 
 ### 清单维护
 
-新增一个功能包时，先创建并推送独立仓库，然后在 [dependencies.repos](./dependencies.repos) 中添加条目：
+新增一个功能域仓库时，先确认它是否应独立于根仓维护。
+
+不应加入 `dependencies.repos` 的内容：
+
+- `src/ats_sentry_bringup`
+- 只服务于根仓部署脚本的临时文件
+- build/install/log 等构建产物
+
+应加入 `dependencies.repos` 的内容：
+
+- 能独立表达一个功能域的自研仓库
+- 需要跟随上游更新的第三方依赖
+- 与 bringup 松耦合、可以单独开发和复用的工具仓库
+
+确认需要新增后，创建并推送独立仓库，然后在 [dependencies.repos](./dependencies.repos) 中添加条目：
 
 ```yaml
 repositories:
@@ -215,18 +254,20 @@ version: 0123456789abcdef0123456789abcdef01234567
 # 按 dependencies.repos 导入 src/
 tools/import_workspace_repos.sh --shallow
 
-# 创建 GitHub 缺失仓库，需要本地提供 GH_TOKEN 或 GITHUB_TOKEN
+# 创建 GitHub 缺失功能仓，需要本地提供 GH_TOKEN 或 GITHUB_TOKEN
 GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh
 
 # 从一个仍包含 src 源码的旧大仓 checkout 导出独立仓库
 tools/export_workspace_repos.sh --mode snapshot --push
 ```
 
+`tools/create_github_repos.sh` 和 `tools/export_workspace_repos.sh` 都不会再处理 `ats_sentry_bringup`。该包是根仓部署入口，后续直接随根仓提交。
+
 `tools/export_workspace_repos.sh` 主要用于历史迁移。当前这些自研功能包已经按 snapshot 方式推送到 GitHub，后续日常开发不需要重复执行。
 
 ### 旧仓历史说明
 
-根仓当前 HEAD 已不再跟踪 `src/`，但旧提交里曾经包含过完整源码和依赖，所以普通 clone 仍可能下载旧历史。异地部署时请使用：
+根仓当前 HEAD 只跟踪 `src/ats_sentry_bringup`，其余 `src/` 功能域由 `dependencies.repos` 拉取。旧提交里曾经包含过更多源码和依赖，所以普通 clone 仍可能下载旧历史。异地部署时请使用：
 
 ```bash
 git clone --depth=1 -b develop git@github.com:liukong1220/ATS_2026_snetry_test.git

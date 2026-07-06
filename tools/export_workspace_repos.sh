@@ -14,7 +14,6 @@ REPOSITORIES=(
   "src/ats_mujoco_sim:ats_mujoco_sim"
   "src/ats_robot_description:ats_robot_description"
   "src/ats_sentry_behavior:ats_sentry_behavior"
-  "src/ats_sentry_bringup:ats_sentry_bringup"
   "src/ats_sentry_nav:ats_sentry_nav"
   "src/carstatemsgs:carstatemsgs"
   "src/interfaces:interfaces"
@@ -29,6 +28,9 @@ usage() {
 Usage: tools/export_workspace_repos.sh [--push] [--mode subtree|snapshot]
 
 Export local workspace packages into standalone repositories.
+
+src/ats_sentry_bringup is intentionally kept in the root workspace repository
+and is not exported as a split repository.
 
 Defaults:
   MODE=subtree
