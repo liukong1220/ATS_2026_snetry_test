@@ -143,13 +143,14 @@ rosdep update
 - 接口域：`src/interfaces`、`src/interfaces/carstatemsgs`、`src/interfaces/manda_can_control`
 - 导航辅助域：`src/ats_sentry_nav/sentry_chassis_vel_transform`
 - 机器人描述：`src/ats_robot_description`
-- 第三方依赖仓库：继续指向原始上游，避免把外部代码重复塞进根仓
+- 第三方工具和依赖仓库：fork 到 `https://github.com/liukong1220` 后由清单统一拉取，避免部署时跨多个账号找依赖
 
 开源部署约定：
 
-- 根仓和自研分包仓库面向开源使用，`dependencies.repos` 统一使用 `https://github.com/...` URL。
+- 根仓、自研分包仓库、fork 后的工具/依赖仓库面向开源使用，`dependencies.repos` 统一使用 `https://github.com/liukong1220/...` URL。
 - 新机器不需要配置 GitHub SSH key 就能执行 `tools/import_workspace_repos.sh --shallow`。
 - 自研分包仓库应保持 public；如果需要批量创建或修正可见性，使用 `GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh`。
+- 上游工具/依赖仓库使用 `tools/fork_ats_nav_dependencies.sh` fork 到 `liukong1220`，并统一加入 GitHub topic `ats-nav`。该 topic 对应本项目的 `ATS_NAV` 研发归类。
 - `src/ats_sentry_bringup/pcd/*.pcd` 只作为本机运行资产，不提交、不上传。
 
 分包边界按“功能完整性”确定，而不是按每个 ROS package 机械拆分。例如 `src/ats_sentry_nav` 内部同时包含 Nav2 bringup、定位、点云转换、地形分析、轨迹优化、恢复插件和底盘速度转换相关工具；`sentry_chassis_vel_transform` 负责底盘速度坐标转换和 fake yaw 相关逻辑，归入导航域后更便于和 `fake_vel_transform`、控制器输出链路一起维护。
@@ -277,7 +278,7 @@ version: 0123456789abcdef0123456789abcdef01234567
 
 ### 拆仓维护脚本
 
-仓库内保留了三个维护脚本：
+仓库内保留了四个维护脚本：
 
 ```bash
 # 按 dependencies.repos 导入 src/
@@ -289,6 +290,9 @@ GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh
 # 若仓库已存在，该脚本会在 token 权限允许时把自研分包仓库修正为 public
 GH_TOKEN=<YOUR_TOKEN> MAKE_PUBLIC=1 tools/create_github_repos.sh
 
+# fork 上游工具/依赖到 liukong1220，并把相关仓库加入 ATS_NAV 归类
+GH_TOKEN=<YOUR_TOKEN> tools/fork_ats_nav_dependencies.sh
+
 # 从一个仍包含 src 源码的旧大仓 checkout 导出独立仓库
 tools/export_workspace_repos.sh --mode snapshot --push
 ```
@@ -296,6 +300,8 @@ tools/export_workspace_repos.sh --mode snapshot --push
 `tools/create_github_repos.sh` 和 `tools/export_workspace_repos.sh` 都不会再处理 `ats_sentry_bringup`。该包是根仓部署入口，后续直接随根仓提交。
 
 `tools/create_github_repos.sh` 默认创建 public 仓库，并会在 token 权限允许时把已存在的自研分包仓库设置为 public。`tools/export_workspace_repos.sh` 默认使用 `https://github.com/liukong1220/<repo>.git` 作为推送目标。
+
+`tools/fork_ats_nav_dependencies.sh` 负责把上游工具和依赖仓库 fork 到 `liukong1220`，再给根仓、自研分包和 fork 后依赖仓统一添加 `ats-nav` topic。GitHub topic 只能使用小写和连字符，所以这里用 `ats-nav` 表达 `ATS_NAV` 研发归类。
 
 `tools/export_workspace_repos.sh` 主要用于历史迁移。当前这些自研功能包已经按 snapshot 方式推送到 GitHub，后续日常开发不需要重复执行。
 
