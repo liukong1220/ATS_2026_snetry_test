@@ -74,7 +74,7 @@ for repo in "${REPOSITORIES[@]}"; do
 import json
 print(json.dumps({
     "name": "$repo",
-    "private": $private_json,
+    "private": "$private_json" == "true",
     "auto_init": False,
 }))
 PY

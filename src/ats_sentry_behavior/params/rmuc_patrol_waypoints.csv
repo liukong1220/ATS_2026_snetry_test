@@ -1,8 +1,0 @@
-# RMUC patrol-only through-poses route
-# Format: x,y,z per line
-# The last valid row is the final goal; earlier rows are pass-through poses.
-
--2.966042995452881,-6.500216484069824,0.0000000000
-
-#-2.744657516479492,-6.141260147094727,0.0000000000
-#备用点位

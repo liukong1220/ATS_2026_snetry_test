@@ -1,9 +1,0 @@
-float64 s
-float64 t
-geometry_msgs/Point point
-geometry_msgs/Vector3 first_derivative
-geometry_msgs/Vector3 second_derivative
-float64 curvature
-float64 speed_limit
-float64 speed
-float64 acceleration

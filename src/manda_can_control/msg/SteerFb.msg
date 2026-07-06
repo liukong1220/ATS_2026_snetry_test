@@ -1,4 +1,0 @@
-float32 lf_steer_angle
-float32 lr_steer_angle
-float32 rf_steer_angle
-float32 rr_steer_angle

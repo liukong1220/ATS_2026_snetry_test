@@ -112,32 +112,127 @@ sudo rosdep init
 rosdep update
 ```
 
-## 仓库清单与异地部署
+## 仓库组织与异地部署
 
-当前工作区支持用根目录的 [dependencies.repos](./dependencies.repos) 作为 vcstool 清单重建 `src/`。新机器上可以先 clone 这个工作区壳仓，再导入各功能仓和第三方依赖：
+当前仓库已经按“壳仓 + vcstool 清单 + 多个功能仓”的方式组织：
+
+- 根仓 `ATS_2026_snetry_test` 只维护工作区说明、部署脚本、构建脚本和 [dependencies.repos](./dependencies.repos)
+- `src/` 下的功能包不再由根仓直接跟踪，统一通过 `dependencies.repos` 拉取
+- 自研功能包位于 `git@github.com:liukong1220/*.git`，当前统一使用 `develop` 分支
+- 第三方依赖继续指向原始上游仓库，避免重复维护外部代码
+
+这样做的目的，是让异地部署机器只需要拉取一个轻量根仓，再按清单浅克隆当前版本的功能包，不再把所有项目历史线性塞进同一个 Git 仓库。
+
+### 快速部署
+
+新机器推荐按下面流程创建工作区：
 
 ```bash
-git clone git@github.com:liukong1220/ATS_2026_snetry_test.git
+git clone --depth=1 -b develop git@github.com:liukong1220/ATS_2026_snetry_test.git
 cd ATS_2026_snetry_test
 tools/import_workspace_repos.sh --shallow
 ```
 
-`--shallow` 会避免拉取完整历史，适合只部署不开发的机器；开发机可以去掉 `--shallow` 保留完整提交历史。
+说明：
 
-如果要把当前大仓拆成独立仓库，先在 GitHub 的 `liukong1220` 命名空间创建 `dependencies.repos` 中列出的自有仓库，然后执行：
+- `git clone --depth=1` 只拉根仓最近一次提交，避免下载旧大仓历史
+- `tools/import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆 `src/` 下所有仓库
+- 如果你要在部署机器上长期开发，可以去掉 `--shallow`，保留各子仓库完整历史
+
+导入完成后，目录结构会变成：
+
+```text
+.
+├── dependencies.repos
+├── build.sh
+├── docs/
+├── tools/
+└── src/
+    ├── ats_sentry_bringup/
+    ├── ats_sentry_behavior/
+    ├── ats_sentry_nav/
+    ├── standard_robot_pp_ros2/
+    ├── loopback_sim/
+    ├── dependencies/
+    ├── interfaces/
+    └── tools/
+```
+
+### 开发流程
+
+根仓和功能包是不同 Git 仓库，提交时需要区分：
 
 ```bash
-# 如果本机有带 repo 权限的 GitHub token，可以自动创建缺失仓库
+# 查看所有子仓状态
+vcs status src
+
+# 更新所有子仓
+vcs pull src
+
+# 在某个功能包内提交代码
+cd src/ats_sentry_nav
+git status
+git add <files>
+git commit -m "<message>"
+git push origin develop
+```
+
+根仓只提交这些内容：
+
+- `dependencies.repos`
+- 根目录脚本，例如 `build.sh`、`mapping.sh`、`NAV2.sh`
+- `tools/` 下的工作区维护脚本
+- `docs/` 和 README
+- `.gitignore`、`.gitattributes` 等根仓配置
+
+功能包源码、第三方依赖、地图、PCD、构建产物都不应再直接提交到根仓。
+
+### 清单维护
+
+新增一个功能包时，先创建并推送独立仓库，然后在 [dependencies.repos](./dependencies.repos) 中添加条目：
+
+```yaml
+repositories:
+  src/example_package:
+    type: git
+    url: git@github.com:liukong1220/example_package.git
+    version: develop
+```
+
+如果某个功能包要锁定到确定版本，可以把 `version` 从分支名改成 commit hash：
+
+```yaml
+version: 0123456789abcdef0123456789abcdef01234567
+```
+
+部署机器要复现固定版本时，优先使用 commit hash；日常开发可以继续使用 `develop`。
+
+### 拆仓维护脚本
+
+仓库内保留了三个维护脚本：
+
+```bash
+# 按 dependencies.repos 导入 src/
+tools/import_workspace_repos.sh --shallow
+
+# 创建 GitHub 缺失仓库，需要本地提供 GH_TOKEN 或 GITHUB_TOKEN
 GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh
 
-# 保留每个目录自己的相关历史
-tools/export_workspace_repos.sh --mode subtree --push
-
-# 或者只保留当前快照，历史最轻
+# 从一个仍包含 src 源码的旧大仓 checkout 导出独立仓库
 tools/export_workspace_repos.sh --mode snapshot --push
 ```
 
-等这些独立仓库都能被 `vcs import` 正常拉取后，再把根仓中已拆出去的 `src/...` 目录从索引移除，只保留清单、脚本和文档。这样根仓后续 clone 的历史会明显变小；已经写进旧大仓的历史不会因为新增 `.repos` 自动消失，若要彻底缩小旧仓包体，需要另建干净壳仓或重写历史。
+`tools/export_workspace_repos.sh` 主要用于历史迁移。当前这些自研功能包已经按 snapshot 方式推送到 GitHub，后续日常开发不需要重复执行。
+
+### 旧仓历史说明
+
+根仓当前 HEAD 已不再跟踪 `src/`，但旧提交里曾经包含过完整源码和依赖，所以普通 clone 仍可能下载旧历史。异地部署时请使用：
+
+```bash
+git clone --depth=1 -b develop git@github.com:liukong1220/ATS_2026_snetry_test.git
+```
+
+如果要让根仓普通 clone 也彻底变小，需要重写 Git 历史或新建一个全新的壳仓。这会影响所有已有 clone 的同步方式，因此没有在本次迁移中自动执行。
 
 ## 构建
 

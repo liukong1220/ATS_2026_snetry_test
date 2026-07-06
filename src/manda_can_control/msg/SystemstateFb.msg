@@ -1,6 +1,0 @@
-uint8 system_mode
-uint8 control_mode
-uint8 emergency_mode
-uint8 obstacle_mode
-uint8 proximity_switch_mode
-uint8 secure_edge_mode
