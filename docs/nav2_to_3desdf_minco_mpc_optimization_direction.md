@@ -13,19 +13,13 @@
 
 ## 0. 目标流程图
 
-下面两张图对应 `V1` 的目标工程形态，核心思想与 `docs/中科大哨兵2025技术报告.pdf` 一致，但这里进一步明确：
+本节对应 `V1` 的目标工程形态，核心思想与 `docs/中科大哨兵2025技术报告.pdf` 一致，但这里进一步明确：
 
 1. 2.5D 语义建图仍然服务 `2D` 地面导航主拓扑
 2. RC-ESDF 是局部滚动的语义距离场，而不是把系统升级成真正 3D 导航
 3. 轨迹侧的终局不再是“B 样条平滑 + MPPI”本身，而是 `A* / JPS -> MINCO -> 独立 Yaw -> 轮廓安全校验 -> 局部重拟合 -> SE2 MPC`
 
-简版主流程图：
-
-![JPS MINCO MPC Simple](./jps_minco_mpc_pipeline_simple.png)
-
-分层版流程图：
-
-![JPS MINCO MPC Layered](./jps_minco_mpc_pipeline_layered.png)
+本轮文档整理已按保留范围删除旧 PNG 图，下面保留文字版流程描述，避免依赖额外图片资源。
 
 这两张图表达的核心结论是：
 
@@ -541,7 +535,7 @@ RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法�
 
 1. 项目命名已基本进入 `ATS` 体系。
    旧 `pb2025_` 与构建相关 `pb_` 包名已经迁移；
-   新对话不要再从 `src/pb2025_sentry_nav` 路径继续工作。
+   新对话统一从当前导航域 `src/ats_sentry_nav` 继续工作。
    当前导航主目录是 `src/ats_sentry_nav`。
 2. 当前 ESDF 主线不是 fake costmap ESDF。
    `fake_costmap_esdf_provider` 只作为 costmap fallback / debug adapter；

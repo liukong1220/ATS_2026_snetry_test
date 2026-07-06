@@ -540,29 +540,29 @@ ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
 当前建议阅读顺序：
 
 1. [docs/总览.md](./docs/总览.md)
-2. [docs/nav2_to_3desdf_minco_mpc_optimization_direction.md](./docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)
-3. [docs/gazebo_sim_integration.md](./docs/gazebo_sim_integration.md)
-4. [docs/esdf_special_sim_observation_plan.md](./docs/esdf_special_sim_observation_plan.md)
-5. [docs/mppi_parameter_tuning_guide.md](./docs/mppi_parameter_tuning_guide.md)
-6. [docs/omni_recovery_smoothing_optimization.md](./docs/omni_recovery_smoothing_optimization.md)
-7. [docs/融合.md](./docs/融合.md)
-8. [docs/sentry_bt_decision_checklist.md](./docs/sentry_bt_decision_checklist.md)
-9. [docs/sentry_posture_switch_logic.md](./docs/sentry_posture_switch_logic.md)
-10. [docs/视觉跟随仿真调试.md](./docs/视觉跟随仿真调试.md)
-11. [docs/实机视觉跟随优化方案.md](./docs/实机视觉跟随优化方案.md)
-12. [docs/上车测试清单.md](./docs/上车测试清单.md)
+2. [docs/代码范围与目录结构.md](./docs/代码范围与目录结构.md)
+3. [docs/启动入口与运行链路.md](./docs/启动入口与运行链路.md)
+4. [docs/导航定位与轨迹链路.md](./docs/导航定位与轨迹链路.md)
+5. [docs/行为树决策链路.md](./docs/行为树决策链路.md)
+6. [docs/接口消息与话题约定.md](./docs/接口消息与话题约定.md)
+7. [docs/仿真域说明.md](./docs/仿真域说明.md)
+8. [docs/视觉与串口桥说明.md](./docs/视觉与串口桥说明.md)
+9. [docs/构建与维护说明.md](./docs/构建与维护说明.md)
+10. [docs/nav2_to_3desdf_minco_mpc_optimization_direction.md](./docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)
 
 说明：
 
-- `docs/interview_prep.md` 体量较大，当前更像内部资料，不作为主线运维文档入口。
-- `docs/navigate_through_poses_migration_checklist.md`、`docs/slim_loopback_refactor.md` 更偏迁移/重构说明，适合作为背景资料。
+- `docs` 已按当前 `src` 目录和功能域重新整理，除 PDF 与 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md` 外，旧文档不再作为维护入口。
+- `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md` 是保留的专项规划文档，用于承接 3D ESDF、MINCO、MPC 等后续方向。
 
 ## 维护约定
 
 1. 修改主启动逻辑、参数入口或地图/PCD 目录时，优先同步本 README 与 `docs/总览.md`
-2. 修改行为树决策、视觉接管、姿态切换时，优先同步 `ats_sentry_behavior/README.md` 与 `docs/融合.md`、`docs/sentry_posture_switch_logic.md`
-3. 修改 Nav2 参数、恢复行为、轨迹优化时，优先同步 `ats_sentry_nav/README.md` 与 `docs/mppi_parameter_tuning_guide.md`、`docs/omni_recovery_smoothing_optimization.md`
-4. 若文档内容无法从当前仓库代码、参数或 launch 中直接确认，应明确标注“待补充”或“需要人工确认”
+2. 修改行为树决策、视觉接管、姿态切换时，优先同步 `ats_sentry_behavior/README.md` 与 `docs/行为树决策链路.md`
+3. 修改 Nav2 参数、恢复行为、轨迹优化、底盘速度坐标转换时，优先同步 `ats_sentry_nav/README.md` 与 `docs/导航定位与轨迹链路.md`
+4. 修改消息、服务、串口桥或视觉桥接时，优先同步 `docs/接口消息与话题约定.md` 与 `docs/视觉与串口桥说明.md`
+5. 修改仿真入口或新增仿真包时，优先同步 `docs/仿真域说明.md`
+6. 若文档内容无法从当前仓库代码、参数或 launch 中直接确认，应明确标注“待补充”或“需要人工确认”
 
 ## 待人工确认
 
