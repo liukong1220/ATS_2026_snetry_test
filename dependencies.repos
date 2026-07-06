@@ -7,6 +7,7 @@
 # because it owns the complete robot startup entrypoints, deployment parameters,
 # maps, PCD assets and RViz views. Do not add it here as a split repository.
 #
+# All repositories are imported through HTTPS URLs for public open-source use.
 # Repository paths are grouped by domain:
 #   src/sim/*                  simulation repositories
 #   src/interfaces/*           message/interface repositories
@@ -15,57 +16,57 @@
 repositories:
   src/sim/ats_mujoco_sim:
     type: git
-    url: git@github.com:liukong1220/ats_mujoco_sim.git
+    url: https://github.com/liukong1220/ats_mujoco_sim.git
     version: develop
 
   src/ats_robot_description:
     type: git
-    url: git@github.com:liukong1220/ats_robot_description.git
+    url: https://github.com/liukong1220/ats_robot_description.git
     version: develop
 
   src/ats_sentry_behavior:
     type: git
-    url: git@github.com:liukong1220/ats_sentry_behavior.git
+    url: https://github.com/liukong1220/ats_sentry_behavior.git
     version: develop
 
   src/ats_sentry_nav:
     type: git
-    url: git@github.com:liukong1220/ats_sentry_nav.git
+    url: https://github.com/liukong1220/ats_sentry_nav.git
     version: develop
 
   src/interfaces:
     type: git
-    url: git@github.com:liukong1220/interfaces.git
+    url: https://github.com/liukong1220/interfaces.git
     version: develop
 
   src/interfaces/carstatemsgs:
     type: git
-    url: git@github.com:liukong1220/carstatemsgs.git
+    url: https://github.com/liukong1220/carstatemsgs.git
     version: develop
 
   src/sim/loopback_sim:
     type: git
-    url: git@github.com:liukong1220/loopback_sim.git
+    url: https://github.com/liukong1220/loopback_sim.git
     version: develop
 
   src/interfaces/manda_can_control:
     type: git
-    url: git@github.com:liukong1220/manda_can_control.git
+    url: https://github.com/liukong1220/manda_can_control.git
     version: develop
 
   src/ats_sentry_nav/sentry_chassis_vel_transform:
     type: git
-    url: git@github.com:liukong1220/sentry_chassis_vel_transform.git
+    url: https://github.com/liukong1220/sentry_chassis_vel_transform.git
     version: develop
 
   src/standard_robot_pp_ros2:
     type: git
-    url: git@github.com:liukong1220/standard_robot_pp_ros2.git
+    url: https://github.com/liukong1220/standard_robot_pp_ros2.git
     version: develop
 
   src/sp_vision25:
     type: git
-    url: git@github.com:liukong1220/sp_vision25.git
+    url: https://github.com/liukong1220/sp_vision25.git
     version: de
 
   src/tools/teleop_gimbal_keyboard:

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REMOTE_PREFIX="${REMOTE_PREFIX:-git@github.com:liukong1220}"
+REMOTE_PREFIX="${REMOTE_PREFIX:-https://github.com/liukong1220}"
 BRANCH="${BRANCH:-develop}"
 MODE="${MODE:-subtree}"
 WORK_DIR="${WORK_DIR:-${ROOT_DIR}/.split-repos}"
@@ -21,6 +21,7 @@ REPOSITORIES=(
   "src/interfaces/manda_can_control:manda_can_control"
   "src/ats_sentry_nav/sentry_chassis_vel_transform:sentry_chassis_vel_transform"
   "src/standard_robot_pp_ros2:standard_robot_pp_ros2"
+  "src/sp_vision25:sp_vision25"
 )
 
 usage() {
@@ -35,7 +36,7 @@ and is not exported as a split repository.
 Defaults:
   MODE=subtree
   BRANCH=develop
-  REMOTE_PREFIX=git@github.com:liukong1220
+  REMOTE_PREFIX=https://github.com/liukong1220
   WORK_DIR=.split-repos
 
 Modes:

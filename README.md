@@ -134,6 +134,8 @@ rosdep update
 
 这部分留在根仓后，新机器克隆根仓即可获得可启动的部署入口；再通过 `dependencies.repos` 拉取行为、导航、接口、仿真和第三方依赖，工作区才完整。
 
+`src/ats_sentry_bringup` 对应的独立远端仓库/分支不再维护，也不应重新加入 `dependencies.repos`。它随根仓 `ATS_2026_snetry_test` 一起被 `colcon` 发现和构建。
+
 `dependencies.repos` 中按功能域维护以下路径：
 
 - 主线功能域：`src/ats_sentry_nav`、`src/ats_sentry_behavior`、`src/standard_robot_pp_ros2`
@@ -143,6 +145,13 @@ rosdep update
 - 机器人描述：`src/ats_robot_description`
 - 第三方依赖仓库：继续指向原始上游，避免把外部代码重复塞进根仓
 
+开源部署约定：
+
+- 根仓和自研分包仓库面向开源使用，`dependencies.repos` 统一使用 `https://github.com/...` URL。
+- 新机器不需要配置 GitHub SSH key 就能执行 `tools/import_workspace_repos.sh --shallow`。
+- 自研分包仓库应保持 public；如果需要批量创建或修正可见性，使用 `GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh`。
+- `src/ats_sentry_bringup/pcd/*.pcd` 只作为本机运行资产，不提交、不上传。
+
 分包边界按“功能完整性”确定，而不是按每个 ROS package 机械拆分。例如 `src/ats_sentry_nav` 内部同时包含 Nav2 bringup、定位、点云转换、地形分析、轨迹优化、恢复插件和底盘速度转换相关工具；`sentry_chassis_vel_transform` 负责底盘速度坐标转换和 fake yaw 相关逻辑，归入导航域后更便于和 `fake_vel_transform`、控制器输出链路一起维护。
 
 ### 快速部署
@@ -150,7 +159,7 @@ rosdep update
 新机器推荐按下面流程创建工作区：
 
 ```bash
-git clone --depth=1 -b develop git@github.com:liukong1220/ATS_2026_snetry_test.git
+git clone --depth=1 -b develop https://github.com/liukong1220/ATS_2026_snetry_test.git
 cd ATS_2026_snetry_test
 git lfs install
 tools/import_workspace_repos.sh --shallow
@@ -254,7 +263,7 @@ cd src/ats_sentry_nav/sentry_chassis_vel_transform
 repositories:
   src/example_package:
     type: git
-    url: git@github.com:liukong1220/example_package.git
+    url: https://github.com/liukong1220/example_package.git
     version: develop
 ```
 
@@ -277,11 +286,16 @@ tools/import_workspace_repos.sh --shallow
 # 创建 GitHub 缺失功能仓，需要本地提供 GH_TOKEN 或 GITHUB_TOKEN
 GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh
 
+# 若仓库已存在，该脚本会在 token 权限允许时把自研分包仓库修正为 public
+GH_TOKEN=<YOUR_TOKEN> MAKE_PUBLIC=1 tools/create_github_repos.sh
+
 # 从一个仍包含 src 源码的旧大仓 checkout 导出独立仓库
 tools/export_workspace_repos.sh --mode snapshot --push
 ```
 
 `tools/create_github_repos.sh` 和 `tools/export_workspace_repos.sh` 都不会再处理 `ats_sentry_bringup`。该包是根仓部署入口，后续直接随根仓提交。
+
+`tools/create_github_repos.sh` 默认创建 public 仓库，并会在 token 权限允许时把已存在的自研分包仓库设置为 public。`tools/export_workspace_repos.sh` 默认使用 `https://github.com/liukong1220/<repo>.git` 作为推送目标。
 
 `tools/export_workspace_repos.sh` 主要用于历史迁移。当前这些自研功能包已经按 snapshot 方式推送到 GitHub，后续日常开发不需要重复执行。
 
@@ -290,7 +304,7 @@ tools/export_workspace_repos.sh --mode snapshot --push
 根仓当前 HEAD 只跟踪 `src/ats_sentry_bringup`，其余 `src/` 功能域由 `dependencies.repos` 拉取。旧提交里曾经包含过更多源码和依赖，所以普通 clone 仍可能下载旧历史。异地部署时请使用：
 
 ```bash
-git clone --depth=1 -b develop git@github.com:liukong1220/ATS_2026_snetry_test.git
+git clone --depth=1 -b develop https://github.com/liukong1220/ATS_2026_snetry_test.git
 ```
 
 如果要让根仓普通 clone 也彻底变小，需要重写 Git 历史或新建一个全新的壳仓。这会影响所有已有 clone 的同步方式，因此没有在本次迁移中自动执行。

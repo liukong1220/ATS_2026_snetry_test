@@ -2,7 +2,8 @@
 set -euo pipefail
 
 OWNER="${OWNER:-liukong1220}"
-PRIVATE="${PRIVATE:-1}"
+PRIVATE="${PRIVATE:-0}"
+MAKE_PUBLIC="${MAKE_PUBLIC:-1}"
 TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 
 REPOSITORIES=(
@@ -15,6 +16,7 @@ REPOSITORIES=(
   loopback_sim
   manda_can_control
   sentry_chassis_vel_transform
+  sp_vision25
   standard_robot_pp_ros2
 )
 
@@ -27,7 +29,8 @@ Create the split package repositories under OWNER, defaulting to liukong1220.
 Environment:
   GH_TOKEN/GITHUB_TOKEN  GitHub token with repo creation permission.
   OWNER                  GitHub user or organization, default liukong1220.
-  PRIVATE=1|0            Create private repositories by default.
+  PRIVATE=1|0            Create private repositories, default 0.
+  MAKE_PUBLIC=1|0        Set existing repositories public when possible, default 1.
 USAGE
 }
 
@@ -66,6 +69,11 @@ fi
 for repo in "${REPOSITORIES[@]}"; do
   if api -o /dev/null "https://api.github.com/repos/${OWNER}/${repo}" 2>/dev/null; then
     echo "Exists: ${OWNER}/${repo}"
+    if [[ "$MAKE_PUBLIC" == "1" || "$MAKE_PUBLIC" == "true" ]]; then
+      api -X PATCH "https://api.github.com/repos/${OWNER}/${repo}" \
+        -d '{"private":false}' >/dev/null
+      echo "Public: ${OWNER}/${repo}"
+    fi
     continue
   fi
 
