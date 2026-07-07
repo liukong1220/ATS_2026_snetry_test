@@ -170,6 +170,7 @@ git lfs install
 
 - `git clone --depth=1` 只拉根仓最近一次提交，避免下载旧大仓历史
 - `./import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆除 `ats_sentry_bringup` 之外的功能仓和第三方依赖
+- 部署脚本会临时设置 `init.defaultBranch=main` 和 `advice.detachedHead=false`，用于屏蔽 `git init` 默认分支提示，以及固定 commit hash 依赖带来的 detached HEAD 提示
 - `src/ats_sentry_bringup/pcd/*.pcd` 不提交到 Git；需要实机建图或从队内离线介质拷贝到本地
 - 如果你要在部署机器上长期开发，可以去掉 `--shallow`，保留各子仓库完整历史
 
@@ -286,6 +287,8 @@ version: 0123456789abcdef0123456789abcdef01234567
 ```
 
 `import_workspace_repos.sh` 是部署机器需要保留的脚本。拆仓、建仓、fork 上游依赖和 topic 归类属于一次性迁移工作，完成后不再保留迁移脚本，避免开源仓库中出现无关维护入口。
+
+该脚本只在当前命令进程中设置 Git 临时配置，不修改用户全局 `git config`。因此 `rosbag2_composable_recorder` 这类锁定到 commit hash 的依赖仍保持版本可复现，但部署输出不会再出现分离头指针建议。
 
 ### 旧仓历史说明
 

@@ -57,6 +57,17 @@ if [[ ! -f "$MANIFEST" ]]; then
   exit 1
 fi
 
+# Keep deployment output focused without changing the user's global git config.
+# vcstool may initialize empty repositories and may checkout pinned commit hashes.
+git_config_count="${GIT_CONFIG_COUNT:-0}"
+export "GIT_CONFIG_KEY_${git_config_count}=init.defaultBranch"
+export "GIT_CONFIG_VALUE_${git_config_count}=main"
+git_config_count=$((git_config_count + 1))
+export "GIT_CONFIG_KEY_${git_config_count}=advice.detachedHead"
+export "GIT_CONFIG_VALUE_${git_config_count}=false"
+git_config_count=$((git_config_count + 1))
+export GIT_CONFIG_COUNT="$git_config_count"
+
 VCS_ARGS=(--recursive)
 if [[ "$FORCE" -eq 1 ]]; then
   VCS_ARGS+=(--force)
