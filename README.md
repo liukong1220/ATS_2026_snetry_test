@@ -148,9 +148,9 @@ rosdep update
 开源部署约定：
 
 - 根仓、自研分包仓库、fork 后的工具/依赖仓库面向开源使用，`dependencies.repos` 统一使用 `https://github.com/liukong1220/...` URL。
-- 新机器不需要配置 GitHub SSH key 就能执行 `tools/import_workspace_repos.sh --shallow`。
-- 自研分包仓库应保持 public；如果需要批量创建或修正可见性，使用 `GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh`。
-- 上游工具/依赖仓库使用 `tools/fork_ats_nav_dependencies.sh` fork 到 `liukong1220`，并统一加入 GitHub topic `ats-nav`。该 topic 对应本项目的 `ATS_NAV` 研发归类。
+- 新机器不需要配置 GitHub SSH key 就能执行 `./import_workspace_repos.sh --shallow`。
+- 自研分包仓库、fork 后的工具/依赖仓库应保持 public，并统一加入 GitHub topic `ats-nav`。该 topic 对应本项目的 `ATS_NAV` 研发归类。
+- 仓库迁移、fork 归类和建仓工作已经完成，对应一次性迁移脚本不再保留。
 - `src/ats_sentry_bringup/pcd/*.pcd` 只作为本机运行资产，不提交、不上传。
 
 分包边界按“功能完整性”确定，而不是按每个 ROS package 机械拆分。例如 `src/ats_sentry_nav` 内部同时包含 Nav2 bringup、定位、点云转换、地形分析、轨迹优化、恢复插件和底盘速度转换相关工具；`sentry_chassis_vel_transform` 负责底盘速度坐标转换和 fake yaw 相关逻辑，归入导航域后更便于和 `fake_vel_transform`、控制器输出链路一起维护。
@@ -163,13 +163,13 @@ rosdep update
 git clone --depth=1 -b develop https://github.com/liukong1220/ATS_2026_snetry_test.git
 cd ATS_2026_snetry_test
 git lfs install
-tools/import_workspace_repos.sh --shallow
+./import_workspace_repos.sh --shallow
 ```
 
 说明：
 
 - `git clone --depth=1` 只拉根仓最近一次提交，避免下载旧大仓历史
-- `tools/import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆除 `ats_sentry_bringup` 之外的功能仓和第三方依赖
+- `./import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆除 `ats_sentry_bringup` 之外的功能仓和第三方依赖
 - `src/ats_sentry_bringup/pcd/*.pcd` 不提交到 Git；需要实机建图或从队内离线介质拷贝到本地
 - 如果你要在部署机器上长期开发，可以去掉 `--shallow`，保留各子仓库完整历史
 
@@ -276,34 +276,16 @@ version: 0123456789abcdef0123456789abcdef01234567
 
 部署机器要复现固定版本时，优先使用 commit hash；日常开发可以继续使用 `develop`。
 
-### 拆仓维护脚本
+### 部署脚本
 
-仓库内保留了四个维护脚本：
+仓库根目录保留部署拉取脚本：
 
 ```bash
 # 按 dependencies.repos 导入 src/
-tools/import_workspace_repos.sh --shallow
-
-# 创建 GitHub 缺失功能仓，需要本地提供 GH_TOKEN 或 GITHUB_TOKEN
-GH_TOKEN=<YOUR_TOKEN> tools/create_github_repos.sh
-
-# 若仓库已存在，该脚本会在 token 权限允许时把自研分包仓库修正为 public
-GH_TOKEN=<YOUR_TOKEN> MAKE_PUBLIC=1 tools/create_github_repos.sh
-
-# fork 上游工具/依赖到 liukong1220，并把相关仓库加入 ATS_NAV 归类
-GH_TOKEN=<YOUR_TOKEN> tools/fork_ats_nav_dependencies.sh
-
-# 从一个仍包含 src 源码的旧大仓 checkout 导出独立仓库
-tools/export_workspace_repos.sh --mode snapshot --push
+./import_workspace_repos.sh --shallow
 ```
 
-`tools/create_github_repos.sh` 和 `tools/export_workspace_repos.sh` 都不会再处理 `ats_sentry_bringup`。该包是根仓部署入口，后续直接随根仓提交。
-
-`tools/create_github_repos.sh` 默认创建 public 仓库，并会在 token 权限允许时把已存在的自研分包仓库设置为 public。`tools/export_workspace_repos.sh` 默认使用 `https://github.com/liukong1220/<repo>.git` 作为推送目标。
-
-`tools/fork_ats_nav_dependencies.sh` 负责把上游工具和依赖仓库 fork 到 `liukong1220`，再给根仓、自研分包和 fork 后依赖仓统一添加 `ats-nav` topic。GitHub topic 只能使用小写和连字符，所以这里用 `ats-nav` 表达 `ATS_NAV` 研发归类。
-
-`tools/export_workspace_repos.sh` 主要用于历史迁移。当前这些自研功能包已经按 snapshot 方式推送到 GitHub，后续日常开发不需要重复执行。
+`import_workspace_repos.sh` 是部署机器需要保留的脚本。拆仓、建仓、fork 上游依赖和 topic 归类属于一次性迁移工作，完成后不再保留迁移脚本，避免开源仓库中出现无关维护入口。
 
 ### 旧仓历史说明
 

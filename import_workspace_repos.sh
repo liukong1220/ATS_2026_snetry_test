@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST="${MANIFEST:-${ROOT_DIR}/dependencies.repos}"
 IMPORT_PATH="${IMPORT_PATH:-${ROOT_DIR}}"
 
@@ -10,7 +10,7 @@ FORCE=0
 
 usage() {
   cat <<'USAGE'
-Usage: tools/import_workspace_repos.sh [--shallow] [--force] [--manifest FILE]
+Usage: ./import_workspace_repos.sh [--shallow] [--force] [--manifest FILE]
 
 Import repositories listed in dependencies.repos into the workspace root.
 
