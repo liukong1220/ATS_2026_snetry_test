@@ -549,7 +549,8 @@ trajectory_optimizer:
     # J_obs 参数：cost 超过 48 就开始推离障碍，权重比之前更强。
     obstacle_safe_cost: 48
     use_esdf_obstacle_cost: true
-    # ESDF 视为“靠近障碍”的安全距离。
+    robot_footprint_radius: 0.31       # ESDF 原始点距转为机体边缘 clearance 的 footprint 外接半径。
+    # 机体边缘到物理障碍表面的最小安全间隙，而不是质心到障碍的距离。
     obstacle_safe_distance: 0.30
     # 离障小于该值时，开始额外压低速度上限。
     obstacle_speed_reduction_distance: 0.50
@@ -1042,6 +1043,7 @@ smoother_server:
       # cost 超过 96 的点会被回拉；profile 会在回拉后重新计算并发给 governor。
       obstacle_safe_cost: 96
       use_esdf_obstacle_cost: true
+      robot_footprint_radius: 0.31     # 主链 smoother 会自动取 Nav2 footprint；这里作为显式兜底。
       obstacle_safe_distance: 0.30
       # 离障速度限速三件套：
       # reduction_distance：开始限速的距离

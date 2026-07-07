@@ -18,7 +18,6 @@
   <exec_depend>sentry_chassis_vel_transform</exec_depend>
   <exec_depend>ats_nav_bringup</exec_depend>
   <exec_depend>ats_sentry_behavior</exec_depend>
-  <exec_depend>rmu_gazebo_simulator</exec_depend>
   <exec_depend>ats_rm_interfaces</exec_depend>
   <exec_depend>sp_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>

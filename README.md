@@ -2,7 +2,7 @@
 
 安徽信息工程学院 Artisans 战队 2026 哨兵机器人 ROS 2 工作区。
 
-当前仓库以实机总启动、行为树决策、Nav2 导航执行、轻量 loopback 仿真和上下位机串口桥接为主线，所有说明以当前工作区代码、launch 文件和参数文件为准。
+当前仓库以实机总启动、行为树决策、Nav2 导航执行、MuJoCo 仿真、轻量 loopback 仿真和上下位机串口桥接为主线，所有说明以当前工作区代码、launch 文件和参数文件为准。Gazebo 入口和依赖已清理，后续仿真统一使用 MuJoCo；loopback 保留用于快速决策和导航链路测试。
 
 ## 项目概览
 
@@ -11,8 +11,9 @@
 1. 启动编排层：`src/ats_sentry_bringup`
 2. 决策层：`src/ats_sentry_behavior`
 3. 导航与定位层：`src/ats_sentry_nav`
-4. 轻量闭环仿真层：`src/sim/loopback_sim`
-5. 串口与裁判系统接口层：`src/standard_robot_pp_ros2`
+4. MuJoCo 动力学仿真层：`src/sim/ats_mujoco_sim`
+5. 轻量闭环仿真层：`src/sim/loopback_sim`
+6. 串口与裁判系统接口层：`src/standard_robot_pp_ros2`
 
 当前默认执行链为：
 
@@ -79,8 +80,7 @@ FollowPath 失败
 │   │   └── sentry_chassis_vel_transform/
 │   ├── sim/                          # 仿真域
 │   │   ├── ats_mujoco_sim/
-│   │   ├── loopback_sim/
-│   │   └── rmu_gazebo_simulator/
+│   │   └── loopback_sim/
 │   ├── standard_robot_pp_ros2/        # 串口桥、裁判系统、底盘命令接口
 │   ├── interfaces/                    # ats_rm_interfaces / sp_msgs / carstatemsgs / manda_can_control
 │   └── tools/                         # pcd2pgm、rosbag recorder、键盘云台控制等
@@ -127,7 +127,7 @@ rosdep update
 
 `src/ats_sentry_bringup` 不再拆成独立仓库。原因是它不是普通算法包，而是实机和仿真的总入口，集中维护：
 
-- `bringup.launch.py`、loopback、Gazebo、视觉专测等 launch 入口
+- `bringup.launch.py`、loopback、MuJoCo、视觉专测等 launch 入口
 - 实机 `node_params.yaml`、MID360 配置、RViz 视图
 - 比赛/测试地图资产，以及 PCD 的本地目录约定
 - `mapping.sh`、`NAV2.sh` 等根脚本实际依赖的路径约定
@@ -139,7 +139,7 @@ rosdep update
 `dependencies.repos` 中按功能域维护以下路径：
 
 - 主线功能域：`src/ats_sentry_nav`、`src/ats_sentry_behavior`、`src/standard_robot_pp_ros2`
-- 仿真域：`src/sim/ats_mujoco_sim`、`src/sim/loopback_sim`、`src/sim/rmu_gazebo_simulator`
+- 仿真域：`src/sim/ats_mujoco_sim`、`src/sim/loopback_sim`
 - 接口域：`src/interfaces`、`src/interfaces/carstatemsgs`、`src/interfaces/manda_can_control`
 - 导航辅助域：`src/ats_sentry_nav/sentry_chassis_vel_transform`
 - 机器人描述：`src/ats_robot_description`
@@ -189,8 +189,7 @@ git lfs install
     │   └── sentry_chassis_vel_transform/
     ├── sim/
     │   ├── ats_mujoco_sim/
-    │   ├── loopback_sim/
-    │   └── rmu_gazebo_simulator/
+    │   └── loopback_sim/
     ├── standard_robot_pp_ros2/
     ├── dependencies/
     ├── interfaces/

@@ -1,797 +1,509 @@
-# 从 2.5D 语义 ESDF 到稳定比赛版与长期最终版导航主链
+# ATS 导航优化当前框架与下一阶段交接
 
-更新时间：2026-07-03
+更新时间：2026-07-07
 
-本文档只保留两条主线：
+本文档已按当前 `src` 目录重新检索后整理。它的用途是让新对话先理解当前工程真实结构，再继续推进 RC-ESDF、MINCO、MuJoCo、MPC 等优化。本文不再记录历史流水账；Gazebo 入口和依赖已清理，后续完整仿真统一使用 MuJoCo，loopback 保留用于快速决策和导航链路测试。
 
-1. `V1 稳定比赛版`
-   `2.5D 语义地图 + 2D 栅格导航主链 + RC-ESDF + A* / JPS + MINCO + 独立 Yaw+ 轮廓安全校验 + 局部重拟合 + SE2 MPC`
-2. `V2 长期最终版`
-   `3D ESDF + 2D / 2.5D 地面导航主链 + JPS + MINCO + 独立 Yaw + 轮廓安全校验 + 局部重拟合 + SE2 MPC`
+## 0. V1 / V2 版本目标
 
-当前优化工作优先服务于 `V1`。`V2` 是在 `V1` 稳定后再推进的长期目标。
+本文档所有优化都围绕两个版本边界展开，后续新对话必须先按这个边界判断任务属于当前比赛主线还是长期升级。
 
-## 0. 目标流程图
+### 0.1 V1：当前比赛可用主线
 
-本节对应 `V1` 的目标工程形态，核心思想与 `docs/中科大哨兵2025技术报告.pdf` 一致，但这里进一步明确：
+`V1` 的目标是先把当前地面哨兵导航做稳定、可观察、可比赛使用：
 
-1. 2.5D 语义建图仍然服务 `2D` 地面导航主拓扑
-2. RC-ESDF 是局部滚动的语义距离场，而不是把系统升级成真正 3D 导航
-3. 轨迹侧的终局不再是“B 样条平滑 + MPPI”本身，而是 `A* / JPS -> MINCO -> 独立 Yaw -> 轮廓安全校验 -> 局部重拟合 -> SE2 MPC`
+`2.5D 地形语义 + 2D 栅格主链 + RC-ESDF-lite/RC-ESDF + JPS + MINCO + 独立 Yaw + footprint safety + Local Collision Repair + SE2 MPC`
 
-本轮文档整理已按保留范围删除旧 PNG 图，下面保留文字版流程描述，避免依赖额外图片资源。
+当前代码还没有完全到达这条终局链。现阶段真实运行链是：
 
-这两张图表达的核心结论是：
+`SmacPlanner2D + Nav2BSplineSmoother + trajectory_speed_governor + MPPI`
 
-1. 地面机器人总体导航仍然是 `2D` 栅格主链。
-2. `2.5D` 前端负责高程、坡度、占有率和地形语义判断。
-3. signed `RC-ESDF` 负责 clearance、gradient 和局部本体安全查询支撑。
-4. `A* / JPS` 负责主搜索。
-5. `MINCO + 独立 Yaw + 轮廓安全校验 + 局部重拟合` 负责把离散路径变成可执行轨迹。
-6. 终局控制目标是 `SE2 MPC`。
+因此 `V1` 当前阶段不是立即推翻 Nav2，而是先把 MuJoCo/RViz2 中的现有过渡主链跑稳定，再逐步替换为 `JPS + MINCO + footprint safety + SE2 MPC`。
 
-## 1. 先说结论
+### 0.2 V2：长期 3D ESDF 后端升级
 
-对当前仓库，最合理的路线不是一步跳到“所有模块同时重写”，而是分成两个清晰层次：
+`V2` 的目标是在 `V1` 稳定后升级地图后端能力：
 
-1. 近期比赛优化目标：
-   `LBFGS-RC-ESDF + MPPI`
-2. `V1` 最终比赛版目标：
-   `RC-ESDF + A* / JPS + MINCO + 独立 Yaw + 轮廓安全校验 + 局部重拟合 + SE2 MPC`
+`3D Occupancy / 3D ESDF -> 地面任务语义抽取 -> 复用 V1 的搜索、轨迹、安全和控制接口`
 
-原因很明确：
+`V2` 不是当前立刻开工的主线，也不是把哨兵导航改成空中机器人式三维路径搜索。它的重点是让地图后端更强，但上层仍围绕地面机器人输出 `2D / 2.5D` 可通行语义。
 
-1. 当前仓库已经有 `TraversabilityEsdfProvider + Nav2BSplineSmoother + MPPI` 的稳定过渡主链。
-2. 先把当前 signed Traversability ESDF 演进为更强的 `RC-ESDF-lite`，可以最快获得窄门、贴边、高速转角收益。
-3. 直接同时替换搜索器、轨迹优化器和执行器，会让比赛期变量过多，调试成本过高。
+当前结论：先做 `V1`，先稳定 MuJoCo 完整闭环，再推进 RC-ESDF、MINCO、footprint safety、SE2 MPC；`V2` 等 `V1` 稳定后再做。
 
-一句话概括：
+## 1. 当前结论
 
-`近期先做 LBFGS-RC-ESDF + MPPI，最终收敛到 RC-ESDF + A* / JPS + MINCO + 独立 Yaw + 局部修补 + SE2 MPC。`
+当前主线是：
 
-## 2. V1 稳定比赛版
+`实车/仿真统一 ROS 接口 -> Nav2 过渡主链 -> 2.5D traversability -> RC-ESDF-lite -> Nav2BSplineSmoother + trajectory_speed_governor + MPPI -> 后续 minco_planner + SE2 MPC`
 
-### 2.1 V1 的最终目标链
+当前仿真主线是：
 
-`Batch-LIWO / 里程计 -> 3D 点云投影 -> 2.5D Traversability + Slope -> 2D 语义 RC-ESDF -> A* / JPS 搜索 -> MINCO 优化 2D 质心位置 + 时间 -> 独立 Yaw 规划（5次 B-spline，限制转向速率） -> 采样车体轮廓并反算 B-spline 控制点做凸包安全校验 -> 若碰撞则仅局部拖动控制点重拟合 -> 输出可执行参考轨迹 -> 近端执行器（过渡期 MPPI，最终 SE2 MPC） -> chassis`
+`MuJoCo + RViz2 + Nav2 + trajectory_optimizer`
 
-这条链是 `V1` 的比赛可用版本最终目标。
+Gazebo 不再作为后续仿真方案；`loopback_sim` 适合低成本验证 Nav2 参数、话题链和行为树；MuJoCo 用于后续完整底盘动力学、传感器、控制器和实车接口对齐测试。
 
-### 2.2 V1 中各层的职责
+当前执行链还不是最终 `JPS + MINCO + SE2 MPC`。真实状态是：
 
-#### 状态估计层
+1. 全局规划：`nav2_smac_planner/SmacPlanner2D`
+2. 主链平滑：`trajectory_optimizer/Nav2BSplineSmoother`
+3. 控制器：`nav2_mppi_controller::MPPIController`
+4. 曲率/坡度/障碍限速：`trajectory_speed_governor`
+5. 目标规划骨架：`minco_planner`，但真实 MINCO/JPS/footprint SDF/SE2 MPC 尚未完成替换
 
-1. 维持 `point_lio / lidar_odometry` 的稳定输出。
-2. 保证时间戳和 TF 链稳定。
-3. 为局部滚动 RC-ESDF、搜索器与控制器提供一致的姿态参考。
+因此下一阶段最稳妥的推进方式是：先把 MuJoCo 中的当前主链稳定跑通和观察清楚，再逐层把 RC-ESDF、footprint safety、MINCO、JPS、SE2 MPC 替换进去。
 
-#### 2.5D 地形语义层
+## 2. 当前 src 分层
 
-建议每个 `(x, y)` 栅格显式维护：
+### 2.1 顶层目录
 
-1. `z_min`
-2. `z_max`
-3. `height_diff`
-4. `occupancy_ratio`
-5. `ground_confidence`
-6. `slope`
-7. `slope_direction`
-8. `roughness`
-9. `dynamic_obstacle_confidence`
-10. `traversable / occupied / unknown`
+当前 `src` 里和导航相关的主目录如下：
 
-这层的任务不是“能不能走”的唯一判断，而是把地形语义转换成可规划、可控速、可解释的代价。
+1. `src/ats_sentry_bringup`
+   实车和综合启动顶层入口。包含 `bringup.launch.py`、loopback 启动、实车默认 `node_params.yaml`、地图、PCD、RViz 配置。
+2. `src/ats_sentry_nav`
+   导航子工作区。包含 Nav2 bringup、Nav2 插件、定位/点云转换、地形分析、轨迹优化、MINCO 规划骨架、速度坐标转换等。
+3. `src/sim`
+   仿真工作区。包含 `ats_mujoco_sim` 和 `loopback_sim`。MuJoCo 是完整仿真主线，loopback 用于快速测试。
+4. `src/interfaces`
+   消息与服务接口。当前包含 `ats_rm_interfaces`、`manda_can_control`、`carstatemsgs`、`sp_msgs`。
+5. `src/dependencies`
+   第三方或外部依赖，包括 BehaviorTree.ROS2、rmoss core/interfaces、sdformat_tools 等。Gazebo 相关依赖已从当前清单移除。
+6. `src/tools`
+   辅助工具，如 `pcd2pgm`、rosbag recorder、键盘遥控等。
+7. `src/sp_vision25`
+   视觉工程，当前不是本导航优化文档的主线，但会影响实车系统整体 bringup。
 
-#### 2D 语义 RC-ESDF 层
+后续新代码统一使用 `ats_` 命名。历史 `pb` 前缀只允许出现在维护检查命令中，不应作为当前包名、topic、参数或文档主结构继续出现。
 
-`V1` 中的 ESDF 层应从当前 `TraversabilityEsdfProvider` 逐步演进为：
+### 2.2 实车顶层 bringup
 
-`RC-ESDF-lite`
-
-这里的 `RC` 指的是：
-
-1. 局部滚动窗口
-2. 更强调围绕机器人当前位置的高频查询
-3. 优先服务轨迹优化、轮廓校验与控制器，而不是做全局 3D 拓扑表达
-
-这一层的职责是：
-
-1. 输入二维可通行栅格和地形语义栅格。
-2. 输出 signed distance。
-3. 输出稳定 `grad d(x, y)`。
-4. 旁路输出 `slope_grid` 或等价坡度代价。
-5. 为 `A* / JPS`、`MINCO`、轮廓安全校验和 `SE2 MPC` 提供统一 clearance 接口。
-
-这里要明确：
-
-1. 主导航拓扑仍由 `2D` 搜索器在栅格图上完成。
-2. RC-ESDF 不负责把问题变成真正 3D 导航。
-3. RC-ESDF 负责的是在 `2D` 平面路径上叠加更丰富的地形语义，并强化局部本体可执行性建模。
-
-#### 前端搜索层
-
-`V1` 的前端搜索最终目标是：
-
-`A* / JPS`
-
-建议分两步推进：
-
-1. 先用 `A*` 把接口跑通。
-2. 再切换到 `JPS` 作为最终比赛版主搜索器。
-
-建议职责分工如下：
-
-1. `traversability_grid` / 二值通行栅格：给 `A* / JPS` 做主搜索。
-2. `slope_grid`：给速度/加速度自适应和软惩罚使用。
-3. signed `RC-ESDF`：给 tie-break、后验筛选、局部修补、后端优化和控制器提供 clearance / gradient 信息。
-4. 如果后续要做风险加权搜索，优先做 `JPS` 主搜索 + ESDF / slope 后验筛选与修补，不要一开始把 `JPS` 改造成重权图搜索器。
-
-#### 轨迹优化层
-
-`V1` 中建议新建独立 `minco_planner` 包，轨迹优化职责如下：
-
-1. 搜索输出先变成离散 `raw_path`。
-2. 用 `MINCO` 优化 `2D` 质心位置轨迹。
-3. 在 `MINCO` 中同时完成时间分配。
-4. 在位置轨迹优化中接入 clearance、曲率和 `slope` 软惩罚。
-5. 输出可给 `MPPI / SE2 MPC` 直接消费的参考轨迹结构。
-
-这一层的目标不是单纯“让路径更圆”，而是：
-
-1. 提高高速下的可跟踪性。
-2. 提高大角度转向时的轨迹几何质量。
-3. 提高极狭窄通道中的轮廓通过成功率。
-
-#### 独立 Yaw 规划层
-
-`Yaw` 规划建议保持独立层，不与位置轨迹一次性强耦合成一个大优化问题。
-
-推荐形式：
-
-`5次 B-spline Yaw Planner`
-
-这一层至少需要考虑：
-
-1. `yaw rate` 限制
-2. 必要时的 `yaw acceleration` 限制
-3. 起点 yaw 边界项
-4. 狭窄区域内的路径切向轻量参考
-
-保留独立 `Yaw` 的原因是：
-
-1. 更适合比赛期分层调试。
-2. 更利于和 `MINCO`、轮廓安全校验分开定位问题。
-3. 更便于后续与 `SE2 MPC` 对接。
-
-#### 车体轮廓安全校验层
-
-在 `MINCO + 独立 Yaw` 之后，应新增明确的：
-
-`车体轮廓采样 + 凸包安全校验`
-
-推荐流程：
-
-1. 沿轨迹采样姿态。
-2. 根据机器人车体轮廓生成离散 footprint。
-3. 将轨迹与 footprint 映射回局部控制点区段。
-4. 基于 RC-ESDF 做 clearance 与碰撞检查。
-5. 做凸包安全性判断，而不是只看中心点。
-
-这层直接服务于：
-
-1. 极窄通道
-2. 贴边过门
-3. 大角度转向时的轮廓扫掠安全
-
-#### 局部碰撞重拟合层
-
-若安全校验发现碰撞，不建议整条轨迹整体重算，建议采用：
-
-`Local Collision Repair`
-
-它的职责应明确为：
-
-1. 只在碰撞段附近调整控制点。
-2. 尽量保持未碰撞区段不动。
-3. 优先修补 clearance 问题。
-4. 用轻量局部重拟合代替全局重优化。
-
-推荐最小实现：
-
-1. 采样车体矩形 footprint。
-2. 发现碰撞后，不做全局重算。
-3. 只动碰撞段影响到的局部控制点。
-4. 沿安全方向拖动一小步。
-5. 重新局部拟合并再次校验。
-
-#### 控制层
-
-控制层需要明确区分：
-
-1. 过渡执行器：`MPPI`
-2. 最终执行器：`SE2 MPC`
-
-`V1` 中可以继续保留 `MPPI` 作为验证执行器，但最终比赛目标控制层仍应收敛到 `SE2 MPC`。
-
-### 2.3 为什么 V1 仍然坚持 2D 栅格主链
-
-对当前地面机器人，`2D` 栅格主链仍然是最合理的选择：
-
-1. 任务目标是地面可通行拓扑，不是空中或多层空间拓扑。
-2. 主决策变量仍然是平面路径与沿路径的 `yaw / v / a` 分配。
-3. `2.5D` 高程、坡度、占有率分析已经足以表达坡道、矮墙、坎边、障碍堆和低置信区域。
-4. RC-ESDF、MINCO、独立 Yaw、轮廓安全校验和局部修补都可以在 `2D` 主链上有效工作。
-5. 真正 3D 导航引入的复杂度，当前不会给 RMUC / 哨兵地面场景带来等比例收益。
-
-所以 `V1` 的定位是：
-
-`做一个由 2.5D 语义地图驱动的 2D 栅格导航系统`
-
-### 2.4 RC-ESDF 如何服务高速、大角度转向和极窄通道
-
-RC-ESDF 相比当前“仅给平滑器提供点式 clearance 代价”的做法，更适合服务下面三类比赛问题：
-
-1. 高速场景
-   clearance、gradient 和坡度代价可以更直接地进入时间分配与控制器。
-2. 大角度转向
-   独立 `Yaw` 与轮廓扫掠安全校验可以避免仅看质心路径导致的姿态风险。
-3. 极窄通道
-   footprint-aware 的局部安全检查比仅看中心线 clearance 更关键。
-
-推荐分工如下：
-
-1. `traversability_grid` 决定“这里能不能走”。
-2. `slope_grid` 决定“这里该以多快的速度走”。
-3. RC-ESDF 决定“离障碍多近、梯度往哪边推、局部轮廓是否还能过”。
-
-### 2.5 V1 的明确边界
-
-`V1` 明确不是 `3D` 导航版本。
-
-它要做的是：
-
-1. 用 `2.5D` 语义地图理解地形。
-2. 用 `2D` 栅格主链完成导航。
-3. 用 `RC-ESDF + A* / JPS + MINCO + 独立 Yaw + 局部修补 + SE2 MPC` 提高比赛可用性和稳定性。
-
-它不要做的是：
-
-1. 把整个系统升级成真正 3D 导航。
-2. 把悬挑、多层空间、桥下穿行当成当前主线问题。
-3. 在 `V1` 阶段同时把地图后端和控制器做成一个难以回退的大一统重写工程。
-
-## 3. V2 长期最终版
-
-`V2` 的目标不是推翻 `V1` 的比赛链路，而是在保留 `V1` 全部规划控制主链结构的前提下，把地图与安全查询后端升级成真正的 `3D ESDF`。
-
-也就是说，`V2` 仍然沿用下面这些关键设计：
-
-1. 主导航仍然服务地面机器人任务
-2. 搜索器仍然是 `A* / JPS` 这一类前端
-3. 轨迹优化仍然是 `MINCO`
-4. 姿态规划仍然保留独立 `Yaw`
-5. 仍然保留车体轮廓安全校验与局部重拟合
-6. 最终执行器仍然是 `SE2 MPC`
-
-`V2` 真正变化的核心，是把 `V1` 中的 `2.5D` 语义 RC-ESDF 后端，升级为更完整的 `3D Occupancy / 3D ESDF` 后端。
-
-### 3.1 V2 的目标链
-
-`Batch-LIWO / 里程计 -> 3D Occupancy / 3D ESDF -> 2D / 2.5D 可通行投影与地面语义抽取 -> A* / JPS 搜索 -> MINCO 优化 2D 质心位置 + 时间 -> 独立 Yaw 规划（5次 B-spline，限制转向速率） -> 采样车体轮廓并反算控制点做凸包安全校验 -> 若碰撞则仅局部拖动控制点重拟合 -> 输出可执行参考轨迹 -> SE2 MPC -> chassis`
-
-这条链与 `V1` 的关系应理解为：
-
-1. `V1` 解决的是 `2.5D` 语义地图驱动下的比赛可用主链
-2. `V2` 解决的是在相同规划控制结构下，把后端地图能力升级为真正 `3D ESDF`
-3. `V2` 的上层搜索、轨迹优化、姿态规划、安全校验和控制器接口尽量不要与 `V1` 分裂成两套体系
-
-### 3.2 V2 中各层的职责
-
-#### 3D 地图后端层
-
-`V2` 与 `V1` 最大的差异在这里。
-
-这一层的职责是：
-
-1. 维护真正的 `3D Occupancy`
-2. 构建真正的 `3D ESDF`
-3. 为上层提供比 `V1` 更准确的 clearance 与几何关系
-4. 在存在堆叠障碍、悬挑、复杂坡体和多高度结构时，提供比 `2.5D` 更稳定的后端几何支撑
-
-但要明确：
-
-1. `V2` 的 3D ESDF 后端不等于把整个导航任务变成空中机器人式 3D 路径规划
-2. 对当前地面机器人，主决策变量仍然主要是平面质心轨迹、沿路径姿态与速度分配
-
-#### 地面语义抽取层
-
-即使进入 `V2`，仍然建议保留一个显式的地面任务抽取层，把 `3D Occupancy / 3D ESDF` 转换成：
-
-1. 地面可通行区域
-2. 地形风险
-3. 坡度语义
-4. 可投影到 `2D / 2.5D` 搜索图上的通行定义
-
-原因是：
-
-1. 当前比赛任务本质仍然是地面机器人导航
-2. 上层搜索器与轨迹优化器继续围绕地面任务定义即可
-3. 这样可以最大限度复用 `V1` 已稳定的接口
-
-#### 搜索前端层
-
-`V2` 仍然建议沿用 `A* / JPS` 这一类前端搜索框架。
-
-区别在于：
-
-1. 搜索图来自 `3D ESDF` 支撑下的更强地面语义抽取结果
-2. tie-break、后验筛选与局部风险评估可以利用更准确的后端 clearance
-3. 上层搜索接口尽量与 `V1` 保持一致
-
-#### 轨迹优化层
-
-`V2` 中的轨迹优化层仍然建议保持：
-
-`MINCO 优化 2D 质心位置 + 时间`
-
-原因是：
-
-1. 即便地图后端升级为 `3D ESDF`，当前地面机器人比赛中的主轨迹变量仍然主要是平面轨迹
-2. `MINCO`、独立 `Yaw`、轮廓安全校验、局部重拟合这套结构在 `V1` 中若已稳定，没有必要在 `V2` 中重新改成另一套上层轨迹体系
-
-#### 独立 Yaw 与轮廓安全层
-
-`V2` 中仍应保留：
-
-1. 独立 `Yaw` 规划
-2. 车体轮廓采样
-3. 凸包安全校验
-4. 局部碰撞重拟合
-
-与 `V1` 的差异主要在于：
-
-1. clearance 查询会来自更强的 `3D ESDF` 后端
-2. 某些复杂结构附近的轮廓风险评估会更稳定
-
-#### 控制层
-
-`V2` 的最终执行器仍然保持 `SE2 MPC`。
-
-原因是：
-
-1. 当前比赛任务仍然是地面机器人执行问题
-2. 即使地图后端升级为 `3D ESDF`，控制层的主状态仍可保持在 `SE2`
-3. 这有助于保持 `V1` 与 `V2` 的执行接口连续
-### 3.3 V2 的核心变化
-
-1. 地图后端从 `2.5D` 语义 RC-ESDF 升级到真正 `3D ESDF`。
-2. 在 `3D ESDF` 后端之上继续抽取适合地面机器人的 `2D / 2.5D` 搜索与优化语义。
-3. `A* / JPS / MINCO / 独立 Yaw / 轮廓安全校验 / 局部修补 / SE2 MPC` 的上层接口尽量保持不变。
-4. `V1` 中已经稳定的坡度、速度、修补和控制逻辑尽量复用。
-
-### 3.4 V2 不是当前主线
-
-`V2` 不是现在立刻开工的主线。
-当前主线仍然是：
-
-1. 先把 `V1` 做稳定。
-2. 先把当前过渡主链收敛为 `LBFGS-RC-ESDF + MPPI`。
-3. 再把它推进到 `RC-ESDF + A* / JPS + MINCO + 独立 Yaw + 局部修补 + SE2 MPC`。
-4. 最后再考虑 `V2` 的 `3D ESDF` 后端升级。
-
-## 4. 当前仓库的真实状态
-
-当前仓库已经具备继续推进 `V1` 的基础：
-
-1. `terrain_analysis_ext` 已经输出 `traversability_grid` 与多类地形语义栅格。
-2. `slope_grid`、`slope_band_grid`、坡度阈值与可视化已经补齐。
-3. `TraversabilityEsdfProvider` 已经能输出 signed distance 与 gradient。
-4. `trajectory_optimizer` 与 `Nav2BSplineSmoother` 已经能消费 traversability ESDF。
-5. 当前主链仍然是 `SmacPlannerHybrid -> Nav2BSplineSmoother -> MPPI`。
-6. 当前平滑器已在用连续优化 / `LBFGS` 风格参数链，具备继续向 `LBFGS-RC-ESDF + MPPI` 收敛的基础。
-
-当前还缺的关键项：
-
-1. `slope_grid` 对 `v_max / a_max` 的正式规则化接入。
-2. 当前 `TraversabilityEsdfProvider` 向 `RC-ESDF-lite` 的演进。
-3. `minco_planner` 包骨架。
-4. `A* -> JPS` 的前端演进。
-5. `MINCO + 独立 Yaw + 轮廓安全校验 + Local Collision Repair` 的稳定实现。
-6. `ReferenceTrajectory` 消息或等价内部结构。
-7. `SE2 MPC` 控制器。
-
-## 5. 推荐实现顺序
-
-### 5.1 路线选择
-
-当前阶段推荐同时保留两个层级的目标：
-
-1. 近期比赛优化目标：
-   `LBFGS-RC-ESDF + MPPI`
-2. `V1` 最终比赛目标：
-   `RC-ESDF + A* / JPS + MINCO + 独立 Yaw + 轮廓安全校验 + Local Collision Repair + SE2 MPC`
-
-推荐原因：
-
-1. 先改 ESDF 表达和局部可执行性建模，收益最快。
-2. 先保留 `MPPI`，可以降低控制层同时更换带来的调试风险。
-3. 等 RC-ESDF、搜索器、轨迹和安全校验都跑稳后，再切 `SE2 MPC` 最合理。
-
-### 5.1A 工作流规则
-
-从 2026-06-23 起，后续实现统一增加下面这条工程规则，方便多轮对话阅读、交接与回退：
-
-1. 每次开始一个新任务前，必须先对上一个任务按内容分块 `git commit`，不要把多个任务揉成一个提交。
-2. 每次开始一个新任务前，必须同步更新本文档，至少说明：
-   上一个任务完成了什么；
-   当前仓库状态变化了什么；
-   下一个任务从哪里继续最自然。
-3. 参数、实现、注释和路线文档应保持同频更新，避免代码已经演进但文档仍停留在旧状态。
-
-### 5.2 新对话起手任务
-
-如果后续要开新对话继续项目优化，建议直接从下面 8 个任务开工：
-
-1. `任务 1`
-   将当前 `TraversabilityEsdfProvider` 演进为 `RC-ESDF-lite`，明确 rolling window、查询接口、`slope_grid` 输入和 footprint-aware 扩展方向。
-2. `任务 2`
-   定义 `slope_grid` 如何影响 `v_max / a_max`，把坡道速度自适应做成可配置规则，并接入现有 profile / governor 链。
-3. `任务 3`
-   新建 `minco_planner` 包骨架，先建目录、配置、最小 launch、调试 marker 和 `ReferenceTrajectory` 结构。
-4. `任务 4`
-   在 `minco_planner` 中先实现 `grid_astar`，输出 `raw_path`、累计弧长、初始时间分配和调试 marker。
-5. `任务 5`
-   实现 `minco_trajectory_optimizer`，先完成 `2D` 质心位置 + 时间分配的最小 `MINCO` 闭环。
-6. `任务 6`
-   实现 `yaw_spline_planner`，使用 `5次 B-spline` 规划独立 `Yaw`，并限制 `yaw rate`。
-7. `任务 7`
-   实现 `footprint_safety_checker` 与 `local_collision_repair`，完成轮廓安全校验和局部控制点重拟合。
-8. `任务 8`
-   先接 `MPPI` 验证窄门、贴边、S 弯、坡道和高速转角，再规划 `SE2 MPC` 替换。
-
-当前进度更新：
-
-0. `RC-ESDF-lite` 已完成一次关键问题修正：
-   对照 `~/参考/src/DDR-opt/utils/plan_env` 中 `RcEsdfMap` 的 signed distance 约定后，
-   修正了当前 `TraversabilityEsdfProvider` 的符号方向；
-   现在自由空间为正 clearance、障碍内部为负 penetration、边界附近为零；
-   这与现有 smoother、footprint-clearance 和后续 MINCO / safety checker 的语义保持一致。
-1. `任务 1` 已完成首版实现：
-   已将当前 `TraversabilityEsdfProvider` 演进为 `RC-ESDF-lite` 形态；
-   已补齐 rolling window 显式配置、统一查询接口、`slope_grid` 输入和 footprint-clearance 扩展接口；
-   已保持现有 `LBFGS + MPPI` 过渡主链兼容；
-   已对关键代码与参数补充传承型注释。
-2. `任务 2` 已完成首版实现：
-   已将 `slope_grid` 正式接入 `v_max / a_max` 规则；
-   已接入现有 profile / governor 链；
-   已将坡度速度规则改为“低于坡度障碍阈值时可加速、超过阈值后逐步保守”的三段式；
-   已补充中文注释与参数说明，便于后续传承与场地调参。
-3. “专项仿真观察与对比验证”首版已完成：
-   已新增 `docs/esdf_special_sim_observation_plan.md`；
-   已新增 `nav2_esdf_observe_view.rviz` 专项观察视图；
-   已把主 README 与 Gazebo 集成文档补上跳转入口。
-4. 当前推荐直接进入“仿真启动解耦与 TF 稳定化”：
-   优先解决 Gazebo / 导航链一起拉起时的 TF 断树与时序问题；
-   增强手动控制 Gazebo、导航链、行为链的开关能力；
-   先把仿真启动过程稳定下来，再做持续的 ESDF 对比测试；
-   再决定是否继续推进 `任务 3`。
-5. 2026-07-02 起，因 Gazebo 仿真修复投入过高且仍未稳定，当前执行策略调整为：
-   Gazebo 不再阻塞主线优化，只保留为可选系统级观察入口；
-   参考 `~/参考/src/DDR-opt` 的 JPS / MINCO / RC-footprint 思路和
-   `~/参考/src/nullspace_mpc`、`~/参考/src/swerve_drive`、`~/参考/src/MuJoCo-LiDAR`
-   的控制 / MuJoCo 仿真入口，优先推进自有规划控制链。
-6. `任务 3 / 任务 4` 已开始首版落地：
-   已新增 `src/ats_sentry_nav/minco_planner` 包；
-   包内按职责拆分为 `planning`、`trajectory`、`safety`、`debug`、`nodes`；
-   当前 `grid_astar` 已具备基于 `traversability_grid` 的最小可用 A*；
-   当前后端先输出带弧长、时间、yaw 的 `ReferenceTrajectory` 骨架，
-   后续再把参考项目中的 GCOPTER / MINCO 内核迁移进同一接口。
-7. 代码组织已进一步整理：
-   `trajectory_optimizer` 内部已按 `bspline`、`esdf`、`nav2`、`control`、`nodes` 分层；
-   原 `traversability_esdf_provider` 已按实际职责重命名为
-   `rc_traversability_esdf_provider` / `RcTraversabilityEsdfProvider`；
-   新增包内 README 说明各层职责，后续不再把规划、控制、ESDF 逻辑堆进 node wrapper。
-8. 当前整理版本已通过相关包编译：
-   `colcon build --packages-select trajectory_optimizer minco_planner --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo`。
-9. 2026-07-03 完成项目命名前缀迁移：
-   仓库内旧赛季项目前缀已统一迁移为 `ats_`；
-   相关目录与 ROS2 包名已迁移为 `ats_sentry_nav`、`ats_nav_bringup`、
-   `ats_sentry_behavior`、`ats_sentry_bringup` 和 `ats_robot_description`。
-10. 已从 `~/参考/src` 迁移 MuJoCo 仿真入口：
-    新增 `ats_mujoco_sim`、`manda_can_control` 和 `carstatemsgs`；
-    `ats_mujoco_sim` 内嵌 `mujoco_lidar`，可用于后续底盘动力学、
-    lidar / ToF 感知和 SE2 MPC 控制验证；
-    详细入口见 `docs/ats_mujoco_sim_integration.md`。
-11. 2026-07-03 已完成剩余 `pb` 前缀迁移：
-    `pb_nav2_plugins`、`pb_teleop_twist_joy`、`pb_rm_interfaces`
-    已迁移为 `ats_nav2_plugins`、`ats_teleop_twist_joy`、`ats_rm_interfaces`；
-    同步更新 C++ namespace、include 路径、pluginlib class、launch 节点名、
-    Nav2 参数和上层包依赖。
-12. MuJoCo 仿真已补齐 RViz2 观察入口：
-    新增 `src/sim/ats_mujoco_sim/rviz/mujoco_sim_observe.rviz`；
-    `ats_mujoco_sim.launch.py` 与 `planner_mujoco.launch.py`
-    已支持 `use_rviz` 和 `rviz_config_file` 参数；
-    后续可以直接用 RViz2 观察 TF、`/localization`、`/local_pointcloud`
-    和 `/perception/tof/points_merged`。
-    当前 RViz2 默认延迟启动，先等 MuJoCo 控制器和传感器进程起来；
-    `lidar_backend` 默认使用 `cpu`，避免低性能机器缺少 Taichi 时 LiDAR 子进程直接退出。
-13. MuJoCo 与实车连接的原则已经明确：
-    仿真端优先复用实车控制 / 反馈接口；
-    当前对齐入口为 `/motion_control`、`/speed_ctrl`、`/steer_ctrl`、
-    `/motion_mode`、`/control_mode` 和对应反馈话题；
-    上层规划控制链后续应只依赖这些统一接口，不直接绑定 MuJoCo 或具体 CAN 驱动。
-14. MuJoCo 完整导航测试入口已补齐：
-    新增 `ats_mujoco_sim mujoco_navigation.launch.py`；
-    该入口按顺序启动 MuJoCo、随机地图、`map_server`、Nav2、trajectory optimizer、
-    `twist_to_motion_ctrl` 和 RViz2；
-    同时发布 `/lidar_odometry` 与 `/registered_scan` 兼容现有 terrain_analysis 链。
-    轻量烟测已确认 map_server 能加载随机地图，Nav2 lifecycle 能把 controller、
-    smoother、planner、behavior、BT navigator、waypoint follower 和 velocity smoother
-    拉到 active。
-
-### 5.2B 当前总结与下一对话交接
-
-截至 2026-07-03，当前仓库可以按下面状态理解：
-
-1. 项目命名已基本进入 `ATS` 体系。
-   旧 `pb2025_` 与构建相关 `pb_` 包名已经迁移；
-   新对话统一从当前导航域 `src/ats_sentry_nav` 继续工作。
-   当前导航主目录是 `src/ats_sentry_nav`。
-2. 当前 ESDF 主线不是 fake costmap ESDF。
-   `fake_costmap_esdf_provider` 只作为 costmap fallback / debug adapter；
-   主线应继续围绕 `RcTraversabilityEsdfProvider`、
-   `RC-ESDF-lite`、`slope_grid`、footprint-aware safety 和后续 MINCO 推进。
-3. Gazebo 不再阻塞主线。
-   Gazebo / loopback 仍保留为系统回归和 ESDF 观察入口；
-   但下一阶段主要精力应放在自有规划控制链和 MuJoCo 动力学验证上。
-4. MuJoCo 已经进入仓库，但它当前还是“可用入口”，不是完整实车闭环替代品。
-   下一步应把它与真实底盘接口、定位话题、雷达 / ToF 话题和 RViz2 观察流程进一步对齐。
-5. `minco_planner` 已经有包结构、A* 骨架、参考轨迹结构、Yaw/safety/debug 分层。
-   真实 MINCO 内核、JPS、footprint SDF 和 `SE2 MPC` 仍是下一阶段主任务。
-
-下一对话建议直接从下面 5 件事开始：
-
-1. `MuJoCo + RViz2 + 实车接口对齐`
-   先确认 `/motion_control`、`/localization`、`/lidar_odometry`、
-   `/local_pointcloud`、`/registered_scan`、`/perception/tof/points_merged`
-   在仿真和实车侧可以统一 remap；
-   把真实 CAN 驱动与 MuJoCo 仿真隔离在同一套接口后面。
-2. `MuJoCo 驱动 Nav2 / trajectory_optimizer`
-   直接使用 `ros2 launch ats_mujoco_sim mujoco_navigation.launch.py`；
-   让 MuJoCo 发布的 `/localization`、`/lidar_odometry` 和 `/registered_scan`
-   进入现有导航 / ESDF 观察链；
-   RViz2 同时看 MuJoCo 动力学视图和 ESDF 专项视图。
-3. `minco_planner 接真实 MINCO`
-   参考 `~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`
-   和 `optimizer.cpp`，保持当前接口不变，替换内部占位后端。
-4. `footprint-aware safety`
-   参考 `~/参考/src/DDR-opt/utils/plan_env/src/rc_footprint_collision.cpp`，
-   把当前 footprint 栅格采样升级为更强的 RC-footprint collision / SDF 查询。
-5. `SE2 MPC 前置接口`
-   先固化 `ReferenceTrajectory`、底盘状态、控制输出和反馈话题；
-   再从 `MPPI` 过渡到 `SE2 MPC`，不要把控制器与仿真器强耦合。
-
-新对话开始时建议先运行的轻量检查：
+实车主入口是：
 
 ```bash
-colcon list | rg 'ats_mujoco_sim|ats_rm_interfaces|ats_nav2_plugins|ats_teleop_twist_joy|trajectory_optimizer|minco_planner'
-rg -n "pb2025|pb_rm_interfaces|pb_nav2_plugins|pb_teleop_twist_joy" src docs --glob '!build/**' --glob '!install/**' --glob '!log/**' || true
+ros2 launch ats_sentry_bringup bringup.launch.py
 ```
 
-低性能机器继续使用单包低并发构建：
+该入口当前负责组织：
+
+1. `standard_robot_pp_ros2`
+   实车串口/底盘/机器人基础通信入口。
+2. `sentry_chassis_vel_transform`
+   将 `cmd_vel_gimbal_yaw_odom` 转换成底盘实际 `/cmd_vel`，并处理大 yaw 坐标系。
+3. `ats_nav_bringup/rm_navigation_reality_launch.py`
+   实车 Nav2、定位、地形分析、trajectory optimizer、small_gicp 等导航子系统。
+4. `ats_sentry_behavior`
+   行为树系统。
+5. `rviz_launch.py`
+   可选 RViz2。
+6. `rosbag2_composable_recorder`
+   可选轻量 rosbag 记录。
+
+实车默认参数主要在：
+
+`src/ats_sentry_bringup/params/node_params.yaml`
+
+这份参数当前是实车综合入口的主要事实来源，包含 Livox、Point-LIO、loam_interface、small_gicp、fake_vel_transform、chassis_vel_transform、Nav2、smoother、trajectory optimizer、speed governor 等配置。
+
+### 2.3 Nav2 子 bringup
+
+Nav2 子入口位于：
+
+`src/ats_sentry_nav/ats_nav_bringup/launch`
+
+关键 launch：
+
+1. `rm_navigation_reality_launch.py`
+   实车导航入口。会启动 `livox_ros_driver2`，过滤可能冲突的 MVS `LD_LIBRARY_PATH`，再拉起 `bringup_launch.py`、RViz、可选 joy teleop。
+2. `navigation_launch.py`
+   Nav2 核心节点入口。当前会启动 `terrain_analysis`、`terrain_analysis_ext`、静态 TF、可选 `sentry_chassis_vel_transform`、`loam_interface`、`sensor_scan_generation`、`fake_vel_transform`、可选 `trajectory_optimizer_node`、固定 `trajectory_speed_governor_node`、Nav2 controller/smoother/planner/behavior/bt/waypoint/velocity_smoother/lifecycle。
+3. `bringup_launch.py`
+   更上层的 Nav2 组合入口。
+
+需要注意：`trajectory_optimizer_node` 主要是旁路可视化/调试优化器；真正进入 BT 主链的是 `smoother_server` 中的 `trajectory_optimizer/Nav2BSplineSmoother` 插件和它发布的 `trajectory_profile`。
+
+### 2.4 当前仿真入口
+
+当前仿真分三类：
+
+1. `src/sim/ats_mujoco_sim`
+   当前主线仿真。负责 MuJoCo 底盘、随机地图、scene 生成、MID360-pattern LiDAR、ToF、Twist 到 `/motion_control` 桥接、RViz2 配置、完整 Nav2 联调入口。
+2. `src/sim/loopback_sim`
+   轻量 loopback 仿真。适合在低性能电脑上快速验证 Nav2 行为、参数和 topic 链路。
+MuJoCo 主要入口：
 
 ```bash
-MAKEFLAGS=-j1 colcon build --packages-select ats_mujoco_sim --parallel-workers 1
-MAKEFLAGS=-j1 colcon build --packages-select trajectory_optimizer --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
-MAKEFLAGS=-j1 colcon build --packages-select minco_planner --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py
 ```
 
-### 5.3 V1 的阶段划分
+只看 MuJoCo、地图、传感器、RViz2：
 
-#### 阶段 P0：固化 2.5D 地形语义与坡度速度规则
+```bash
+ros2 launch ats_mujoco_sim planner_mujoco.launch.py
+```
 
-目标：
+Gazebo 综合入口已经从当前主线清理，不再新增或维护 Gazebo 调试路径。
 
-1. 固化 `slope_grid` 与 `slope_band_grid`。
-2. 明确坡度阈值与坡度分级。
-3. 明确坡度如何影响 `traversability` 二值化。
-4. 明确坡度如何影响 `v_max / a_max`。
+## 3. 当前数据与控制链路
 
-当前状态补充：
+### 3.1 实车/常规 Nav2 过渡链
 
-1. `slope_grid` 与 `slope_band_grid` 发布链已经就位。
-2. `RC-ESDF-lite` 已经能接收并查询 `slope_grid`，目前先作为语义旁路输入保留。
-3. 坡度已经从“可查询语义”推进到“正式速度/加速度约束规则”。
-4. 下一步更适合优先做专项仿真观察，而不是继续叠更多规划模块。
+当前实车参数中，速度链路大致是：
 
-#### 阶段 P1：将当前 ESDF 演进为 `RC-ESDF-lite`
+`Nav2 controller_server -> cmd_vel_controller -> trajectory_speed_governor -> cmd_vel_controller_governed -> velocity_smoother -> cmd_vel_nav2_result -> fake_vel_transform -> cmd_vel_gimbal_yaw_odom -> sentry_chassis_vel_transform -> /cmd_vel`
 
-目标：
+关键参数位置：
 
-1. 保留当前 `TraversabilityEsdfProvider` 的基础接口。
-2. 强化局部滚动特性。
-3. 稳定 `d(x, y)` 与 `grad d(x, y)` 查询。
-4. 为后续 footprint-aware 校验预留接口。
-5. 保持当前 `LBFGS + MPPI` 过渡主链可继续运行。
+1. `fake_vel_transform`
+   `input_cmd_vel_topic: cmd_vel_nav2_result`
+   `output_cmd_vel_topic: cmd_vel_gimbal_yaw_odom`
+2. `chassis_vel_transform`
+   `input_cmd_vel_topic: cmd_vel_gimbal_yaw_odom`
+   `output_cmd_vel_topic: /cmd_vel`
+3. `trajectory_speed_governor`
+   `profile_topic: trajectory_profile`
+   `input_cmd_vel_topic: cmd_vel_controller`
+   `output_cmd_vel_topic: cmd_vel_controller_governed`
 
-当前状态补充：
+这一链路说明：当前真正参与控制闭环的是 `Nav2BSplineSmoother` 生成的 `trajectory_profile` 和 `trajectory_speed_governor`，不是旁路 `trajectory_optimizer_node` 的 `trajectory_profile_visual`。
 
-1. 本阶段首版已落地。
-2. 已新增统一 `query` / `slope` / local-window 接口。
-3. 已新增 `traversability_slope_topic`、`rc_esdf_rolling_window_enabled`、
-   `rc_esdf_query_window_size_x`、`rc_esdf_query_window_size_y`、
-   `traversability_slope_max_degrees` 参数并接入仿真、实机与 bringup 配置。
-4. 已补充代码与 YAML 注释，便于后续任务直接接着阅读实现。
-5. 已修正 signed distance 符号方向：
-   原实现为 `d_free - d_occ`，会导致自由空间为负、障碍内部为正；
-   当前已改为 `d_occ - d_free`，与参考项目 `RcEsdfMap` 的“外正内负”约定一致。
-   该修正会直接影响 ESDF obstacle cost、gradient 回拉、速度距离估计和后续 footprint clearance。
+### 3.2 MuJoCo 导航链
 
-#### 阶段 P1.5：坡度速度规则与仿真对比观察
+MuJoCo 完整导航入口的目标链路是：
 
-当前状态补充：
+`ats_mujoco_sim -> /localization + /lidar_odometry + /local_pointcloud + /registered_scan + /perception/tof/points_merged -> Nav2 / trajectory_optimizer -> cmd_vel_gimbal_yaw_odom -> twist_to_motion_ctrl -> /motion_control -> MuJoCo chassis`
 
-1. 已完成 `slope_grid -> speed_limit / longitudinal_accel_limit / governor` 首版接入。
-2. 当前坡度规则采用三段式：
-   低于坡度障碍阈值时允许加速增益；
-   接近阈值时回落到 `1.0`；
-   超过阈值后逐步降到保守速度与加速度比例。
-3. 当前最值得优先推进的不是立刻上 `任务 3`，而是先把 Gazebo / loopback 中的
-   `traversability_*_grid`、`trajectory_esdf_debug`、`trajectory_profile_markers`
-   和 `cmd_vel_controller_governed` 观察链做成标准测试流程。
+当前 `ats_mujoco_sim` 提供的 console scripts：
 
-#### 阶段 P1.6：仿真启动解耦与 TF 稳定化
+1. `ats_mujoco_sim`
+2. `twist_to_motion_ctrl`
+3. `generate_ats_mujoco_map`
+4. `generate_ats_mujoco_scene`
 
-当前状态补充：
+关键点：
 
-1. Gazebo / loopback 的 ESDF 专项观察文档和 RViz 视图已经补齐。
-2. 当前仿真主痛点已从“看不清 ESDF 效果”转为：
-   Gazebo 世界与导航链同时启动时，`map / odom / gimbal_yaw_fake` TF 树时序不稳定。
-3. 下一步更值得优先做的是：
-   把 Gazebo 世界、导航链、行为链改成可手动分开启动；
-   显式暴露 `autostart`、导航链开关和专项 RViz 入口；
-   减少“每次切世界就重启整条导航链”带来的 TF 断树问题。
+1. MuJoCo 包位于 `src/sim/ats_mujoco_sim`，不是 `src/ats_mujoco_sim`。
+2. LiDAR 默认应使用 `lidar_backend:=cpu`，避免低性能电脑缺少 `taichi` 后进程崩溃。
+3. 默认 LiDAR 模式固定为 `mid360`，可用 `lidar_downsample` 降低负载。
+4. RViz2 配置包括 `mujoco_navigation.rviz` 和 `mujoco_sim_observe.rviz`。
+5. MuJoCo 与实车应继续通过统一 topic 抽象隔离，规划层不应直接依赖 MuJoCo 内部实现。
 
-2026-07-02 调整：
+### 3.3 地图、点云与地形链
 
-1. 由于 Gazebo 仿真链长期未稳定，当前不再把本阶段作为主线阻塞项。
-2. Gazebo 后续只作为可选系统级观察入口，用于已有 topic / RViz 回归。
-3. 主线转入 P2 / P3，先把规划链接口、A* 前端、参考轨迹结构和 safety checker 跑通。
-4. MuJoCo 作为后续控制与动力学验证入口保留，优先用于 `SE2 MPC`、底盘加减速极限、轮地接触和高带宽控制验证。
+当前导航主链仍是地面机器人 `2D / 2.5D` 主链：
 
-#### 阶段 P2：新建 `minco_planner`
+1. `livox_ros_driver2` 或 MuJoCo LiDAR 发布点云。
+2. `point_lio` / 仿真定位链提供里程计与注册点云。
+3. `loam_interface` 对接定位输出、注册点云、frame。
+4. `sensor_scan_generation` 生成导航需要的 scan/terrain 输入。
+5. `terrain_analysis` 与 `terrain_analysis_ext` 输出地形语义。
+6. `traversability_grid`、`traversability_slope_grid` 等进入 smoother、optimizer 和后续 minco_planner。
 
-包内第一阶段建议只放这些模块：
+必须继续保持的原则：
 
-1. `rc_esdf_adapter`
-2. `grid_astar`
-3. `minco_trajectory_optimizer`
-4. `yaw_spline_planner`
-5. `footprint_safety_checker`
-6. `local_collision_repair`
-7. `planner_debug_visualizer`
-8. `trajectory_bridge_mppi`
+1. 主导航拓扑是地面 `2D` 栅格主链，不是三维路径搜索。
+2. `2.5D` 层负责高程、坡度、占有率、roughness、unknown、ground confidence 等地形语义。
+3. RC-ESDF 层负责 signed distance、gradient、clearance 和局部本体安全查询。
+4. footprint safety 不能长期只看质心点 clearance，必须逐步接入车体轮廓扫掠检查。
 
-这个阶段的目标不是“立刻全部终局化”，而是先把自有规划链骨架和接口跑起来。
+## 4. 当前核心包职责
 
-当前状态补充：
+### 4.1 trajectory_optimizer
 
-1. 已新增 `minco_planner` ROS2 包。
-2. 分包原则已明确：
-   A*、轨迹后端、Yaw、安全检查、局部修补和 debug marker 分别独立文件与目录实现；
-   后续迁移参考项目代码时继续按模块进入，不允许把大段逻辑堆进单一 node 文件。
-3. 当前 `minco_trajectory_optimizer` 是接口占位和时间分配骨架，不声称已经完成真实 MINCO；
-   真实 MINCO 后端应优先参考 `~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`
-   与 `~/参考/src/DDR-opt/back_end/src/optimizer.cpp`，在保持接口不变的前提下替换内部优化器。
-4. 当前 `footprint_safety_checker` 先做栅格 footprint 采样；
-   后续应参考 `~/参考/src/DDR-opt/utils/plan_env/src/rc_footprint_collision.cpp`
-   迁移“机器人 footprint SDF + 局部 occupied cell 查询”的更强实现。
+路径：
 
-#### 阶段 P3：前端位置规划先用 `A*`
+`src/ats_sentry_nav/trajectory_optimizer`
 
-输入：
+当前构建目标：
 
-1. `RC-ESDF-lite` 或等价独立 clearance 采样接口。
-2. 当前起点、目标点。
-3. `traversability_grid`。
-4. clearance / risk / unknown 代价参数。
+1. `trajectory_optimizer_node`
+2. `trajectory_speed_governor_node`
+3. `trajectory_optimizer/Nav2BSplineSmoother` Nav2 smoother 插件
 
-输出：
+当前源码分层：
 
-1. 离散 `raw_path`。
-2. 每个点的累计弧长。
-3. 初始时间分配。
-4. 调试用 `raw_path` marker。
+1. `src/bspline`
+   B-spline path optimizer。
+2. `src/esdf`
+   ESDF provider。
+   `rc_traversability_esdf_provider` 是当前 RC-ESDF-lite 主入口；
+   `terrain_pointcloud_esdf_provider` 是点云 ESDF 入口；
+   `fake_costmap_esdf_provider` 只是 costmap 近似 ESDF 的 fallback/debug adapter。
+3. `src/nav2`
+   Nav2 smoother 插件 `Nav2BSplineSmoother`。
+4. `src/control`
+   `trajectory_speed_governor`，根据 `trajectory_profile` 对 controller 输出限速。
+5. `src/nodes`
+   ROS2 节点胶水。
 
-#### 阶段 P4：`MINCO` 优化 2D 质心位置 + 时间
+当前参数事实：
 
-目标：
+1. 主链 smoother 使用 `esdf_source: traversability_grid`。
+2. 主链 smoother 订阅 `terrain_map_ext`、`traversability_grid`、`traversability_slope_grid`。
+3. 主链 smoother 发布 `trajectory_profile`。
+4. 旁路 `trajectory_optimizer_node` 发布 `smoothed_path_visual` 和 `trajectory_profile_visual`，主要用于 RViz/调试。
+5. 当前已启用 `use_esdf_obstacle_cost`、坡度速度/加速度限制、footprint cost 采样与局部退化逻辑，但这仍不是最终 MINCO/footprint SDF 实现。
 
-1. 输入 `raw_path`。
-2. 输出连续 `2D` 质心轨迹。
-3. 同步完成时间分配。
-4. 接入 clearance、曲率和 `slope` 软惩罚。
-5. 形成后续 `Yaw` 规划与执行器都能消费的参考轨迹。
+### 4.2 minco_planner
 
-#### 阶段 P5：独立 `Yaw` 规划
+路径：
 
-目标：
+`src/ats_sentry_nav/minco_planner`
 
-1. 基于位置轨迹生成独立 `Yaw` 参考。
-2. 使用 `5次 B-spline`。
-3. 限制 `yaw rate`。
-4. 必要时限制 `yaw acceleration`。
-5. 在狭窄区域对路径切向引入轻量参考。
+当前构建目标：
 
-#### 阶段 P6：轮廓安全校验与局部碰撞重拟合
+`minco_planner_node`
 
-目标：
+当前源码分层：
 
-1. 沿轨迹采样车体 footprint。
-2. 做凸包安全校验。
-3. 若碰撞，只在局部控制点区段重拟合。
-4. 避免一旦发现碰撞就整条轨迹全局重算。
+1. `src/planning`
+   `grid_astar` 前端搜索骨架。
+2. `src/trajectory`
+   `minco_trajectory_optimizer`、`reference_trajectory`、`yaw_spline_planner`。
+3. `src/safety`
+   `footprint_safety_checker`、`local_collision_repair`。
+4. `src/debug`
+   `planner_debug_visualizer`。
+5. `src/nodes`
+   `minco_planner_node`。
 
-#### 阶段 P7：把前端替换成 `JPS`
+当前默认 topic：
 
-切换条件建议是：
+1. `grid_topic: traversability_grid`
+2. `goal_topic: goal_pose`
+3. `raw_path_topic: minco/raw_path`
+4. `reference_path_topic: minco/reference_path`
+5. `debug_marker_topic: minco/debug_markers`
+6. `global_frame: map`
+7. `robot_frame: base_link`
 
-1. `traversability_grid` 的二值可通行定义已经稳定。
-2. 目标点拉回和 unknown 策略已经稳定。
-3. `A*` 版本已经能稳定穿过 `rmuc_2025` 窄门。
-4. RC-ESDF、`MINCO`、`Yaw` 和局部修补接口已经定型。
+当前状态判断：
 
-切换后的职责：
+1. `minco_planner` 已经是合理分包骨架。
+2. 真实 MINCO 后端仍未接入。
+3. JPS 尚未替代当前 A* 骨架。
+4. footprint safety 和 local collision repair 还需要接真实 RC-ESDF/footprint SDF，并在 MuJoCo 场景中验证。
 
-1. `JPS` 负责快速主搜索。
-2. signed `RC-ESDF` 继续负责 clearance 判断、局部修补和后端优化。
-3. `slope_grid` 继续负责速度/加速度自适应。
-4. `Yaw` 规划、局部修补、控制器接口保持不变。
+后续参考迁移重点：
 
-#### 阶段 P8：先下发给 `MPPI`
+1. MINCO：`~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`
+2. footprint SDF：`~/参考/src/DDR-opt/utils/plan_env/src/rc_footprint_collision.cpp`
+3. MPC / MuJoCo：`~/参考/src/nullspace_mpc`、`~/参考/src/swerve_drive`、`~/参考/src/MuJoCo-LiDAR`
 
-`MPPI` 先作为执行器，目标仍然是过渡到 `SE2 MPC`。
+### 4.3 ats_nav2_plugins
 
-这个阶段要重点验证：
+路径：
 
-1. 窄门通过
-2. 贴边走廊
-3. 高速直道转急弯
-4. `S` 弯连续性
-5. 坡道速度自适应
+`src/ats_sentry_nav/ats_nav2_plugins`
 
-#### 阶段 P9：V1 稳定后再上 `SE2 MPC`
+当前用于 Nav2 自定义插件，包括 costmap layer 和 behavior。参数中可以看到：
+
+1. `ats_nav2_costmap_2d::IntensityVoxelLayer`
+2. `ats_nav2_behaviors/BackUpFreeSpace`
+
+这些插件仍属于当前 Nav2 过渡主链的一部分。后续引入 MINCO/MPC 时，不应直接删除现有插件，而应先明确哪些功能被新链路替代，哪些仍作为安全 fallback 保留。
+
+### 4.4 sentry_chassis_vel_transform 与 fake_vel_transform
+
+当前存在两级速度坐标变换：
+
+1. `fake_vel_transform`
+   把 Nav2 输出从 `cmd_vel_nav2_result` 转到大 yaw 导航参考系 `cmd_vel_gimbal_yaw_odom`，并维护 `gimbal_yaw_fake`。
+2. `sentry_chassis_vel_transform`
+   结合实车 gimbal joint state，把 `cmd_vel_gimbal_yaw_odom` 转成底盘 `/cmd_vel`。
+
+MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 `/motion_control`。
+
+因此后续 SE2 MPC 接入时必须先决定输出接在哪一层：
+
+1. 若输出 `cmd_vel_gimbal_yaw_odom`，可复用实车/MuJoCo 后级转换。
+2. 若直接输出 `/motion_control`，需要明确实车 CAN 与 MuJoCo 的接口一致性。
+3. 不建议让 MPC 同时绕过多条链路，否则实车与仿真会难以对比。
+
+## 5. 当前已完成
+
+1. 主线命名已迁移到 ATS 前缀，当前代码包以 `ats_` 为主。
+2. `trajectory_optimizer` 已按 B-spline、ESDF、Nav2、control、nodes 拆分。
+3. `Nav2BSplineSmoother` 已进入 Nav2 主链，并和 `trajectory_speed_governor` 联动。
+4. `rc_traversability_esdf_provider` 已作为当前 RC-ESDF-lite provider，主链和旁路 optimizer 都可以使用 `traversability_grid`。
+5. `traversability_slope_grid` 已进入 smoother / governor 的速度、加速度约束逻辑。
+6. `minco_planner` 已建立 planning、trajectory、safety、debug、nodes 分层骨架。
+7. `ats_mujoco_sim` 已迁移进 `src/sim`，具备地图/scene 生成、MuJoCo 底盘、LiDAR、ToF、RViz2 和 Nav2 联调入口。
+8. `mujoco_navigation.launch.py` 已可组织 MuJoCo、map_server、Nav2、trajectory optimizer 选项、Twist bridge 和 RViz2。
+9. 实车 bringup、MuJoCo bringup、loopback bringup 是后续保留入口；Gazebo bringup 已从当前主线清理。
+
+## 6. 当前未完成与风险
+
+1. `minco_planner` 仍是骨架包，真实 MINCO 后端未接入。
+2. 当前前端搜索仍是 `SmacPlanner2D` 和 `grid_astar` 骨架，JPS 尚未成为主链。
+3. footprint safety 还没有完全替代当前的中心线/局部 footprint cost 采样，窄门和大角度转向仍需重点验证。
+4. SE2 MPC 尚未替换 MPPI，当前控制器仍是 Nav2 MPPI 过渡方案。
+5. `fake_costmap_esdf_provider` 只能作为 fallback/debug，不应当作最终 RC-ESDF。
+6. MuJoCo 已有入口，但底盘参数、传感器外参、真实 footprint、速度/加速度/角速度约束仍需继续和实车对齐。
+7. `src` 下存在未跟踪的 `__pycache__` 运行缓存。它们未被 git 跟踪，但后续可清理工作区，避免检索噪声。
+8. 当前电脑性能较弱，不要使用全工作区高并发构建。
+
+## 7. 阶段目标与下一阶段任务
+
+### 7.1 当前阶段目标
+
+当前阶段不是立即完成全部 `V1` 终局，而是把 `V1` 过渡链打成稳定基线：
+
+1. 使用 MuJoCo 作为完整仿真主线，形成可复现的导航测试入口。
+2. 在 RViz2 中稳定观察 map、TF、点云、traversability、RC-ESDF、Nav2 plan、B-spline path、trajectory profile、限速 marker。
+3. 固化实车和 MuJoCo 的统一控制接口，避免规划层直接绑定仿真内部实现。
+4. 证明当前 `SmacPlanner2D + Nav2BSplineSmoother + trajectory_speed_governor + MPPI` 在 MuJoCo 中能闭环跑通。
+5. 找出当前 RC-ESDF-lite 是否仍存在原理性问题，尤其是 unknown、坡度、障碍膨胀、signed distance、footprint clearance 的定义。
+
+当前阶段验收标准：
+
+1. `mujoco_navigation.launch.py` 能在低性能电脑上用 CPU LiDAR 后端启动。
+2. RViz2 能看到定位、地图、点云、路径、profile 和关键调试 marker。
+3. `/motion_control` 能驱动 MuJoCo 底盘响应 Nav2 输出。
+4. `trajectory_profile` 能实际进入 `trajectory_speed_governor`，而不是只作为旁路可视化。
+5. 发现问题时能判断属于仿真、TF/时间戳、地形语义、ESDF、规划、平滑、限速或控制哪一层。
+
+### 7.2 下一阶段任务
+
+下一阶段建议按下面顺序执行，不要同时大范围重构多包：
+
+1. `任务 1：MuJoCo 闭环稳定化`
+   低性能默认参数、LiDAR/ToF topic、TF、`/motion_control`、RViz2 显示全部跑通。
+2. `任务 2：RC-ESDF-lite 观测与修正`
+   对齐 `traversability_grid`、`traversability_slope_grid`、`terrain_map_ext`，检查 signed distance、unknown、坡度阈值、障碍膨胀和 gradient。
+3. `任务 3：footprint-aware 安全检查`
+   先在 `trajectory_optimizer` / smoother 侧验证 footprint clearance，再迁移到 `minco_planner/safety`。
+4. `任务 4：minco_planner 骨架接真实数据`
+   让 `grid_astar -> raw_path -> reference_path -> debug_marker` 基于当前 `traversability_grid` 跑通。
+5. `任务 5：接入真实 MINCO`
+   参考 `~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`，替换当前 placeholder optimizer。
+6. `任务 6：独立 yaw + local collision repair`
+   让 yaw、footprint safety 和局部修补形成可重复验证链。
+7. `任务 7：JPS 替换 A* / grid search`
+   在接口稳定后替换前端搜索，不要过早和 MINCO 同时改。
+8. `任务 8：SE2 MPC 接入 MuJoCo 与实车接口`
+   先在 MuJoCo 验证 MPC 轨迹跟踪，再决定实车输出接 `cmd_vel_gimbal_yaw_odom` 还是更底层控制接口。
+
+### 7.3 P0：固定当前可观察闭环
+
+目标：先保证每次调试都能复现同一条链路。
+
+优先验证：
+
+1. MuJoCo 能发布 `/localization`、`/lidar_odometry`、`/local_pointcloud`、`/registered_scan`。
+2. RViz2 能看到 map、TF、机器人、点云、Nav2 plan、smoothed path、trajectory profile marker。
+3. `cmd_vel_gimbal_yaw_odom` 能通过 `twist_to_motion_ctrl` 驱动 `/motion_control`。
+4. 当前主链的 `trajectory_profile` 能被 `trajectory_speed_governor` 使用。
+
+### 7.4 P1：强化 RC-ESDF-lite 的真实性
+
+目标：让 ESDF 不只是能跑，而是符合当前地面机器人任务。
+
+重点：
+
+1. 检查 `traversability_grid`、`traversability_slope_grid` 和 `terrain_map_ext` 的 frame、分辨率、时间戳。
+2. 明确 free/occupied/unknown 的 signed distance 编码。
+3. 检查坡度障碍阈值和速度限制是否与 `terrain_analysis_ext` 对齐。
+4. 让 RViz2 能稳定观察 clearance、slope、profile、限速 marker。
+5. 开始补 footprint-aware 查询，不再只依赖质心 clearance。
+
+### 7.5 P2：让 minco_planner 从骨架变成可验证节点
 
 推荐顺序：
 
-1. 先把 `RC-ESDF-lite + A* / JPS + MINCO + 独立 Yaw + Local Collision Repair` 跑稳定。
-2. 再把参考轨迹接口固化为 `SE2 MPC` 可直接消费的结构。
-3. 最后再用 `SE2 MPC` 替换 `MPPI` 作为最终执行器。
+1. 先让 `grid_astar -> reference_path -> debug_marker` 在当前 `traversability_grid` 上稳定跑通。
+2. 接入真实 MINCO 位置轨迹优化。
+3. 接入独立 yaw planner，输出可用于 footprint 检查和控制器的姿态参考。
+4. 接入 footprint safety checker 和 local collision repair。
+5. 在 MuJoCo 中验证窄门、贴边、大角度转向。
+6. 最后再把 A* / grid search 替换成 JPS。
 
-## 6. 旧叙述的处理原则
+### 7.6 P3：从 MPPI 过渡到 SE2 MPC
 
-为了让文档真正服务于当前项目优化，下面这些内容不再作为主线叙述：
+目标：最终让控制器消费 `minco_planner` 输出的轨迹，而不是长期依赖 Nav2 smoother + MPPI。
 
-1. 把 fake costmap ESDF 当主线的旧描述。
-2. 把单纯 Nav2 参数调优写成长期主方向的叙述。
-3. 把历史对照链与当前最终目标写成同等重要。
-4. 把“B 样条平滑 + MPPI”误写成终局架构。
+需要先明确：
 
-文档只保留三类内容：
+1. MPC 输入轨迹格式：位置、yaw、速度、加速度、时间戳。
+2. MPC 输出 topic：优先复用 `cmd_vel_gimbal_yaw_odom` 或统一后的控制抽象。
+3. MuJoCo `/motion_control` 与实车 `/cmd_vel` 或 CAN 控制接口的边界。
+4. RViz2 和日志中能区分规划失败、ESDF 不可信、footprint 碰撞、控制跟踪失败。
 
-1. 当前项目的真实过渡状态是什么。
-2. `V1` 现在应该做什么。
-3. `V2` 未来应该怎么升级。
+## 8. 低性能电脑构建与启动命令
 
-## 7. 结论
+不要全工作区并行构建。默认使用单包、单 worker、单 job：
 
-当前最合理的推进方式是：
+```bash
+MAKEFLAGS=-j1 colcon build --packages-select ats_mujoco_sim --parallel-workers 1
+MAKEFLAGS=-j1 colcon build --packages-select trajectory_optimizer --parallel-workers 1
+MAKEFLAGS=-j1 colcon build --packages-select minco_planner --parallel-workers 1
+```
 
-1. 先按 `V1 稳定比赛版` 做。
-2. 先把当前主链收敛为 `LBFGS-RC-ESDF + MPPI`。
-3. 再推进到 `RC-ESDF + A* / JPS + MINCO + 独立 Yaw + 轮廓安全校验 + Local Collision Repair + SE2 MPC`。
-4. 等比赛版稳定后，再升级到 `V2` 的真正 `3D ESDF` 后端。
+加载环境：
 
-如果一句话总结：
+```bash
+source install/setup.bash
+```
 
-`V1 解决比赛能用与高速窄通道可执行性，V2 解决体系最终形态。`
+推荐 MuJoCo 完整导航入口：
+
+```bash
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
+  use_rviz:=true \
+  use_viewer:=false \
+  show_viewer:=false \
+  enable_lidar:=true \
+  lidar_backend:=cpu \
+  lidar_downsample:=24 \
+  enable_tof:=true \
+  launch_nav2:=true \
+  launch_twist_bridge:=true
+```
+
+只看 MuJoCo 传感器和 RViz2：
+
+```bash
+ros2 launch ats_mujoco_sim planner_mujoco.launch.py \
+  use_rviz:=true \
+  use_viewer:=false \
+  show_viewer:=false \
+  enable_lidar:=true \
+  lidar_backend:=cpu \
+  lidar_downsample:=24 \
+  enable_tof:=true
+```
+
+实车主入口：
+
+```bash
+ros2 launch ats_sentry_bringup bringup.launch.py \
+  world:=rmul \
+  use_rviz:=true \
+  launch_trajectory_optimizer:=false
+```
+
+检查关键 topic：
+
+```bash
+ros2 topic list | rg 'localization|lidar_odometry|local_pointcloud|registered_scan|terrain_map|traversability|trajectory_profile|cmd_vel|motion_control'
+ros2 topic hz /localization
+ros2 topic hz /local_pointcloud
+ros2 topic hz /trajectory_profile
+```
+
+检查旧命名残留：
+
+```bash
+rg -n "pb2025|pb_rm_interfaces|pb_nav2_plugins|pb_teleop_twist_joy" src docs --glob '!build/**' --glob '!install/**' --glob '!log/**' || true
+```
+
+## 9. 新对话起手清单
+
+新对话继续优化时，建议按这个顺序：
+
+1. 读本文档，先确认当前主链不是最终 MINCO/MPC，而是 Nav2 + B-spline + MPPI 过渡链。
+2. 读 `src/ats_sentry_bringup/params/node_params.yaml`，确认当前实车参数和 topic 事实。
+3. 读 `src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py`，确认 Nav2 实际启动节点。
+4. 读 `src/sim/ats_mujoco_sim/launch/mujoco_navigation.launch.py`，确认 MuJoCo 完整测试入口。
+5. 读 `src/ats_sentry_nav/trajectory_optimizer/README.md` 和源码分层，确认当前 smoother/ESDF/governor。
+6. 读 `src/ats_sentry_nav/minco_planner/README.md` 和 `config/minco_planner.yaml`，确认下一阶段目标骨架。
+7. 先单包构建和启动 MuJoCo/RViz2，再进入 RC-ESDF、MINCO、footprint、MPC 的具体实现。

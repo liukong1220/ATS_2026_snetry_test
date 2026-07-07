@@ -101,16 +101,6 @@ repositories:
     url: https://github.com/liukong1220/rmoss_core.git
     version: humble
 
-  src/dependencies/rmoss_gazebo:
-    type: git
-    url: https://github.com/liukong1220/rmoss_gazebo.git
-    version: humble
-
-  src/dependencies/rmoss_gz_resources:
-    type: git
-    url: https://github.com/liukong1220/rmoss_gz_resources.git
-    version: humble
-
   src/dependencies/rmoss_interfaces:
     type: git
     url: https://github.com/liukong1220/rmoss_interfaces.git
@@ -120,8 +110,3 @@ repositories:
     type: git
     url: https://github.com/liukong1220/BehaviorTree.ROS2.git
     version: humble
-
-  src/sim/rmu_gazebo_simulator:
-    type: git
-    url: https://github.com/liukong1220/rmu_gazebo_simulator.git
-    version: main
