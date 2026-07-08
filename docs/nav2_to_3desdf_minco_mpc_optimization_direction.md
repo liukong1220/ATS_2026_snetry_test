@@ -1,8 +1,8 @@
 # ATS 导航优化当前框架与下一阶段交接
 
-更新时间：2026-07-07
+更新时间：2026-07-08
 
-本文档已按当前 `src` 目录重新检索后整理。它的用途是让新对话先理解当前工程真实结构，再继续推进 RC-ESDF、MINCO、MuJoCo、MPC 等优化。本文不再记录历史流水账；Gazebo 入口和依赖已清理，后续完整仿真统一使用 MuJoCo，loopback 保留用于快速决策和导航链路测试。
+本文档已按当前 `src` 目录重新检索后整理，并补充 2026-07-07 MuJoCo/MID360/ESDF/RViz 导航闭环修正结果。它的用途是让新对话先理解当前工程真实结构，再继续推进 RC-ESDF、MINCO、MuJoCo、MPC 等优化。本文不再记录历史流水账；Gazebo 入口和依赖已清理，后续完整仿真统一使用 MuJoCo，loopback 保留用于快速决策和导航链路测试。
 
 ## 0. V1 / V2 版本目标
 
@@ -30,6 +30,18 @@
 
 当前结论：先做 `V1`，先稳定 MuJoCo 完整闭环，再推进 RC-ESDF、MINCO、footprint safety、SE2 MPC；`V2` 等 `V1` 稳定后再做。
 
+### 0.3 2026-07-07 MuJoCo 导航基线状态
+
+当前 MuJoCo 导航基线已经完成一轮传感器、地形、ESDF 输入、Nav2 action、控制桥接的闭环验证：
+
+1. `ros2 launch ats_mujoco_sim mujoco_navigation.launch.py` 是当前完整仿真入口。
+2. MuJoCo LiDAR 使用 MID360 扫描模式，`/local_pointcloud` 在 `front_mid360`，`/registered_scan` 在 `odom`。
+3. `terrain_analysis` / `terrain_analysis_ext` 输出的 `/terrain_map`、`/terrain_map_ext`、`/traversability_grid`、`/traversability_slope_grid` 均按 `odom` 语义进入 Nav2 / smoother / RC-ESDF-lite。
+4. `terrain_analysis_ext` 发布 `OccupancyGrid` 时已经把内部 `planarVoxelWidth * indX + indY` 索引转换为 ROS 标准 `x + y * width` 索引，避免 ESDF / traversability grid 出现 X/Y 转置。
+5. RViz2 的 `mujoco_navigation.rviz` 已使用 `nav2_rviz_plugins/GoalTool`，目标点会进入 `/navigate_to_pose` action，而不是只发布旧的 `/goal_pose` topic。
+6. 回归脚本 `scripts/test_mujoco_nav_chain.sh` 已覆盖 `/localization`、TF、MID360 点云、注册点云、terrain map、traversability grid、Nav2 lifecycle、`/navigate_to_pose`、`/cmd_vel_nav2_result`、`/motion_control`。
+7. 已接入用户导出的 RMUC2026 OBJ/STL，新增 `rmuc_2026_swerve.xml` 和 `rmuc_2026_mujoco.launch.py`，可直接用真实 mesh 作为 MuJoCo 场地。
+
 ## 1. 当前结论
 
 当前主线是：
@@ -51,6 +63,14 @@ Gazebo 不再作为后续仿真方案；`loopback_sim` 适合低成本验证 Nav
 5. 目标规划骨架：`minco_planner`，但真实 MINCO/JPS/footprint SDF/SE2 MPC 尚未完成替换
 
 因此下一阶段最稳妥的推进方式是：先把 MuJoCo 中的当前主链稳定跑通和观察清楚，再逐层把 RC-ESDF、footprint safety、MINCO、JPS、SE2 MPC 替换进去。
+
+当前 MuJoCo 基线已经可以作为后续替换链路前的回归标准。任何 RC-ESDF、MINCO、JPS、MPC 改动后，都应至少重新跑通：
+
+```bash
+scripts/test_mujoco_nav_chain.sh
+```
+
+该脚本不替代人工 RViz 检查，但能快速确认 Nav2 action 和控制输出没有被破坏。
 
 ## 2. 当前 src 分层
 
@@ -126,7 +146,7 @@ Nav2 子入口位于：
 当前仿真分三类：
 
 1. `src/sim/ats_mujoco_sim`
-   当前主线仿真。负责 MuJoCo 底盘、随机地图、scene 生成、MID360-pattern LiDAR、ToF、Twist 到 `/motion_control` 桥接、RViz2 配置、完整 Nav2 联调入口。
+   当前主线仿真。负责 MuJoCo 底盘、随机地图、RM2026 窄路坡道地图、scene 生成、MID360-pattern LiDAR、ToF、Twist 到 `/motion_control` 桥接、RViz2 配置、完整 Nav2 联调入口。
 2. `src/sim/loopback_sim`
    轻量 loopback 仿真。适合在低性能电脑上快速验证 Nav2 行为、参数和 topic 链路。
 MuJoCo 主要入口：
@@ -142,6 +162,18 @@ ros2 launch ats_mujoco_sim planner_mujoco.launch.py
 ```
 
 Gazebo 综合入口已经从当前主线清理，不再新增或维护 Gazebo 调试路径。
+
+MuJoCo RViz2 默认配置：
+
+`src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz`
+
+这份配置用于完整导航观察，当前应包含：
+
+1. `Navigation 2` panel。
+2. `nav2_rviz_plugins/GoalTool` 目标工具。
+3. `/map`、TF、`/local_pointcloud`、`/registered_scan`、`/terrain_map_ext`、`/traversability_grid`、global/local costmap、`/plan` 等显示项。
+
+注意：不要再依赖 RViz 默认 `SetGoal -> /goal_pose` 工具测试 Nav2 主链。当前 Nav2 主链目标入口是 `/navigate_to_pose` action。
 
 ## 3. 当前数据与控制链路
 
@@ -187,6 +219,20 @@ MuJoCo 完整导航入口的目标链路是：
 4. RViz2 配置包括 `mujoco_navigation.rviz` 和 `mujoco_sim_observe.rviz`。
 5. MuJoCo 与实车应继续通过统一 topic 抽象隔离，规划层不应直接依赖 MuJoCo 内部实现。
 
+当前 MuJoCo MID360 / 注册点云约定：
+
+1. `/local_pointcloud`
+   frame 为 `front_mid360`，表示仿真 MID360 传感器局部坐标系点云，用于 RViz 观察和传感器链路对齐。
+2. `/registered_scan`
+   frame 为 `odom`，由 MuJoCo 根据 LiDAR raycast 命中点转换到世界/里程计语义后发布，供 `terrain_analysis` 和 `terrain_analysis_ext` 直接消费。
+3. `/lidar_odometry`
+   header frame 为 `odom`，child frame 为 `front_mid360`，描述当前 MID360 位姿。
+4. `/localization`
+   header frame 为 `odom`，child frame 为 `gimbal_yaw_odom`，供 Nav2 和 costmap 获取机器人基准位姿。
+5. `gimbal_yaw_odom -> front_mid360` 静态外参应与 `ats_robot_description` 中 MID360 模型一致，MuJoCo 可视 MID360 模型应只服务于仿真和观察，不应重新引入额外旧 LiDAR 旋转。
+
+这意味着 MuJoCo 模式下不要再把 `/registered_scan` 当作 Point-LIO 的 `cloud_registered` 旧语义重复转换；它已经是 `odom` 下的注册点云。
+
 ### 3.3 地图、点云与地形链
 
 当前导航主链仍是地面机器人 `2D / 2.5D` 主链：
@@ -204,6 +250,14 @@ MuJoCo 完整导航入口的目标链路是：
 2. `2.5D` 层负责高程、坡度、占有率、roughness、unknown、ground confidence 等地形语义。
 3. RC-ESDF 层负责 signed distance、gradient、clearance 和局部本体安全查询。
 4. footprint safety 不能长期只看质心点 clearance，必须逐步接入车体轮廓扫掠检查。
+
+当前 MuJoCo 地形 / ESDF 输入链路的关键事实：
+
+1. `terrain_analysis` 订阅 `registered_scan` 和 `lidar_odometry`，发布 `/terrain_map`，frame 为 `odom`。
+2. `terrain_analysis_ext` 订阅 `registered_scan`、`lidar_odometry` 和 `/terrain_map`，发布 `/terrain_map_ext`、`/traversability_grid`、`/traversability_slope_grid` 等，frame 为 `odom`。
+3. `trajectory_optimizer/Nav2BSplineSmoother` 当前主链 `esdf_source` 为 `traversability_grid`，因此 ESDF 方向首先取决于 `traversability_grid` 的 ROS `OccupancyGrid` 索引是否符合 `x + y * width`。
+4. `terrain_analysis_ext` 内部平面 voxel 使用 `planarVoxelWidth * indX + indY`，发布 ROS `OccupancyGrid` 时必须转换为 `indX + indY * width`。这是防止 ESDF 方向相对点云发生转置的关键约束。
+5. 如果后续重构 `terrain_analysis_ext` 或更换 ESDF 后端，需要保留上述转换或整体改为 ROS 标准索引，不可只改一半。
 
 ## 4. 当前核心包职责
 
@@ -330,6 +384,11 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 7. `ats_mujoco_sim` 已迁移进 `src/sim`，具备地图/scene 生成、MuJoCo 底盘、LiDAR、ToF、RViz2 和 Nav2 联调入口。
 8. `mujoco_navigation.launch.py` 已可组织 MuJoCo、map_server、Nav2、trajectory optimizer 选项、Twist bridge 和 RViz2。
 9. 实车 bringup、MuJoCo bringup、loopback bringup 是后续保留入口；Gazebo bringup 已从当前主线清理。
+10. MuJoCo MID360 点云链路已对齐：`/local_pointcloud` 使用 `front_mid360`，`/registered_scan` 使用 `odom`，地形分析输出与 ESDF 输入保持同一方向。
+11. `terrain_analysis_ext` 的 traversability / slope / debug `OccupancyGrid` 发布索引已按 ROS 标准修正，避免 ESDF 相对点云转置。
+12. `mujoco_navigation.rviz` 已切换为 `nav2_rviz_plugins/GoalTool`，RViz 点目标可进入 Nav2 `/navigate_to_pose` action。
+13. `scripts/test_mujoco_nav_chain.sh` 已作为 MuJoCo 导航回归脚本，覆盖传感器、terrain、traversability、Nav2 action 和 `/motion_control`。
+14. `ats_mujoco_sim` 已新增 RMUC2026 mesh 场景：`models/rmuc_2026_swerve.xml` 引用 `models/meshes/rmuc2026_v1_2_0.obj`，并保留现有舵轮底盘、MID360、ToF、执行器和传感器。
 
 ## 6. 当前未完成与风险
 
@@ -339,8 +398,11 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 4. SE2 MPC 尚未替换 MPPI，当前控制器仍是 Nav2 MPPI 过渡方案。
 5. `fake_costmap_esdf_provider` 只能作为 fallback/debug，不应当作最终 RC-ESDF。
 6. MuJoCo 已有入口，但底盘参数、传感器外参、真实 footprint、速度/加速度/角速度约束仍需继续和实车对齐。
-7. `src` 下存在未跟踪的 `__pycache__` 运行缓存。它们未被 git 跟踪，但后续可清理工作区，避免检索噪声。
-8. 当前电脑性能较弱，不要使用全工作区高并发构建。
+7. RMUC2026 mesh 场景已验证可加载和启动，但完整 Nav2 仍需要与 2026 mesh 对齐的 2D/2.5D 导航地图；不能长期用 2025 PGM 代替 2026 场地。
+8. `src` 下存在未跟踪的 `__pycache__` 运行缓存。它们未被 git 跟踪，但后续可清理工作区，避免检索噪声。
+9. 当前电脑性能较弱，不要使用全工作区高并发构建。
+10. `src/*` 目前被 `.gitignore` 忽略，很多源码改动不会出现在 `git diff` 中。交接时必须直接核查文件内容，不能只依赖 git 状态。
+11. RViz 人工点目标依赖 `nav2_rviz_plugins`，若某台机器缺少该插件，会表现为工具加载失败；此时应先确认 Nav2 RViz 插件安装和 overlay 环境，而不是回退到 `/goal_pose`。
 
 ## 7. 阶段目标与下一阶段任务
 
@@ -361,6 +423,8 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 3. `/motion_control` 能驱动 MuJoCo 底盘响应 Nav2 输出。
 4. `trajectory_profile` 能实际进入 `trajectory_speed_governor`，而不是只作为旁路可视化。
 5. 发现问题时能判断属于仿真、TF/时间戳、地形语义、ESDF、规划、平滑、限速或控制哪一层。
+6. RViz2 使用 `GoalTool` 发布 Nav2 action 目标后，`/navigate_to_pose` 能 accepted 并产生 `/cmd_vel_nav2_result` 与 `/motion_control`。
+7. `/traversability_grid` 和 `/traversability_slope_grid` 在 RViz 中与 `/registered_scan`、`/terrain_map_ext` 方向一致。
 
 ### 7.2 下一阶段任务
 
@@ -393,6 +457,9 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 2. RViz2 能看到 map、TF、机器人、点云、Nav2 plan、smoothed path、trajectory profile marker。
 3. `cmd_vel_gimbal_yaw_odom` 能通过 `twist_to_motion_ctrl` 驱动 `/motion_control`。
 4. 当前主链的 `trajectory_profile` 能被 `trajectory_speed_governor` 使用。
+5. RViz2 中使用 `Navigation 2 GoalTool` 点目标，确认目标进入 `/navigate_to_pose` action，而不是只在 `/goal_pose` topic 上出现。
+6. 每次改 MuJoCo、terrain、ESDF、RViz、Nav2 参数后，至少跑一次 `scripts/test_mujoco_nav_chain.sh`。
+7. 涉及 footprint、坡度、ESDF 或控制器的改动，后续应在 RMUC2026 mesh 场景上复查 MID360 点云、terrain map、traversability 和控制输出。
 
 ### 7.4 P1：强化 RC-ESDF-lite 的真实性
 
@@ -458,6 +525,74 @@ ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
   launch_nav2:=true \
   launch_twist_bridge:=true
 ```
+
+MuJoCo 导航回归测试：
+
+```bash
+scripts/test_mujoco_nav_chain.sh
+```
+
+RMUC2026 mesh 场景加载测试：
+
+```bash
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  use_viewer:=false \
+  show_viewer:=false \
+  launch_mujoco_rviz:=false \
+  enable_lidar:=false \
+  enable_tof:=false
+```
+
+该脚本会自动使用无 RViz / 无 viewer 模式启动 MuJoCo 导航链，并检查：
+
+1. `/localization`
+2. TF `odom -> gimbal_yaw_odom`
+3. TF `gimbal_yaw_odom -> front_mid360`
+4. `/local_pointcloud`
+5. `/registered_scan`
+6. `/terrain_map`
+7. `/terrain_map_ext`
+8. `/traversability_grid`
+9. `/traversability_slope_grid`
+10. Nav2 lifecycle active
+11. `/navigate_to_pose` action accepted / succeeded
+12. `/cmd_vel_nav2_result`
+13. `/motion_control`
+
+RViz2 手动导航测试：
+
+```bash
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
+  use_rviz:=true \
+  use_viewer:=false \
+  show_viewer:=false \
+  enable_lidar:=true \
+  lidar_backend:=cpu \
+  lidar_downsample:=24 \
+  enable_tof:=true \
+  launch_nav2:=true \
+  launch_twist_bridge:=true
+```
+
+启动后在 RViz2 工具栏选择 `Nav2 Goal` / `GoalTool` 类工具点目标。若只看到旧的 `2D Goal Pose` 并发布 `/goal_pose`，说明 RViz 配置或插件环境没有加载到当前 `mujoco_navigation.rviz`。
+
+RMUC2026 mesh 场景手动 MuJoCo/RViz2 测试：
+
+```bash
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  use_viewer:=true \
+  launch_mujoco_rviz:=true \
+  start_x:=-12.0 \
+  start_y:=-6.0 \
+  start_z:=0.20 \
+  start_yaw:=0.0 \
+  enable_lidar:=true \
+  lidar_backend:=cpu \
+  lidar_downsample:=24 \
+  enable_tof:=false
+```
+
+注意：该入口是 MuJoCo mesh 场景测试，不会启动完整 Nav2 map_server / planner / controller。要做完整导航，下一步需要从 `rmuc2026_v1_2_0.obj` 或 `rmuc_2026.stl` 派生出和 mesh 同坐标系的 2D map、PCD 或 ESDF 输入。
 
 只看 MuJoCo 传感器和 RViz2：
 
