@@ -422,6 +422,7 @@ bt_navigator:
       - nav2_compute_path_through_poses_action_bt_node
       - nav2_smooth_path_action_bt_node
       - nav2_follow_path_action_bt_node
+      - trajectory_optimizer_follow_elastic_path_bt_node
       - nav2_spin_action_bt_node
       - nav2_wait_action_bt_node
       - nav2_assisted_teleop_action_bt_node
@@ -471,12 +472,16 @@ trajectory_optimizer:
     use_sim_time: false
     # 旁路轨迹优化输入，通常接全局规划器的 `plan`。
     input_path_topic: "plan"
-    # 仅用于调试/RViz 的平滑路径输出，不参与主控制闭环。
-    output_path_topic: "smoothed_path_visual"
+    # RC-ESDF 本地弹性路径：BT 仅在它实质变化时更新 controller 目标。
+    output_path_topic: "local_elastic_path"
     # 仅用于调试/RViz 的 profile 输出，不参与主控制闭环。
     output_profile_topic: "trajectory_profile_visual"
     # 旁路可视化订阅全局 costmap，避免 RViz 青色线只显示几何样条而忽略 J_obs。
     costmap_topic: "global_costmap/costmap_raw"
+    local_elastic_enabled: true
+    local_elastic_require_esdf: true
+    local_elastic_update_rate_hz: 5.0
+    local_elastic_position_change_threshold: 0.025
     # 阶段二：旁路 optimizer 优先使用 traversability_grid 构造 ESDF，terrain_map_ext 保留为回退诊断输入。
     esdf_source: "traversability_grid"
     terrain_pointcloud_topic: "terrain_map_ext"
@@ -507,7 +512,7 @@ trajectory_optimizer:
     min_control_points: 5
     # 连续优化主开关：启用控制点级 L-BFGS，启发式稠密点修正作为后处理保留。
     use_continuous_optimization: true
-    continuous_max_iterations: 30
+    continuous_max_iterations: 16
     continuous_lbfgs_memory: 8
     continuous_gradient_tolerance: 1.0e-4
     continuous_initial_step: 0.20

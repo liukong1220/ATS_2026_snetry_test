@@ -5,17 +5,15 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="/tmp/ats_nav_chain_test_logs"
 LAUNCH_LOG="/tmp/ats_nav_chain_test_launch.log"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-87}"
-MAP_CONFIG="${MAP_CONFIG:-}"
-MAP_NAME="${MAP_NAME:-}"
-SEED="${SEED:-7}"
-START_X="${START_X:-0.0}"
-START_Y="${START_Y:-0.0}"
-START_Z="${START_Z:-0.18}"
+START_X="${START_X:--10.66}"
+START_Y="${START_Y:-1.47}"
+START_Z="${START_Z:-0.42}"
 START_YAW="${START_YAW:-0.0}"
-GOAL_X="${GOAL_X:-2.0}"
-GOAL_Y="${GOAL_Y:-0.0}"
+GOAL_X="${GOAL_X:--9.0}"
+GOAL_Y="${GOAL_Y:-1.47}"
 GOAL_YAW_W="${GOAL_YAW_W:-1.0}"
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-20}"
+VERIFY_EVENT_DRIVEN_REPLAN="${VERIFY_EVENT_DRIVEN_REPLAN:-true}"
 
 set +u
 source "${WORKSPACE_DIR}/install/setup.bash"
@@ -39,17 +37,17 @@ trap cleanup EXIT
 
 LAUNCH_ARGS=(
   ats_mujoco_sim
-  mujoco_navigation.launch.py
+  rmuc_2026_mujoco.launch.py
   use_viewer:=false
   show_viewer:=false
-  use_rviz:=false
+  launch_mujoco_rviz:=false
   launch_nav2:=true
+  launch_trajectory_optimizer:=true
   launch_twist_bridge:=true
   enable_lidar:=true
   lidar_backend:=cpu
   lidar_downsample:=64
   enable_tof:=false
-  seed:="${SEED}"
   start_x:="${START_X}"
   start_y:="${START_Y}"
   start_z:="${START_Z}"
@@ -59,12 +57,6 @@ LAUNCH_ARGS=(
   rviz_delay_sec:=1000.0
   log_level:=warn
 )
-if [[ -n "${MAP_CONFIG}" ]]; then
-  LAUNCH_ARGS+=(map_config:="${MAP_CONFIG}")
-fi
-if [[ -n "${MAP_NAME}" ]]; then
-  LAUNCH_ARGS+=(map_name:="${MAP_NAME}")
-fi
 
 setsid ros2 launch "${LAUNCH_ARGS[@]}" > "${LAUNCH_LOG}" 2>&1 &
 LAUNCH_PID=$!
@@ -84,7 +76,7 @@ wait_for_command() {
   while (( SECONDS < deadline )); do
     if "$@" >/tmp/ats_nav_chain_check.out 2>/tmp/ats_nav_chain_check.err; then
       echo "OK: ${label}"
-      cat /tmp/ats_nav_chain_check.out
+      sed -n '1,24p' /tmp/ats_nav_chain_check.out
       return 0
     fi
     if ! kill -0 "${LAUNCH_PID}" 2>/dev/null; then
@@ -101,6 +93,22 @@ wait_for_topic_once() {
   local topic="$1"
   local timeout_sec="$2"
   wait_for_command "topic ${topic}" "${timeout_sec}" timeout 4 ros2 topic echo --once "${topic}"
+}
+
+assert_plan_is_event_driven() {
+  local observation_sec="$1"
+  local output_file="/tmp/ats_nav_chain_plan_observation.out"
+
+  timeout "${observation_sec}" ros2 topic echo /plan >"${output_file}" 2>/dev/null || true
+  local message_count
+  message_count="$(rg -c '^header:$' "${output_file}" || true)"
+  message_count="${message_count:-0}"
+  if (( message_count > 1 )); then
+    echo "observed /plan messages: ${message_count}"
+    cat "${output_file}" || true
+    fail "global planner is still publishing periodically in the static test"
+  fi
+  echo "OK: event-driven global plan observation (${message_count} message in ${observation_sec}s)"
 }
 
 wait_for_tf() {
@@ -169,5 +177,10 @@ fi
 
 wait_for_topic_once /cmd_vel_nav2_result 30
 wait_for_topic_once /motion_control 30
+wait_for_topic_once /local_elastic_path 30
 
-echo "PASS: MuJoCo navigation chain is active, publishing sensor data, accepting Nav2 goals, and forwarding motion commands."
+if [[ "${VERIFY_EVENT_DRIVEN_REPLAN}" == "true" ]]; then
+  assert_plan_is_event_driven 4
+fi
+
+echo "PASS: MuJoCo navigation chain is active, publishing RC-ESDF local elastic paths, accepting Nav2 goals, and forwarding motion commands."

@@ -16,7 +16,7 @@
 
 当前代码还没有完全到达这条终局链。现阶段真实运行链是：
 
-`SmacPlanner2D + Nav2BSplineSmoother + trajectory_speed_governor + MPPI`
+`SmacPlanner2D + stable global reference + RC-ESDF local elastic path + Nav2BSplineSmoother + trajectory_speed_governor + MPPI`
 
 因此 `V1` 当前阶段不是立即推翻 Nav2，而是先把 MuJoCo/RViz2 中的现有过渡主链跑稳定，再逐步替换为 `JPS + MINCO + footprint safety + SE2 MPC`。
 
@@ -139,7 +139,7 @@ Nav2 子入口位于：
 3. `bringup_launch.py`
    更上层的 Nav2 组合入口。
 
-需要注意：`trajectory_optimizer_node` 主要是旁路可视化/调试优化器；真正进入 BT 主链的是 `smoother_server` 中的 `trajectory_optimizer/Nav2BSplineSmoother` 插件和它发布的 `trajectory_profile`。
+需要注意：`trajectory_optimizer_node` 现在维护稳定全局参考并发布 `local_elastic_path`；BT 的 `FollowElasticPath` 仅在路径有实质变化时向 controller 更新 FollowPath goal。`smoother_server` 的 `trajectory_optimizer/Nav2BSplineSmoother` 和其 `trajectory_profile` 仍负责既有主链的平滑与速度治理。恢复行为继续使用自研 `ats_nav2_behaviors/BackUpFreeSpace`。
 
 ### 2.4 当前仿真入口
 
@@ -294,7 +294,7 @@ MuJoCo 完整导航入口的目标链路是：
 1. 主链 smoother 使用 `esdf_source: traversability_grid`。
 2. 主链 smoother 订阅 `terrain_map_ext`、`traversability_grid`、`traversability_slope_grid`。
 3. 主链 smoother 发布 `trajectory_profile`。
-4. 旁路 `trajectory_optimizer_node` 发布 `smoothed_path_visual` 和 `trajectory_profile_visual`，主要用于 RViz/调试。
+4. `trajectory_optimizer_node` 发布 `local_elastic_path` 和 `trajectory_profile_visual`；前者经 `FollowElasticPath` 进入 controller，后者仍用于观察。
 5. 当前已启用 `use_esdf_obstacle_cost`、坡度速度/加速度限制、footprint cost 采样与局部退化逻辑，但这仍不是最终 MINCO/footprint SDF 实现。
 
 ### 4.2 minco_planner
@@ -511,7 +511,7 @@ MAKEFLAGS=-j1 colcon build --packages-select minco_planner --parallel-workers 1
 source install/setup.bash
 ```
 
-推荐 MuJoCo 完整导航入口：
+随机地图基线入口：
 
 ```bash
 ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
@@ -526,9 +526,19 @@ ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
   launch_twist_bridge:=true
 ```
 
-MuJoCo 导航回归测试：
+RMUC2026 完整导航与回归入口：
 
 ```bash
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  use_viewer:=false \
+  show_viewer:=false \
+  launch_mujoco_rviz:=false \
+  launch_trajectory_optimizer:=true \
+  enable_lidar:=true \
+  lidar_backend:=cpu \
+  lidar_downsample:=24 \
+  enable_tof:=false
+
 scripts/test_mujoco_nav_chain.sh
 ```
 
@@ -592,7 +602,7 @@ ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
   enable_tof:=false
 ```
 
-注意：该入口是 MuJoCo mesh 场景测试，不会启动完整 Nav2 map_server / planner / controller。要做完整导航，下一步需要从 `rmuc2026_v1_2_0.obj` 或 `rmuc_2026.stl` 派生出和 mesh 同坐标系的 2D map、PCD 或 ESDF 输入。
+该入口使用 `rmuc_2026_swerve.xml`、`rmuc_2026.yaml` 和完整 Nav2 map server / planner / controller 链。回归脚本默认使用该入口，并验证 `local_elastic_path` 与事件触发的全局路径行为。
 
 只看 MuJoCo 传感器和 RViz2：
 
