@@ -111,6 +111,28 @@ assert_plan_is_event_driven() {
   echo "OK: event-driven global plan observation (${message_count} message in ${observation_sec}s)"
 }
 
+assert_controller_never_received_empty_path() {
+  if rg -q "Resulting plan has 0 poses" "${LAUNCH_LOG}"; then
+    fail "controller_server received an empty FollowPath goal"
+  fi
+  echo "OK: controller never received an empty FollowPath goal"
+}
+
+assert_controller_never_aborted_follow_path() {
+  if rg -q "\[follow_path\] \[ActionServer\] Aborting handle\." "${LAUNCH_LOG}"; then
+    fail "controller_server aborted FollowPath; a recovery completed the goal instead of a clean track"
+  fi
+  echo "OK: controller completed FollowPath without aborting"
+}
+
+assert_navigation_succeeded() {
+  if ! grep -q "Goal finished with status: SUCCEEDED" /tmp/ats_nav_chain_goal.out; then
+    cat /tmp/ats_nav_chain_goal.err || true
+    fail "NavigateToPose did not finish successfully before the timeout"
+  fi
+  echo "OK: NavigateToPose returned SUCCEEDED"
+}
+
 wait_for_tf() {
   local parent="$1"
   local child="$2"
@@ -138,7 +160,8 @@ wait_for_lifecycle_active() {
   local node="$1"
   local deadline=$((SECONDS + 90))
   while (( SECONDS < deadline )); do
-    if ros2 lifecycle get "${node}" 2>/tmp/ats_nav_chain_lifecycle.err | tee /tmp/ats_nav_chain_lifecycle.out | grep -q "active"; then
+    if timeout 4 ros2 lifecycle get "${node}" 2>/tmp/ats_nav_chain_lifecycle.err | \
+      tee /tmp/ats_nav_chain_lifecycle.out | grep -q "active"; then
       echo "OK: lifecycle ${node} active"
       return 0
     fi
@@ -174,6 +197,7 @@ if ! grep -q "Goal accepted" /tmp/ats_nav_chain_goal.out; then
   cat /tmp/ats_nav_chain_goal.err || true
   fail "NavigateToPose goal was not accepted"
 fi
+assert_navigation_succeeded
 
 wait_for_topic_once /cmd_vel_nav2_result 30
 wait_for_topic_once /motion_control 30
@@ -182,5 +206,7 @@ wait_for_topic_once /local_elastic_path 30
 if [[ "${VERIFY_EVENT_DRIVEN_REPLAN}" == "true" ]]; then
   assert_plan_is_event_driven 4
 fi
+assert_controller_never_received_empty_path
+assert_controller_never_aborted_follow_path
 
 echo "PASS: MuJoCo navigation chain is active, publishing RC-ESDF local elastic paths, accepting Nav2 goals, and forwarding motion commands."

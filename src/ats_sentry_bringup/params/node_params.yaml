@@ -587,8 +587,10 @@ controller_server:
     controller_plugins: ["FollowPath"]
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.25
-      movement_time_allowance: 6.0
+      # Match the Nav2 bringup policy: wait for body-forward alignment in a
+      # narrow corridor before treating absent translation as a stall.
+      required_movement_radius: 0.15
+      movement_time_allowance: 15.0
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
@@ -1201,6 +1203,23 @@ trajectory_speed_governor:
     speed_scale_rise_rate: 3.0
     # 速度比例下降斜率。大：刹得更快；小：更平顺。
     speed_scale_fall_rate: 3.0
+    # 开阔区域保留舵轮全向能力；RC-ESDF 判定足迹净空不足时，才要求车头
+    # 沿 local_elastic_path 切线前向穿越，并禁止横移和倒车。
+    heading_guard_enabled: true
+    heading_guard_path_topic: "local_elastic_path"
+    heading_guard_traversability_grid_topic: "traversability_grid"
+    heading_guard_base_frame: "gimbal_yaw_odom"
+    heading_guard_obstacle_value_threshold: 50
+    heading_guard_lethal_value_threshold: 90
+    heading_guard_unknown_is_obstacle: false
+    heading_guard_enter_clearance_m: 0.20
+    heading_guard_exit_clearance_m: 0.30
+    heading_guard_footprint_length_m: 0.60
+    heading_guard_footprint_width_m: 0.50
+    heading_guard_lateral_speed_limit: 0.0
+    heading_guard_stop_error_rad: 0.22
+    heading_guard_yaw_kp: 2.5
+    heading_guard_max_angular_speed: 1.50
 
 velocity_smoother:
   ros__parameters:
