@@ -1106,8 +1106,8 @@ behavior_server:
     service_name: "global_costmap/get_costmap"
     # 最大搜索半径。大：更容易脱困；小：更保守更快。
     max_radius: 1.6
-    # 恢复动作允许从膨胀层向外退出，但仍拒绝 253/254 障碍栅格。
-    max_allowed_cost: 252
+    # 高于该 cost 的膨胀区不再被当作“可脱困方向”，防止恢复动作继续贴墙试探。
+    max_allowed_cost: 96
     # 以车尾方向为中心搜索恢复轨迹。舵轮底盘建议保留较大的角域，充分利用斜后退能力。
     search_half_span_deg: 120.0
     # 候选方向搜索分辨率。
