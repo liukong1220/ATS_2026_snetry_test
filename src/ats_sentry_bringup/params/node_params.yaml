@@ -694,7 +694,7 @@ controller_server:
         # 路径贴合项。权重调大=数值调大，会更强制贴线；
         # 直线高速下适度提高可抑制全向底盘左右采样同价导致的横摆，
         # 但转角、障碍边缘和终段过大时会僵硬、来回修正。
-        cost_weight: 20.0
+        cost_weight: 12.0
         # Parameter `PathAlignCritic.threshold_to_consider`
         # 距目标小于该值时 PathAlign 关闭，让终段交给 GoalCritic。
         # 调大=更早放弃强制贴线；调小=更晚才退出，终点附近仍会被路径拉住。
@@ -703,7 +703,7 @@ controller_server:
         # 从当前 rollout 已到达的最远路径点继续向前偏移多少个 path point 作为对齐范围。
         # 调大=看得更远、速度感更强，但更容易在弯口 shortcut；调小=更保守。
         # 保持中等前视，兼顾高速和不过度抄近道。
-        offset_from_furthest: 3
+        offset_from_furthest: 5
         trajectory_point_step: 4
         max_path_occupancy_ratio: 0.06
         use_path_orientations: false
@@ -714,7 +714,7 @@ controller_server:
         # 鼓励轨迹末端追向路径前方的 follow 点，比 PathAlign 更柔和。
         # 权重调大=数值调大，会更积极沿路径推进；对直线提速有帮助，
         # 但过大可能在转角抄近道。
-        cost_weight: 12.0
+        cost_weight: 13.0
         # Parameter `PathFollowCritic.threshold_to_consider`
         # 距目标小于该值时 PathFollow 关闭，避免终点附近继续“往前推”。
         # 调大=更早退出推进项；调小=更接近终点仍保持推进。
@@ -722,27 +722,26 @@ controller_server:
         threshold_to_consider: 1.4
         # Parameter `PathFollowCritic.offset_from_furthest`
         # 越大越倾向追逐更远的 follow 点，速度会快，但转角更容易 shortcut。
-        offset_from_furthest: 3
+        offset_from_furthest: 7
       PathAngleCritic:
         enabled: true
         cost_power: 1
         # Parameter `PathAngleCritic.cost_weight`
         # 惩罚轨迹朝向与路径前方参考点方向不一致。权重调大=数值调大，
         # 会更强烈抑制反向试探和横切；过大时转角会发僵。
-        cost_weight: 6.0
+        cost_weight: 7.5
         # Parameter `PathAngleCritic.threshold_to_consider`
         # 距目标小于该值时 PathAngle 关闭，让终段由 GoalAngle/Twirling 控制。
         # 调大=更早停止路径方向约束；调小=更靠近终点仍要求沿路径方向。
         threshold_to_consider: 1.0
         # Parameter `PathAngleCritic.offset_from_furthest`
         # 判断朝向一致性时使用的前方路径点偏移；调大更看远方，调小更看近处。
-        offset_from_furthest: 3
+        offset_from_furthest: 5
         # Parameter `PathAngleCritic.max_angle_to_furthest`
         # 越小越严格，太小会让过弯很僵。
         max_angle_to_furthest: 0.75
-        # 开阔区允许全向横移纠偏；PreferForwardCritic 保留正向推进偏好，
-        # 窄通道中的严格车头朝向由 RC-ESDF heading guard 强制执行。
-        forward_preference: false
+        # fake gimbal yaw 需要稳定的前向参考，避免巡航时路径朝向被反向采样打散。
+        forward_preference: true
       GoalCritic:
         enabled: true
         cost_power: 1
@@ -1120,8 +1119,8 @@ behavior_server:
     far_sample_step: 0.08
     # 近/远分层采样切换距离。
     layered_sampling_split_distance: 0.40
-    # 覆盖 0.60 x 0.50m 车体与 0.02m 足迹 padding，避免只按中心线选逃逸方向。
-    corridor_half_width: 0.32
+    # 轨迹走廊半宽，等价于给底盘侧向预留的安全带宽。
+    corridor_half_width: 0.18
     # 轨迹走廊横向采样步长。
     corridor_lateral_step: 0.06
     # 远距离走廊横向采样步长，可比近距离更粗。
