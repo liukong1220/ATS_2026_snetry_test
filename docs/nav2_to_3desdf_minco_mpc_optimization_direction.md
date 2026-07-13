@@ -496,6 +496,48 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 4. 让 RViz2 能稳定观察 clearance、slope、profile、限速 marker。
 5. 开始补 footprint-aware 查询，不再只依赖质心 clearance。
 
+#### 2026-07-13 已落实：静态地图融合的真实 RC-ESDF
+
+此前 `RcTraversabilityEsdfProvider` 已是距离场实现，并非 `fake_costmap_esdf_provider`；但输入只有局部 `traversability_grid`，因此静态 `/map` 的墙体不会进入 MINCO/JPS 和平滑器的 ESDF 输入。本轮增加 `trajectory_optimizer::RcEsdfMapNode`，运行链改为：
+
+```text
+/map (map) + traversability_grid (odom) --TF 重采样--> /rc_esdf/planning_grid (odom)
+    -> 精确二维 signed Euclidean Distance Transform
+    -> /rc_esdf/signed_distance_grid
+    -> /rc_esdf/footprint_clearance_grid
+    -> Nav2 smoother / trajectory_optimizer / heading_guard / JPS + MINCO
+```
+
+融合规则与编码：
+
+| 数据 | 编码 / 规则 |
+| --- | --- |
+| `/rc_esdf/planning_grid` | `0` 为 free，`1..49` 为局部软地形风险，`50..100` 为 occupied；`-1` 为 static unknown 或 static map 外。每个局部格按 static-map 分辨率子采样，静态 occupied 优先，局部 free/unknown 不可擦除。 |
+| 内部 signed ESDF | $d=d_{occ}-d_{free}$；$d>0$ 为 free，$d<0$ 为 occupied，$d=0$ 为边界 cell。unknown 对规划按 occupied 处理。 |
+| `/rc_esdf/signed_distance_grid` | 为 RViz 运输编码：`-1` unknown，`0..49` 负距离，`50` 零距离，`51..100` 正距离；按 `signed_distance_max_m=2.0` m 截断。 |
+| `/rc_esdf/footprint_clearance_grid` | 使用 $d-r$ 的同一编码，其中 $r=0.5\sqrt{0.60^2+0.50^2}+0.02$ m，是任意 yaw 下保守矩形足迹半径。运行时 MINCO 和 heading guard 仍对实际 yaw 的矩形采样查询。 |
+
+同步约束：`rc_esdf_map` 的输出继承 `traversability_grid` 的 `odom` frame、分辨率、origin 和时间戳；`/map` 仅按该时间的 `map <- odom` TF 重采样。`RcTraversabilityEsdfProvider` 对 height/occupancy/ground/slope 侧栅格同时检查 frame、时间戳、分辨率和 origin，不匹配时拒绝该语义侧输入，避免两个 rolling snapshot 混合。
+
+启动后在 RViz2 的 `RC-ESDF / Terrain` 组观察 `/rc_esdf/planning_grid`，可按需启用 signed distance、footprint clearance 和 slope 图层；`TrajectoryProfileMarkers` 继续显示 profile / 限速 marker。应确认静态墙在 planning grid 中始终为 occupied，目标两侧存在绕行时，`/plan`、`/minco/raw_path` 和 `/minco/reference_path` 都不穿过该墙。
+
+RMUC2026 还增加了由同一 `rmuc_2026.pgm` 生成的矩形碰撞体 `models/rmuc_2026_wall_boxes.xml`。heightfield 保留为地形和 LiDAR 表达，box 墙体作为物理接触兜底，防止控制器异常时穿过静态墙。地图更新后执行：
+
+```bash
+ros2 run ats_mujoco_sim generate_rmuc_2026_wall_collisions
+```
+
+定向验证：
+
+```bash
+colcon test --packages-select trajectory_optimizer minco_planner \
+  --ctest-args -R 'test_rc_esdf_map|test_grid_jps|test_minco_trajectory_optimizer'
+
+ros2 topic echo --once /rc_esdf/planning_grid
+ros2 topic echo --once /rc_esdf/signed_distance_grid
+ros2 topic echo --once /rc_esdf/footprint_clearance_grid
+```
+
 ### 7.5 P2：minco_planner 当前状态与剩余验收
 
 已完成：`JPS -> MINCO S3 -> RC-ESDF clearance-aware independent yaw -> footprint gate -> timed Path`。

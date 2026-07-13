@@ -184,6 +184,9 @@ wait_for_topic_once /terrain_map 120
 wait_for_topic_once /terrain_map_ext 120
 wait_for_topic_once /traversability_grid 120
 wait_for_topic_once /traversability_slope_grid 120
+wait_for_topic_once /rc_esdf/planning_grid 120
+wait_for_topic_once /rc_esdf/signed_distance_grid 120
+wait_for_topic_once /rc_esdf/footprint_clearance_grid 120
 
 for node in /controller_server /planner_server /behavior_server /bt_navigator /velocity_smoother; do
   wait_for_lifecycle_active "${node}"
