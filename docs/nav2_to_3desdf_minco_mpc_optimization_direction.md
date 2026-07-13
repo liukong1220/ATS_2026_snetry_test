@@ -1,6 +1,6 @@
 # ATS 导航优化当前框架与下一阶段交接
 
-更新时间：2026-07-08
+更新时间：2026-07-13
 
 本文档已按当前 `src` 目录重新检索后整理，并补充 2026-07-07 MuJoCo/MID360/ESDF/RViz 导航闭环修正结果。它的用途是让新对话先理解当前工程真实结构，再继续推进 RC-ESDF、MINCO、MuJoCo、MPC 等优化。本文不再记录历史流水账；Gazebo 入口和依赖已清理，后续完整仿真统一使用 MuJoCo，loopback 保留用于快速决策和导航链路测试。
 
@@ -42,6 +42,22 @@
 6. 回归脚本 `scripts/test_mujoco_nav_chain.sh` 已覆盖 `/localization`、TF、MID360 点云、注册点云、terrain map、traversability grid、Nav2 lifecycle、`/navigate_to_pose`、`/cmd_vel_nav2_result`、`/motion_control`。
 7. 已接入用户导出的 RMUC2026 OBJ/STL，新增 `rmuc_2026_swerve.xml` 和 `rmuc_2026_mujoco.launch.py`，可直接用真实 mesh 作为 MuJoCo 场地。
 
+### 0.4 2026-07-13 JPS / MINCO / 舵轮 MPC 旁路状态
+
+在不改变默认 Nav2 + MPPI 基线的前提下，现已增加可选旁路：
+
+`/plan 目标 -> traversability_grid -> 2D JPS -> MINCO S3 -> 独立目标 yaw -> footprint safety -> timed Path -> holonomic SE2 MPC -> /cmd_vel_mpc -> twist_to_motion_ctrl -> /motion_control`
+
+本轮实现边界：
+
+1. `minco_planner` 默认前端已切换为 2D JPS，保留 A* 回退；JPS 使用 `jps_safe_distance` 对占据栅格做保守 clearance 查询。
+2. 已迁入 GCOPTER 的非均匀时间五次 `MINCO_S3` 核心，生成连续位置、世界系 `vx/vy/ax/ay` 和逐点时间戳。
+3. 四驱四转舵轮默认使用 `yaw_mode: goal_heading`，车体 yaw 与平移切向解耦；不迁移 DDR 差速底盘的 ICR、曲率和 `vy=0` 约束。
+4. exact oriented footprint 检查失败时默认拒绝发布轨迹。local repair 默认关闭；若显式启用，修补后的几何会重新经过 MINCO 求导，避免位置和导数不一致。
+5. 新增 `ats_swerve_mpc`，状态为世界系 `[x, y, yaw]`，控制为车体系 `[vx, vy, wz]`；单测覆盖纯横移不改变 yaw 以及速度/加速度限幅。
+6. `mujoco_navigation.launch.py` 与 `rmuc_2026_mujoco.launch.py` 新增 `launch_swerve_mpc:=true`。启用时关闭 `fake_vel_transform`，bridge 只订阅 `/cmd_vel_mpc`，避免 MPPI/MPC 同时驱动 MuJoCo。
+7. 已完成四包单线程构建、JPS/MINCO/yaw/MPC 定向测试和 RMUC2026 无 GUI 启动冒烟；尚未完成真实目标下发后的整段动态跟踪参数标定，因此默认开关仍为 `false`。
+
 ## 1. 当前结论
 
 当前主线是：
@@ -60,7 +76,7 @@ Gazebo 不再作为后续仿真方案；`loopback_sim` 适合低成本验证 Nav
 2. 主链平滑：`trajectory_optimizer/Nav2BSplineSmoother`
 3. 控制器：`nav2_mppi_controller::MPPIController`
 4. 曲率/坡度/障碍限速：`trajectory_speed_governor`
-5. 目标规划骨架：`minco_planner`，但真实 MINCO/JPS/footprint SDF/SE2 MPC 尚未完成替换
+5. 可选目标旁路：`minco_planner` 已具备 JPS + MINCO S3 + 独立 yaw + footprint gate，`ats_swerve_mpc` 已具备全向 SE2 MPC；尚未替换默认 MPPI 主链
 
 因此下一阶段最稳妥的推进方式是：先把 MuJoCo 中的当前主链稳定跑通和观察清楚，再逐层把 RC-ESDF、footprint safety、MINCO、JPS、SE2 MPC 替换进去。
 
@@ -81,7 +97,7 @@ scripts/test_mujoco_nav_chain.sh
 1. `src/ats_sentry_bringup`
    实车和综合启动顶层入口。包含 `bringup.launch.py`、loopback 启动、实车默认 `node_params.yaml`、地图、PCD、RViz 配置。
 2. `src/ats_sentry_nav`
-   导航子工作区。包含 Nav2 bringup、Nav2 插件、定位/点云转换、地形分析、轨迹优化、MINCO 规划骨架、速度坐标转换等。
+   导航子工作区。包含 Nav2 bringup、Nav2 插件、定位/点云转换、地形分析、轨迹优化、JPS/MINCO 规划旁路、舵轮 MPC、速度坐标转换等。
 3. `src/sim`
    仿真工作区。包含 `ats_mujoco_sim` 和 `loopback_sim`。MuJoCo 是完整仿真主线，loopback 用于快速测试。
 4. `src/interfaces`
@@ -310,9 +326,9 @@ MuJoCo 完整导航入口的目标链路是：
 当前源码分层：
 
 1. `src/planning`
-   `grid_astar` 前端搜索骨架。
+   `grid_jps` 默认前端搜索，`grid_astar` 作为回退。
 2. `src/trajectory`
-   `minco_trajectory_optimizer`、`reference_trajectory`、`yaw_spline_planner`。
+   MINCO S3、定时 reference trajectory、独立 yaw planner。
 3. `src/safety`
    `footprint_safety_checker`、`local_collision_repair`。
 4. `src/debug`
@@ -324,18 +340,20 @@ MuJoCo 完整导航入口的目标链路是：
 
 1. `grid_topic: traversability_grid`
 2. `goal_topic: goal_pose`
-3. `raw_path_topic: minco/raw_path`
-4. `reference_path_topic: minco/reference_path`
-5. `debug_marker_topic: minco/debug_markers`
-6. `global_frame: map`
-7. `robot_frame: base_link`
+3. `global_plan_topic: /plan`
+4. `raw_path_topic: minco/raw_path`
+5. `reference_path_topic: minco/reference_path`
+6. `debug_marker_topic: minco/debug_markers`
+7. `global_frame: odom`
+8. `robot_frame: gimbal_yaw_odom`
 
 当前状态判断：
 
-1. `minco_planner` 已经是合理分包骨架。
-2. 真实 MINCO 后端仍未接入。
-3. JPS 尚未替代当前 A* 骨架。
-4. footprint safety 和 local collision repair 还需要接真实 RC-ESDF/footprint SDF，并在 MuJoCo 场景中验证。
+1. `minco_planner` 已从骨架升级为可运行旁路，能由 Nav2 `/plan` 获取 GoalTool 目标。
+2. 已接入非均匀时间 MINCO S3 核心，位置、速度、加速度和逐点时间戳可供 MPC 使用。
+3. JPS 已成为默认前端，A* 仅作为可配置回退。
+4. 当前 footprint safety 使用 traversability `OccupancyGrid` 上的定向矩形采样与 JPS clearance；完整 RC footprint SDF 梯度代价仍未迁入 MINCO 外层优化。
+5. local collision repair 默认关闭；当前启用时会把修补后的几何重新送入 MINCO，但最近自由栅格策略仍较粗，需要升级成基于 footprint SDF 梯度的局部重规划。
 
 后续参考迁移重点：
 
@@ -380,7 +398,7 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 3. `Nav2BSplineSmoother` 已进入 Nav2 主链，并和 `trajectory_speed_governor` 联动。
 4. `rc_traversability_esdf_provider` 已作为当前 RC-ESDF-lite provider，主链和旁路 optimizer 都可以使用 `traversability_grid`。
 5. `traversability_slope_grid` 已进入 smoother / governor 的速度、加速度约束逻辑。
-6. `minco_planner` 已建立 planning、trajectory、safety、debug、nodes 分层骨架。
+6. `minco_planner` 已建立 planning、trajectory、safety、debug、nodes 分层，并接入 JPS、MINCO S3、独立 yaw 与 footprint gate。
 7. `ats_mujoco_sim` 已迁移进 `src/sim`，具备地图/scene 生成、MuJoCo 底盘、LiDAR、ToF、RViz2 和 Nav2 联调入口。
 8. `mujoco_navigation.launch.py` 已可组织 MuJoCo、map_server、Nav2、trajectory optimizer 选项、Twist bridge 和 RViz2。
 9. 实车 bringup、MuJoCo bringup、loopback bringup 是后续保留入口；Gazebo bringup 已从当前主线清理。
@@ -392,10 +410,10 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 
 ## 6. 当前未完成与风险
 
-1. `minco_planner` 仍是骨架包，真实 MINCO 后端未接入。
-2. 当前前端搜索仍是 `SmacPlanner2D` 和 `grid_astar` 骨架，JPS 尚未成为主链。
-3. footprint safety 还没有完全替代当前的中心线/局部 footprint cost 采样，窄门和大角度转向仍需重点验证。
-4. SE2 MPC 尚未替换 MPPI，当前控制器仍是 Nav2 MPPI 过渡方案。
+1. JPS/MINCO/MPC 仍是显式 opt-in 旁路，默认主链继续使用 SmacPlanner2D + MPPI。
+2. 当前 MINCO 只迁入 S3 多项式核心和时间缩放，尚未迁入带 RC-ESDF 梯度/footprint SDF 的外层 LBFGS 障碍优化。
+3. footprint gate 已能拒绝碰撞轨迹，但窄门、贴边、横移和独立 yaw 扫掠仍需在开启 LiDAR 的 RMUC2026 场景逐项验证。
+4. SE2 MPC 已实现并通过纯横移单测与启动冒烟，尚未完成目标闭环、轮端舵角/轮速反馈约束和实车参数标定，不能直接替代比赛默认控制器。
 5. `fake_costmap_esdf_provider` 只能作为 fallback/debug，不应当作最终 RC-ESDF。
 6. MuJoCo 已有入口，但底盘参数、传感器外参、真实 footprint、速度/加速度/角速度约束仍需继续和实车对齐。
 7. RMUC2026 mesh 场景已验证可加载和启动，但完整 Nav2 仍需要与 2026 mesh 对齐的 2D/2.5D 导航地图；不能长期用 2025 PGM 代替 2026 场地。
@@ -430,22 +448,16 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 
 下一阶段建议按下面顺序执行，不要同时大范围重构多包：
 
-1. `任务 1：MuJoCo 闭环稳定化`
-   低性能默认参数、LiDAR/ToF topic、TF、`/motion_control`、RViz2 显示全部跑通。
-2. `任务 2：RC-ESDF-lite 观测与修正`
-   对齐 `traversability_grid`、`traversability_slope_grid`、`terrain_map_ext`，检查 signed distance、unknown、坡度阈值、障碍膨胀和 gradient。
-3. `任务 3：footprint-aware 安全检查`
-   先在 `trajectory_optimizer` / smoother 侧验证 footprint clearance，再迁移到 `minco_planner/safety`。
-4. `任务 4：minco_planner 骨架接真实数据`
-   让 `grid_astar -> raw_path -> reference_path -> debug_marker` 基于当前 `traversability_grid` 跑通。
-5. `任务 5：接入真实 MINCO`
-   参考 `~/参考/src/DDR-opt/back_end/include/gcopter/minco.hpp`，替换当前 placeholder optimizer。
-6. `任务 6：独立 yaw + local collision repair`
-   让 yaw、footprint safety 和局部修补形成可重复验证链。
-7. `任务 7：JPS 替换 A* / grid search`
-   在接口稳定后替换前端搜索，不要过早和 MINCO 同时改。
-8. `任务 8：SE2 MPC 接入 MuJoCo 与实车接口`
-   先在 MuJoCo 验证 MPC 轨迹跟踪，再决定实车输出接 `cmd_vel_gimbal_yaw_odom` 还是更底层控制接口。
+1. `任务 1：JPS/MINCO/MPC 动态目标闭环`
+   在 RMUC2026 场地开启 MID360，通过 GoalTool 下发目标，记录 `/plan`、`minco/raw_path`、`minco/reference_path`、MPC predicted path、`/cmd_vel_mpc` 与 `/motion_control`。
+2. `任务 2：RC-ESDF 外层障碍优化`
+   将当前 RC-ESDF 的 distance/gradient 接入 MINCO 外层代价，而不是只使用 JPS clearance 和末端 footprint gate。
+3. `任务 3：footprint swept-volume 与局部重规划`
+   让碰撞段回到几何路径或内点层重新求 MINCO；禁止恢复直接移动定时采样点的旧 local repair。
+4. `任务 4：舵轮执行约束标定`
+   根据实车轴距、轮距、最大舵角速度、轮速和反馈延迟，标定 MPC 的 `max_vx/max_vy/max_wz/max_ax/max_ay/max_awz`。
+5. `任务 5：控制权仲裁与实车灰度切换`
+   MuJoCo 继续用 `/cmd_vel_mpc -> twist_to_motion_ctrl`；实车增加明确 mux/急停优先级后，再考虑由 `/cmd_vel_mpc` 接入 `sentry_chassis_vel_transform`。
 
 ### 7.3 P0：固定当前可观察闭环
 
@@ -473,27 +485,28 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 4. 让 RViz2 能稳定观察 clearance、slope、profile、限速 marker。
 5. 开始补 footprint-aware 查询，不再只依赖质心 clearance。
 
-### 7.5 P2：让 minco_planner 从骨架变成可验证节点
+### 7.5 P2：minco_planner 当前状态与剩余验收
 
-推荐顺序：
+已完成：`JPS -> MINCO S3 -> independent yaw -> footprint gate -> timed Path`。
 
-1. 先让 `grid_astar -> reference_path -> debug_marker` 在当前 `traversability_grid` 上稳定跑通。
-2. 接入真实 MINCO 位置轨迹优化。
-3. 接入独立 yaw planner，输出可用于 footprint 检查和控制器的姿态参考。
-4. 接入 footprint safety checker 和 local collision repair。
-5. 在 MuJoCo 中验证窄门、贴边、大角度转向。
-6. 最后再把 A* / grid search 替换成 JPS。
+剩余验收：
+
+1. 开启 MID360 后验证 `/plan` 触发 JPS，比较 JPS 与 A* 的搜索时间、路径长度和失败率。
+2. 在窄门、贴边、纯横移、大角度独立 yaw 场景验证 swept footprint。
+3. 接入 RC-ESDF/footprint SDF 梯度外层优化，降低只靠末端拒绝导致的规划失败率。
+4. 将 local repair 从最近自由栅格升级为碰撞段内点重优化。
 
 ### 7.6 P3：从 MPPI 过渡到 SE2 MPC
 
 目标：最终让控制器消费 `minco_planner` 输出的轨迹，而不是长期依赖 Nav2 smoother + MPPI。
 
-需要先明确：
+当前已明确：
 
-1. MPC 输入轨迹格式：位置、yaw、速度、加速度、时间戳。
-2. MPC 输出 topic：优先复用 `cmd_vel_gimbal_yaw_odom` 或统一后的控制抽象。
-3. MuJoCo `/motion_control` 与实车 `/cmd_vel` 或 CAN 控制接口的边界。
-4. RViz2 和日志中能区分规划失败、ESDF 不可信、footprint 碰撞、控制跟踪失败。
+1. MPC 输入使用逐 pose 时间戳的 `nav_msgs/Path`，位置/yaw 直接插值，前馈 `vx/vy/wz` 由定时轨迹导出。
+2. MuJoCo 旁路输出 `/cmd_vel_mpc`，再由现有 bridge 进入 `/motion_control`；默认 MPPI 关闭该旁路。
+3. 控制模型为世界系状态和车体系全向速度，保留 `vy`，不使用差速 ICR/曲率约束。
+
+仍需明确：实车 mux/急停仲裁、轮端舵角速度约束、反馈延迟和比赛速度标定。
 
 ## 8. 低性能电脑构建与启动命令
 
@@ -503,6 +516,7 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 MAKEFLAGS=-j1 colcon build --packages-select ats_mujoco_sim --parallel-workers 1
 MAKEFLAGS=-j1 colcon build --packages-select trajectory_optimizer --parallel-workers 1
 MAKEFLAGS=-j1 colcon build --packages-select minco_planner --parallel-workers 1
+MAKEFLAGS=-j1 colcon build --packages-select ats_swerve_mpc --parallel-workers 1
 ```
 
 加载环境：
@@ -604,6 +618,20 @@ ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
 
 该入口使用 `rmuc_2026_swerve.xml`、`rmuc_2026.yaml` 和完整 Nav2 map server / planner / controller 链。回归脚本默认使用该入口，并验证 `local_elastic_path` 与事件触发的全局路径行为。
 
+RMUC2026 JPS + MINCO + 舵轮全向 MPC 旁路：
+
+```bash
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  launch_swerve_mpc:=true \
+  use_viewer:=true \
+  launch_mujoco_rviz:=true \
+  enable_lidar:=true \
+  lidar_backend:=cpu \
+  lidar_downsample:=24
+```
+
+该开关会关闭 `fake_vel_transform`，使 `/cmd_vel_mpc` 成为 bridge 的唯一输入。默认 `launch_swerve_mpc:=false`，仍运行既有 MPPI 基线。
+
 只看 MuJoCo 传感器和 RViz2：
 
 ```bash
@@ -650,5 +678,5 @@ rg -n "pb2025|pb_rm_interfaces|pb_nav2_plugins|pb_teleop_twist_joy" src docs --g
 3. 读 `src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py`，确认 Nav2 实际启动节点。
 4. 读 `src/sim/ats_mujoco_sim/launch/mujoco_navigation.launch.py`，确认 MuJoCo 完整测试入口。
 5. 读 `src/ats_sentry_nav/trajectory_optimizer/README.md` 和源码分层，确认当前 smoother/ESDF/governor。
-6. 读 `src/ats_sentry_nav/minco_planner/README.md` 和 `config/minco_planner.yaml`，确认下一阶段目标骨架。
+6. 读 `src/ats_sentry_nav/minco_planner/README.md`、`ats_swerve_mpc/README.md` 和两份参数文件，确认旁路边界与未标定项。
 7. 先单包构建和启动 MuJoCo/RViz2，再进入 RC-ESDF、MINCO、footprint、MPC 的具体实现。
