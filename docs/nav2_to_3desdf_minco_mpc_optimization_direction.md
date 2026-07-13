@@ -653,6 +653,77 @@ scripts/test_mujoco_minco_mpc_chain.sh
 
 该脚本自动下发 `/navigate_to_pose`，并验证 `/plan`、JPS、MINCO、MPC reference/predicted path、`/cmd_vel_mpc`、`/motion_control`、位姿推进与目标结果。它还要求 `fake_vel_transform` 不存在，且 `/cmd_vel_mpc` 恰好只有一个 MPC 发布者和一个 bridge 订阅者。
 
+扩大后的矩形连续重规划回归：
+
+```bash
+TEST_PROFILE=rectangle scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+该模式先驶入东侧自由区，再依次执行 east、south、west、north 四条边。每条边都必须重新收到 `/plan`、`/minco/raw_path` 和 `/minco/reference_path`，action 必须返回 `SUCCEEDED`，单边位移不得小于 `0.20 m`，落点误差不得超过 `0.30 m`。south/north 两边保持目标 `yaw=0`，并额外要求 `/cmd_vel_mpc.linear.y` 非零，用于确认四驱四转舵轮执行的是全向侧移，而不是 DDR 差速转向。
+
+2026-07-13 实测五段全部通过，MINCO 每段均为零 footprint 碰撞。各段到达位姿如下：
+
+1. stage：`(-9.660, 1.469)`
+2. east：`(-8.690, 1.470)`
+3. south：`(-8.890, 1.098)`，检测到非零 `linear.y`
+4. west：`(-9.462, 1.080)`
+5. north：`(-9.659, 1.498)`，检测到非零 `linear.y`
+
+### 8.1 如何切换到 MINCO 实验链
+
+先构建并加载当前工作区：
+
+```bash
+colcon build --packages-up-to trajectory_optimizer minco_planner ats_swerve_mpc \
+  --executor sequential
+source install/setup.bash
+```
+
+无界面自主实验：
+
+```bash
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  launch_swerve_mpc:=true \
+  use_viewer:=false \
+  show_viewer:=false \
+  launch_mujoco_rviz:=false
+```
+
+人工 RViz 点目标实验：
+
+```bash
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  launch_swerve_mpc:=true \
+  use_viewer:=true \
+  launch_mujoco_rviz:=true
+```
+
+`launch_swerve_mpc:=true` 会同时完成四件事：
+
+1. 启动 `minco_planner`，消费 `/plan` 和 `/traversability_grid`。
+2. 启动 `ats_swerve_mpc`，消费 `/minco/reference_path`。
+3. 关闭 `fake_vel_transform`，防止 MPPI 与 MPC 同时取得底盘控制权。
+4. 将 `twist_to_motion_ctrl` 的唯一输入切换为 `/cmd_vel_mpc`，再输出 `/motion_control`。
+
+实验时可用下面的命令确认没有只启动规划可视化、却仍由 MPPI 驱动车体：
+
+```bash
+ros2 node list | rg 'minco_planner|ats_swerve_mpc|fake_vel_transform|twist_to_motion_ctrl'
+ros2 topic info --verbose /cmd_vel_mpc
+ros2 topic echo --once /minco/reference_path
+```
+
+预期存在 `/minco_planner`、`/ats_swerve_mpc`、`/twist_to_motion_ctrl`，不存在 `/fake_vel_transform`；`/cmd_vel_mpc` 应恰好有一个发布者和一个订阅者。
+
+切回原有 Nav2 + MPPI 基线时显式关闭开关：
+
+```bash
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  launch_swerve_mpc:=false \
+  use_viewer:=true \
+  launch_mujoco_rviz:=true
+```
+
 只看 MuJoCo 传感器和 RViz2：
 
 ```bash
