@@ -46,7 +46,7 @@
 
 在不改变默认 Nav2 + MPPI 基线的前提下，现已增加可选旁路：
 
-`/plan 目标 -> traversability_grid -> 2D JPS -> MINCO S3 -> 独立目标 yaw -> footprint safety -> timed Path -> holonomic SE2 MPC -> /cmd_vel_mpc -> twist_to_motion_ctrl -> /motion_control`
+`/plan 目标 -> traversability_grid/RC-ESDF -> 2D JPS -> MINCO S3 -> 净空感知独立 yaw -> footprint safety -> timed Path -> holonomic SE2 MPC -> /cmd_vel_mpc -> twist_to_motion_ctrl -> /motion_control`
 
 本轮实现边界：
 
@@ -56,7 +56,18 @@
 4. exact oriented footprint 检查失败时默认拒绝发布轨迹。local repair 默认关闭；若显式启用，修补后的几何会重新经过 MINCO 求导，避免位置和导数不一致。
 5. 新增 `ats_swerve_mpc`，状态为世界系 `[x, y, yaw]`，控制为车体系 `[vx, vy, wz]`；单测覆盖纯横移不改变 yaw 以及速度/加速度限幅。
 6. `mujoco_navigation.launch.py` 与 `rmuc_2026_mujoco.launch.py` 新增 `launch_swerve_mpc:=true`。启用时关闭 `fake_vel_transform`，bridge 只订阅 `/cmd_vel_mpc`，避免 MPPI/MPC 同时驱动 MuJoCo。
-7. 已完成四包单线程构建、JPS/MINCO/yaw/MPC 定向测试和 RMUC2026 无 GUI 启动冒烟；尚未完成真实目标下发后的整段动态跟踪参数标定，因此默认开关仍为 `false`。
+7. 已完成四包单线程构建、JPS/MINCO/yaw/MPC 定向测试、RMUC2026 无 GUI 启动和一次真实目标自主闭环；默认开关仍为 `false`，因为窄门、动态障碍、轮端舵角/轮速约束与实车参数尚未标定。
+
+### 0.5 2026-07-13 中科大 2025 技术报告优化落实
+
+新增参考 `docs/中科大哨兵2025技术报告.pdf` 后，已优先落实报告 5.5.5 中与四驱四转舵轮兼容的控制策略：
+
+1. MPC 不再按 ROS 墙钟时间追逐轨迹，而是将当前 `x/y` 投影到最近 MINCO 线段，以投影时间构建预测域。
+2. 轨迹进度禁止回跳，并用前向时间窗限制自交或近邻线段造成的未来跳跃。
+3. 横向误差超过阈值后压缩参考轨迹进度和前馈速度，优先收敛横向误差；保留短命令前瞻补偿求解、通信和执行延迟。
+4. MINCO 采样点复用现有 RC-ESDF 距离场写入净空。宽区域保持目标航向与平移切向解耦；窄区域带进入/退出滞回地选择旋转量更小的正切向或反切向。
+5. 未迁移 DDR-opt 的差速 ICR、`vy=0` 或曲率转向约束；MPC 状态仍为世界系 `[x, y, yaw]`，控制仍为车体系 `[vx, vy, wz]`。
+6. 新增 `scripts/test_mujoco_minco_mpc_chain.sh`。2026-07-13 实测从 `(-10.657, 1.470)` 到 `(-8.876, 1.468)`，`NavigateToPose` 返回 `SUCCEEDED`，并验证规划、MINCO、MPC、底盘指令、单一控制发布者/订阅者和 `fake_vel_transform` 缺席。
 
 ## 1. 当前结论
 
@@ -413,7 +424,7 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 1. JPS/MINCO/MPC 仍是显式 opt-in 旁路，默认主链继续使用 SmacPlanner2D + MPPI。
 2. 当前 MINCO 只迁入 S3 多项式核心和时间缩放，尚未迁入带 RC-ESDF 梯度/footprint SDF 的外层 LBFGS 障碍优化。
 3. footprint gate 已能拒绝碰撞轨迹，但窄门、贴边、横移和独立 yaw 扫掠仍需在开启 LiDAR 的 RMUC2026 场景逐项验证。
-4. SE2 MPC 已实现并通过纯横移单测与启动冒烟，尚未完成目标闭环、轮端舵角/轮速反馈约束和实车参数标定，不能直接替代比赛默认控制器。
+4. SE2 MPC 已通过纯横移、轨迹投影/进度约束单测和一次 MuJoCo 目标闭环；轮端舵角/轮速反馈约束、复杂场景与实车参数仍未标定，不能直接替代比赛默认控制器。
 5. `fake_costmap_esdf_provider` 只能作为 fallback/debug，不应当作最终 RC-ESDF。
 6. MuJoCo 已有入口，但底盘参数、传感器外参、真实 footprint、速度/加速度/角速度约束仍需继续和实车对齐。
 7. RMUC2026 mesh 场景已验证可加载和启动，但完整 Nav2 仍需要与 2026 mesh 对齐的 2D/2.5D 导航地图；不能长期用 2025 PGM 代替 2026 场地。
@@ -448,8 +459,8 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 
 下一阶段建议按下面顺序执行，不要同时大范围重构多包：
 
-1. `任务 1：JPS/MINCO/MPC 动态目标闭环`
-   在 RMUC2026 场地开启 MID360，通过 GoalTool 下发目标，记录 `/plan`、`minco/raw_path`、`minco/reference_path`、MPC predicted path、`/cmd_vel_mpc` 与 `/motion_control`。
+1. `已完成：JPS/MINCO/MPC 基础动态目标闭环`
+   自动回归已记录 `/plan`、`minco/raw_path`、`minco/reference_path`、MPC reference/predicted path、`/cmd_vel_mpc`、`/motion_control` 和位姿推进。下一步应扩展为窄门、横移、大角度 yaw 与动态障碍矩阵。
 2. `任务 2：RC-ESDF 外层障碍优化`
    将当前 RC-ESDF 的 distance/gradient 接入 MINCO 外层代价，而不是只使用 JPS clearance 和末端 footprint gate。
 3. `任务 3：footprint swept-volume 与局部重规划`
@@ -487,7 +498,7 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 
 ### 7.5 P2：minco_planner 当前状态与剩余验收
 
-已完成：`JPS -> MINCO S3 -> independent yaw -> footprint gate -> timed Path`。
+已完成：`JPS -> MINCO S3 -> RC-ESDF clearance-aware independent yaw -> footprint gate -> timed Path`。
 
 剩余验收：
 
@@ -502,9 +513,11 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 
 当前已明确：
 
-1. MPC 输入使用逐 pose 时间戳的 `nav_msgs/Path`，位置/yaw 直接插值，前馈 `vx/vy/wz` 由定时轨迹导出。
+1. MPC 输入使用逐 pose 时间戳的 `nav_msgs/Path`，但预测域从机器人最近轨迹投影开始，而不是从墙钟时间开始；位置/yaw 直接插值，前馈 `vx/vy/wz` 由定时轨迹导出。
 2. MuJoCo 旁路输出 `/cmd_vel_mpc`，再由现有 bridge 进入 `/motion_control`；默认 MPPI 关闭该旁路。
 3. 控制模型为世界系状态和车体系全向速度，保留 `vy`，不使用差速 ICR/曲率约束。
+4. 横向误差会缩放预测域推进速度，投影时间带后退禁止和前跳限制；短命令前瞻用于延迟补偿。
+5. 已通过一次 RMUC2026 直线目标自主闭环，默认 MPPI 回归也保持通过。
 
 仍需明确：实车 mux/急停仲裁、轮端舵角速度约束、反馈延迟和比赛速度标定。
 
@@ -631,6 +644,14 @@ ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
 ```
 
 该开关会关闭 `fake_vel_transform`，使 `/cmd_vel_mpc` 成为 bridge 的唯一输入。默认 `launch_swerve_mpc:=false`，仍运行既有 MPPI 基线。
+
+JPS + MINCO + 舵轮 MPC 自主回归：
+
+```bash
+scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+该脚本自动下发 `/navigate_to_pose`，并验证 `/plan`、JPS、MINCO、MPC reference/predicted path、`/cmd_vel_mpc`、`/motion_control`、位姿推进与目标结果。它还要求 `fake_vel_transform` 不存在，且 `/cmd_vel_mpc` 恰好只有一个 MPC 发布者和一个 bridge 订阅者。
 
 只看 MuJoCo 传感器和 RViz2：
 
