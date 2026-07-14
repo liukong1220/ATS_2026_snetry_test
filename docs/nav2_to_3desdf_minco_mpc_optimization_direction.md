@@ -1,6 +1,6 @@
 # ATS 导航优化当前框架与下一阶段交接
 
-更新时间：2026-07-13
+更新时间：2026-07-14
 
 本文档已按当前 `src` 目录重新检索后整理，并补充 2026-07-07 MuJoCo/MID360/ESDF/RViz 导航闭环修正结果。它的用途是让新对话先理解当前工程真实结构，再继续推进 RC-ESDF、MINCO、MuJoCo、MPC 等优化。本文不再记录历史流水账；Gazebo 入口和依赖已清理，后续完整仿真统一使用 MuJoCo，loopback 保留用于快速决策和导航链路测试。
 
@@ -57,6 +57,7 @@
 5. 新增 `ats_swerve_mpc`，状态为世界系 `[x, y, yaw]`，控制为车体系 `[vx, vy, wz]`；单测覆盖纯横移不改变 yaw 以及速度/加速度限幅。
 6. `mujoco_navigation.launch.py` 与 `rmuc_2026_mujoco.launch.py` 新增 `launch_swerve_mpc:=true`。启用时关闭 `fake_vel_transform`，bridge 只订阅 `/cmd_vel_mpc`，避免 MPPI/MPC 同时驱动 MuJoCo。
 7. 已完成四包单线程构建、JPS/MINCO/yaw/MPC 定向测试、RMUC2026 无 GUI 启动和一次真实目标自主闭环；默认开关仍为 `false`，因为窄门、动态障碍、轮端舵角/轮速约束与实车参数尚未标定。
+8. 2026-07-14 将 `/rc_esdf/planning_grid` 的规划分辨率设为 `0.1 m`：局部 `0.4 m` terrain 语义按 cell-center 上采样，静态 `/map` 仍按原 PGM 分辨率采样后融合。这样保留 terrain 语义，同时避免任一静态墙像素将整块 `0.4 m` terrain cell 误判为不可通行。
 
 ### 0.5 2026-07-13 中科大 2025 技术报告优化落实
 
@@ -363,7 +364,7 @@ MuJoCo 完整导航入口的目标链路是：
 1. `minco_planner` 已从骨架升级为可运行旁路，能由 Nav2 `/plan` 获取 GoalTool 目标。
 2. 已接入非均匀时间 MINCO S3 核心，位置、速度、加速度和逐点时间戳可供 MPC 使用。
 3. JPS 已成为默认前端，A* 仅作为可配置回退。
-4. 当前 footprint safety 使用 traversability `OccupancyGrid` 上的定向矩形采样与 JPS clearance；完整 RC footprint SDF 梯度代价仍未迁入 MINCO 外层优化。
+4. 当前 footprint safety 使用规划 `OccupancyGrid` 上的定向矩形采样与 JPS clearance。MINCO 已接入 RC-ESDF signed distance/gradient 的外层内点修正；完整的 oriented footprint-SDF 联合优化尚未迁入。
 5. local collision repair 默认关闭；当前启用时会把修补后的几何重新送入 MINCO，但最近自由栅格策略仍较粗，需要升级成基于 footprint SDF 梯度的局部重规划。
 
 后续参考迁移重点：
@@ -422,7 +423,7 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 ## 6. 当前未完成与风险
 
 1. JPS/MINCO/MPC 仍是显式 opt-in 旁路，默认主链继续使用 SmacPlanner2D + MPPI。
-2. 当前 MINCO 只迁入 S3 多项式核心和时间缩放，尚未迁入带 RC-ESDF 梯度/footprint SDF 的外层 LBFGS 障碍优化。
+2. MINCO 已有 RC-ESDF gradient 外层内点修正，但不是 DDR-opt 的完整 LBFGS/footprint-SDF 联合优化；实际定向矩形仍由末端 swept-footprint gate 复查，候选不安全时回退原始 JPS-MINCO。
 3. footprint gate 已能拒绝碰撞轨迹，但窄门、贴边、横移和独立 yaw 扫掠仍需在开启 LiDAR 的 RMUC2026 场景逐项验证。
 4. SE2 MPC 已通过纯横移、轨迹投影/进度约束单测和一次 MuJoCo 目标闭环；轮端舵角/轮速反馈约束、复杂场景与实车参数仍未标定，不能直接替代比赛默认控制器。
 5. `fake_costmap_esdf_provider` 只能作为 fallback/debug，不应当作最终 RC-ESDF。
@@ -461,8 +462,8 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 
 1. `已完成：JPS/MINCO/MPC 基础动态目标闭环`
    自动回归已记录 `/plan`、`minco/raw_path`、`minco/reference_path`、MPC reference/predicted path、`/cmd_vel_mpc`、`/motion_control` 和位姿推进。下一步应扩展为窄门、横移、大角度 yaw 与动态障碍矩阵。
-2. `任务 2：RC-ESDF 外层障碍优化`
-   将当前 RC-ESDF 的 distance/gradient 接入 MINCO 外层代价，而不是只使用 JPS clearance 和末端 footprint gate。
+2. `已完成（第一步）：RC-ESDF 外层障碍修正`
+   MINCO 对 `0.45 m` 净空内的采样点用 signed-distance gradient 修正内部控制点，每次重求 MINCO；端点锁定，单步最多 `0.10 m`，控制点间距 `0.30 m`，最多 6 次。候选经定向矩形 footprint gate 复查，若新候选不安全而基线安全，则回退基线。下一步才是将 oriented footprint-SDF 作为联合优化代价。
 3. `任务 3：footprint swept-volume 与局部重规划`
    让碰撞段回到几何路径或内点层重新求 MINCO；禁止恢复直接移动定时采样点的旧 local repair。
 4. `任务 4：舵轮执行约束标定`
@@ -517,7 +518,7 @@ MuJoCo 中则通过 `twist_to_motion_ctrl` 把 `cmd_vel_gimbal_yaw_odom` 转为 
 | `/rc_esdf/signed_distance_grid` | 为 RViz 运输编码：`-1` unknown，`0..49` 负距离，`50` 零距离，`51..100` 正距离；按 `signed_distance_max_m=2.0` m 截断。 |
 | `/rc_esdf/footprint_clearance_grid` | 使用 $d-r$ 的同一编码，其中 $r=0.5\sqrt{0.60^2+0.50^2}+0.02$ m，是任意 yaw 下保守矩形足迹半径。运行时 MINCO 和 heading guard 仍对实际 yaw 的矩形采样查询。 |
 
-同步约束：`rc_esdf_map` 的输出继承 `traversability_grid` 的 `odom` frame、分辨率、origin 和时间戳；`/map` 仅按该时间的 `map <- odom` TF 重采样。`RcTraversabilityEsdfProvider` 对 height/occupancy/ground/slope 侧栅格同时检查 frame、时间戳、分辨率和 origin，不匹配时拒绝该语义侧输入，避免两个 rolling snapshot 混合。
+同步约束：`rc_esdf_map` 的输出继承 `traversability_grid` 的 `odom` frame、origin 和时间戳。`planning_grid_resolution` 为 `0` 时保留 terrain 分辨率；当前实车/仿真配置为 `0.1 m`，将局部 terrain cell-center 语义上采样，再让 `/map` 按该时间的 `map <- odom` TF 和自身原始分辨率融合。`RcTraversabilityEsdfProvider` 对 height/occupancy/ground/slope 侧栅格同时检查 frame、时间戳、分辨率和 origin，不匹配时拒绝该语义侧输入，避免两个 rolling snapshot 混合。
 
 启动后在 RViz2 的 `RC-ESDF / Terrain` 组观察 `/rc_esdf/planning_grid`，可按需启用 signed distance、footprint clearance 和 slope 图层；`TrajectoryProfileMarkers` 继续显示 profile / 限速 marker。应确认静态墙在 planning grid 中始终为 occupied，目标两侧存在绕行时，`/plan`、`/minco/raw_path` 和 `/minco/reference_path` 都不穿过该墙。
 
@@ -540,13 +541,27 @@ ros2 topic echo --once /rc_esdf/footprint_clearance_grid
 
 ### 7.5 P2：minco_planner 当前状态与剩余验收
 
-已完成：`JPS -> MINCO S3 -> RC-ESDF clearance-aware independent yaw -> footprint gate -> timed Path`。
+已完成：`JPS -> MINCO S3 -> RC-ESDF gradient inner-point correction -> clearance-aware independent yaw -> footprint gate -> timed Path`。
+
+#### 2026-07-14 已落实：真实 RC-ESDF 外层修正与红框长路线
+
+`minco_planner` 订阅的已是 `/rc_esdf/planning_grid`，而不是 `fake_costmap_esdf_provider`。规划搜索仍以保守 `jps_safe_distance: 0.57 m` 约束四驱四转舵轮任意 yaw 的矩形外接半径；JPS/A* 只量化搜索索引，输出路径重新写回真实连续起点和终点，避免 `0.4 m` 原 terrain 栅格中心导致 MINCO 起终点偏移。
+
+MINCO 外层优化只移动 densify 后的内部几何控制点：对低于 `esdf_obstacle_clearance: 0.45 m` 的每个 MINCO 采样点查询 RC-ESDF signed distance 与 gradient，沿正梯度分配修正并重新求解 S3。端点固定；控制点最大偏离 `0.60 m`；每轮单点修正最大 `0.10 m`；最多 6 轮。此实现保持舵轮的平移/yaw 解耦，并没有迁入 DDR 差速车的 ICR、曲率或 `vy=0` 约束。
+
+长路线使用截图红框中心换算目标 `(-0.04, -4.08)`，先经东侧自由区中转 `(-8.88, 1.47)`。执行：
+
+```bash
+TEST_PROFILE=red_box GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+实测两个 `NavigateToPose` 均返回 `SUCCEEDED`：中转终点 `(-8.9195, 1.4733)`，误差 `0.040 m`；红框终点 `(-0.0574, -4.0830)`，误差 `0.018 m`。主段日志记录 `raw_points=39`、`reference_points=878`、`length=22.31 m`、`collisions=0`，并且 MPC reference horizon、predicted path、`/cmd_vel_mpc` 与 `/motion_control` 均有非空录制。该结果证明该指定长路线已实际跟随到目标；不等价于窄门、动态障碍或实车全覆盖验证。
 
 剩余验收：
 
 1. 开启 MID360 后验证 `/plan` 触发 JPS，比较 JPS 与 A* 的搜索时间、路径长度和失败率。
 2. 在窄门、贴边、纯横移、大角度独立 yaw 场景验证 swept footprint。
-3. 接入 RC-ESDF/footprint SDF 梯度外层优化，降低只靠末端拒绝导致的规划失败率。
+3. 将现有质心 RC-ESDF 梯度修正升级为 oriented footprint-SDF 联合优化，降低只靠末端拒绝导致的规划失败率。
 4. 将 local repair 从最近自由栅格升级为碰撞段内点重优化。
 
 ### 7.6 P3：从 MPPI 过渡到 SE2 MPC

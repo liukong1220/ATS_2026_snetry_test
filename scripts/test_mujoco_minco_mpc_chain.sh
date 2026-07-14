@@ -29,8 +29,16 @@ case "${TEST_PROFILE}" in
     GOAL_XS=(-9.50 -8.82 -8.82 -9.50 -9.50)
     GOAL_YS=(1.47 1.47 0.98 0.98 1.47)
     ;;
+  red_box)
+    # Screenshot red box center converted from rmuc_2026.pgm/yaml:
+    # pixel=(510,425) -> map=(-0.043,-4.082). Stage through the existing
+    # east-side free area first, then run the 10 m-class route to the target.
+    GOAL_NAMES=(stage_red_box red_box)
+    GOAL_XS=(-8.88 -0.04)
+    GOAL_YS=(1.47 -4.08)
+    ;;
   *)
-    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'single' or 'rectangle'."
+    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'single', 'rectangle', or 'red_box'."
     exit 2
     ;;
 esac
