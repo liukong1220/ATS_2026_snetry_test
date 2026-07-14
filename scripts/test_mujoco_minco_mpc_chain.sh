@@ -4,16 +4,22 @@ set -u
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="/tmp/ats_minco_mpc_test_logs"
 LAUNCH_LOG="/tmp/ats_minco_mpc_test_launch.log"
+# ROS 领域号；默认 88，避免回归测试与其他 ROS 进程串话。
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-88}"
+# MuJoCo 初始位姿（map/odom 平面坐标，单位 m；yaw 单位 rad）。
 START_X="${START_X:--10.66}"
 START_Y="${START_Y:-1.47}"
 START_Z="${START_Z:-0.42}"
 START_YAW="${START_YAW:-0.0}"
 GOAL_X="${GOAL_X:--9.0}"
 GOAL_Y="${GOAL_Y:-1.47}"
+# 单点测试的目标朝向四元数 w；当前只使用零 yaw 的 w=1。
 GOAL_YAW_W="${GOAL_YAW_W:-1.0}"
+# 每个目标允许的最长执行时间（s）。
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
+# 回归路线：single、rectangle（验证横移）、red_box（长距离路线）。
 TEST_PROFILE="${TEST_PROFILE:-single}"
+# 每一段至少应产生的位姿位移（m），低于此值视为控制未真正跟随。
 MIN_LEG_PROGRESS="${MIN_LEG_PROGRESS:-0.20}"
 
 case "${TEST_PROFILE}" in
@@ -23,16 +29,15 @@ case "${TEST_PROFILE}" in
     GOAL_YS=("${GOAL_Y}")
     ;;
   rectangle)
-    # Stage into the map's east-side free area, then close a 0.68 m x 0.49 m loop.
-    # Keeping yaw at zero makes the north/south legs exercise true lateral motion.
+    # 先进入东侧空旷区，再闭合 0.68 m x 0.49 m 矩形；保持 yaw=0，
+    # 使南北两段必须产生真实横移速度，而不是差速式原地转向。
     GOAL_NAMES=(stage east south west north)
     GOAL_XS=(-9.50 -8.82 -8.82 -9.50 -9.50)
     GOAL_YS=(1.47 1.47 0.98 0.98 1.47)
     ;;
   red_box)
-    # Screenshot red box center converted from rmuc_2026.pgm/yaml:
-    # pixel=(510,425) -> map=(-0.043,-4.082). Stage through the existing
-    # east-side free area first, then run the 10 m-class route to the target.
+    # 截图红框中心由 rmuc_2026.pgm/yaml 换算：pixel=(510,425) ->
+    # map=(-0.043,-4.082)。先经东侧空旷区，再执行约 10 m 的长路线。
     GOAL_NAMES=(stage_red_box red_box)
     GOAL_XS=(-8.88 -0.04)
     GOAL_YS=(1.47 -4.08)
@@ -254,8 +259,8 @@ run_navigation_goal() {
   local leg_command_pid=$!
   CAPTURE_PIDS+=("${leg_command_pid}")
 
-  # The MINCO paths are event-driven. Let the one-shot subscriptions complete
-  # DDS discovery before the goal causes all three paths to publish in a burst.
+  # MINCO 路径为事件触发发布；先等待 DDS 单次订阅发现完成，
+  # 避免目标触发后多个路径话题瞬时发布而被测试遗漏。
   sleep 1
 
   timeout "${GOAL_TIMEOUT}" ros2 action send_goal /navigate_to_pose \
@@ -305,10 +310,12 @@ run_navigation_goal() {
 LAUNCH_ARGS=(
   ats_mujoco_sim
   rmuc_2026_mujoco.launch.py
+  # 启用 JPS/MINCO/全向 MPC 旁路；当前脚本仍用 Nav2 action 下发目标。
   launch_swerve_mpc:=true
   use_viewer:=false
   show_viewer:=false
   launch_mujoco_rviz:=false
+  # 当前兼容回归需 Nav2 生成 /plan；Nav2-free 回归应另建脚本，不能复用这里的 action。
   launch_nav2:=true
   launch_trajectory_optimizer:=true
   launch_twist_bridge:=true
