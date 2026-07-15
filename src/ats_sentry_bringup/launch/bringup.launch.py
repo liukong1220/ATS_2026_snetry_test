@@ -8,9 +8,14 @@ from launch.actions import (
     IncludeLaunchDescription,
     SetEnvironmentVariable,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression, TextSubstitution
+from launch.substitutions import (
+    IfElseSubstitution,
+    LaunchConfiguration,
+    PythonExpression,
+    TextSubstitution,
+)
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
@@ -45,9 +50,20 @@ def generate_launch_description():
     launch_rosbag_recorder = LaunchConfiguration("launch_rosbag_recorder")
     launch_trajectory_optimizer = LaunchConfiguration("launch_trajectory_optimizer")
     launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
+    launch_fake_vel_transform = LaunchConfiguration("launch_fake_vel_transform")
+    launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
+    nav_cmd_vel_topic = LaunchConfiguration("nav_cmd_vel_topic")
+    fake_vel_output_topic = LaunchConfiguration("fake_vel_output_topic")
+    chassis_vel_input_topic = LaunchConfiguration("chassis_vel_input_topic")
+    launch_rog_map = LaunchConfiguration("launch_rog_map")
     use_composition = LaunchConfiguration("use_composition")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
+
+    any_velocity_transform = PythonExpression([
+        "'", launch_fake_vel_transform, "'.lower() == 'true' or '",
+        launch_chassis_vel_transform, "'.lower() == 'true'",
+    ])
 
     configured_params = ParameterFile(
         RewrittenYaml(
@@ -175,6 +191,48 @@ def generate_launch_description():
         description="Whether to start small_gicp map->odom relocalization",
     )
 
+    declare_launch_fake_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_fake_vel_transform",
+        default_value="True",
+        description="Keep the fake-yaw command-frame transform enabled for the gimbal-mounted lidar.",
+    )
+
+    declare_launch_chassis_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_chassis_vel_transform",
+        default_value="True",
+        description="Keep the gimbal-yaw to chassis command transform enabled.",
+    )
+
+    declare_nav_cmd_vel_topic_cmd = DeclareLaunchArgument(
+        "nav_cmd_vel_topic",
+        default_value=IfElseSubstitution(
+            any_velocity_transform, "cmd_vel_nav2_result", "/cmd_vel"
+        ),
+        description="Nav2 velocity output selected for the enabled transform chain",
+    )
+
+    declare_fake_vel_output_topic_cmd = DeclareLaunchArgument(
+        "fake_vel_output_topic",
+        default_value=IfElseSubstitution(
+            launch_chassis_vel_transform, "cmd_vel_gimbal_yaw_odom", "/cmd_vel"
+        ),
+        description="Fake-yaw adapter output topic",
+    )
+
+    declare_chassis_vel_input_topic_cmd = DeclareLaunchArgument(
+        "chassis_vel_input_topic",
+        default_value=IfElseSubstitution(
+            launch_fake_vel_transform, "cmd_vel_gimbal_yaw_odom", "cmd_vel_nav2_result"
+        ),
+        description="Chassis-frame adapter input topic",
+    )
+
+    declare_launch_rog_map_cmd = DeclareLaunchArgument(
+        "launch_rog_map",
+        default_value="False",
+        description="Start ROGMap 3D occupancy perception without changing the RC-ESDF planning owner.",
+    )
+
     declare_use_composition_cmd = DeclareLaunchArgument(
         "use_composition",
         default_value="True",
@@ -198,7 +256,7 @@ def generate_launch_description():
                 serial_bringup_dir, "launch", "standard_robot_pp_ros2.launch.py"
             )
         ),
-        condition=IfCondition(PythonExpression(["not ", use_robot_state_pub])),
+        condition=UnlessCondition(use_robot_state_pub),
         launch_arguments={
             "robot_name": robot_name,
             "namespace": namespace,
@@ -214,7 +272,7 @@ def generate_launch_description():
         package="tf2_ros",
         executable="static_transform_publisher",
         name="static_tf_base_link",
-        condition=IfCondition(PythonExpression(["not ", use_robot_state_pub])),
+        condition=UnlessCondition(use_robot_state_pub),
         arguments=["--frame-id", "base_footprint", "--child-frame-id", "base_link"],
         output="screen",
     )
@@ -223,7 +281,24 @@ def generate_launch_description():
         package="sentry_chassis_vel_transform",
         executable="chassis_vel_transform_node",
         name="chassis_vel_transform",
+        condition=IfCondition(launch_chassis_vel_transform),
         namespace=namespace,
+        output="screen",
+        respawn=use_respawn,
+        respawn_delay=2.0,
+        parameters=[
+            configured_params,
+            {"input_cmd_vel_topic": chassis_vel_input_topic},
+        ],
+        arguments=["--ros-args", "--log-level", log_level],
+    )
+
+    start_rog_map_cmd = Node(
+        package="ats_rog_map",
+        executable="ats_rog_map_node",
+        name="ats_rog_map",
+        namespace=namespace,
+        condition=IfCondition(launch_rog_map),
         output="screen",
         respawn=use_respawn,
         respawn_delay=2.0,
@@ -249,6 +324,11 @@ def generate_launch_description():
             "launch_joy_teleop": launch_joy_teleop,
             "launch_trajectory_optimizer": launch_trajectory_optimizer,
             "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+            "launch_fake_vel_transform": launch_fake_vel_transform,
+            "launch_chassis_vel_transform": "False",
+            "nav_cmd_vel_topic": nav_cmd_vel_topic,
+            "fake_vel_output_topic": fake_vel_output_topic,
+            "chassis_vel_input_topic": chassis_vel_input_topic,
             "use_composition": use_composition,
             "use_respawn": use_respawn,
             "log_level": log_level,
@@ -317,6 +397,12 @@ def generate_launch_description():
     ld.add_action(declare_launch_rosbag_recorder_cmd)
     ld.add_action(declare_launch_trajectory_optimizer_cmd)
     ld.add_action(declare_launch_small_gicp_relocalization_cmd)
+    ld.add_action(declare_launch_fake_vel_transform_cmd)
+    ld.add_action(declare_launch_chassis_vel_transform_cmd)
+    ld.add_action(declare_nav_cmd_vel_topic_cmd)
+    ld.add_action(declare_fake_vel_output_topic_cmd)
+    ld.add_action(declare_chassis_vel_input_topic_cmd)
+    ld.add_action(declare_launch_rog_map_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
@@ -324,8 +410,9 @@ def generate_launch_description():
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_rviz_cmd)
     ld.add_action(start_serial_driver_cmd)
-    ld.add_action(static_tf_base_link_cmd)
+    # navigation_launch owns base_footprint -> base_link to keep one TF authority.
     ld.add_action(start_chassis_vel_transform_cmd)
+    ld.add_action(start_rog_map_cmd)
     ld.add_action(start_navigation_launch_cmd)
     ld.add_action(start_behavior_launch_cmd)
     ld.add_action(record_rosbag_cmd)
