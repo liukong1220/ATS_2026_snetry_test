@@ -14,6 +14,23 @@ GOAL_Y="${GOAL_Y:-1.47}"
 GOAL_YAW_W="${GOAL_YAW_W:-1.0}"
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-20}"
 VERIFY_EVENT_DRIVEN_REPLAN="${VERIFY_EVENT_DRIVEN_REPLAN:-true}"
+PLANNING_GRID_OWNER="${PLANNING_GRID_OWNER:-rc_esdf}"
+LAUNCH_ROG_MAP="${LAUNCH_ROG_MAP:-false}"
+ROG_MAP_CONFIG_FILE="${ROG_MAP_CONFIG_FILE:-${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map/config/rog_map_ground_planning_mujoco.yaml}"
+
+case "${PLANNING_GRID_OWNER}" in
+  rc_esdf|rog_map) ;;
+  *)
+    echo "Unsupported PLANNING_GRID_OWNER='${PLANNING_GRID_OWNER}'; use 'rc_esdf' or 'rog_map'."
+    exit 2
+    ;;
+esac
+if [[ "${PLANNING_GRID_OWNER}" == "rog_map" || "${LAUNCH_ROG_MAP,,}" == "true" ]]; then
+  [[ -r "${ROG_MAP_CONFIG_FILE}" ]] || {
+    echo "ROGMap config is not readable: ${ROG_MAP_CONFIG_FILE}"
+    exit 2
+  }
+fi
 
 set +u
 source "${WORKSPACE_DIR}/install/setup.bash"
@@ -30,6 +47,8 @@ cleanup() {
     kill -INT "-${LAUNCH_PID}" 2>/dev/null || true
     sleep 3
     kill -TERM "-${LAUNCH_PID}" 2>/dev/null || true
+    sleep 1
+    kill -KILL "-${LAUNCH_PID}" 2>/dev/null || true
     wait "${LAUNCH_PID}" 2>/dev/null || true
   fi
 }
@@ -44,6 +63,9 @@ LAUNCH_ARGS=(
   launch_nav2:=true
   launch_trajectory_optimizer:=true
   launch_twist_bridge:=true
+  launch_rog_map:="${LAUNCH_ROG_MAP}"
+  planning_grid_owner:="${PLANNING_GRID_OWNER}"
+  rog_map_config_file:="${ROG_MAP_CONFIG_FILE}"
   enable_lidar:=true
   lidar_backend:=cpu
   lidar_downsample:=64
@@ -53,6 +75,7 @@ LAUNCH_ARGS=(
   start_z:="${START_Z}"
   start_yaw:="${START_YAW}"
   nav_start_delay_sec:=9.0
+  rog_map_start_delay_sec:=15.0
   map_start_delay_sec:=2.0
   rviz_delay_sec:=1000.0
   log_level:=warn
@@ -93,6 +116,93 @@ wait_for_topic_once() {
   local topic="$1"
   local timeout_sec="$2"
   wait_for_command "topic ${topic}" "${timeout_sec}" timeout 4 ros2 topic echo --once "${topic}"
+}
+
+read_topic_field() {
+  local topic="$1"
+  local field="$2"
+  timeout 5 ros2 topic echo --once "${topic}" --field "${field}" 2>/dev/null | awk '
+    $1 ~ /^[[:alnum:]_]+:$/ && NF >= 2 {print $2; exit}
+    NF == 1 && $1 != "---" {print $1; exit}
+  '
+}
+
+topic_field_equals() {
+  local topic="$1"
+  local field="$2"
+  local expected="$3"
+  local value
+  value="$(read_topic_field "${topic}" "${field}")"
+  [[ "${value,,}" == "${expected,,}" ]]
+}
+
+topic_field_positive() {
+  local topic="$1"
+  local field="$2"
+  local value
+  value="$(read_topic_field "${topic}" "${field}")"
+  [[ "${value}" =~ ^[0-9]+$ ]] && awk -v value="${value}" 'BEGIN {exit value > 0 ? 0 : 1}'
+}
+
+wait_for_generation_advance() {
+  local baseline="$1"
+  local timeout_sec="$2"
+  local deadline=$((SECONDS + timeout_sec))
+  local current
+  while (( SECONDS < deadline )); do
+    current="$(read_topic_field /rog_map_adapter/generation data)"
+    if [[ "${current}" =~ ^[0-9]+$ ]] &&
+      awk -v current="${current}" -v baseline="${baseline}" \
+        'BEGIN {exit current > baseline ? 0 : 1}'
+    then
+      echo "OK: ROGMap adapter generation advanced ${baseline} -> ${current}"
+      return 0
+    fi
+    sleep 1
+  done
+  fail "ROGMap adapter generation did not advance beyond ${baseline}"
+}
+
+assert_single_publisher_owner() {
+  local topic="$1"
+  local expected_node="$2"
+  local topic_info publisher_block
+  topic_info="$(ros2 topic info --verbose "${topic}")"
+  grep -q '^Publisher count: 1$' <<<"${topic_info}" || \
+    fail "${topic} publisher count is not one"
+  publisher_block="$(sed -n '/^Publisher count:/,/^Subscription count:/p' <<<"${topic_info}")"
+  grep -q "Node name: ${expected_node}$" <<<"${publisher_block}" || \
+    fail "${topic} publisher is not ${expected_node}"
+  echo "OK: ${topic} has one publisher owned by ${expected_node}"
+}
+
+verify_rog_map_planning_interface() {
+  local topic node_info generation
+  for topic in /rog_map/occ /rog_map/inf_occ /rog_map/unk /rog_map/esdf; do
+    wait_for_command "non-empty ${topic}" 120 topic_field_positive "${topic}" width
+  done
+  wait_for_command "ROGMap input fresh" 30 topic_field_equals /rog_map/stale data false
+  wait_for_command "ROGMap adapter ready" 120 \
+    topic_field_equals /rog_map_adapter/ready data true
+  wait_for_command "positive ROGMap adapter generation" 30 \
+    topic_field_positive /rog_map_adapter/generation data
+  wait_for_command "non-empty planning grid width" 30 \
+    topic_field_positive /rc_esdf/planning_grid info.width
+  wait_for_command "non-empty planning grid height" 30 \
+    topic_field_positive /rc_esdf/planning_grid info.height
+
+  assert_single_publisher_owner /rc_esdf/planning_grid ats_rog_map_adapter
+  node_info="$(ros2 node info /ats_rog_map_adapter)"
+  if grep -q '/rog_map/esdf' <<<"${node_info}"; then
+    fail "ats_rog_map_adapter must not subscribe to the ROGMap visualization ESDF cloud"
+  fi
+  grep -q '/rog_map/get_ground_projection' <<<"${node_info}" || \
+    fail "ats_rog_map_adapter does not expose the numeric projection service client"
+  echo "OK: adapter consumes the numeric projection service without /rog_map/esdf subscription"
+
+  generation="$(read_topic_field /rog_map_adapter/generation data)"
+  [[ "${generation}" =~ ^[0-9]+$ ]] || fail "cannot read ROGMap adapter generation"
+  wait_for_generation_advance "${generation}" 30
 }
 
 assert_plan_is_event_driven() {
@@ -187,6 +297,10 @@ wait_for_topic_once /traversability_slope_grid 120
 wait_for_topic_once /rc_esdf/planning_grid 120
 wait_for_topic_once /rc_esdf/signed_distance_grid 120
 wait_for_topic_once /rc_esdf/footprint_clearance_grid 120
+
+if [[ "${PLANNING_GRID_OWNER}" == "rog_map" ]]; then
+  verify_rog_map_planning_interface
+fi
 
 for node in /controller_server /planner_server /behavior_server /bt_navigator /velocity_smoother; do
   wait_for_lifecycle_active "${node}"
