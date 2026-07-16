@@ -2,7 +2,7 @@
 
 更新时间：2026-07-16
 
-有效更新窗口：2026-07-13 至 2026-07-16。本文只保留当前有效架构、最近验证结果和下一阶段任务。完整仿真统一使用 MuJoCo，`loopback_sim` 仅用于低成本接口检查。
+有效更新窗口：2026-07-10 至 2026-07-16（滚动保留最近一周）。本文只保留当前有效架构、最近验证结果和下一阶段任务，方便回溯和连续阅读。完整仿真统一使用 MuJoCo，`loopback_sim` 仅用于低成本接口检查。
 
 本文中的状态含义：
 
@@ -19,15 +19,18 @@
 
 V1 面向四驱四转舵轮地面哨兵，最终比赛主线确定为脱离 Nav2 的自研 ROS2 导航方案：
 
-`传感器 + 独立状态估计 -> ROGMap 概率地图/膨胀地图/3D ESDF -> 地面投影与 2.5D 可通行语义 -> RC-ESDF 规划接口 -> 自研目标管理 -> JPS -> MINCO S3 -> 独立 yaw -> footprint safety -> Local Collision Repair -> 全向 SE2 MPC -> 底盘`
+`传感器时间同步 -> Point-LIO 局部连续里程计 -> small_gicp 全局重定位观测 -> 定位融合/健康状态/localization epoch -> ROGMap 概率地图/膨胀地图/3D ESDF -> 地面投影与 2.5D 可通行语义 -> RC-ESDF 规划接口 -> ATS 目标管理/action -> JPS -> MINCO S3 -> 独立 yaw -> footprint safety -> Local Collision Repair -> 全向 SE2 MPC -> twist_to_motion_ctrl -> 四舵轮底盘`
+
+该箭头表示数据依赖和安全授权关系，不表示所有模块按目标串行调用。ATS Action Server 是 Goal Manager 的正式接口组成，不应再画成 Goal Manager 之前的第二个任务节点；ROGMap 与 adapter 持续异步更新地图，目标到达时 JPS/MINCO 只读取已 ready 的单次规划本地不可变 snapshot，Goal Manager 不负责同步调用建图。
 
 架构约束：
 
 1. ROGMap 是 V1 的建图与 ESDF 地图后端主线。
-2. ROGMap 不是完整定位器。它消费外部里程计与点云，不估计机器人位姿；状态估计仍须独立提供 `map -> odom -> base_link`。
+2. ROGMap 不是完整定位器。它消费外部里程计与点云，不估计机器人位姿；Point-LIO、重定位和后续定位融合必须独立提供 `map -> odom -> robot base`。
 3. 自研比赛链不得依赖 Nav2 的 `NavigateToPose`、BT Navigator、planner server、controller server、costmap 或 `/plan` 才能运行。
 4. 初期可继续复用 ROS 标准消息、TF2、RViz2 和 lifecycle，但不能把“使用 ROS2 基础设施”误写为“仍使用 Nav2 导航框架”。
 5. 舵轮状态保持世界系 `[x, y, yaw]`，控制保持车体系 `[vx, vy, wz]`。禁止迁入 DDR 差速车的 ICR、曲率转向或 `vy=0` 约束。
+6. `odom -> robot base` 必须保持局部连续，禁止用重定位结果直接覆盖；全局修正只允许作用于 `map -> odom`。任一时刻 `map -> odom` 只能有一个权威发布者。
 
 ### 0.2 Nav2 的新定位
 
@@ -49,9 +52,107 @@ Nav2 从 V1 默认比赛主线降级为：
 
 在 P3 中，`launch_swerve_mpc:=true` 会关闭 `fake_vel_transform`，`twist_to_motion_ctrl` 只订阅 `/cmd_vel_mpc`；目标管理器是 `/planner/emergency_stop` 与正式 `/minco/reference_path` 的唯一权威。Nav2 action 和 `/plan` 只保留在独立的对照模式，不能与 P3 运行图混用。
 
-## 1. ROGMap 参考来源与活动实现
+## 1. 状态估计、里程计与重定位
 
-### 1.1 本地来源与当前状态
+### 1.1 当前实机活动链
+
+当前实机链不能简化为“Point-LIO 直接发布 `odom -> base`”。活动源码与实机 launch 的实际数据流为：
+
+```text
+MID360 + IMU
+  -> point_lio
+     aft_mapped_to_init: camera_init -> body
+     cloud_registered: camera_init
+  -> loam_interface
+     lidar_odometry: odom -> front_mid360
+     registered_scan: odom
+  -> sensor_scan_generation
+     odometry: odom -> gimbal_yaw_odom
+     TF: odom -> gimbal_yaw_odom
+     TF: odom -> base_footprint
+
+registered_scan + prior PCD + /initialpose
+  -> small_gicp_relocalization
+     TF: map -> odom
+```
+
+Point-LIO 负责局部连续激光惯性里程计；`loam_interface` 将 Point-LIO 的 `camera_init/body` 契约转换为导航使用的 `odom/front_mid360`；`sensor_scan_generation` 再结合雷达外参生成机器人基座里程计和 TF。`small_gicp_relocalization` 位于 `src/ats_sentry_nav/small_gicp_relocalization`，是活动导航仓中的正式重定位包，不属于 `参考/`，实机主入口默认 `launch_small_gicp_relocalization:=True`。
+
+当前接口与唯一所有权如下：
+
+| 契约 | 当前生产者 | frame / 时间语义 | 当前边界 |
+| --- | --- | --- | --- |
+| `aft_mapped_to_init`、`cloud_registered` | Point-LIO | `camera_init -> body`；使用雷达测量时间 | Point-LIO 不直接拥有 `map -> odom`。 |
+| `lidar_odometry`、`registered_scan` | `loam_interface` | 转换到 `odom`；点云发布时选择时间最接近的里程计样本 | 最近样本匹配不是插值，实车高速运动下仍需验证时间误差。 |
+| `/odometry` | `sensor_scan_generation` | `odom -> gimbal_yaw_odom`；twist 为车体系 | 当前实机 launch 未发现到 `/localization` 的显式 remap。 |
+| `odom -> gimbal_yaw_odom`、`odom -> base_footprint` | `sensor_scan_generation` | 跟随 Point-LIO 里程计时间戳 | TF 查询失败当前回退单位变换，属于需要加固的失效安全风险。 |
+| `map -> odom` | 当前为 `small_gicp_relocalization` | GICP 接受结果；TF 以 `20 Hz` 定时发布 | 关闭 small_gicp 时才启用静态 `map -> odom`；二者由 launch 互斥。 |
+| `/localization` | 当前 MuJoCo/P2 状态估计入口 | `odom -> gimbal_yaw_odom` | 是仿真与 P2 已验证契约，不能在缺少 remap 证据时写成当前实机 Point-LIO 的直接输出。 |
+
+因此，V1 实机 Nav2-free 入口必须显式统一 `/odometry` 与 `/localization` 契约，可选择受版本控制的 remap 或单一适配节点；在完成 launch graph 验证前，该项状态为 `未实现`。不得让 ROGMap、MPC 和目标管理器分别猜测不同的里程计 topic。
+
+### 1.2 `small_gicp_relocalization` 当前行为与限制
+
+当前实现订阅 `registered_scan` 和 `/initialpose`，加载先验 PCD，GICP 收敛且满足内点/误差门禁后直接更新并广播 `map -> odom`。源码默认值为注册 timer `0.25 s`、累计窗口 `0.30 s`、位移触发 `0.10 m`、yaw 触发 `0.12 rad`、`min_source_points=500`、`min_inliers=200`，TF 发布周期 `50 ms`。这些是配置与定时器上限，不是目标机实测频率。
+
+实机配置当前使用 `min_inliers=200`，但 `max_registration_error=-1.0` 会关闭数值误差上限。当前节点也没有发布结构化的重定位质量、协方差、健康状态或 localization epoch，没有多帧确认，不会把修正渐进分摊到固定时间窗口。附件中的 Point-LIO `100 Hz~1 kHz`、small_gicp `0.5~1 Hz`、yaw `0.5 deg` 死区、位移 `0.3 m` 重规划阈值和 `0.5 s` 渐进修正均未在 ATS 目标机测量或标定，不能写成当前参数或验收结果。
+
+当前 TF 时间戳优先取最后扫描时间；扫描落后超过 `0.25 s` 时会把 `map -> odom` 时间戳钳制到当前时刻。该行为能减少 TF 查询超时，但不等于完成“按重定位观测时间与 Point-LIO 历史位姿对齐”，仍存在运动期间时间错配风险。
+
+### 1.3 目标优化架构与 TF 所有权
+
+最终优化方向是在保持局部里程计连续的前提下，将 small_gicp 从“直接改 TF 的唯一节点”演进为“带质量的全局重定位观测源”：
+
+```text
+Point-LIO / loam_interface / sensor_scan_generation
+  -> 连续 odom -> robot base + 带时间戳的里程计历史
+                                      \
+                                       -> localization fusion
+small_gicp + prior PCD                /      -> 唯一 map -> odom
+  -> relocalization observation             -> localization health
+     {stamp, pose, covariance,               -> localization epoch
+      inliers, error, sequence}
+
+localization health/epoch
+  -> ROGMap adapter / Goal Manager / MINCO / MPC 安全门禁
+```
+
+目标契约如下：
+
+1. small_gicp 观测必须携带原始测量时间、全局位姿、协方差或可解释质量、内点数、配准误差和单调序号；不得只靠一个无状态 TF 表示“重定位成功”。
+2. 定位融合节点必须使用观测时刻的 Point-LIO 历史位姿计算 `map -> odom`，再外推到当前时刻；禁止把迟到观测直接套到最新 odom。
+3. 当前 small_gicp 直接拥有 `map -> odom`；引入融合节点后，必须关闭 small_gicp TF 和静态 fallback，由融合节点成为唯一发布者。禁止三个来源同时发布同一 TF。
+4. 不新增会破坏局部连续性的“平滑 odom”替换 Point-LIO。MPC 继续使用连续 `odom` 状态；如需全局平滑位姿，只作为诊断或任务层输出，不得形成第二条底盘状态权威。
+5. 每次接受会改变规划几何关系的全局修正都推进 localization epoch。adapter 发布、Goal Manager 目标、MINCO snapshot/reference 和 MPC tracker 必须绑定该 epoch；旧 epoch 的地图、候选轨迹与 reference 一律拒绝。
+6. 小修正是否低通、大修正阈值和修正时间常数必须通过 rosbag replay、MuJoCo 注入和目标机实测标定。未标定前采用保守策略：停止当前执行、失效旧 reference，等待新 epoch 地图 ready 后重规划。
+
+localization epoch 与 ROG source generation、adapter publication epoch、MINCO local snapshot generation 是不同维度，禁止复用同一个数字或宣称天然一致。规划提交至少要同时校验“定位 epoch 未变”和“本次地图/轨迹 snapshot 仍有效”；只有结构化接口贯通并由 consumer 校验后，才能声称定位修正到轨迹执行的端到端版本一致。
+
+### 1.4 重定位健康与安全状态机
+
+定位健康至少区分 `UNINITIALIZED`、`TRACKING`、`RELOCALIZING`、`DEGRADED`、`LOST`。安全行为必须由 Goal Manager 统一收敛：
+
+| 事件/状态 | 规划与执行行为 |
+| --- | --- |
+| `UNINITIALIZED`、`LOST`、定位 stale、TF 失败 | `emergency_stop=true`，清空 candidate/reference 和 MPC tracker，保证 `/cmd_vel_mpc`、`/motion_control` 为零。 |
+| 正在验证重定位或接受显著全局修正 | 先急停并推进 localization epoch；旧地图 snapshot/reference 禁止继续执行。 |
+| 单帧 GICP 失败或质量不足 | 拒绝该观测，不直接跳变 TF；连续失败或超时后进入 `DEGRADED/LOST`。 |
+| 新 epoch 定位与地图恢复 ready，仍有活动目标 | 只允许 Goal Manager 重新触发 JPS/MINCO，收到同 epoch 安全 reference 后解除急停。 |
+| 新 epoch 恢复但没有活动目标 | 保持急停和双零；不得恢复急停前 reference。 |
+
+该状态机、结构化观测、定位融合、localization epoch 和重定位触发的自动重规划当前均为 `未实现`。当前已实现边界仅是 Point-LIO 局部里程计链、small_gicp 直接 `map -> odom` 和 launch 互斥静态 fallback。[Confidence: High] 证据来自活动源码与 launch；尚无本轮实机或 rosbag 运行验证。
+
+### 1.5 后续重定位验收门禁
+
+1. 使用 rosbag 或可控仿真分别注入正常修正、迟到观测、乱序观测、单帧假匹配、连续配准失败、Point-LIO stale、TF 缺失、小修正和大跳变；每个用例使用独立进程或明确清理全部状态。
+2. 验证 `map -> odom` publisher 始终唯一，`odom -> robot base` 在重定位前后不跳变；记录观测时间、处理时间、修正量、内点数、误差、定位状态和 localization epoch。
+3. 大修正期间必须观测 `emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`，旧 planning-grid snapshot、候选 reference、正式 reference 和 MPC warm-start 均失效。
+4. 恢复后有活动目标时必须生成新 epoch 的 JPS raw path、MINCO reference 和 MPC 预测后才能运动；没有活动目标时保持双零。
+5. 记录重定位接受率、错误接受率、恢复时间和端到端延迟，但在目标机完成受控测量前不得给出固定运行频率、滤波时间常数或跳变阈值。
+
+## 2. ROGMap 参考来源与活动实现
+
+### 2.1 本地来源与当前状态
 
 上游参考源码保留在 `参考/src/rog_map`，只用于溯源与比较。活动实现位于 `src/ats_sentry_nav/ats_rog_map`，属于 `ats_sentry_nav` 独立 Git 仓库；构建和运行均不依赖 `参考/`。
 
@@ -66,7 +167,7 @@ Nav2 从 V1 默认比赛主线降级为：
 5. 四类点云均是诊断/RViz 数据，禁止从 `/rog_map/esdf` 点云反解析为 MINCO 距离场。
 6. 输入与调试点云默认 best-effort、depth 1；输入过期通过 `cloud_timeout_sec` 与 `odom_timeout_sec` 报告 `/rog_map/stale`。MuJoCo 因 ESDF 计算开销使用 `2.0 s` 超时，实车仍需按目标机负载复核。
 
-### 1.2 ATS 侧目标接口
+### 2.2 ATS 侧目标接口
 
 P2 用适配层保持现有 JPS/MINCO 规划接口：
 
@@ -82,21 +183,21 @@ P2 用适配层保持现有 JPS/MINCO 规划接口：
 
 P2 已新增 ATS adapter 并可通过 `planning_grid_owner:=rog_map` 切换 `/rc_esdf/planning_grid` 唯一所有者。MINCO 直接消费浮点距离与梯度的 provider 仍是后续优化，不能把 adapter 内部 snapshot 写成已经贯通到 MINCO。
 
-### 1.3 frame 与地图语义
+### 2.3 frame 与地图语义
 
 目标 frame 约束：
 
 1. `map` 是比赛全局规划 frame。
-2. 状态估计发布 `map -> odom`，底盘里程计发布 `odom -> base_link`；传感器外参连接到 `base_link`。
+2. 当前实机由 `small_gicp_relocalization` 发布 `map -> odom`，由 `sensor_scan_generation` 发布 `odom -> gimbal_yaw_odom` 与 `odom -> base_footprint`；未来引入定位融合后由融合节点独占 `map -> odom`，不得增加第二个发布者。
 3. ROGMap 必须按点云时间戳查询传感器到 `map` 的位姿，禁止只取“最近一帧 odom”而忽略时间同步。
 4. 地面投影必须显式定义高度带、坡度阈值、悬空障碍、地面以下噪点和 unknown 策略。
 5. ROG 数值 service 内 occupancy、distance、gradient 与 source generation 属于同一快照；adapter 发布的 `OccupancyGrid` 不携带 source generation，MINCO 当前以 callback 本地编号构造不可变 grid + 二维 RC-ESDF snapshot。
 
 ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变换并融合到静态 `map` planning grid。MINCO 在该 grid 上规划后把 reference 通过 TF 转到 MPC 所需的 `odom`，TF 失败时拒绝发布并急停。
 
-## 2. 当前 RC-ESDF、JPS、MINCO 与 MPC 基线
+## 3. 当前 RC-ESDF、JPS、MINCO 与 MPC 基线
 
-### 2.1 当前地图输入
+### 3.1 当前地图输入
 
 当前 P2 已验证链使用：
 
@@ -111,7 +212,7 @@ ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变
 
 `terrain_analysis_ext` 使用 ROS 标准 `x + y * width` 索引。`/rc_esdf/planning_grid` 当前以 `0.10 m` 规划分辨率上采样局部 `0.40 m` terrain 语义，并融合静态 PGM 墙体。静态图分辨率约为 `0.02847 m`，adapter 不再只采样输出单元中心，而是聚合每个输出 footprint 有面积重叠的所有静态源单元；任一 occupied 源单元都会保留。聚焦 GTest 已覆盖非整除分辨率、平移 origin 与非零 yaw。
 
-### 2.2 当前 signed distance 语义
+### 3.2 当前 signed distance 语义
 
 `RcTraversabilityEsdfProvider` 使用精确二维 signed Euclidean Distance Transform，不使用 `fake_costmap_esdf_provider` 作为运行时后端。
 
@@ -124,7 +225,7 @@ ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变
 
 运行时 MINCO footprint gate 使用 `0.70 x 0.55 m + 0.05 m` 的定向矩形。adapter 的 ego unknown 外接圆清理已默认设为 `0.0`；在实现带 yaw 的矩形栅格化前不得启用，避免把 footprint 外 unknown 改成 free。
 
-### 2.3 自研规划控制的已完成能力
+### 3.3 自研规划控制的已完成能力
 
 1. `minco_planner` 已能直接订阅 `goal_pose`；`global_plan_topic` 设为空后不会订阅 Nav2 `/plan`。
 2. `onGoal()` 能从 TF 获取当前位姿，在最新 planning grid 上独立运行 JPS，失败时回退 A*，不需要 Smac 路径内容。
@@ -135,9 +236,9 @@ ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变
 
 P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `NavigateToPose`/`/plan` 的回归。P2 仍可继续做 MINCO 直接数值 ESDF provider 与 source generation 结构化传播；这些优化不应替换当前 RC-ESDF 规划语义。
 
-## 3. Nav2-free 目标运行链
+## 4. Nav2-free 目标运行链
 
-### 3.1 最小可运行链
+### 4.1 最小可运行链
 
 已实现的最小链为：
 
@@ -147,21 +248,21 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 
 `ROS_DOMAIN_ID=162/164/165` 的实际进程图同时验证 ATS action 存在、`/plan` 不存在，`/rc_esdf/planning_grid` 仅由 `ats_rog_map_adapter` 发布，`/cmd_vel_mpc` 为 `ats_swerve_mpc -> twist_to_motion_ctrl`，`/motion_control` 为 `twist_to_motion_ctrl -> ats_mujoco_sim` 的一对一链路。
 
-### 3.2 自研目标管理
+### 4.2 自研目标管理
 
 1. `/goal_pose` 已先通过目标管理器打通 Nav2-free 最小闭环；`ROS_DOMAIN_ID=129` 到达 `(-9.089719, 1.463896)`，误差 `0.089926 m`。它仅是兼容入口，正式任务入口为 `ats_navigation_interfaces/action/NavigateToPose`。
 2. ATS action 支持 goal、feedback、result、cancel、preempt、timeout；结果码显式区分成功、取消、抢占、超时、地图未就绪、规划失败和 TF 失败。取消、抢占、超时、到达、TF/地图/规划失败均清空 active task、candidate reference 与旧授权，并发布急停。
 3. `ats_goal_manager` 只负责任务生命周期、map heartbeat steady-clock lease、goal_id/candidate stamp 复核、reference 重定时和急停；JPS/MINCO 只规划，MPC 只跟踪。提交点在同一互斥区先发布 `emergency_stop=false`，再发布新的正式 reference；恢复 ready 本身不能复活旧 reference。
 4. action 和 `/goal_pose` 都不调用 `nav2_msgs/action/NavigateToPose`；决策层应只调用 ATS action。
 
-## 4. 最近验证记录
+## 5. 最近验证记录
 
-### 4.1 2026-07-13
+### 5.1 2026-07-13
 
 1. 扩大矩形回归 `TEST_PROFILE=rectangle` 五段均完成，south/north 检测到非零 `/cmd_vel_mpc.linear.y`，证明控制未退化为差速转向。
 2. 当前实验链已验证 `/plan`、`/minco/raw_path`、`/minco/reference_path`、MPC reference/predicted path、`/cmd_vel_mpc`、`/motion_control` 和单一控制发布者/订阅者。
 
-### 4.2 2026-07-14
+### 5.2 2026-07-14
 
 1. `UsesYawAwareFootprintToIncreaseEdgeClearance` 单测确认 P2.1 后最小足迹净空大于 `0.39 m`，较中心候选提高超过 `0.05 m`，连续起终点不变。
 2. `test_rc_esdf_map`、`test_grid_jps`、`test_minco_trajectory_optimizer`、`test_yaw_spline_planner` 全部通过。
@@ -170,7 +271,7 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 
 验证边界：以上结果证明当前静态 MuJoCo 场景中的 Nav2 上游 + 自研规划控制链可运行，不证明 ROGMap、自研 action、Nav2-free 启动、动态障碍、连续 swept volume 或实车安全已完成。
 
-### 4.3 2026-07-15：ROGMap P1 与云台/底盘兼容链
+### 5.3 2026-07-15：ROGMap P1 与云台/底盘兼容链
 
 1. `ats_rog_map`、`ats_nav_bringup`、`ats_sentry_bringup` 与 `ats_mujoco_sim` 单线程构建通过；`prob_map_log_odds_fusion_test`、`prob_map_stale_decay_test`、`test_split_robot_sensor_pose` 全部通过。
 2. 在隔离 `ROS_DOMAIN_ID=88`、无 viewer/RViz、`launch_nav2:=false`、`launch_rog_map:=true` 的 MuJoCo 验收中，`/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 的宽度分别为 `2`、`239`、`9797`、`2601`，均为 `odom` frame；持续输入时 `/rog_map/stale=false`。
@@ -180,7 +281,7 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 
 验证边界：本节只验证了当前稀疏 MuJoCo 点云、调试地图和开关路由。`rog_map_report_025.yaml` 尚未在目标机完成 50 Hz、约 6 ms、峰值 RSS 或完整 2.5 cm ESDF 性能验收；不得将技术报告数字写成 ATS 实测结果。
 
-### 4.4 2026-07-16：ROGMap P2 地面规划闭环
+### 5.4 2026-07-16：ROGMap P2 地面规划闭环
 
 源码与组件证据：
 
@@ -223,7 +324,7 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 4. `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子事务；当前通过源端互斥、提交点重定时、MPC 旧 reference 拒绝和 lease fail-stop 限制风险。
 5. 本轮没有在目标机复现技术报告的 `50 Hz`、约 `6 ms`、CPU 或峰值 RSS，也没有完成受控尾延迟基准；运行日志中的单次耗时不能替代性能验收。
 
-### 4.5 2026-07-16：MuJoCo 入口与回归脚本复验
+### 5.5 2026-07-16：MuJoCo 入口与回归脚本复验
 
 1. `ats_mujoco_sim.launch.py` 是裸底盘/传感器入口，默认回退到通用 `swerve_chassis.xml`，不启动 `map_server`、Nav2、ROGMap adapter、MINCO 或 MPC；其轻量 RViz 也没有 `/map` display。固定 RMUC 场地与导航验证必须使用 `ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py`。P2 手工闭环还需设置 `planning_grid_owner:=rog_map launch_swerve_mpc:=true`；在 Bash 中统一 source `install/setup.bash`。
 2. 用户附件中的 single 回归实际上已经得到 `NavigateToPose=SUCCEEDED`、`/plan=59`、raw/reference `3/80` 和 `collisions=0`。原最终失败来自测试脚本调用环境中不存在的 `rg`，不是地图、规划或控制失败。两个 MuJoCo 回归脚本现已使用系统基础 `grep` 完成等价日志匹配，不再把 ripgrep 作为隐式运行依赖。
@@ -232,7 +333,7 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 5. 同一最终脚本以 `ROS_DOMAIN_ID=212 TEST_PROFILE=red_box GOAL_TIMEOUT=180` 完成红框长路线：中转终点 `(-8.892180, 1.472841)`、误差 `0.012507 m`；红框终点 `(-0.114627, -4.070920)`、误差 `0.075178 m`。两段 action 均 `SUCCEEDED`，最终段 `/plan=128`、首次捕获 raw/reference `37/128`、最终有效规划 `16/512`、MPC reference/predicted `21/21`、两级速度非零，generation `296 -> 991`，离散 footprint 冲突 `0`。
 6. `ROS_DOMAIN_ID=216 scripts/test_mujoco_nav_chain.sh` 完整通过固定地图、TF、terrain/slope、RC-ESDF 三类栅格、Nav2 lifecycle、非空 `35` 点 local elastic path、事件驱动 `/plan`、无空 FollowPath 和无 controller abort。该脚本仍是 Nav2 对照，不计算终点误差；物理接触仍未验证，以上结果也不证明 P3 Nav2-free。
 
-### 4.6 2026-07-16：P3 Nav2-free 目标管理与启动链
+### 5.6 2026-07-16：P3 Nav2-free 目标管理与启动链
 
 源码、构建与接口证据：
 
@@ -273,7 +374,7 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 3. ROG source generation 尚未以结构化 OccupancyGrid/数值 ESDF 消息端到端传给 MINCO；当前只证明一次 MINCO 局部不可变 snapshot 内的一致性。MINCO 也尚未直接消费 adapter 数值 ESDF。
 4. 本轮未在目标机测量技术报告的 `50 Hz`、约 `6 ms`、CPU、内存或尾延迟；不得写为 ATS 实测性能。
 
-## 5. 下一阶段实施顺序
+## 6. 下一阶段实施顺序
 
 ### P0：架构与交接文档
 
@@ -334,19 +435,21 @@ P2 后续优化但不阻塞 P3 的范围：
 3. 已把任务生命周期和正式 reference/急停交给目标管理器，JPS/MINCO 与 MPC 保持职责分离；P3 graph、planning grid、急停与速度/底盘输入的唯一所有权已实际检查。
 4. 已独立注入 adapter lease、projection timeout、input stale、all-unknown、free-unreachable、cancel、preempt、timeout、TF failure，并在恢复后验证无新目标时双零。unsafe trajectory、连续 swept footprint、实车约束和独立 contact evaluator 转入 P4。
 
-### P4：连续安全与舵轮执行约束
+### P4：定位融合、连续安全与舵轮执行约束
 
-1. 为相邻 MINCO 时刻补连续 swept-volume 检查，覆盖窄门、贴边、纯横移和大 yaw 变化。
-2. 依据实车轴距、轮距、最大轮速、最大舵角速度和反馈延迟标定 MPC 约束。
-3. 完成控制 mux、急停优先级、地图/规划/MPC 健康检查后再灰度到实车。
+1. 为 small_gicp 增加带时间戳、质量、协方差和序号的重定位观测；增加唯一 `map -> odom` 融合权威、定位健康状态和 localization epoch。
+2. 补齐实机 `/odometry -> /localization` 显式契约，按观测时间对齐 Point-LIO 历史位姿；验证 stale、错误重定位、连续失败、跳变、恢复和重规划时旧 reference 不复活。
+3. 为相邻 MINCO 时刻补连续 swept-volume 检查，覆盖窄门、贴边、纯横移和大 yaw 变化。
+4. 依据实车轴距、轮距、最大轮速、最大舵角速度和反馈延迟标定 MPC 约束。
+5. 完成控制 mux、急停优先级、定位/地图/规划/MPC 健康检查后再灰度到实车。
 
-## 6. 下一对话接续入口
+## 7. 下一对话接续入口
 
-下一对话从 P4 连续 swept footprint、实车舵轮执行约束和 P2 的结构化 generation/直接数值 ESDF provider 加固开始；不得重复实现 ROGMap/adapter，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint 或 stale 安全门禁换取路线通过。
+下一对话先从实机里程计 topic 统一、small_gicp 结构化观测、唯一 `map -> odom` 融合权威与 localization epoch 开始，再推进 P4 连续 swept footprint、实车舵轮约束和 P2 的结构化 generation/直接数值 ESDF provider 加固；不得重复实现 ROGMap/adapter，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint 或 stale 安全门禁换取路线通过。
 
 必须保持以下边界：
 
-1. Point-LIO 继续提供 `/localization` 与 `/registered_scan`；不得用 ROGMap 替换里程计。
+1. Point-LIO 链继续提供局部连续里程计与 `/registered_scan`，不得用 ROGMap 替换里程计。MuJoCo/P2 当前使用 `/localization`，实机链当前发布 `/odometry`；必须通过显式、唯一、受版本控制的接口统一后再宣称实机契约完成。
 2. RC-ESDF、JPS、MINCO 与全向 SE2 MPC 继续保留；P2、P3 及后续运行中 `/rc_esdf/planning_grid` 始终只能有一个发布者。
 3. 默认保留 `launch_fake_vel_transform:=True` 与 `launch_chassis_vel_transform:=True`。固定雷达迁移时可关闭开关；关闭 fake-yaw 仍保留零旋转兼容 TF，待所有 Nav2/行为参数改为固定 frame 后再删除该兼容层。
 4. P3 已保留 P2 owner、heartbeat、snapshot 和急停契约；后续 P3 正式回归必须继续显式 `launch_nav2:=false`、使用 ATS action、拒绝 `/plan`，Nav2 `NavigateToPose` 只能作为独立对照。
@@ -365,7 +468,7 @@ colcon test --base-paths src \
 
 MuJoCo P1 smoke test 使用 `launch_nav2:=false launch_rog_map:=true`，并关闭 viewer、RViz、MPC 与速度 bridge；验收 `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 非空、`frame_id=odom`、`/rog_map/stale=false`，且 `ats_rog_map` 不发布 TF。
 
-## 7. 当前构建与回归入口
+## 8. 当前构建与回归入口
 
 Nav2 对照和 P3 正式入口必须分开运行：
 
@@ -410,10 +513,10 @@ for fault in adapter_lease service_timeout input_stale unknown unreachable; do
 done
 ```
 
-## 8. 维护约束
+## 9. 维护约束
 
 1. 后续提交统一在各仓库 `develop` 分支完成并推送 `origin/develop`。
-2. 文档保留最近一周内当前决策所需的验证记录，方便回溯和阅读；超过一周的过期状态合并为当前结论，不保留无关历史流水账。
+2. 文档滚动保留最近七个自然日内当前决策所需的验证记录，方便回溯和阅读；超过一周的过期状态合并为当前结论，不保留无关历史流水账。
 3. 参考目录不是运行时依赖。进入比赛链的源码、配置、消息定义和许可证信息必须受版本控制。
 4. 修改地图语义时必须验证 frame、时间戳、分辨率、origin、unknown 和 signed distance；P3 的正式门禁是 Nav2-free rectangle 与 red_box，Nav2 红框只保留为对照。
 5. 保留 Nav2 模式作为对照，直到自研链具备同等或更高覆盖；新功能优先落在自研链，禁止重新引入 Nav2 action 或 `/plan` 依赖。
