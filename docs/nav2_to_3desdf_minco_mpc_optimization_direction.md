@@ -45,9 +45,9 @@ Nav2 从 V1 默认比赛主线降级为：
 | --- | --- | --- |
 | Nav2 + MPPI | `SmacPlanner2D -> RC-ESDF local elastic path -> Nav2BSplineSmoother -> trajectory_speed_governor -> MPPI -> 底盘` | `已验证`；仅作稳定回归与对照，不再是 V1 比赛目标。 |
 | ROGMap owner + Nav2 上游 + 自研规划控制 | `NavigateToPose -> /plan 目标触发 -> ROGMap 数值投影/2.5D 融合 -> JPS -> MINCO -> 独立 yaw -> footprint gate/repair -> SE2 MPC -> 底盘` | `P2 最小实现范围本阶段完成`；ROGMap adapter 是 planning grid 唯一所有者，但目标管理和全局触发仍依赖 Nav2。 |
-| ROGMap + 自研 ROS2 导航 | `ATS goal/action -> ROGMap -> JPS -> MINCO -> 独立 yaw -> footprint safety/repair -> SE2 MPC` | `P3 未实现`；尚无自研 action、Nav2-free launch 和不依赖 `/plan` 的正式回归。 |
+| ROGMap + 自研 ROS2 导航 | `/goal_pose` 或 ATS `NavigateToPose` action -> 目标管理 -> ROGMap/adapter -> JPS -> MINCO -> 独立 yaw -> footprint safety/repair -> SE2 MPC -> 底盘 | `P3 主线已验证`；正式 MuJoCo 入口显式 `launch_nav2:=false`，不依赖 `/plan` 或 Nav2 action。 |
 
-当前 `launch_swerve_mpc:=true` 会关闭 `fake_vel_transform`，`twist_to_motion_ctrl` 只订阅 `/cmd_vel_mpc`，因此 MPPI 不能同时驱动 MuJoCo 底盘。但 Nav2 action 和 `/plan` 仍在上游运行，不能据此声称已脱离 Nav2。
+在 P3 中，`launch_swerve_mpc:=true` 会关闭 `fake_vel_transform`，`twist_to_motion_ctrl` 只订阅 `/cmd_vel_mpc`；目标管理器是 `/planner/emergency_stop` 与正式 `/minco/reference_path` 的唯一权威。Nav2 action 和 `/plan` 只保留在独立的对照模式，不能与 P3 运行图混用。
 
 ## 1. ROGMap 参考来源与活动实现
 
@@ -133,34 +133,26 @@ ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变
 5. yaw-aware footprint RC-ESDF 内点修正、最终矩形 gate 和可选 local repair 已接入。
 6. `ats_swerve_mpc` 使用 `[vx, vy, wz]` 跟踪 MINCO reference，输出 `/cmd_vel_mpc`。
 
-当前主要缺口不是重新实现 JPS/MINCO/MPC，而是 P3 自研 goal/action 状态机、Nav2-free launch 和不依赖 `NavigateToPose`/`/plan` 的回归；P2 仍可继续做 MINCO 直接数值 ESDF provider 与 source generation 结构化传播。
+P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `NavigateToPose`/`/plan` 的回归。P2 仍可继续做 MINCO 直接数值 ESDF provider 与 source generation 结构化传播；这些优化不应替换当前 RC-ESDF 规划语义。
 
 ## 3. Nav2-free 目标运行链
 
 ### 3.1 最小可运行链
 
-下一阶段首先实现以下最小链：
+已实现的最小链为：
 
-`MuJoCo sensors/localization -> ats_rog_map_node -> ats_rog_map_adapter -> /rc_esdf/planning_grid + 数值 ESDF -> /goal_pose -> JPS -> MINCO -> yaw/footprint gate -> SE2 MPC -> /cmd_vel_mpc -> twist_to_motion_ctrl -> /motion_control`
+`MuJoCo sensors/localization -> ats_rog_map_node -> ats_rog_map_adapter -> /rc_esdf/planning_grid -> /goal_pose 或 /ats_navigate_to_pose -> ats_goal_manager -> /ats_goal_manager/planner_goal -> JPS/MINCO -> candidate reference/status -> ats_goal_manager -> 正式 reference + emergency_stop -> SE2 MPC -> /cmd_vel_mpc -> twist_to_motion_ctrl -> /motion_control`
 
-该模式必须满足：
+运行时 `launch_nav2:=false` 会启动非 lifecycle 的 `static_map_publisher` 和 `ats_goal_manager`，而不会启动 `bt_navigator`、`planner_server`、`controller_server`、`behavior_server`、`velocity_smoother`、`map_server` 或 Nav2 lifecycle manager。launch 覆盖 MINCO 为 `goal_topic=""`、`global_plan_topic=""`、`goal_request_topic=/ats_goal_manager/planner_goal`、`planner_status_topic=/minco/planning_status`、`candidate_reference_path_topic=/minco/reference_path_candidate`、`planner_manages_emergency_stop=false`；故不订阅 `/plan`，也不由 MINCO 发布正式 reference 或急停。
 
-1. `launch_nav2:=false` 时仍能接收目标、生成路径并到达目标。
-2. 不存在 Nav2 `bt_navigator`、`planner_server`、`controller_server`、`behavior_server` 或 lifecycle manager。
-3. 不订阅 `/plan`，不调用 `nav2_msgs/action/NavigateToPose`。
-4. `/cmd_vel_mpc` 只有一个控制发布者，底盘 bridge 只有一个对应订阅入口。
-5. ROGMap/adapter 未就绪、地图过期、目标不可达、轨迹被 gate 拒绝或 MPC 异常时，任务状态必须明确失败并停止底盘。
+`ROS_DOMAIN_ID=162/164/165` 的实际进程图同时验证 ATS action 存在、`/plan` 不存在，`/rc_esdf/planning_grid` 仅由 `ats_rog_map_adapter` 发布，`/cmd_vel_mpc` 为 `ats_swerve_mpc -> twist_to_motion_ctrl`，`/motion_control` 为 `twist_to_motion_ctrl -> ats_mujoco_sim` 的一对一链路。
 
 ### 3.2 自研目标管理
 
-迁移顺序：
-
-1. 首先使用现有 `/goal_pose` 贯通 Nav2-free 仿真，验证地图、JPS、MINCO 和 MPC 的因果链。
-2. 随后在 ATS 自有接口包中新增 action，提供 goal、feedback、result、cancel、preempt 和 timeout；不能仅用无状态 topic 作为比赛任务接口。
-3. 自研 action server 负责任务状态与安全停止，规划器只负责地图上的路径生成，MPC 只负责跟踪，避免职责重新耦合成单节点。
-4. 决策层最终只调用 ATS action，不直接依赖 Nav2 action 类型。
-
-`src/interfaces` 当前没有 `.action` 定义，因此 action 接口属于未实现任务，不能在 launch 或文档中写成已有能力。
+1. `/goal_pose` 已先通过目标管理器打通 Nav2-free 最小闭环；`ROS_DOMAIN_ID=129` 到达 `(-9.089719, 1.463896)`，误差 `0.089926 m`。它仅是兼容入口，正式任务入口为 `ats_navigation_interfaces/action/NavigateToPose`。
+2. ATS action 支持 goal、feedback、result、cancel、preempt、timeout；结果码显式区分成功、取消、抢占、超时、地图未就绪、规划失败和 TF 失败。取消、抢占、超时、到达、TF/地图/规划失败均清空 active task、candidate reference 与旧授权，并发布急停。
+3. `ats_goal_manager` 只负责任务生命周期、map heartbeat steady-clock lease、goal_id/candidate stamp 复核、reference 重定时和急停；JPS/MINCO 只规划，MPC 只跟踪。提交点在同一互斥区先发布 `emergency_stop=false`，再发布新的正式 reference；恢复 ready 本身不能复活旧 reference。
+4. action 和 `/goal_pose` 都不调用 `nav2_msgs/action/NavigateToPose`；决策层应只调用 ATS action。
 
 ## 4. 最近验证记录
 
@@ -226,7 +218,7 @@ ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变
 验证边界：
 
 1. `footprint_collisions=0` 只表示 MINCO 离散定向矩形 gate 未发现冲突采样。项目尚无独立 MuJoCo contact evaluator，因此物理接触次数为“未验证”，不能写成零碰撞。
-2. 当前红框脚本仍固定 `launch_nav2:=true`，通过 `NavigateToPose` 与 `/plan` 触发自研链；P3 Nav2-free 尚未实现。
+2. 本节的 P2 红框脚本固定 `launch_nav2:=true`，因此只证明 Nav2 上游 + 自研规划控制；P3 Nav2-free 的独立证据见 4.6，二者不能互相替代。
 3. ROG source generation 尚未通过 `OccupancyGrid` 结构化传播到 MINCO；MINCO 也尚未直接消费 adapter 数值 ESDF，而是从融合 planning grid 重建二维 RC-ESDF。
 4. `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子事务；当前通过源端互斥、提交点重定时、MPC 旧 reference 拒绝和 lease fail-stop 限制风险。
 5. 本轮没有在目标机复现技术报告的 `50 Hz`、约 `6 ms`、CPU 或峰值 RSS，也没有完成受控尾延迟基准；运行日志中的单次耗时不能替代性能验收。
@@ -239,6 +231,47 @@ ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变
 4. 修复后在不含 `rg` 的精简 `PATH` 中运行 `ROS_DOMAIN_ID=211 TEST_PROFILE=single PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none`：终点 `(-9.062361, 1.466486)`，误差 `0.062460 m`；`/plan=59`、raw/reference `3/80`、MPC reference/predicted `21/21`、两级速度非零，generation `294 -> 466`，离散 footprint 冲突 `0`。
 5. 同一最终脚本以 `ROS_DOMAIN_ID=212 TEST_PROFILE=red_box GOAL_TIMEOUT=180` 完成红框长路线：中转终点 `(-8.892180, 1.472841)`、误差 `0.012507 m`；红框终点 `(-0.114627, -4.070920)`、误差 `0.075178 m`。两段 action 均 `SUCCEEDED`，最终段 `/plan=128`、首次捕获 raw/reference `37/128`、最终有效规划 `16/512`、MPC reference/predicted `21/21`、两级速度非零，generation `296 -> 991`，离散 footprint 冲突 `0`。
 6. `ROS_DOMAIN_ID=216 scripts/test_mujoco_nav_chain.sh` 完整通过固定地图、TF、terrain/slope、RC-ESDF 三类栅格、Nav2 lifecycle、非空 `35` 点 local elastic path、事件驱动 `/plan`、无空 FollowPath 和无 controller abort。该脚本仍是 Nav2 对照，不计算终点误差；物理接触仍未验证，以上结果也不证明 P3 Nav2-free。
+
+### 4.6 2026-07-16：P3 Nav2-free 目标管理与启动链
+
+源码、构建与接口证据：
+
+1. 新增 `ats_navigation_interfaces` 的 ATS `NavigateToPose` action、`PlannerGoal`、`PlannerStatus`，以及 `ats_goal_manager`。前者不依赖 `nav2_msgs`；后者处理 `/goal_pose` 与 `/ats_navigate_to_pose`，将单调 `goal_id` 发给 MINCO，并独占正式 `/minco/reference_path` 与 `/planner/emergency_stop`。
+2. MINCO 仅向 `/minco/reference_path_candidate` 与 `/minco/planning_status` 反馈候选；每个 planning-grid callback 仍构造一个不可变本地 snapshot，JPS、二维 RC-ESDF、MINCO clearance、footprint gate 和 repair 不跨 generation 混用。`clearance_aware` yaw 已对末端原地 yaw 过渡逐点复核 footprint gate；MPC 也能在零平移、yaw 变化的 tail segment 按 yaw 推进跟踪时间。
+3. `launch_nav2:=false` 时 MuJoCo 使用 `static_map_publisher.py` 读取 RMUC YAML/PGM 并保持三态 OccupancyGrid、origin、分辨率、`map` frame、reliable/transient-local QoS；没有 `map_server` 或 lifecycle manager。RViz 配置已按当前 ROGMap/adapter、raw/reference/MPC 路径框架更新。
+4. 最终 Release 构建为 `ats_navigation_interfaces`、`ats_goal_manager`、`ats_rog_map_adapter`、`minco_planner`、`ats_swerve_mpc`、`ats_mujoco_sim` 共 `6 packages finished`。`test_goal_lifecycle`、`test_ground_projection_fusion`、`test_yaw_spline_planner`、`test_trajectory_tracker` 与静态地图 Python 单测均通过；launch `--show-args`、改动 Python `py_compile`、两个回归脚本 `bash -n` 通过。`minco_planner` 全包 lint 的既有 `copyright`、`cpplint`、`clang_format` 失败仍不能写成全包测试通过。
+
+所有 P3 名义路线均使用独立 ROS domain、`use_viewer:=false`、`show_viewer:=false`、`launch_mujoco_rviz:=false`、`NAVIGATION_MODE=p3`、`P3_GOAL_ENTRY=action`、`PLANNING_GRID_OWNER=rog_map` 与 `launch_nav2:=false`：
+
+| 场景 | 终点与二维误差 | JPS/MINCO/MPC/底盘证据 | 离散 footprint 冲突 |
+| --- | --- | --- | ---: |
+| single（`ROS_DOMAIN_ID=162` 名义段） | `(-9.017683, 1.463644)`，`0.018791 m` | action feedback + `SUCCEEDED`；raw/reference `3/82`；MPC reference/predicted `21/21`；两级速度非零；adapter generation 名义段 `326 -> 493` | `0` |
+| rectangle stage/east/south/west/north（`ROS_DOMAIN_ID=164`） | `(-9.502665,1.472583)`/`0.003711 m`；`(-8.852614,1.476912)`/`0.033339 m`；`(-8.817343,1.146728)`/`0.004215 m`；`(-9.500722,1.142227)`/`0.007806 m`；`(-9.500829,1.468654)`/`0.001581 m` | raw/reference 依次 `3/58`、`3/42`、`2/26`、`2/27`、`2/25`；south/north 实测非零 `linear.y`；MPC reference/predicted `21/21`、两级速度非零；generation `178 -> 696` | 每段 `0` |
+| red_box 中转（`ROS_DOMAIN_ID=165`） | `(-8.947054,1.467880)`，`0.067088 m` | raw/reference `3/88`，action `SUCCEEDED` | `0` |
+| red_box 最终目标 `(-0.04,-4.08)`（`ROS_DOMAIN_ID=165`） | `(-0.038637,-4.087151)`，`0.007280 m` | 首次捕获 raw/reference `37/128`，最终 MINCO reference `37/708`；MPC reference/predicted `21/21`、两级速度非零；generation `311 -> 989` | `0` |
+
+故障均从新的 MuJoCo launch 和新的 ROS domain 注入，动作前若需要运动证据，先以已验证自由走廊 action 进入 tracking；故障恢复后均不发送新目标并再次采样双零输出：
+
+| 故障 | 实际结果 |
+| --- | --- |
+| adapter lease（`155`） | 暂停 adapter 后 ready heartbeat lease 触发急停，`/cmd_vel_mpc` 与 `/motion_control` 为零；恢复 ready/generation 后无新目标仍为零。 |
+| projection service timeout（`156`） | 暂停 ROGMap 后记录 `projection request timed out`、adapter not-ready、急停与双零；恢复后无旧 reference 复活。 |
+| Point-LIO-compatible input stale（`157`） | 暂停 MuJoCo 输入后 `/rog_map/stale=true`、adapter not-ready、急停与双零；恢复后 generation `584 -> 616`，无新目标仍双零。 |
+| all-unknown planning grid（`162`） | 仅隔离测试参数 `test_force_all_unknown=true`（默认 false）使 adapter 作为唯一 publisher 输出 all-unknown blocked grid；ready=false，正在 tracking 的 ATS action 返回 `RESULT_MAP_UNREADY=4`，双零；关闭参数后 generation `556 -> 726`，无新目标仍双零。 |
+| free-unreachable（`163`） | 动态选取 `(10.175000,-6.875000)` 的 clearance-valid free 且不连通单元；ATS action 返回 `RESULT_PLANNING_FAILED=5`，MINCO 记录 no-path，双零。 |
+| cancel（`148`） | Humble 通过 action `cancel_goal` service 精确 UUID 取消，结果码 `1`，有非空 cancel acknowledgement，急停与双零；恢复后仍双零。 |
+| preempt（`151`） | 第一个 action 结果码 `2`，第二个 action 以超时结果码 `3` 结束，最终急停与双零；恢复后仍双零。 |
+| timeout（`149`） | action 结果码 `3`，急停与双零；恢复后仍双零。 |
+| TF failure（`152`） | 目标 frame 不存在，action 结果码 `6`，急停与双零。 |
+
+`ROS_DOMAIN_ID=166 scripts/test_mujoco_nav_chain.sh` 也完整通过 Nav2 lifecycle、TF、terrain/slope、RC-ESDF、`NavigateToPose`、local elastic path 与速度桥；它是 Nav2 回归对照，不能作为 P3 通过证据。
+
+验证边界：
+
+1. `footprint_collisions=0` 仅表示 MINCO 离散定向矩形 gate 无冲突采样，项目仍没有独立 MuJoCo contact evaluator；物理 contact 为“未验证”，不能推导为零碰撞。
+2. 专用 unsafe-trajectory 运行注入尚未实现；`publish_unsafe_trajectory=false`、MINCO failed status 到目标管理器急停已在源码中保留，但本轮没有把它单独作为 MuJoCo 故障证据。连续 swept footprint、实车动力学约束和实机验证属于 P4。
+3. ROG source generation 尚未以结构化 OccupancyGrid/数值 ESDF 消息端到端传给 MINCO；当前只证明一次 MINCO 局部不可变 snapshot 内的一致性。MINCO 也尚未直接消费 adapter 数值 ESDF。
+4. 本轮未在目标机测量技术报告的 `50 Hz`、约 `6 ms`、CPU、内存或尾延迟；不得写为 ATS 实测性能。
 
 ## 5. 下一阶段实施顺序
 
@@ -294,14 +327,12 @@ P2 后续优化但不阻塞 P3 的范围：
 
 ### P3：Nav2-free 启动与目标状态机
 
-状态：`未实现`。
+状态：`Nav2-free 主线已实现并在当前静态 MuJoCo 场景验证`；专用 unsafe-trajectory 运行注入仍未完成，不能把它写成已覆盖的安全验收。
 
-1. 新增自研导航 launch 模式，关闭 Nav2，`minco_planner.global_plan_topic` 设为空。
-2. 先用 `/goal_pose` 完成长路线，再增加 ATS 自定义 Navigate action 与任务状态机。
-3. 改造回归脚本，不调用 `nav2_msgs/action/NavigateToPose`，直接验证 ATS goal/action。
-4. 增加地图未就绪、目标不可达、规划失败、轨迹不安全、取消和抢占测试。
-
-P3 完成标准：进程图中无 Nav2 节点和 `/plan` 依赖，仍能完成扩大矩形与红框长路线，终点误差、碰撞数、横移量和唯一控制权均自动判定。
+1. 已新增正式 launch 模式并显式使用 `launch_nav2:=false`；MINCO 运行时 `global_plan_topic=""`，P3 图中不出现禁止的 Nav2 节点、Nav2 lifecycle manager 或 `/plan`。
+2. 已先以 `/goal_pose` 贯通最小闭环，再以 ATS 自定义 action 完成正式 single、rectangle、red_box。action 覆盖 feedback、result、cancel、preempt、timeout 与 TF/map/planning 失败，并对所有终止状态执行安全停止。
+3. 已把任务生命周期和正式 reference/急停交给目标管理器，JPS/MINCO 与 MPC 保持职责分离；P3 graph、planning grid、急停与速度/底盘输入的唯一所有权已实际检查。
+4. 已独立注入 adapter lease、projection timeout、input stale、all-unknown、free-unreachable、cancel、preempt、timeout、TF failure，并在恢复后验证无新目标时双零。unsafe trajectory、连续 swept footprint、实车约束和独立 contact evaluator 转入 P4。
 
 ### P4：连续安全与舵轮执行约束
 
@@ -311,14 +342,14 @@ P3 完成标准：进程图中无 Nav2 节点和 `/plan` 依赖，仍能完成�
 
 ## 6. 下一对话接续入口
 
-下一对话从 P3 自研目标管理和 Nav2-free launch 开始；不得重复实现 ROGMap/adapter，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。P2 的直接数值 ESDF provider 与 source generation 传播可并行加固，但不能通过放宽 unknown、frame 或 stale 安全门禁换取路线通过。
+下一对话从 P4 连续 swept footprint、实车舵轮执行约束和 P2 的结构化 generation/直接数值 ESDF provider 加固开始；不得重复实现 ROGMap/adapter，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint 或 stale 安全门禁换取路线通过。
 
 必须保持以下边界：
 
 1. Point-LIO 继续提供 `/localization` 与 `/registered_scan`；不得用 ROGMap 替换里程计。
 2. RC-ESDF、JPS、MINCO 与全向 SE2 MPC 继续保留；P2、P3 及后续运行中 `/rc_esdf/planning_grid` 始终只能有一个发布者。
 3. 默认保留 `launch_fake_vel_transform:=True` 与 `launch_chassis_vel_transform:=True`。固定雷达迁移时可关闭开关；关闭 fake-yaw 仍保留零旋转兼容 TF，待所有 Nav2/行为参数改为固定 frame 后再删除该兼容层。
-4. P3 前提是保留 P2 owner、heartbeat、snapshot 和急停契约；P3 完成前仍必须明确当前回归依赖 `launch_nav2:=true`、`NavigateToPose` 与 `/plan`。
+4. P3 已保留 P2 owner、heartbeat、snapshot 和急停契约；后续 P3 正式回归必须继续显式 `launch_nav2:=false`、使用 ATS action、拒绝 `/plan`，Nav2 `NavigateToPose` 只能作为独立对照。
 
 本阶段复验命令：
 
@@ -336,14 +367,27 @@ MuJoCo P1 smoke test 使用 `launch_nav2:=false launch_rog_map:=true`，并关�
 
 ## 7. 当前构建与回归入口
 
-当前以下命令仍是 Nav2 上游实验链的回归入口，不能用于证明 Nav2-free 目标已完成：
+Nav2 对照和 P3 正式入口必须分开运行：
 
 ```bash
 MAKEFLAGS=-j1 colcon build --base-paths src \
-  --packages-select ats_rog_map_interfaces ats_rog_map ats_rog_map_adapter \
-    minco_planner ats_swerve_mpc --parallel-workers 1
+  --packages-select ats_navigation_interfaces ats_goal_manager ats_rog_map_adapter \
+    minco_planner ats_swerve_mpc ats_mujoco_sim --parallel-workers 1 \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
+# 仅 Nav2 对照：允许 NavigateToPose、/plan 与 lifecycle 节点。
+ROS_DOMAIN_ID=166 scripts/test_mujoco_nav_chain.sh
+
+# P3 正式：action 入口，无 Nav2 与 /plan。
+ROS_DOMAIN_ID=165 NAVIGATION_MODE=p3 P3_GOAL_ENTRY=action \
+  PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none P3_FAULT_CASE=none \
+  TEST_PROFILE=red_box GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+ROS_DOMAIN_ID=164 NAVIGATION_MODE=p3 P3_GOAL_ENTRY=action \
+  PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none P3_FAULT_CASE=none \
+  TEST_PROFILE=rectangle GOAL_TIMEOUT=90 scripts/test_mujoco_minco_mpc_chain.sh
+
+# P2/Nav2 兼容红框，仅作为地图与规划控制回归，不能替代上面的 P3 命令。
 ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
   launch_nav2:=true \
   launch_swerve_mpc:=true \
@@ -366,12 +410,10 @@ for fault in adapter_lease service_timeout input_stale unknown unreachable; do
 done
 ```
 
-Nav2-free 的正式命令只能在 P3 对应 launch、ATS goal/action 和回归脚本落地后补入，避免文档提供当前不存在的参数或伪启动方式。
-
 ## 8. 维护约束
 
 1. 后续提交统一在各仓库 `develop` 分支完成并推送 `origin/develop`。
-2. 文档只保留当前决策所需的近期验证记录；过期状态合并为当前结论，不保留无关历史流水账。
+2. 文档保留最近一周内当前决策所需的验证记录，方便回溯和阅读；超过一周的过期状态合并为当前结论，不保留无关历史流水账。
 3. 参考目录不是运行时依赖。进入比赛链的源码、配置、消息定义和许可证信息必须受版本控制。
-4. 修改地图语义时必须验证 frame、时间戳、分辨率、origin、unknown 和 signed distance；P3 前必须重跑 ROGMap owner + Nav2 上游红框，P3 落地后才以 Nav2-free 红框作为正式门禁。
-5. 未完成 ROGMap Nav2-free 回归前，保留当前 Nav2 模式作为对照，但新功能优先落在自研链。
+4. 修改地图语义时必须验证 frame、时间戳、分辨率、origin、unknown 和 signed distance；P3 的正式门禁是 Nav2-free rectangle 与 red_box，Nav2 红框只保留为对照。
+5. 保留 Nav2 模式作为对照，直到自研链具备同等或更高覆盖；新功能优先落在自研链，禁止重新引入 Nav2 action 或 `/plan` 依赖。
