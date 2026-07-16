@@ -231,6 +231,15 @@ ROGMap 当前仍以 `odom` 维护局部滑动三维地图；adapter 将投影变
 4. `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子事务；当前通过源端互斥、提交点重定时、MPC 旧 reference 拒绝和 lease fail-stop 限制风险。
 5. 本轮没有在目标机复现技术报告的 `50 Hz`、约 `6 ms`、CPU 或峰值 RSS，也没有完成受控尾延迟基准；运行日志中的单次耗时不能替代性能验收。
 
+### 4.5 2026-07-16：MuJoCo 入口与回归脚本复验
+
+1. `ats_mujoco_sim.launch.py` 是裸底盘/传感器入口，默认回退到通用 `swerve_chassis.xml`，不启动 `map_server`、Nav2、ROGMap adapter、MINCO 或 MPC；其轻量 RViz 也没有 `/map` display。固定 RMUC 场地与导航验证必须使用 `ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py`。P2 手工闭环还需设置 `planning_grid_owner:=rog_map launch_swerve_mpc:=true`；在 Bash 中统一 source `install/setup.bash`。
+2. 用户附件中的 single 回归实际上已经得到 `NavigateToPose=SUCCEEDED`、`/plan=59`、raw/reference `3/80` 和 `collisions=0`。原最终失败来自测试脚本调用环境中不存在的 `rg`，不是地图、规划或控制失败。两个 MuJoCo 回归脚本现已使用系统基础 `grep` 完成等价日志匹配，不再把 ripgrep 作为隐式运行依赖。
+3. Nav2 对照脚本原先在 action 完成后才创建 `/local_elastic_path` 临时订阅，可能错过运动期唯一一次实质变化发布。脚本现于发送目标前预置 `reliable + transient_local` 捕获，并在 action 完成后验证 `poses` 非空。定向 `info` 运行记录 optimizer 输出 `35` 点、`published=true`、耗时 `0.007 s`；该单次日志只用于验证采样时序，不能作为性能指标。
+4. 修复后在不含 `rg` 的精简 `PATH` 中运行 `ROS_DOMAIN_ID=211 TEST_PROFILE=single PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none`：终点 `(-9.062361, 1.466486)`，误差 `0.062460 m`；`/plan=59`、raw/reference `3/80`、MPC reference/predicted `21/21`、两级速度非零，generation `294 -> 466`，离散 footprint 冲突 `0`。
+5. 同一最终脚本以 `ROS_DOMAIN_ID=212 TEST_PROFILE=red_box GOAL_TIMEOUT=180` 完成红框长路线：中转终点 `(-8.892180, 1.472841)`、误差 `0.012507 m`；红框终点 `(-0.114627, -4.070920)`、误差 `0.075178 m`。两段 action 均 `SUCCEEDED`，最终段 `/plan=128`、首次捕获 raw/reference `37/128`、最终有效规划 `16/512`、MPC reference/predicted `21/21`、两级速度非零，generation `296 -> 991`，离散 footprint 冲突 `0`。
+6. `ROS_DOMAIN_ID=216 scripts/test_mujoco_nav_chain.sh` 完整通过固定地图、TF、terrain/slope、RC-ESDF 三类栅格、Nav2 lifecycle、非空 `35` 点 local elastic path、事件驱动 `/plan`、无空 FollowPath 和无 controller abort。该脚本仍是 Nav2 对照，不计算终点误差；物理接触仍未验证，以上结果也不证明 P3 Nav2-free。
+
 ## 5. 下一阶段实施顺序
 
 ### P0：架构与交接文档
