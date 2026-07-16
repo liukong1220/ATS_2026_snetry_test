@@ -390,7 +390,7 @@ capture_numeric_stream() {
   for attempt in 1 2 3; do
     : >"${output_file}"
     timeout 3 ros2 topic echo "${topic}" >"${output_file}" 2>/dev/null || true
-    if rg -q '^[[:space:]]*(x|y|z|linear_x|linear_y|angular_z):' "${output_file}"; then
+    if grep -Eq '^[[:space:]]*(x|y|z|linear_x|linear_y|angular_z):' "${output_file}"; then
       return 0
     fi
     sleep 0.5
@@ -506,7 +506,7 @@ run_p2_fault_injection() {
       wait_for_command "ROGMap service timeout publishes adapter not-ready" 10 \
         topic_field_equals /rog_map_adapter/ready data false
       wait_for_command "ROGMap service timeout is logged" 6 \
-        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | rg -q 'projection request timed out'"
+        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'projection request timed out'"
       wait_for_command "ROGMap service timeout triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
       capture_zero_outputs service_timeout
@@ -556,7 +556,7 @@ run_p2_fault_injection() {
       wait_for_command "unknown goal triggers emergency stop" 10 \
         topic_field_equals /planner/emergency_stop data true
       wait_for_command "unknown goal is rejected as occupied" 6 \
-        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | rg -q 'goal is occupied'"
+        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'goal is occupied'"
       capture_zero_outputs unknown
       ;;
     unreachable)
@@ -572,7 +572,7 @@ run_p2_fault_injection() {
       wait_for_command "unreachable goal triggers emergency stop" 10 \
         topic_field_equals /planner/emergency_stop data true
       wait_for_command "free unreachable goal is classified no-path" 8 \
-        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | rg -q 'failed.*no path'"
+        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'failed.*no path'"
       capture_zero_outputs unreachable
       ;;
   esac
@@ -650,7 +650,7 @@ assert_minco_plan_record() {
   local record generation raw_points reference_points collisions
   while (( SECONDS < deadline )); do
     record="$(tail -n +"${start_line}" "${LAUNCH_LOG}" | \
-      rg 'planned generation=' | tail -n 1 || true)"
+      grep 'planned generation=' | tail -n 1 || true)"
     if [[ "${record}" =~ generation=([0-9]+).*raw_points=([0-9]+).*reference_points=([0-9]+).*collisions=([0-9]+) ]]; then
       generation="${BASH_REMATCH[1]}"
       raw_points="${BASH_REMATCH[2]}"

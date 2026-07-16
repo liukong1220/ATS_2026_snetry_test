@@ -43,6 +43,10 @@ mkdir -p "${LOG_DIR}"
 : > "${LAUNCH_LOG}"
 
 cleanup() {
+  if [[ -n "${ELASTIC_PATH_PID:-}" ]]; then
+    kill "${ELASTIC_PATH_PID}" 2>/dev/null || true
+    wait "${ELASTIC_PATH_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${LAUNCH_PID:-}" ]]; then
     kill -INT "-${LAUNCH_PID}" 2>/dev/null || true
     sleep 3
@@ -144,6 +148,11 @@ topic_field_positive() {
   [[ "${value}" =~ ^[0-9]+$ ]] && awk -v value="${value}" 'BEGIN {exit value > 0 ? 0 : 1}'
 }
 
+path_capture_has_poses() {
+  local output_file="$1"
+  grep -q '^poses:$' "${output_file}" && grep -q '^- header:$' "${output_file}"
+}
+
 wait_for_generation_advance() {
   local baseline="$1"
   local timeout_sec="$2"
@@ -211,7 +220,7 @@ assert_plan_is_event_driven() {
 
   timeout "${observation_sec}" ros2 topic echo /plan >"${output_file}" 2>/dev/null || true
   local message_count
-  message_count="$(rg -c '^header:$' "${output_file}" || true)"
+  message_count="$(grep -c '^header:$' "${output_file}" || true)"
   message_count="${message_count:-0}"
   if (( message_count > 1 )); then
     echo "observed /plan messages: ${message_count}"
@@ -222,14 +231,14 @@ assert_plan_is_event_driven() {
 }
 
 assert_controller_never_received_empty_path() {
-  if rg -q "Resulting plan has 0 poses" "${LAUNCH_LOG}"; then
+  if grep -q "Resulting plan has 0 poses" "${LAUNCH_LOG}"; then
     fail "controller_server received an empty FollowPath goal"
   fi
   echo "OK: controller never received an empty FollowPath goal"
 }
 
 assert_controller_never_aborted_follow_path() {
-  if rg -q "\[follow_path\] \[ActionServer\] Aborting handle\." "${LAUNCH_LOG}"; then
+  if grep -q "\[follow_path\] \[ActionServer\] Aborting handle\." "${LAUNCH_LOG}"; then
     fail "controller_server aborted FollowPath; a recovery completed the goal instead of a clean track"
   fi
   echo "OK: controller completed FollowPath without aborting"
@@ -306,6 +315,14 @@ for node in /controller_server /planner_server /behavior_server /bt_navigator /v
   wait_for_lifecycle_active "${node}"
 done
 
+ELASTIC_PATH_OUTPUT=/tmp/ats_nav_chain_local_elastic_path.out
+: >"${ELASTIC_PATH_OUTPUT}"
+timeout "$((GOAL_TIMEOUT + 30))" ros2 topic echo --once \
+  --qos-reliability reliable --qos-durability transient_local \
+  /local_elastic_path >"${ELASTIC_PATH_OUTPUT}" 2>/tmp/ats_nav_chain_local_elastic_path.err &
+ELASTIC_PATH_PID=$!
+sleep 2
+
 timeout "${GOAL_TIMEOUT}" ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
   "{pose: {header: {frame_id: map}, pose: {position: {x: ${GOAL_X}, y: ${GOAL_Y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}}" \
   >/tmp/ats_nav_chain_goal.out 2>/tmp/ats_nav_chain_goal.err || true
@@ -318,7 +335,11 @@ assert_navigation_succeeded
 
 wait_for_topic_once /cmd_vel_nav2_result 30
 wait_for_topic_once /motion_control 30
-wait_for_topic_once /local_elastic_path 30
+wait_for_command "non-empty topic /local_elastic_path" 30 \
+  path_capture_has_poses "${ELASTIC_PATH_OUTPUT}"
+wait "${ELASTIC_PATH_PID}" 2>/dev/null || true
+unset ELASTIC_PATH_PID
+sed -n '1,24p' "${ELASTIC_PATH_OUTPUT}"
 
 if [[ "${VERIFY_EVENT_DRIVEN_REPLAN}" == "true" ]]; then
   assert_plan_is_event_driven 4
