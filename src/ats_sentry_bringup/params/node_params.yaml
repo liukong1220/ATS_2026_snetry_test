@@ -286,10 +286,16 @@ small_gicp_relocalization:
     registered_leaf_size: 0.05
     # 最大匹配距离平方。过小容易掉配准，过大容易吃进错误对应。
     max_dist_sq: 3.0
-    # 最大允许注册误差。<0 表示只用 converged + inlier 判据。
-    max_registration_error: -1.0
+    # 每内点 GICP 目标值上限；5.0 是 P4 初值，必须用 rosbag 与实机残差分布复核。
+    max_registration_error: 5.0
     # 是否打印每次注册结果。联调建议开，比赛可关。
     log_registration_details: false
+    # 由 localization_fusion 独占 map->odom 时，此项由 launch 覆盖为 false。
+    publish_tf: true
+    # 连续两次一致结果才形成 accepted observation，单帧假匹配不改 map->odom。
+    confirmation_count: 2
+    confirmation_translation_tolerance: 0.15
+    confirmation_yaw_tolerance: 0.10
     # 定时器周期。表示“最频繁多久尝试一次注册”，不代表每次都真的执行。
     registration_interval_s: 0.35
     # 最短点云累积窗口。太短时跳过注册，避免点还没积够就配。
@@ -314,6 +320,35 @@ small_gicp_relocalization:
     #init_pose: [20.3, 0.0, 0.0, 0.0, 0.0, 3.14]   # [x, y, z, roll, pitch, yaw]
     # The prior_pcd_file does not need to be specified since it going to be set by defaults in launch.
     # prior_pcd_file: ""
+
+localization_fusion:
+  ros__parameters:
+    use_sim_time: false
+    odom_topic: "/odometry"
+    localization_topic: "/localization"
+    observation_topic: "relocalization_observation"
+    status_topic: "/localization/status"
+    map_frame: "map"
+    odom_frame: "odom"
+    robot_base_frame: "gimbal_yaw_odom"
+    publish_tf: true
+    allow_initial_identity: false
+    odom_timeout_s: 0.5
+    observation_timeout_s: 3.0
+    observation_lost_timeout_s: 10.0
+    history_duration_s: 5.0
+    history_boundary_tolerance_s: 0.10
+    maximum_interpolation_gap_s: 0.20
+    transform_future_offset_s: 0.05
+    relocalizing_hold_s: 0.20
+    max_consecutive_rejections: 3
+    epoch_translation_threshold: 0.05
+    epoch_yaw_threshold: 0.05
+    max_correction_translation: 2.0
+    max_correction_yaw: 1.0
+    min_observation_quality: 0.02
+    min_observation_inliers: 200
+    max_registration_error: 5.0
 
 pointcloud_to_laserscan:
   ros__parameters:
