@@ -234,6 +234,25 @@ topic_field_positive() {
   [[ "${value}" =~ ^[0-9]+$ ]] && awk -v value="${value}" 'BEGIN {exit value > 0 ? 0 : 1}'
 }
 
+read_positive_topic_field() {
+  local topic="$1"
+  local field="$2"
+  local timeout_sec="$3"
+  local deadline=$((SECONDS + timeout_sec))
+  local value
+  while (( SECONDS < deadline )); do
+    value="$(read_topic_field "${topic}" "${field}")"
+    if [[ "${value}" =~ ^[0-9]+$ ]] &&
+      awk -v value="${value}" 'BEGIN {exit value > 0 ? 0 : 1}'
+    then
+      printf '%s\n' "${value}"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 wait_for_generation_advance() {
   local baseline="$1"
   local timeout_sec="$2"
@@ -258,23 +277,43 @@ assert_topic_ownership() {
   local topic="$1"
   local expected_publisher="$2"
   local expected_subscriber="${3:-}"
-  local topic_info publisher_block subscription_block
-  topic_info="$(ros2 topic info --no-daemon --verbose "${topic}")"
-  grep -q '^Publisher count: 1$' <<<"${topic_info}" || \
-    fail "${topic} publisher count is not one"
-  publisher_block="$(sed -n '/^Publisher count:/,/^Subscription count:/p' <<<"${topic_info}")"
-  grep -q "Node name: ${expected_publisher}$" <<<"${publisher_block}" || \
-    fail "${topic} publisher is not ${expected_publisher}"
-  if [[ -n "${expected_subscriber}" ]]; then
-    grep -q '^Subscription count: 1$' <<<"${topic_info}" || \
-      fail "${topic} subscription count is not one"
+  local topic_info publisher_block subscription_block deadline
+  deadline=$((SECONDS + 30))
+  while (( SECONDS < deadline )); do
+    topic_info="$(ros2 topic info --no-daemon --verbose "${topic}" 2>/dev/null || true)"
+    publisher_block="$(sed -n '/^Publisher count:/,/^Subscription count:/p' <<<"${topic_info}")"
+    if ! grep -q '^Publisher count: 1$' <<<"${topic_info}" ||
+      ! grep -q "Node name: ${expected_publisher}$" <<<"${publisher_block}"
+    then
+      sleep 1
+      continue
+    fi
+    if [[ -z "${expected_subscriber}" ]]; then
+      echo "OK: ${topic} has one publisher owned by ${expected_publisher}"
+      return
+    fi
     subscription_block="$(sed -n '/^Subscription count:/,$p' <<<"${topic_info}")"
-    grep -q "Node name: ${expected_subscriber}$" <<<"${subscription_block}" || \
-      fail "${topic} subscriber is not ${expected_subscriber}"
-    echo "OK: ${topic} ownership ${expected_publisher} -> ${expected_subscriber} is unique"
-    return
-  fi
-  echo "OK: ${topic} has one publisher owned by ${expected_publisher}"
+    if grep -q '^Subscription count: 1$' <<<"${topic_info}" &&
+      grep -q "Node name: ${expected_subscriber}$" <<<"${subscription_block}"
+    then
+      echo "OK: ${topic} ownership ${expected_publisher} -> ${expected_subscriber} is unique"
+      return
+    fi
+    sleep 1
+  done
+  echo "${topic_info}" >&2
+  fail "${topic} ownership did not converge to ${expected_publisher} -> ${expected_subscriber:-<none>}"
+}
+
+node_is_present() {
+  local node_name="$1"
+  ros2 node list --no-daemon 2>/dev/null | grep -qx "${node_name}"
+}
+
+node_exposes_endpoint() {
+  local node_name="$1"
+  local endpoint="$2"
+  ros2 node info --no-daemon "${node_name}" 2>/dev/null | grep -Fq "${endpoint}"
 }
 
 assert_final_swerve_telemetry() {
@@ -307,8 +346,10 @@ assert_final_swerve_telemetry() {
 
 assert_p3_process_graph() {
   local node_list goal_manager_info forbidden
+  wait_for_command "ats_goal_manager node" 30 node_is_present /ats_goal_manager
+  wait_for_command "ATS P3 Navigate action" 30 \
+    node_exposes_endpoint /ats_goal_manager /ats_navigate_to_pose
   node_list="$(ros2 node list --no-daemon)"
-  grep -q '^/ats_goal_manager$' <<<"${node_list}" || fail "ats_goal_manager is absent in P3"
   for forbidden in /bt_navigator /planner_server /controller_server /behavior_server \
     /velocity_smoother /lifecycle_manager_rmuc_2026_map /map_server; do
     if grep -q "^${forbidden}$" <<<"${node_list}"; then
@@ -319,8 +360,6 @@ assert_p3_process_graph() {
     fail "P3 graph unexpectedly exposes /plan"
   fi
   goal_manager_info="$(ros2 node info --no-daemon /ats_goal_manager)"
-  grep -q '/ats_navigate_to_pose' <<<"${goal_manager_info}" || \
-    fail "ATS P3 Navigate action is absent from ats_goal_manager"
   echo "OK: P3 graph has ATS action and no Nav2 process or /plan dependency"
 }
 
@@ -340,22 +379,22 @@ verify_rog_map_planning_interface() {
     topic_field_positive /rc_esdf/planning_grid info.height
 
   assert_topic_ownership /rc_esdf/planning_grid ats_rog_map_adapter
+  wait_for_command "ats_rog_map node" 30 node_is_present /ats_rog_map
+  wait_for_command "ats_rog_map_adapter node" 30 node_is_present /ats_rog_map_adapter
   node_list="$(ros2 node list --no-daemon)"
-  grep -q '^/ats_rog_map$' <<<"${node_list}" || fail "ats_rog_map is absent"
-  grep -q '^/ats_rog_map_adapter$' <<<"${node_list}" || fail "ats_rog_map_adapter is absent"
   if grep -q '^/rc_esdf_map$' <<<"${node_list}"; then
     fail "rc_esdf_map must not run while ROGMap owns the planning grid"
   fi
+  wait_for_command "ROGMap numeric projection client" 30 \
+    node_exposes_endpoint /ats_rog_map_adapter /rog_map/get_ground_projection
   node_info="$(ros2 node info --no-daemon /ats_rog_map_adapter)"
   if grep -q '/rog_map/esdf' <<<"${node_info}"; then
     fail "ats_rog_map_adapter must not subscribe to the ROGMap visualization ESDF cloud"
   fi
-  grep -q '/rog_map/get_ground_projection' <<<"${node_info}" || \
-    fail "ats_rog_map_adapter does not expose the numeric projection service client"
   echo "OK: adapter consumes the numeric projection service without /rog_map/esdf subscription"
 
-  generation="$(read_topic_field /rog_map_adapter/generation data)"
-  [[ "${generation}" =~ ^[0-9]+$ ]] || fail "cannot read ROGMap adapter generation"
+  generation="$(read_positive_topic_field /rog_map_adapter/generation data 30)" || \
+    fail "cannot read ROGMap adapter generation"
   wait_for_generation_advance "${generation}" 30
 }
 
@@ -973,17 +1012,25 @@ wait_for_capture() {
   local pid="$2"
   local output_file="$3"
   local deadline=$((SECONDS + 10))
-  while kill -0 "${pid}" 2>/dev/null && (( SECONDS < deadline )); do
+  while (( SECONDS < deadline )); do
+    if [[ -s "${output_file}" ]] && \
+      awk '/^[[:space:]]*-[[:space:]]+header:$/ {found = 1} END {exit found ? 0 : 1}' \
+        "${output_file}"
+    then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+      assert_path_has_poses "${label}" "${output_file}"
+      return
+    fi
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      wait "${pid}" 2>/dev/null || true
+      break
+    fi
     sleep 0.2
   done
-  if kill -0 "${pid}" 2>/dev/null; then
-    kill "${pid}" 2>/dev/null || true
-    wait "${pid}" 2>/dev/null || true
-    fail "timeout capturing ${label}"
-  fi
+  kill "${pid}" 2>/dev/null || true
   wait "${pid}" 2>/dev/null || true
-  [[ -s "${output_file}" ]] || fail "${label} did not publish after the goal"
-  assert_path_has_poses "${label}" "${output_file}"
+  fail "${label} did not publish a non-empty path after the goal"
 }
 
 run_navigation_goal() {
@@ -1009,7 +1056,7 @@ run_navigation_goal() {
   fi
   for topic in "${path_topics[@]}"; do
     output_file="${prefix}_${topic//\//_}.out"
-    timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon --once "${topic}" >"${output_file}" 2>/dev/null &
+    timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon "${topic}" >"${output_file}" 2>/dev/null &
     pid=$!
     CAPTURE_PIDS+=("${pid}")
     topic_pids+=("${pid}:${topic}:${output_file}")
@@ -1154,10 +1201,10 @@ if [[ "${PLANNING_GRID_OWNER}" == "rog_map" ]]; then
   verify_rog_map_planning_interface
 fi
 
+wait_for_command "minco_planner node" 30 node_is_present /minco_planner
+wait_for_command "ats_swerve_mpc node" 30 node_is_present /ats_swerve_mpc
+wait_for_command "twist bridge node" 30 node_is_present /twist_to_motion_ctrl
 NODE_LIST="$(ros2 node list --no-daemon)"
-grep -q '^/minco_planner$' <<<"${NODE_LIST}" || fail "minco_planner is absent"
-grep -q '^/ats_swerve_mpc$' <<<"${NODE_LIST}" || fail "ats_swerve_mpc is absent"
-grep -q '^/twist_to_motion_ctrl$' <<<"${NODE_LIST}" || fail "twist bridge is absent"
 if grep -q '^/fake_vel_transform$' <<<"${NODE_LIST}"; then
   fail "fake_vel_transform must be disabled in swerve MPC mode"
 fi
@@ -1168,6 +1215,7 @@ assert_topic_ownership /motion_control twist_to_motion_ctrl ats_mujoco_sim
 if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
   assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
   assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
+  assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mpc
   # MPC 清 tracker，MuJoCo 执行器做硬零速；安全信号允许多个 consumer，但只有
   # Goal Manager 可以发布最终急停权威。
   assert_topic_ownership /planner/emergency_stop ats_goal_manager
@@ -1178,10 +1226,15 @@ declare -a DEBUG_TOPICS=(
   /ats_swerve_mpc/reference_horizon
   /ats_swerve_mpc/predicted_path
 )
+declare -a DEBUG_CAPTURE_PIDS=()
 for topic in "${DEBUG_TOPICS[@]}"; do
   output_file="/tmp/ats_minco_mpc_${topic//\//_}.out"
-  timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon --once "${topic}" \
+  # Both debug topics have transient-local QoS and initially publish an empty
+  # path while MPC is fail-stopped.  Keep the capture open through the goal so
+  # an initial empty latched sample cannot hide the non-empty tracking output.
+  timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon "${topic}" \
     >"${output_file}" 2>/dev/null &
+  DEBUG_CAPTURE_PIDS+=("$!")
   CAPTURE_PIDS+=("$!")
 done
 timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon /cmd_vel_mpc \
@@ -1204,7 +1257,11 @@ kill "${CMD_STREAM_PID}" "${MOTION_STREAM_PID}" 2>/dev/null || true
 wait "${CMD_STREAM_PID}" 2>/dev/null || true
 wait "${MOTION_STREAM_PID}" 2>/dev/null || true
 
-for topic in "${DEBUG_TOPICS[@]}"; do
+for index in "${!DEBUG_TOPICS[@]}"; do
+  topic="${DEBUG_TOPICS[index]}"
+  debug_pid="${DEBUG_CAPTURE_PIDS[index]}"
+  kill "${debug_pid}" 2>/dev/null || true
+  wait "${debug_pid}" 2>/dev/null || true
   output_file="/tmp/ats_minco_mpc_${topic//\//_}.out"
   [[ -s "${output_file}" ]] || fail "${topic} did not publish after the goal"
   assert_path_has_poses "${topic}" "${output_file}"
