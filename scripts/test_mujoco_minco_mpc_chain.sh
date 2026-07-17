@@ -37,6 +37,8 @@ LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-24}"
 P2_FAULT_CASE="${P2_FAULT_CASE:-none}"
 # P3 action 生命周期故障；每次也必须使用新的 ROS_DOMAIN_ID 和 MuJoCo launch。
 P3_FAULT_CASE="${P3_FAULT_CASE:-none}"
+# P4 定位融合回归；默认关闭以保持既有 P3/Nav2 对照基线。
+P4_LOCALIZATION_FUSION="${P4_LOCALIZATION_FUSION:-false}"
 
 case "${PLANNING_GRID_OWNER}" in
   rc_esdf|rog_map) ;;
@@ -87,6 +89,21 @@ if [[ "${P3_FAULT_CASE}" != "none" && "${NAVIGATION_MODE}" != "p3" ]]; then
   echo "P3_FAULT_CASE='${P3_FAULT_CASE}' requires NAVIGATION_MODE='p3'."
   exit 2
 fi
+case "${P4_LOCALIZATION_FUSION,,}" in
+  true|false) ;;
+  *)
+    echo "P4_LOCALIZATION_FUSION must be true or false."
+    exit 2
+    ;;
+esac
+if [[ "${P4_LOCALIZATION_FUSION,,}" == "true" &&
+  ("${NAVIGATION_MODE}" != "p3" || "${PLANNING_GRID_OWNER}" != "rog_map") ]]; then
+  echo "P4 localization fusion requires NAVIGATION_MODE=p3 and PLANNING_GRID_OWNER=rog_map."
+  exit 2
+fi
+P3_GOAL_FRAME="${P3_GOAL_FRAME:-$(
+  [[ "${P4_LOCALIZATION_FUSION,,}" == "true" ]] && echo map || echo odom
+)}"
 if [[ "${PLANNING_GRID_OWNER}" == "rog_map" || "${LAUNCH_ROG_MAP,,}" == "true" ]]; then
   [[ -r "${ROG_MAP_CONFIG_FILE}" ]] || {
     echo "ROGMap config is not readable: ${ROG_MAP_CONFIG_FILE}"
@@ -126,6 +143,8 @@ source "${WORKSPACE_DIR}/install/setup.bash"
 set -u
 export ROS_DOMAIN_ID
 export ROS_LOG_DIR="${LOG_DIR}"
+# 沙箱禁止 ros2cli 的 XML-RPC daemon socket；直接通过当前 DDS domain 查询图。
+export ROS2CLI_DISABLE_DAEMON="${ROS2CLI_DISABLE_DAEMON:-1}"
 
 rm -rf "${LOG_DIR}"
 mkdir -p "${LOG_DIR}"
@@ -186,13 +205,13 @@ wait_for_command() {
 wait_for_topic_once() {
   local topic="$1"
   local timeout_sec="$2"
-  wait_for_command "topic ${topic}" "${timeout_sec}" timeout 4 ros2 topic echo --once "${topic}"
+  wait_for_command "topic ${topic}" "${timeout_sec}" timeout 4 ros2 topic echo --no-daemon --once "${topic}"
 }
 
 read_topic_field() {
   local topic="$1"
   local field="$2"
-  timeout 5 ros2 topic echo --once "${topic}" --field "${field}" 2>/dev/null | awk '
+  timeout 5 ros2 topic echo --no-daemon --once "${topic}" --field "${field}" 2>/dev/null | awk '
     $1 ~ /^[[:alnum:]_]+:$/ && NF >= 2 {print $2; exit}
     NF == 1 && $1 != "---" {print $1; exit}
   '
@@ -240,7 +259,7 @@ assert_topic_ownership() {
   local expected_publisher="$2"
   local expected_subscriber="${3:-}"
   local topic_info publisher_block subscription_block
-  topic_info="$(ros2 topic info --verbose "${topic}")"
+  topic_info="$(ros2 topic info --no-daemon --verbose "${topic}")"
   grep -q '^Publisher count: 1$' <<<"${topic_info}" || \
     fail "${topic} publisher count is not one"
   publisher_block="$(sed -n '/^Publisher count:/,/^Subscription count:/p' <<<"${topic_info}")"
@@ -258,9 +277,37 @@ assert_topic_ownership() {
   echo "OK: ${topic} has one publisher owned by ${expected_publisher}"
 }
 
+assert_final_swerve_telemetry() {
+  local output_file="$1"
+  local contact_count drive_count
+  timeout 8 ros2 topic echo --no-daemon --once /swerve/telemetry >"${output_file}" \
+    2>/dev/null || fail "cannot capture final /swerve/telemetry"
+  contact_count="$(awk '$1 == "contact_violation_count:" {print $2}' "${output_file}")"
+  [[ "${contact_count}" =~ ^[0-9]+$ ]] || \
+    fail "final telemetry has no valid contact_violation_count"
+  [[ "${contact_count}" == "0" ]] || \
+    fail "MuJoCo contact evaluator reported ${contact_count} violation samples"
+  drive_count="$(awk '
+    /^drive_rpm:/ {in_drive=1; next}
+    in_drive && /^- / {
+      value=$2 + 0.0
+      if (value < 0.0) value=-value
+      if (value >= 2.0) exit 2
+      count++
+      next
+    }
+    in_drive {in_drive=0}
+    END {if (count != 4) exit 3; print count}
+  ' "${output_file}")" || fail "final four-wheel drive RPM did not settle below 2 rpm"
+  [[ "${drive_count}" == "4" ]] || fail "final telemetry did not contain four drive RPM values"
+  echo "RESULT: MuJoCo contact_violation_count=0 and final four-wheel drive RPM is below 2 rpm"
+  sed -n '/^drive_rpm:/,/^command_vx:/p; /^contact_violation_count:/,/^max_contact_force:/p' \
+    "${output_file}"
+}
+
 assert_p3_process_graph() {
-  local node_list forbidden
-  node_list="$(ros2 node list)"
+  local node_list goal_manager_info forbidden
+  node_list="$(ros2 node list --no-daemon)"
   grep -q '^/ats_goal_manager$' <<<"${node_list}" || fail "ats_goal_manager is absent in P3"
   for forbidden in /bt_navigator /planner_server /controller_server /behavior_server \
     /velocity_smoother /lifecycle_manager_rmuc_2026_map /map_server; do
@@ -268,14 +315,12 @@ assert_p3_process_graph() {
       fail "P3 graph unexpectedly contains ${forbidden}"
     fi
   done
-  if ros2 topic list | grep -qx '/plan'; then
+  if ros2 topic list --no-daemon | grep -qx '/plan'; then
     fail "P3 graph unexpectedly exposes /plan"
   fi
-  ros2 action list | grep -qx '/ats_navigate_to_pose' || \
-    fail "ATS P3 Navigate action is absent"
-  if ros2 action list | grep -qx '/navigate_to_pose'; then
-    fail "P3 graph unexpectedly exposes Nav2 /navigate_to_pose"
-  fi
+  goal_manager_info="$(ros2 node info --no-daemon /ats_goal_manager)"
+  grep -q '/ats_navigate_to_pose' <<<"${goal_manager_info}" || \
+    fail "ATS P3 Navigate action is absent from ats_goal_manager"
   echo "OK: P3 graph has ATS action and no Nav2 process or /plan dependency"
 }
 
@@ -295,13 +340,13 @@ verify_rog_map_planning_interface() {
     topic_field_positive /rc_esdf/planning_grid info.height
 
   assert_topic_ownership /rc_esdf/planning_grid ats_rog_map_adapter
-  node_list="$(ros2 node list)"
+  node_list="$(ros2 node list --no-daemon)"
   grep -q '^/ats_rog_map$' <<<"${node_list}" || fail "ats_rog_map is absent"
   grep -q '^/ats_rog_map_adapter$' <<<"${node_list}" || fail "ats_rog_map_adapter is absent"
   if grep -q '^/rc_esdf_map$' <<<"${node_list}"; then
     fail "rc_esdf_map must not run while ROGMap owns the planning grid"
   fi
-  node_info="$(ros2 node info /ats_rog_map_adapter)"
+  node_info="$(ros2 node info --no-daemon /ats_rog_map_adapter)"
   if grep -q '/rog_map/esdf' <<<"${node_info}"; then
     fail "ats_rog_map_adapter must not subscribe to the ROGMap visualization ESDF cloud"
   fi
@@ -318,7 +363,7 @@ wait_for_lifecycle_active() {
   local node="$1"
   local deadline=$((SECONDS + 90))
   while (( SECONDS < deadline )); do
-    if timeout 4 ros2 lifecycle get "${node}" 2>/dev/null | grep -q "active"; then
+    if timeout 4 ros2 lifecycle get --no-daemon "${node}" 2>/dev/null | grep -q "active"; then
       echo "OK: lifecycle ${node} active"
       return 0
     fi
@@ -332,7 +377,7 @@ wait_for_lifecycle_active() {
 
 capture_pose() {
   local output_file="$1"
-  timeout 8 ros2 topic echo --once /localization --field pose.pose.position \
+  timeout 8 ros2 topic echo --no-daemon --once /localization --field pose.pose.position \
     >"${output_file}" 2>/dev/null || return 1
   grep -q '^x:' "${output_file}" && grep -q '^y:' "${output_file}"
 }
@@ -447,7 +492,7 @@ capture_numeric_stream() {
   local attempt
   for attempt in 1 2 3; do
     : >"${output_file}"
-    timeout 3 ros2 topic echo "${topic}" >"${output_file}" 2>/dev/null || true
+    timeout 3 ros2 topic echo --no-daemon "${topic}" >"${output_file}" 2>/dev/null || true
     if grep -Eq '^[[:space:]]*(x|y|z|linear_x|linear_y|angular_z):' "${output_file}"; then
       return 0
     fi
@@ -502,7 +547,7 @@ publish_relative_fault_goal() {
   : >"${command_file}"
   # 重定向到文件时 ros2 Python CLI 会块缓冲；强制无缓冲才能在 tracking 期间
   # 立即观察到非零控制量，而不是等采样 timeout 后才注入故障。
-  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo /cmd_vel_mpc >"${command_file}" 2>/dev/null &
+  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon /cmd_vel_mpc >"${command_file}" 2>/dev/null &
   monitor_pid=$!
   CAPTURE_PIDS+=("${monitor_pid}")
   sleep 2
@@ -964,12 +1009,12 @@ run_navigation_goal() {
   fi
   for topic in "${path_topics[@]}"; do
     output_file="${prefix}_${topic//\//_}.out"
-    timeout "${GOAL_TIMEOUT}" ros2 topic echo --once "${topic}" >"${output_file}" 2>/dev/null &
+    timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon --once "${topic}" >"${output_file}" 2>/dev/null &
     pid=$!
     CAPTURE_PIDS+=("${pid}")
     topic_pids+=("${pid}:${topic}:${output_file}")
   done
-  timeout "${GOAL_TIMEOUT}" ros2 topic echo /cmd_vel_mpc >"${command_output}" 2>/dev/null &
+  timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon /cmd_vel_mpc >"${command_output}" 2>/dev/null &
   local leg_command_pid=$!
   CAPTURE_PIDS+=("${leg_command_pid}")
 
@@ -986,14 +1031,14 @@ run_navigation_goal() {
   elif [[ "${P3_GOAL_ENTRY}" == "action" ]]; then
     timeout "${GOAL_TIMEOUT}" ros2 action send_goal --feedback /ats_navigate_to_pose \
       ats_navigation_interfaces/action/NavigateToPose \
-      "{goal_pose: {header: {frame_id: odom}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
+      "{goal_pose: {header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
       >"${goal_output}" 2>"${goal_error}" &
     GOAL_PID=$!
   else
     # P3 中 /goal_pose 只由目标管理器消费；MINCO 直接目标订阅已显式关闭。
     timeout 8 ros2 topic pub --once --wait-matching-subscriptions 1 \
       /goal_pose geometry_msgs/msg/PoseStamped \
-      "{header: {frame_id: odom}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}" \
+      "{header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}" \
       >"${goal_output}" 2>"${goal_error}" || fail "${name} P3 /goal_pose was not delivered"
   fi
 
@@ -1058,6 +1103,7 @@ LAUNCH_ARGS=(
   launch_trajectory_optimizer:=true
   launch_twist_bridge:=true
   launch_rog_map:="${LAUNCH_ROG_MAP}"
+  launch_localization_fusion:="${P4_LOCALIZATION_FUSION}"
   planning_grid_owner:="${PLANNING_GRID_OWNER}"
   rog_map_config_file:="${ROG_MAP_CONFIG_FILE}"
   enable_lidar:=true
@@ -1078,8 +1124,22 @@ LAUNCH_ARGS=(
 setsid ros2 launch "${LAUNCH_ARGS[@]}" >"${LAUNCH_LOG}" 2>&1 &
 LAUNCH_PID=$!
 
-wait_for_command "node graph" 60 timeout 4 ros2 node list
+wait_for_command "node graph" 60 timeout 4 ros2 node list --no-daemon
 wait_for_topic_once /localization 70
+if [[ "${P4_LOCALIZATION_FUSION,,}" == "true" ]]; then
+  wait_for_topic_once /odometry 30
+  wait_for_topic_once /localization/status 30
+  wait_for_command "localization tracking" 30 \
+    topic_field_equals /localization/status state 1
+  wait_for_command "MuJoCo map->odom disabled" 10 \
+    bash -c "ros2 param get --no-daemon /ats_mujoco_sim publish_map_to_odom_tf | grep -q 'Boolean value is: False'"
+  wait_for_command "fusion map->odom enabled" 10 \
+    bash -c "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
+  assert_topic_ownership /odometry ats_mujoco_sim localization_fusion
+  assert_topic_ownership /localization localization_fusion
+  assert_topic_ownership /localization/status localization_fusion
+  echo "OK: P4 /odometry -> fusion -> /localization contract is active"
+fi
 wait_for_topic_once /traversability_grid 120
 wait_for_topic_once /rc_esdf/planning_grid 120
 if [[ "${NAVIGATION_MODE}" == "nav2" ]]; then
@@ -1094,7 +1154,7 @@ if [[ "${PLANNING_GRID_OWNER}" == "rog_map" ]]; then
   verify_rog_map_planning_interface
 fi
 
-NODE_LIST="$(ros2 node list)"
+NODE_LIST="$(ros2 node list --no-daemon)"
 grep -q '^/minco_planner$' <<<"${NODE_LIST}" || fail "minco_planner is absent"
 grep -q '^/ats_swerve_mpc$' <<<"${NODE_LIST}" || fail "ats_swerve_mpc is absent"
 grep -q '^/twist_to_motion_ctrl$' <<<"${NODE_LIST}" || fail "twist bridge is absent"
@@ -1105,6 +1165,14 @@ echo "OK: MPC nodes present and fake_vel_transform absent"
 
 assert_topic_ownership /cmd_vel_mpc ats_swerve_mpc twist_to_motion_ctrl
 assert_topic_ownership /motion_control twist_to_motion_ctrl ats_mujoco_sim
+if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
+  assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
+  assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
+  # MPC 清 tracker，MuJoCo 执行器做硬零速；安全信号允许多个 consumer，但只有
+  # Goal Manager 可以发布最终急停权威。
+  assert_topic_ownership /planner/emergency_stop ats_goal_manager
+fi
+wait_for_topic_once /swerve/telemetry 20
 
 declare -a DEBUG_TOPICS=(
   /ats_swerve_mpc/reference_horizon
@@ -1112,15 +1180,15 @@ declare -a DEBUG_TOPICS=(
 )
 for topic in "${DEBUG_TOPICS[@]}"; do
   output_file="/tmp/ats_minco_mpc_${topic//\//_}.out"
-  timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --once "${topic}" \
+  timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon --once "${topic}" \
     >"${output_file}" 2>/dev/null &
   CAPTURE_PIDS+=("$!")
 done
-timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo /cmd_vel_mpc \
+timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon /cmd_vel_mpc \
   >/tmp/ats_minco_mpc_cmd_vel_stream.out 2>/dev/null &
 CMD_STREAM_PID=$!
 CAPTURE_PIDS+=("${CMD_STREAM_PID}")
-timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo /motion_control \
+timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon /motion_control \
   >/tmp/ats_minco_mpc_motion_stream.out 2>/dev/null &
 MOTION_STREAM_PID=$!
 CAPTURE_PIDS+=("${MOTION_STREAM_PID}")
@@ -1143,6 +1211,8 @@ for topic in "${DEBUG_TOPICS[@]}"; do
 done
 assert_nonzero_stream /cmd_vel_mpc /tmp/ats_minco_mpc_cmd_vel_stream.out
 assert_nonzero_stream /motion_control /tmp/ats_minco_mpc_motion_stream.out
+assert_final_swerve_telemetry \
+  "/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_final_swerve_telemetry.out"
 
 if [[ "${PLANNING_GRID_OWNER}" == "rog_map" ]]; then
   wait_for_generation_advance "${P2_LAST_GENERATION}" 30
