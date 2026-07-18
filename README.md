@@ -169,7 +169,8 @@ git lfs install
 说明：
 
 - `git clone --depth=1` 只拉根仓最近一次提交，避免下载旧大仓历史
-- `./import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆除 `ats_sentry_bringup` 之外的功能仓和第三方依赖
+- `./import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆除 `ats_sentry_bringup` 之外的功能仓和第三方依赖；已存在且工作树干净、分支和 `origin` URL 与清单一致的仓库会同时以 fast-forward 方式同步到清单版本
+- 若只需导入缺失仓库，可使用 `./import_workspace_repos.sh --no-sync`；脚本不会拉取工作树有改动、分支不同、远端 URL 不同、领先或分叉的仓库，并会以非零状态提醒处理这些仓库
 - 部署脚本会临时设置 `init.defaultBranch=main` 和 `advice.detachedHead=false`，用于屏蔽 `git init` 默认分支提示；如果后续清单再次锁定到 commit hash，也会减少 detached HEAD 提示噪声
 - `src/ats_sentry_bringup/pcd/*.pcd` 不提交到 Git；需要实机建图或从队内离线介质拷贝到本地
 - 如果你要在部署机器上长期开发，可以去掉 `--shallow`，保留各子仓库完整历史
