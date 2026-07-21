@@ -4,7 +4,7 @@
 
 ## 固定输入
 
-每次采集前记录并冻结：导航仓、根仓和 MuJoCo 仓 commit；参数 YAML；机器人质量、载荷、电池状态、轮胎和场地；控制器固件；地图版本；时间同步状态；安全操作员和独立物理急停状态。采集文件必须保留原始 rosbag、参数转储、控制器反馈和执行命令序号。
+每次采集前记录并冻结：根仓、导航仓、MuJoCo 仓以及实际参与运行的行为决策仓和 loopback 仓 commit；参数 YAML、行为树 XML 和 scenario version；机器人质量、载荷、电池状态、轮胎和场地；控制器固件；地图版本；时间同步状态；安全操作员和独立物理急停状态。采集文件必须保留原始 rosbag、参数转储、控制器反馈和执行命令序号。
 
 ## 不通电检查
 
@@ -29,5 +29,26 @@
 2. 低能台架：一次只开启一个自由度，先验证 `vx`、再 `vy`、最后 `wz`；每个样本间停机检查电流、温度和反馈延迟。
 3. 受控低速地面：定义封闭区域、最大速度/加速度/扭矩、观察员、物理急停和停止条件。先直线/横移/停止，再加入 yaw、规划和重定位。
 4. 只有重复运行满足停止距离、无异常接触、无未解释饱和、定位/地图健康与命令唯一性后，才可扩大速度、路线或障碍复杂度。
+
+## 稳定跟踪准入
+
+实车路线不以“单次到达”为准入依据。进入每一级速度前，必须在前一级包络内固定 revision、参数、地图、载荷、电池和轮胎状态，按直线、横移、90 度、S 弯、窄道、坡道、rectangle 和 red_box 分层重复测量。
+
+1. 使用外部真值或经标定的场地测量把 localization error 与 MPC tracking error 分开；无外部真值时不得宣称“定位不漂移”。
+2. 每次运行都计算 `C_min > e_track_99 + e_loc_99 + v*tau_99 + d_brake + m_map`。任一分项缺失或预算为负时，不得提高速度。
+3. 终端必须同时满足位置、wrapped yaw、线速度、角速度和 dwell；不能只以 action `SUCCEEDED` 或位置误差判断稳定。
+4. wheel/steer saturation 必须记录起止时间、持续时间和占空比。累计 count 只能用于发现约束介入，不能证明 reference 不可行或执行器需要放宽。
+5. 每个场景至少连续 `10/10` 通过且无人工接管、contact、定位跳变、错误 owner 或旧 reference 复活，才允许进入下一灰度级。
+6. 任何硬件、固件、外参、轮胎、地图或安全相关参数变化都会失效当前准入记录，必须从相应低风险 gate 重新验证。
+
+## 行为决策准入
+
+行为树接入不能扩大底盘命令所有权。进入 HIL 前，正式行为 profile 必须只通过 `ats_navigation_interfaces/action/NavigateToPose` 驱动 Goal Manager，并在离线 tick、ATS loopback 和 MuJoCo 依次通过同一 scenario 矩阵。
+
+1. branch halt、比赛结束、视觉 stale、补给/防守优先级切换和进程关闭均须取消活动 ATS action；Goal Manager 发布的新 `ExecutionCommand STOP` 才是停止运动的权威。
+2. 正式 profile 不得包含直接底盘 `PublishTwist`，不得让 `cmd_spin` 在 MPC 后叠加 body `wz`；受击自旋若需要车体运动，必须成为受规划、footprint、执行器约束和 yaw authority 保护的正式 reference。
+3. 行为层不得用位置距离替代 ATS action 成功。巡逻 cursor、任务 waypoint 和补给/退防完成只在 Goal Manager 已验证 position、yaw、terminal velocity 与 dwell 后推进。
+4. 云台视觉/扫描请求不得覆盖 `BODY_YAW_FOLLOW` 的锁定要求；没有实际 gimbal feedback acknowledgement 时保持 `HOLD_SAFE_STOP`，不能以 BT 黑板状态伪造确认。
+5. 固定 scenario 下，离线/loopback 至少连续 `20` 次得到一致的 branch/action 序列；MuJoCo 关键决策场景至少 `10/10` 无孤儿 goal、无抢占风暴、无旧 result/reference 复活并完成五级归零故障链。
 
 立即停止条件包括：任何未命令运动、方向/幅值异常、无效状态被接受、TF/epoch 跳变、swept clearance 失效、执行命令租约失效未归零、轮端电流/温度异常、通信丢失或独立急停不可用。发生后保留日志并回到 HIL 或离线复现，禁止用放宽门限恢复测试。
