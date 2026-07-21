@@ -39,6 +39,13 @@ P2_FAULT_CASE="${P2_FAULT_CASE:-none}"
 P3_FAULT_CASE="${P3_FAULT_CASE:-none}"
 # P4 定位融合回归；默认关闭以保持既有 P3/Nav2 对照基线。
 P4_LOCALIZATION_FUSION="${P4_LOCALIZATION_FUSION:-false}"
+# Route-profile input for narrow/slope/contact-sensitive BODY_YAW_FOLLOW
+# regressions. This is not a runtime authority hot switch.
+FORCE_BODY_YAW_FOLLOW="${FORCE_BODY_YAW_FOLLOW:-false}"
+BODY_YAW_FOLLOW_CLEARANCE="${BODY_YAW_FOLLOW_CLEARANCE:-0.55}"
+# auto records the selected immutable policy; gimbal/body assert the complete
+# execute lease and simulated gimbal acknowledgement contract.
+YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
 
 case "${PLANNING_GRID_OWNER}" in
   rc_esdf|rog_map) ;;
@@ -96,6 +103,25 @@ case "${P4_LOCALIZATION_FUSION,,}" in
     exit 2
     ;;
 esac
+case "${FORCE_BODY_YAW_FOLLOW,,}" in
+  true|false) ;;
+  *)
+    echo "FORCE_BODY_YAW_FOLLOW must be true or false."
+    exit 2
+    ;;
+esac
+case "${YAW_AUTHORITY_EXPECTED}" in
+  auto|gimbal|body) ;;
+  *)
+    echo "YAW_AUTHORITY_EXPECTED must be auto, gimbal, or body."
+    exit 2
+    ;;
+esac
+if [[ "${FORCE_BODY_YAW_FOLLOW,,}" == "true" &&
+  "${YAW_AUTHORITY_EXPECTED}" == "gimbal" ]]; then
+  echo "FORCE_BODY_YAW_FOLLOW=true cannot expect GIMBAL_COMPENSATED."
+  exit 2
+fi
 if [[ "${P4_LOCALIZATION_FUSION,,}" == "true" &&
   ("${NAVIGATION_MODE}" != "p3" || "${PLANNING_GRID_OWNER}" != "rog_map") ]]; then
   echo "P4 localization fusion requires NAVIGATION_MODE=p3 and PLANNING_GRID_OWNER=rog_map."
@@ -153,17 +179,30 @@ mkdir -p "${LOG_DIR}"
 CAPTURE_PIDS=()
 STOPPED_PIDS=()
 
+stop_capture_process() {
+  local pid="$1"
+  local deadline
+  [[ -n "${pid}" ]] || return
+  kill -TERM "${pid}" 2>/dev/null || true
+  deadline=$((SECONDS + 3))
+  while kill -0 "${pid}" 2>/dev/null && (( SECONDS < deadline )); do
+    sleep 0.1
+  done
+  if kill -0 "${pid}" 2>/dev/null; then
+    kill -KILL "${pid}" 2>/dev/null || true
+  fi
+  wait "${pid}" 2>/dev/null || true
+}
+
 cleanup() {
   for pid in "${STOPPED_PIDS[@]:-}"; do
     kill -CONT "${pid}" 2>/dev/null || true
   done
   for pid in "${CAPTURE_PIDS[@]:-}"; do
-    kill "${pid}" 2>/dev/null || true
-    wait "${pid}" 2>/dev/null || true
+    stop_capture_process "${pid}"
   done
   if [[ -n "${GOAL_PID:-}" ]]; then
-    kill "${GOAL_PID}" 2>/dev/null || true
-    wait "${GOAL_PID}" 2>/dev/null || true
+    stop_capture_process "${GOAL_PID}"
   fi
   if [[ -n "${LAUNCH_PID:-}" ]]; then
     kill -INT "-${LAUNCH_PID}" 2>/dev/null || true
@@ -280,7 +319,7 @@ assert_topic_ownership() {
   local topic_info publisher_block subscription_block deadline
   deadline=$((SECONDS + 30))
   while (( SECONDS < deadline )); do
-    topic_info="$(ros2 topic info --no-daemon --verbose "${topic}" 2>/dev/null || true)"
+    topic_info="$(timeout 5 ros2 topic info --no-daemon --verbose "${topic}" 2>/dev/null || true)"
     publisher_block="$(sed -n '/^Publisher count:/,/^Subscription count:/p' <<<"${topic_info}")"
     if ! grep -q '^Publisher count: 1$' <<<"${topic_info}" ||
       ! grep -q "Node name: ${expected_publisher}$" <<<"${publisher_block}"
@@ -319,7 +358,8 @@ node_exposes_endpoint() {
 assert_final_swerve_telemetry() {
   local output_file="$1"
   local contact_count drive_count
-  timeout 8 ros2 topic echo --no-daemon --once /swerve/telemetry >"${output_file}" \
+  timeout 8 ros2 topic echo --no-daemon --once /swerve/telemetry \
+    ats_navigation_interfaces/msg/SwerveTelemetry >"${output_file}" \
     2>/dev/null || fail "cannot capture final /swerve/telemetry"
   contact_count="$(awk '$1 == "contact_violation_count:" {print $2}' "${output_file}")"
   [[ "${contact_count}" =~ ^[0-9]+$ ]] || \
@@ -416,9 +456,19 @@ wait_for_lifecycle_active() {
 
 capture_pose() {
   local output_file="$1"
-  timeout 8 ros2 topic echo --no-daemon --once /localization --field pose.pose.position \
-    >"${output_file}" 2>/dev/null || return 1
-  grep -q '^x:' "${output_file}" && grep -q '^y:' "${output_file}"
+  local attempt
+  # ros2cli discovery is independent from the already-verified localization
+  # lease. Retry boundedly so one missed transient-local discovery window is
+  # not reported as a control or yaw-authority failure.
+  for attempt in 1 2 3; do
+    timeout 5 ros2 topic echo --no-daemon --once /localization --field pose.pose.position \
+      >"${output_file}" 2>/dev/null || true
+    if grep -q '^x:' "${output_file}" && grep -q '^y:' "${output_file}"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 pose_axis() {
@@ -606,8 +656,7 @@ publish_relative_fault_goal() {
     topic_field_equals /planner/emergency_stop data false
   wait_for_command "${label} produces MPC motion" 12 \
     stream_has_nonzero_command "${command_file}"
-  kill "${monitor_pid}" 2>/dev/null || true
-  wait "${monitor_pid}" 2>/dev/null || true
+  stop_capture_process "${monitor_pid}"
 }
 
 resume_process() {
@@ -906,6 +955,65 @@ assert_lateral_stream() {
   echo "OK: ${label} produced a lateral MPC command"
 }
 
+report_execution_yaw_authority() {
+  local output_file="$1"
+  awk '
+    function emit() {
+      if (mode == 1 && yaw != "") {
+        printf "RESULT: execute_yaw_authority=%s requires_gimbal_lock=%s request_sequence=%s feedback_sequence=%s\n", \
+          yaw, locked, request, feedback
+      }
+    }
+    $1 == "mode:" {mode = $2}
+    $1 == "yaw_authority:" {yaw = $2}
+    $1 == "requires_gimbal_lock:" {locked = $2}
+    $1 == "gimbal_request_sequence:" {request = $2}
+    $1 == "gimbal_feedback_sequence:" {feedback = $2}
+    $1 == "---" {emit(); mode = ""; yaw = ""; locked = ""; request = ""; feedback = ""}
+    END {emit()}
+  ' "${output_file}" | tail -n 1
+}
+
+assert_execution_yaw_authority() {
+  local output_file="$1"
+  local expected="$2"
+  local expected_value expected_lock
+  case "${expected}" in
+    gimbal)
+      expected_value=1
+      expected_lock=false
+      ;;
+    body)
+      expected_value=2
+      expected_lock=true
+      ;;
+    *)
+      report_execution_yaw_authority "${output_file}"
+      return
+      ;;
+  esac
+  if ! awk -v expected="${expected_value}" -v expected_lock="${expected_lock}" '
+    function matches() {
+      return mode == 1 && yaw == expected && locked == expected_lock &&
+        request ~ /^[1-9][0-9]*$/ && feedback ~ /^[1-9][0-9]*$/
+    }
+    $1 == "mode:" {mode = $2}
+    $1 == "yaw_authority:" {yaw = $2}
+    $1 == "requires_gimbal_lock:" {locked = $2}
+    $1 == "gimbal_request_sequence:" {request = $2}
+    $1 == "gimbal_feedback_sequence:" {feedback = $2}
+    $1 == "---" {
+      if (matches()) found = 1
+      mode = ""; yaw = ""; locked = ""; request = ""; feedback = ""
+    }
+    END {if (matches()) found = 1; exit found ? 0 : 1}
+  ' "${output_file}"; then
+    fail "no EXECUTE lease matched yaw authority '${expected}' with a fresh gimbal acknowledgement"
+  fi
+  report_execution_yaw_authority "${output_file}"
+  echo "OK: execute lease and gimbal acknowledgement match '${expected}' authority"
+}
+
 assert_pose_progress() {
   local label="$1"
   local before_file="$2"
@@ -1017,8 +1125,7 @@ wait_for_capture() {
       awk '/^[[:space:]]*-[[:space:]]+header:$/ {found = 1} END {exit found ? 0 : 1}' \
         "${output_file}"
     then
-      kill "${pid}" 2>/dev/null || true
-      wait "${pid}" 2>/dev/null || true
+      stop_capture_process "${pid}"
       assert_path_has_poses "${label}" "${output_file}"
       return
     fi
@@ -1028,9 +1135,45 @@ wait_for_capture() {
     fi
     sleep 0.2
   done
-  kill "${pid}" 2>/dev/null || true
-  wait "${pid}" 2>/dev/null || true
+  stop_capture_process "${pid}"
   fail "${label} did not publish a non-empty path after the goal"
+}
+
+start_topic_capture() {
+  local topic="$1"
+  local message_type="$2"
+  local output_file="$3"
+  : >"${output_file}"
+  # The event-driven diagnostic and authorization topics must have a live
+  # observer before the next execute cycle is published. Providing the type
+  # avoids ros2cli graph discovery being the condition for creating it.
+  timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon --qos-reliability reliable "${topic}" \
+    "${message_type}" \
+    >"${output_file}" 2>/dev/null &
+  STARTED_CAPTURE_PID=$!
+}
+
+ensure_topic_capture_ready() {
+  local label="$1"
+  local topic="$2"
+  local message_type="$3"
+  local output_file="$4"
+  local pid_variable="$5"
+  local attempt
+  for attempt in 1 2 3; do
+    start_topic_capture "${topic}" "${message_type}" "${output_file}"
+    # ros2cli can lose a one-shot graph discovery race even when the producer
+    # was verified earlier. Detect that exit before issuing the goal; a retry
+    # after the event-driven volatile publication would be too late.
+    sleep 1
+    if kill -0 "${STARTED_CAPTURE_PID}" 2>/dev/null; then
+      printf -v "${pid_variable}" '%s' "${STARTED_CAPTURE_PID}"
+      return 0
+    fi
+    wait "${STARTED_CAPTURE_PID}" 2>/dev/null || true
+    sleep 1
+  done
+  fail "${label} topic capture could not remain subscribed before the goal"
 }
 
 run_navigation_goal() {
@@ -1056,8 +1199,8 @@ run_navigation_goal() {
   fi
   for topic in "${path_topics[@]}"; do
     output_file="${prefix}_${topic//\//_}.out"
-    timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon "${topic}" >"${output_file}" 2>/dev/null &
-    pid=$!
+    ensure_topic_capture_ready "${name} ${topic}" "${topic}" nav_msgs/msg/Path \
+      "${output_file}" pid
     CAPTURE_PIDS+=("${pid}")
     topic_pids+=("${pid}:${topic}:${output_file}")
   done
@@ -1126,8 +1269,7 @@ run_navigation_goal() {
   assert_minco_plan_record "${name}" "${log_start_line}"
 
   sleep 0.5
-  kill "${leg_command_pid}" 2>/dev/null || true
-  wait "${leg_command_pid}" 2>/dev/null || true
+  stop_capture_process "${leg_command_pid}"
   if [[ "${name}" == "south" || "${name}" == "north" ]]; then
     assert_lateral_stream "${name} leg" "${command_output}"
   fi
@@ -1152,6 +1294,8 @@ LAUNCH_ARGS=(
   launch_rog_map:="${LAUNCH_ROG_MAP}"
   launch_localization_fusion:="${P4_LOCALIZATION_FUSION}"
   planning_grid_owner:="${PLANNING_GRID_OWNER}"
+  force_body_yaw_follow:="${FORCE_BODY_YAW_FOLLOW}"
+  body_yaw_follow_clearance:="${BODY_YAW_FOLLOW_CLEARANCE}"
   rog_map_config_file:="${ROG_MAP_CONFIG_FILE}"
   enable_lidar:=true
   lidar_backend:=cpu
@@ -1219,6 +1363,7 @@ if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
   # MPC 清 tracker，MuJoCo 执行器做硬零速；安全信号允许多个 consumer，但只有
   # Goal Manager 可以发布最终急停权威。
   assert_topic_ownership /planner/emergency_stop ats_goal_manager
+  wait_for_topic_once /gimbal/yaw_status 20
 fi
 wait_for_topic_once /swerve/telemetry 20
 
@@ -1232,19 +1377,23 @@ for topic in "${DEBUG_TOPICS[@]}"; do
   # Both debug topics have transient-local QoS and initially publish an empty
   # path while MPC is fail-stopped.  Keep the capture open through the goal so
   # an initial empty latched sample cannot hide the non-empty tracking output.
-  timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon "${topic}" \
-    >"${output_file}" 2>/dev/null &
-  DEBUG_CAPTURE_PIDS+=("$!")
-  CAPTURE_PIDS+=("$!")
+  ensure_topic_capture_ready "MPC debug ${topic}" "${topic}" nav_msgs/msg/Path \
+    "${output_file}" debug_pid
+  DEBUG_CAPTURE_PIDS+=("${debug_pid}")
+  CAPTURE_PIDS+=("${debug_pid}")
 done
-timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon /cmd_vel_mpc \
-  >/tmp/ats_minco_mpc_cmd_vel_stream.out 2>/dev/null &
-CMD_STREAM_PID=$!
+ensure_topic_capture_ready "MPC command stream" /cmd_vel_mpc geometry_msgs/msg/Twist \
+  /tmp/ats_minco_mpc_cmd_vel_stream.out CMD_STREAM_PID
 CAPTURE_PIDS+=("${CMD_STREAM_PID}")
-timeout "$((GOAL_TIMEOUT * ${#GOAL_NAMES[@]}))" ros2 topic echo --no-daemon /motion_control \
-  >/tmp/ats_minco_mpc_motion_stream.out 2>/dev/null &
-MOTION_STREAM_PID=$!
+ensure_topic_capture_ready "Motion control stream" /motion_control manda_can_control/msg/MotionCtrl \
+  /tmp/ats_minco_mpc_motion_stream.out MOTION_STREAM_PID
 CAPTURE_PIDS+=("${MOTION_STREAM_PID}")
+if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
+  EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
+  ensure_topic_capture_ready "P3 ExecutionCommand" /planner/execution_command \
+    ats_navigation_interfaces/msg/ExecutionCommand "${EXECUTION_STREAM}" EXECUTION_STREAM_PID
+  CAPTURE_PIDS+=("${EXECUTION_STREAM_PID}")
+fi
 
 for index in "${!GOAL_NAMES[@]}"; do
   echo "RUN: ${TEST_PROFILE} goal $((index + 1))/${#GOAL_NAMES[@]} '${GOAL_NAMES[index]}' -> " \
@@ -1253,15 +1402,22 @@ for index in "${!GOAL_NAMES[@]}"; do
 done
 
 sleep 1
-kill "${CMD_STREAM_PID}" "${MOTION_STREAM_PID}" 2>/dev/null || true
-wait "${CMD_STREAM_PID}" 2>/dev/null || true
-wait "${MOTION_STREAM_PID}" 2>/dev/null || true
+stop_capture_process "${CMD_STREAM_PID}"
+stop_capture_process "${MOTION_STREAM_PID}"
+if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
+  stop_capture_process "${EXECUTION_STREAM_PID}"
+  [[ -s "${EXECUTION_STREAM}" ]] || fail "ExecutionCommand did not publish during P3 run"
+  assert_execution_yaw_authority "${EXECUTION_STREAM}" "${YAW_AUTHORITY_EXPECTED}"
+  if [[ "${YAW_AUTHORITY_EXPECTED}" == "body" ]]; then
+    wait_for_command "BODY_YAW_FOLLOW gimbal lock acknowledgement" 10 \
+      topic_field_equals /gimbal/yaw_status locked true
+  fi
+fi
 
 for index in "${!DEBUG_TOPICS[@]}"; do
   topic="${DEBUG_TOPICS[index]}"
   debug_pid="${DEBUG_CAPTURE_PIDS[index]}"
-  kill "${debug_pid}" 2>/dev/null || true
-  wait "${debug_pid}" 2>/dev/null || true
+  stop_capture_process "${debug_pid}"
   output_file="/tmp/ats_minco_mpc_${topic//\//_}.out"
   [[ -s "${output_file}" ]] || fail "${topic} did not publish after the goal"
   assert_path_has_poses "${topic}" "${output_file}"
