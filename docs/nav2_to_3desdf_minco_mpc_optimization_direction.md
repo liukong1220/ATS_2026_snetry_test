@@ -1,8 +1,8 @@
 # ATS 自研导航 V1 当前状态与下一阶段交接
 
-更新时间：2026-07-26
+更新时间：2026-07-27
 
-有效更新窗口：2026-07-20 至 2026-07-26（滚动保留最近一周）。窗口外的逐日验证流水（原 5.1~5.8，覆盖 2026-07-13 至 2026-07-17）已按第 9 节维护约束第 2 条合并为 5.1 的当前结论，不再保留分日记录。本文只保留当前有效架构、最近验证结果和下一阶段任务，方便回溯和连续阅读。MuJoCo 继续承担规划、控制、四舵轮动力学和 contact 的完整闭环；`loopback_sim` 只承担低成本行为决策、action 生命周期和任务时间线检查，不能替代 MuJoCo 验收。
+有效更新窗口：2026-07-21 至 2026-07-27（滚动保留最近一周）。窗口外的逐日验证流水（原 5.1~5.8，覆盖 2026-07-13 至 2026-07-17）已按第 9 节维护约束第 2 条合并为 5.1 的当前结论，不再保留分日记录。本文只保留当前有效架构、最近验证结果和下一阶段任务，方便回溯和连续阅读。MuJoCo 继续承担规划、控制、四舵轮动力学和 contact 的完整闭环；`loopback_sim` 只承担低成本行为决策、action 生命周期和任务时间线检查，不能替代 MuJoCo 验收。
 
 本文中的状态含义：
 
@@ -468,7 +468,7 @@ $$
 
 该阶段涉及的独立仓库不再只有原三仓。实际修改前至少检查根仓、导航仓、MuJoCo 仓、`src/ats_sentry_behavior` 和 `src/sim/loopback_sim` 五个仓库；只在实际修改的仓库创建中文分内容提交并普通 push，未修改仓库不得制造空提交。
 
-### 5.13 2026-07-26 MINCO+MPC 缺陷审查与实车化整改（本轮）
+### 5.13 2026-07-26 MINCO+MPC 缺陷审查与实车化整改
 
 本节记录本轮按"MINCO 稀疏轨迹表示 / MPC 预测模型 / 二者协同"三条线做的静态审查结论与已落地整改。所有结论都给出源码锚点；未运行的部分显式标注，不得当作闭环证据。
 
@@ -511,6 +511,47 @@ $$
 1. 上述 MINCO 首端播种未做 MuJoCo 闭环，也未新增针对性单测，不得写成跟踪精度改善证据。
 2. MPC 三处高危修复只有单测与构建证据，本轮未重跑 rectangle/red_box 闭环，原 5.9 的运行数字仍是当前最新闭环证据。
 3. MuJoCo 场地冲突只有静态度量，未修改模型，因此既有闭环结论仍建立在旧场地模型上。
+
+### 5.14 2026-07-27 实车接口连通性审计（串口、行为树、实车 launch、MID360）
+
+本节回答"现在能否上车（MID360）、串口与行为树及各方面接口能否与当前自研导航框架连通"。结论：**当前不能上车。** 自研 MINCO+MPC 链没有出现在实车运行图中，命令通路与授权通路都断在实车侧。以下全部是静态源码/配置审计结论（`已验证` 仅指静态事实），未通电、未运动、未运行本轮闭环。[Confidence: High]
+
+**结论一：实车运行图里没有自研导航链（阻塞级）**
+
+1. `minco_planner_node`、`ats_goal_manager_node`、`ats_swerve_mpc_node` 只出现在 `src/sim/ats_mujoco_sim/launch/mujoco_navigation.launch.py`、`rmuc_2026_mujoco.launch.py`、各包自带 launch 与 `ats_goal_manager` 测试中；`src/ats_sentry_nav/ats_nav_bringup/launch/` 下八个 launch 文件零引用。
+2. 实车入口链 [bringup.launch.py](../src/ats_sentry_bringup/launch/bringup.launch.py) -> [rm_navigation_reality_launch.py](../src/ats_sentry_nav/ats_nav_bringup/launch/rm_navigation_reality_launch.py) -> `bringup_launch.py` -> [navigation_launch.py](../src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py) 仍启动 Nav2 `controller_server`/`planner_server`/`bt_navigator`/`lifecycle_manager` 与 `trajectory_optimizer_node`、`trajectory_speed_governor_node`。
+3. 参数缺失：`src/ats_sentry_bringup/params/node_params.yaml` 与 `ats_nav_bringup/config/reality/nav2_params.yaml` 均无 `minco_planner`/`ats_swerve_mpc`/`ats_goal_manager` 段；[ats_swerve_mpc.yaml:3](../src/ats_sentry_nav/ats_swerve_mpc/config/ats_swerve_mpc.yaml#L3) 仍为 `use_sim_time: true`。
+
+**结论二：命令通路与授权通路断裂（阻塞级）**
+
+1. MPC 输出 `/cmd_vel_mpc` 在 `src/ats_sentry_bringup` 与 `ats_nav_bringup` 内没有任何订阅者；实车实际通路是 `cmd_vel_nav2_result -> fake_vel_transform -> cmd_vel_gimbal_yaw_odom -> chassis_vel_transform -> /cmd_vel -> 串口 speed_vector`。
+2. `GimbalYawStatus` 仅由 [sim_node.py](../src/sim/ats_mujoco_sim/ats_mujoco_sim/sim_node.py) 发布，实车无发布者；而 Goal Manager 与 MPC 都是 `require_gimbal_status: true`、超时 `0.5 s`，实车上电后整链会直接停在确定性停止态。
+3. `fake_vel_transform` 把 `cmd_spin` 直接叠加到输出 `angular.z`，是 MPC 之后的第二个车体角速度入口，正式 profile 未解决前不得启用。
+
+**结论三：串口层协议兼容，但保护逻辑与执行器上限冲突**
+
+1. 兼容（无需改造）：[packet_typedef.hpp:216-219](../src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp#L216-L219) 的 packed `speed_vector {float vx; float vy; float wz;}` 与 [standard_robot_pp_ros2.cpp:962-967](../src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp#L962-L967) 的 `linear.x/linear.y/angular.z -> vx/vy/wz` 本身就是车体系全向命令，与四舵轮语义一致，不需要迁入差速或 `vy=0`。
+2. 高危：`enable_transient_zero_cmd_hold: true` 与 `transient_zero_cmd_hold_timeout_ms: 50`（[standard_robot_pp_ros2.yaml:24-26](../src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml#L24-L26)、实现见 [standard_robot_pp_ros2.cpp:932-960](../src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp#L932-L960)）在收到零命令时继续下发上一条非零 twist，最多抑制 `50 ms` 的五级归零链。
+3. 高危：出口级比授权级宽松。[node_params.yaml:248-261](../src/ats_sentry_bringup/params/node_params.yaml#L248-L261) 的 `chassis_vel_transform` 允许 `4.6 m/s`、`3.6 m/s^2`、`4.2 rad/s`，远高于 MPC 可行域 `max_vx/vy=1.5`、`max_ax/ay=2.0`、`max_wz=2.0`、`max_awz=3.0`。
+4. 高危：`pass_through_without_yaw: true` 在缺 `serial/gimbal_joint_state` 时不旋转直通命令，属静默降级放行。该目录 `sentry_chassis_vel_transform/` 是用户未跟踪文件且自带嵌套 `.git`，归属用户。
+5. `serialPortProtect()`（[standard_robot_pp_ros2.cpp:306-322](../src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp#L306-L322)）保持连接、断开重连、异常处理三项仍为 `@TODO`；`cmd_vel_watchdog_timeout_ms: 300` 与上层 `0.5 s` lease 的时序关系未论证。
+
+**结论四：行为树用的是 Nav2 接口，不是 ATS 接口（阻塞级）**
+
+1. [send_nav2_goal.cpp:12-53](../src/ats_sentry_behavior/plugins/action/send_nav2_goal.cpp#L12-L53) 与 `send_nav_through_poses.cpp` 依赖 `nav2_msgs/action/NavigateToPose`、`NavigateThroughPoses`，默认名 `/navigate_to_pose`（[send_nav_through_poses.hpp:80](../src/ats_sentry_behavior/include/ats_sentry_behavior/plugins/action/send_nav_through_poses.hpp#L80)、[sentry_behavior.yaml:184](../src/ats_sentry_behavior/params/sentry_behavior.yaml#L184)）；Goal Manager 提供的是 `ats_navigation_interfaces/action/NavigateToPose`、服务名 `/ats_navigate_to_pose`（[ats_goal_manager_node.cpp:154-155](../src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp#L154-L155)）。消息定义不同，不存在自动兼容。
+2. `decision.topics.cmd_vel`（[ats_sentry_behavior_server.cpp:218](../src/ats_sentry_behavior/src/ats_sentry_behavior_server.cpp#L218)）仍暴露行为层直发底盘通路，被 `docs/p4_real_robot_calibration_preflight.md` 行为决策准入禁止。其余 5.12.1 已记录的缺口（`SyncActionNode` 无 halt、`IsPathGoalReached` 位置判断、硬编码 costmap/odom 输入、无聚焦功能测试）仍全部有效。
+
+**结论五：MID360 配置内部一致，但外参未标定、有效参数双份**
+
+1. 一致：[MID360_config.json](../src/ats_sentry_nav/livox_ros_driver2/config/MID360_config.json) 与 [mid360_user_config.json](../src/ats_sentry_nav/ats_nav_bringup/config/reality/mid360_user_config.json) 的主机 `192.168.1.50`、雷达 `192.168.1.177` 与端口对齐；`node_params.yaml:59-73` 使用 `xfer_format: 4`、`frame_id: front_mid360`。
+2. 高危：两份配置的 `extrinsic_parameter` 全为零，云台上安装的 MID360 到 `base_link` 外参未标定，Point-LIO 输出与 footprint/净空判据不在同一几何基准上。
+3. Point-LIO 有效参数双份不一致：[point_lio/config/mid360.yaml](../src/ats_sentry_nav/point_lio/config/mid360.yaml) 与 `node_params.yaml:85-110` 在 `filter_size_map`（`0.5` vs `0.15`）、`ivox_nearby_type`（`6` vs `18`）、`blind`（`0.5` vs `0.3`）、`cut_frame_time_interval`（`0.1` vs `0.05`）上冲突，实车生效值必须固定并在运行时打印确认。
+
+**本节不可声明项**
+
+1. 以上全部为静态审计，未通电、未运动、未采集实车 rosbag，不得作为任何实车能力证据。
+2. 本轮未修改任何代码或 launch，因此实车不可上车结论在 P6 完成前保持有效。
+3. 本轮未重跑 MuJoCo 闭环，5.9 的运行数字仍是当前最新闭环证据。
 
 ## 6. 下一阶段实施顺序
 
@@ -585,7 +626,7 @@ P2 后续优化但不阻塞 P3 的范围：
 5. 使用实车电流、轮端阶跃、反馈延迟、rosbag 重定位统计标定协方差、质量门限与加速度约束；完成控制 mux 和灰度门禁后再上车。
 6. 本轮（5.13）已修复 MPC 侧四项高危实车缺陷（轮速边界失效、模型/执行时间轴不一致、舵角翻转判据、求解成功判据与饱和诊断），并在 optimizer 层实现带初速的 MINCO 首端播种。MPC 有单测证据；MINCO 播种属 `已实现未运行`，节点接线、周期重规划、前馈传递与中文分级日志仍未完成。
 
-### P5：实车化整改（本轮新增，未完成）
+### P5：实车化整改（未完成）
 
 状态：`迁移中`。范围与门禁见 5.13。
 
@@ -594,9 +635,21 @@ P2 后续优化但不阻塞 P3 的范围：
 3. MuJoCo 场地模型单一权威碰撞表示、按图纸校正高度与坡角、统一 `8.025` 原点、固定 pgm→hfield→墙体生成顺序。
 4. 上述任一改动完成后必须重跑 rectangle 与 red_box 闭环，且不得放宽 unknown、footprint、执行器或 stale 门禁换取通过。
 
+### P6：实车接口连通（本轮新增，未完成）
+
+状态：`未实现`。范围与门禁见 5.14 与 `docs/p6_real_robot_interface_integration_prompt.md`。
+
+1. 实车 Nav2-free profile：把 `minco_planner`、`ats_goal_manager`、`ats_swerve_mpc` 接入实车入口 launch，补齐实车参数段并统一 `use_sim_time: false`，与 Nav2 对照 profile 互斥。
+2. 唯一命令通路：消除 `/cmd_vel_mpc` 无消费者的断裂，明确 `fake_vel_transform`/`chassis_vel_transform` 去留，禁止在 MPC 之后改变 `[vx, vy, wz]` 或叠加 `cmd_spin`。
+3. 串口层：急停路径不受瞬时零保持抑制、实现 `serialPortProtect` 重连与重连期确定性零速度、出口限幅收紧到不宽于 MPC、缺云台反馈即零速度、符号/单位/轮位与固件口径逐项对齐。
+4. 行为树：新增 ATS action 节点并把正式树切到 `/ats_navigate_to_pose`，移除行为层直发底盘通路，输入改用 `/rc_esdf/planning_grid` 与 `/localization`，补 halt/cancel/迟到 result 功能测试。
+5. 实车 `GimbalYawStatus` 发布者（由串口云台关节反馈驱动，含 ack 与 stale 语义），禁止伪造 ack。
+6. MID360：标定并唯一化外参，固定 Point-LIO 实车生效参数，完成静止 rosbag 采集与漂移/状态统计。
+7. 分级执行只允许推进到不通电检查与抬轮 HIL；落地行走必须先闭合 5.11.2 净空预算与实测 `tau_99`。
+
 ## 7. 下一对话接续入口
 
-下一对话从 5.13 的 P5 实车化整改开始（`minco_planner` 节点接线与 MuJoCo 场地模型冲突优先），随后继续 P4 第四阶段的统一 telemetry/baseline 与 5.12 的 ATS 行为树 action 迁移：先用同一 scenario 进行 BT 离线/loopback 决策验证，再进入 MuJoCo 的真实 Goal Manager/JPS/MINCO/MPC 闭环；reference feasibility/time scaling、实车 rosbag/轮端与时延标定、控制 mux 和受控灰度按门禁后续推进。不得重复实现定位融合、ROGMap/adapter、JPS、MINCO 或 MPC，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint、执行器物理限值或 stale 安全门禁换取路线通过。
+下一对话按"P6 实车接口连通优先、P5 并行"的顺序推进：先完成 5.14 列出的实车 launch/命令通路/串口/行为树/MID360 五条阻塞项（提示词见 `docs/p6_real_robot_interface_integration_prompt.md`），使实车具备不通电检查与抬轮 HIL 条件；`minco_planner` 节点接线与 MuJoCo 场地模型冲突（P5，提示词见 `docs/p5_real_robot_hardening_prompt.md`）继续作为仿真侧主线，随后继续 P4 第四阶段的统一 telemetry/baseline 与 5.12 的 ATS 行为树 action 迁移：先用同一 scenario 进行 BT 离线/loopback 决策验证，再进入 MuJoCo 的真实 Goal Manager/JPS/MINCO/MPC 闭环；reference feasibility/time scaling、实车 rosbag/轮端与时延标定、控制 mux 和受控灰度按门禁后续推进。不得重复实现定位融合、ROGMap/adapter、JPS、MINCO 或 MPC，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint、执行器物理限值或 stale 安全门禁换取路线通过。
 
 必须保持以下边界：
 
