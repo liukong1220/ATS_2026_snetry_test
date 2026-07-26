@@ -1,8 +1,8 @@
 # ATS 自研导航 V1 当前状态与下一阶段交接
 
-更新时间：2026-07-21
+更新时间：2026-07-26
 
-有效更新窗口：2026-07-15 至 2026-07-21（滚动保留最近一周）。本文只保留当前有效架构、最近验证结果和下一阶段任务，方便回溯和连续阅读。MuJoCo 继续承担规划、控制、四舵轮动力学和 contact 的完整闭环；`loopback_sim` 只承担低成本行为决策、action 生命周期和任务时间线检查，不能替代 MuJoCo 验收。
+有效更新窗口：2026-07-20 至 2026-07-26（滚动保留最近一周）。窗口外的逐日验证流水（原 5.1~5.8，覆盖 2026-07-13 至 2026-07-17）已按第 9 节维护约束第 2 条合并为 5.1 的当前结论，不再保留分日记录。本文只保留当前有效架构、最近验证结果和下一阶段任务，方便回溯和连续阅读。MuJoCo 继续承担规划、控制、四舵轮动力学和 contact 的完整闭环；`loopback_sim` 只承担低成本行为决策、action 生命周期和任务时间线检查，不能替代 MuJoCo 验收。
 
 本文中的状态含义：
 
@@ -145,7 +145,7 @@ localization epoch 与 ROG source generation、adapter publication epoch、MINCO
 | 新 epoch 定位与地图恢复 ready，仍有活动目标 | 只允许 Goal Manager 重新触发 JPS/MINCO，收到同 epoch 安全 reference 后解除急停。 |
 | 新 epoch 恢复但没有活动目标 | 保持急停和双零；不得恢复急停前 reference。 |
 
-该状态机、结构化观测、定位融合、localization epoch 和重定位触发的自动重规划均已实现并通过节点测试与 MuJoCo 故障注入。[Confidence: High] 证据为 fusion/Goal Manager 节点测试和 5.7 的六个独立故障闭环；实车 rosbag、错误接受率、恢复时延分布和阈值标定仍未验证。
+该状态机、结构化观测、定位融合、localization epoch 和重定位触发的自动重规划均已实现并通过节点测试与 MuJoCo 故障注入。[Confidence: High] 证据为 fusion/Goal Manager 节点测试和 5.1 合并结论中的六个独立定位故障闭环；实车 rosbag、错误接受率、恢复时延分布和阈值标定仍未验证。
 
 ### 1.5 后续重定位验收门禁
 
@@ -262,203 +262,46 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 
 ## 5. 最近验证记录
 
-### 5.1 2026-07-13
+### 5.1 2026-07-13 至 2026-07-17 结论合并（P1/P2/P3 与 P4 第一、二阶段）
 
-1. 扩大矩形回归 `TEST_PROFILE=rectangle` 五段均完成，south/north 检测到非零 `/cmd_vel_mpc.linear.y`，证明控制未退化为差速转向。
-2. 当前实验链已验证 `/plan`、`/minco/raw_path`、`/minco/reference_path`、MPC reference/predicted path、`/cmd_vel_mpc`、`/motion_control` 和单一控制发布者/订阅者。
+按第 9 节维护约束第 2 条，原 5.1~5.8 的分日流水已合并为下列当前结论，只保留仍在支撑当前决策的结论与验证边界，不再保留逐次运行明细。后续小节保留原编号 5.9~5.13，避免破坏第 6、7 节的交叉引用。
 
-### 5.2 2026-07-14
+**地图与规划控制链（原 P1/P2）**
 
-1. `UsesYawAwareFootprintToIncreaseEdgeClearance` 单测确认 P2.1 后最小足迹净空大于 `0.39 m`，较中心候选提高超过 `0.05 m`，连续起终点不变。
-2. `test_rc_esdf_map`、`test_grid_jps`、`test_minco_trajectory_optimizer`、`test_yaw_spline_planner` 全部通过。
-3. 红框长路线 `TEST_PROFILE=red_box` 两段 Nav2 `NavigateToPose` 均为 `SUCCEEDED`：中转终点 `(-8.9181, 1.4698)`，误差 `0.038 m`；红框终点 `(-0.0845, -4.0685)`，误差 `0.046 m`。
-4. 主段记录 `raw_points=39`、`reference_points=707`、`length=22.28 m`、`collisions=0`；MPC reference horizon、predicted path、`/cmd_vel_mpc`、`/motion_control` 录制均非空。
+1. ROGMap 三维滑窗、四类调试点云、概率对数几率融合与 stale 衰减已在 MuJoCo 验收；`ats_rog_map` 不发布任何机器人 TF，也不发布 `/rc_esdf/planning_grid`。四档配置见 6 节 P1 表格。
+2. `ats_rog_map_adapter` 只调用数值 `GetRogMapProjection` service，融合 ROGMap、`traversability_grid`、`traversability_slope_grid` 与静态墙，unknown 默认按障碍处理；`planning_grid_owner` 在 `rc_esdf|rog_map` 间选定 `/rc_esdf/planning_grid` 的唯一 publisher，不支持运行中热切换。禁止从 `/rog_map/esdf` 可视化点云反解析距离场。
+3. MINCO 每次 planning-grid 回调构造不可变 snapshot，单次 JPS、二维 RC-ESDF、clearance、footprint gate 与 Local Collision Repair 不混用地图更新；最终 reference 在提交点统一重定时，先发布 `emergency_stop=false` 再发布 reference。
+4. map ready heartbeat（`10 Hz`）、`0.5 s` steady-clock lease、projection deadline/epoch、input stale、规划失败与 MPC tracker clear 已构成确定性急停链；ready 恢复本身不能重新授权旧轨迹。
+5. Nav2 上游加自研规划控制的红框回归（rectangle 五段、red_box 中转与终点）终点误差量级为 `0.02~0.08 m`、离散 footprint 冲突 `0`；该批只作为地图与规划控制回归，不能替代 P3 Nav2-free 证据。
 
-验证边界：以上结果证明当前静态 MuJoCo 场景中的 Nav2 上游 + 自研规划控制链可运行，不证明 ROGMap、自研 action、Nav2-free 启动、动态障碍、连续 swept volume 或实车安全已完成。
+**Nav2-free 目标管理（原 P3）**
 
-### 5.3 2026-07-15：ROGMap P1 与云台/底盘兼容链
+1. `ats_navigation_interfaces` action、`PlannerGoal`/`PlannerStatus`、`ats_goal_manager` 与 `static_map_publisher.py` 构成 Nav2-free 主线；MINCO 只发布 `/minco/reference_path_candidate` 与 `/minco/planning_status`，不越权发布正式 reference 或急停。
+2. 正式入口显式 `launch_nav2:=false`、`global_plan_topic=""`，运行图中不出现 Nav2 节点、lifecycle manager 或 `/plan`；single、rectangle、red_box 均由 ATS action 完成，并覆盖 feedback、result、cancel、preempt、timeout。
+3. 已独立注入并验证的失效安全用例：adapter lease、projection timeout、input stale、all-unknown（`RESULT_MAP_UNREADY=4`）、free-unreachable（`RESULT_PLANNING_FAILED=5`）、cancel、preempt、timeout、TF failure；每例均确定性急停、两级零速度，恢复后无新目标时不复活旧 reference。
+4. `rmuc_2026_mujoco.launch.py` 是唯一 MuJoCo 入口；回归脚本不得依赖 `rg` 等隐式工具，`/local_elastic_path` 一类 transient-local 话题必须先订阅再启动。
 
-1. `ats_rog_map`、`ats_nav_bringup`、`ats_sentry_bringup` 与 `ats_mujoco_sim` 单线程构建通过；`prob_map_log_odds_fusion_test`、`prob_map_stale_decay_test`、`test_split_robot_sensor_pose` 全部通过。
-2. 在隔离 `ROS_DOMAIN_ID=88`、无 viewer/RViz、`launch_nav2:=false`、`launch_rog_map:=true` 的 MuJoCo 验收中，`/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 的宽度分别为 `2`、`239`、`9797`、`2601`，均为 `odom` frame；持续输入时 `/rog_map/stale=false`。
-3. `ros2 node info /ats_rog_map` 只列出地图诊断话题，不含 `/tf` 或 `/tf_static` 发布者；ROGMap 不参与机器人 TF 所有权。
-4. `fake_yaw` 与底盘坐标转换在实机主入口默认启用。四种开关组合均有明确速度出口：双开时维持 `cmd_vel_nav2_result -> fake -> cmd_vel_gimbal_yaw_odom -> chassis -> /cmd_vel`；仅底盘开时 chassis 直接订阅 `cmd_vel_nav2_result`；双关时 Nav2 直接输出 `/cmd_vel`；仅 fake 开时 fake 直接输出 `/cmd_vel`。实机不得在下游仍要求底盘坐标速度时仅关闭 chassis；该组合只适用于显式接管 gimbal-yaw 速度的外部执行器。
-5. fake 关闭时启动 `gimbal_yaw_odom -> gimbal_yaw_fake` 的零旋转兼容 TF，使现有 Nav2 frame 参数不失效，但不会执行 fake-yaw 动态旋转。`base_footprint -> base_link` 静态 TF 改由内层 navigation launch 单一所有；启用 `robot_state_publisher` 时不再额外发布该静态 TF。
+**定位融合与四舵轮执行约束（原 P4 第一阶段）**
 
-验证边界：本节只验证了当前稀疏 MuJoCo 点云、调试地图和开关路由。`rog_map_report_025.yaml` 尚未在目标机完成 50 Hz、约 6 ms、峰值 RSS 或完整 2.5 cm ESDF 性能验收；不得将技术报告数字写成 ATS 实测结果。
+1. `localization_fusion` 独占 `map -> odom`、`/localization` 与定位健康/epoch；small_gicp 提供结构化 `RelocalizationObservation`，按观测时间对齐 odom 历史。
+2. 六个独立定位故障闭环（`odometry_stale`、`delayed`、`gicp_rejected`、`false_match`、`epoch_jump`、`tf_loss`）均验证急停、两级零速度与恢复后旧 reference 不复活；该批即 1.4 引用的故障证据。其中 `odometry_stale` 在 P4 第二阶段补跑时于初始 `TRACKING` 前超时，未重新注入。[Confidence: Medium]
+3. 四舵轮几何与执行器语义已在三个 MuJoCo 模型与 MPC 配置间对齐：`wheel_base_x/y=0.270 m` 是半轴偏置（轮心距 `0.540 m`）、`wheel_radius=0.0425 m` 是含包胶最终滚动半径、总质量 `25 kg`、质心高 `0.100 m`、摩擦 `0.8/0.02/0.005`；`450 rpm` 与 `120 rpm` 经减速比和 `1.2` 冗余折算为 `max_wheel_speed=1.6689711 m/s`、`max_steer_rate=10.4719755 rad/s`。
+4. 动力学矩阵运行已记录各阶段峰值与累计饱和次数，证明执行器约束在运行中频繁介入；该累计量不足以支撑放宽任何执行器限值。
 
-### 5.4 2026-07-16：ROGMap P2 地面规划闭环
+**连续安全与执行契约（原 P4 第二阶段）**
 
-源码与组件证据：
+1. `FootprintSafetyChecker` 在相邻 reference SE(2) 段间做 swept 检查，分段数按四个最远角点位移除以 `planning_grid.resolution * swept_max_corner_step_cells`（默认半格）向上取整，yaw 用最短角插值；这是保守离散采样，不是解析连续 Minkowski sweep。
+2. `ExecutionCommand` 是 Goal Manager 到 MPC 的唯一执行授权，原子携带 `STOP/EXECUTE`、reference、goal id、localization epoch、snapshot generation、adapter publication sequence、`failure_reason` 枚举与严格单调命令序号；legacy `Path` 与 `emergency_stop=false` 不能重新授权 tracker。
+3. 运行期 unsafe 用例（提交后变障碍、纯旋转、unknown、outside、旧 generation/epoch、mid-segment、repair 后复核）均进入确定性停止；`FAILURE_RUNTIME_UNSAFE` 由 Goal Manager 决策停止与重规划，MINCO 不越权急停。
 
-1. 新增 `ats_rog_map_interfaces/GetRogMapProjection` 与 `ats_rog_map_adapter`。adapter 直接调用数值 service，不订阅 `/rog_map/esdf`；service 输出来自概率地图、未膨胀的 raw 三态占据分类，避免与下游二维 RC-ESDF/footprint clearance 重复膨胀。
-2. ROGMap wrapper 使用独立 source generation；概率地图 mutation、滑窗移动/reset 会推进 generation 并立即失效旧 ESDF generation。查询前只为当前 generation 重算 ESDF，数值结果仅在本次 ESDF updated bbox 内有效，bbox 外 distance/gradient 保持 `NaN`。地图健康由最后一次成功 mutation 与 odom freshness 判定，不能由原始 cloud 到达单独续命。
-3. 有效 MuJoCo 参数位于受版本控制且由 launch 加载的 `ats_rog_map/config/rog_map_ground_planning_mujoco.yaml` 与 `ats_rog_map_adapter/config/rog_map_ground_planning.yaml`。`projection_min_height=0.10 m` 排除了当前场景地面回波；低矮障碍仍依赖 terrain/slope 语义，属于后续场景覆盖风险。
-4. 融合真值表已由 GTest 固化：任一有效来源 occupied 保持 occupied；任一新鲜来源 known-free 可消解其他来源 unknown；只有所有来源都缺少 free/occupied 证据时输出 unknown，且 unknown 默认按障碍处理。静态细栅格使用输出 footprint 保守聚合，测试覆盖非整除分辨率、平移 origin 与 yaw；ego unknown 圆形清理默认禁用。
-5. `planning_grid_owner:=rog_map` 会启动 adapter 并抑制 `rc_esdf_map`。运行时 `/rc_esdf/planning_grid` 只有 adapter 一个 publisher；`/cmd_vel_mpc` 与 `/motion_control` 也分别只有一个 publisher 和一个下游 subscriber。
-6. MINCO 每次 planning-grid callback 构造不可变本地 snapshot，单次 JPS、二维 RC-ESDF、clearance、footprint gate 与 repair 不混用更新。最终 reference 在 snapshot/heartbeat 复核成功的提交点统一重定时，先发布 `emergency_stop=false`、再发布 reference；MPC 继续拒绝急停前的旧 reference。
-7. `/planner/emergency_stop` 使用 reliable + transient-local QoS 和 `10 Hz` heartbeat；MPC 默认 fail-stop、使用 `0.5 s` steady-clock lease，并在首次建立权威、显式 stop 或 lease timeout 时清 tracker、deadline 与 warm start。ready 恢复本身不能重新授权旧轨迹。
+**该批结论的验证边界（继续有效）**
 
-最终统一 Release 构建为 `7 packages finished`。功能 CTest 为 `ats_rog_map 4/4`、`ats_rog_map_adapter 1/1`（测试进程内部 `7/7` GTest）、`minco_planner 5/5`、`ats_swerve_mpc 3/3`。`minco_planner` 全包测试仍有既有 `copyright`、`cpplint`、`clang_format` 失败，不能写成全包 lint 通过；本轮新增 reference timing 文件没有格式偏差。
-
-最终 MuJoCo 名义路线均使用隔离 `ROS_DOMAIN_ID`、无 viewer/RViz 与 `PLANNING_GRID_OWNER=rog_map`。rectangle/red_box 使用 `P2_FAULT_CASE=none`；single 数据来自最终源码 `adapter_lease` 用例在注入故障前完成的健康名义段：
-
-| 场景 | 终点与误差 | 路径/控制证据 | 离散 footprint 冲突 |
-| --- | --- | --- | ---: |
-| single | `(-9.076145, 1.464456)`，误差 `0.076347 m` | `/plan=59`，raw/reference `3/80`，MPC reference/predicted `21/21`，两级速度非零 | `0` |
-| rectangle | 五段误差 `0.017822/0.019986/0.026784/0.028911/0.020937 m` | 五段 raw/reference 为 `3/56, 2/25, 2/13, 2/25, 3/17`；south/north 均有真实 `linear.y`；generation `298 -> 817` | 每段 `0` |
-| red_box 中转 | `(-8.919291, 1.467177)`，误差 `0.039392 m` | `/plan=64`，raw/reference `3/86` | `0` |
-| red_box 终点 | `(-0.069555, -4.092861)`，误差 `0.032232 m` | `/plan=128`，首次捕获 raw/reference `37/128`，最终有效规划日志 `16/572`，MPC reference/predicted `21/21`，两级速度非零，generation `304 -> 1133` | `0` |
-
-最后一次源码修改后又完整运行 `ROS_DOMAIN_ID=203 scripts/test_mujoco_nav_chain.sh`，Nav2 action、lifecycle、TF、terrain/slope、RC-ESDF local elastic path 与速度桥均通过。该脚本不计算终点误差，只是 Nav2 回归对照，不能证明 P2 红框或 Nav2-free。
-
-失效安全使用相互独立的 MuJoCo launch 与 ROS domain 执行；禁止将多个 fault 串在同一机器人状态中：
-
-| `P2_FAULT_CASE` | 实际触发 | 结果 |
-| --- | --- | --- |
-| `adapter_lease` | 最终源码下 `ROS_DOMAIN_ID=204`，运动中 `SIGSTOP` adapter | heartbeat lease 触发急停与两级零速度；恢复后 generation `588 -> 701`，无新目标时旧 reference 不恢复运动 |
-| `service_timeout` | `ROS_DOMAIN_ID=189`，运动中 `SIGSTOP` ROGMap | 记录 `projection request timed out`、ready=false、急停与双零；恢复后 generation `628 -> 675` 且仍双零 |
-| `input_stale` | `ROS_DOMAIN_ID=191`，运动中 `SIGSTOP` MuJoCo sensor/localization 输入 | `/rog_map/stale=true`、ready=false、急停与双零；恢复后 generation `502 -> 540` 且仍双零 |
-| `unknown` | `ROS_DOMAIN_ID=182`，从最终 planning grid 选取真实 unknown 单元 `(-14.525, -7.975)` | 日志 `goal is occupied`、急停与双零 |
-| `unreachable` | `ROS_DOMAIN_ID=186`，动态选取 clearance-valid、值小于 `50` 且与起点不连通的 free 单元 `(10.175, -6.875)` | 日志 `no path` 而非 occupied-goal，急停与双零 |
-
-验证边界：
-
-1. 该批 2026-07-16 P2 结果运行时尚无独立 MuJoCo contact evaluator，`footprint_collisions=0` 只表示 MINCO 离散定向矩形 gate 未发现冲突采样；P4 evaluator 不能倒推这批历史结果的物理 contact。
-2. 本节的 P2 红框脚本固定 `launch_nav2:=true`，因此只证明 Nav2 上游 + 自研规划控制；P3 Nav2-free 的独立证据见 4.6，二者不能互相替代。
-3. ROG source generation 尚未通过 `OccupancyGrid` 结构化传播到 MINCO；MINCO 也尚未直接消费 adapter 数值 ESDF，而是从融合 planning grid 重建二维 RC-ESDF。
-4. `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子事务；当前通过源端互斥、提交点重定时、MPC 旧 reference 拒绝和 lease fail-stop 限制风险。
-5. 本轮没有在目标机复现技术报告的 `50 Hz`、约 `6 ms`、CPU 或峰值 RSS，也没有完成受控尾延迟基准；运行日志中的单次耗时不能替代性能验收。
-
-### 5.5 2026-07-16：MuJoCo 入口与回归脚本复验
-
-1. `ats_mujoco_sim.launch.py` 是裸底盘/传感器入口，默认回退到通用 `swerve_chassis.xml`，不启动 `map_server`、Nav2、ROGMap adapter、MINCO 或 MPC；其轻量 RViz 也没有 `/map` display。固定 RMUC 场地与导航验证必须使用 `ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py`。P2 手工闭环还需设置 `planning_grid_owner:=rog_map launch_swerve_mpc:=true`；在 Bash 中统一 source `install/setup.bash`。
-2. 用户附件中的 single 回归实际上已经得到 `NavigateToPose=SUCCEEDED`、`/plan=59`、raw/reference `3/80` 和 `collisions=0`。原最终失败来自测试脚本调用环境中不存在的 `rg`，不是地图、规划或控制失败。两个 MuJoCo 回归脚本现已使用系统基础 `grep` 完成等价日志匹配，不再把 ripgrep 作为隐式运行依赖。
-3. Nav2 对照脚本原先在 action 完成后才创建 `/local_elastic_path` 临时订阅，可能错过运动期唯一一次实质变化发布。脚本现于发送目标前预置 `reliable + transient_local` 捕获，并在 action 完成后验证 `poses` 非空。定向 `info` 运行记录 optimizer 输出 `35` 点、`published=true`、耗时 `0.007 s`；该单次日志只用于验证采样时序，不能作为性能指标。
-4. 修复后在不含 `rg` 的精简 `PATH` 中运行 `ROS_DOMAIN_ID=211 TEST_PROFILE=single PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none`：终点 `(-9.062361, 1.466486)`，误差 `0.062460 m`；`/plan=59`、raw/reference `3/80`、MPC reference/predicted `21/21`、两级速度非零，generation `294 -> 466`，离散 footprint 冲突 `0`。
-5. 同一最终脚本以 `ROS_DOMAIN_ID=212 TEST_PROFILE=red_box GOAL_TIMEOUT=180` 完成红框长路线：中转终点 `(-8.892180, 1.472841)`、误差 `0.012507 m`；红框终点 `(-0.114627, -4.070920)`、误差 `0.075178 m`。两段 action 均 `SUCCEEDED`，最终段 `/plan=128`、首次捕获 raw/reference `37/128`、最终有效规划 `16/512`、MPC reference/predicted `21/21`、两级速度非零，generation `296 -> 991`，离散 footprint 冲突 `0`。
-6. `ROS_DOMAIN_ID=216 scripts/test_mujoco_nav_chain.sh` 完整通过固定地图、TF、terrain/slope、RC-ESDF 三类栅格、Nav2 lifecycle、非空 `35` 点 local elastic path、事件驱动 `/plan`、无空 FollowPath 和无 controller abort。该脚本仍是 Nav2 对照，不计算终点误差；物理接触仍未验证，以上结果也不证明 P3 Nav2-free。
-
-### 5.6 2026-07-16：P3 Nav2-free 目标管理与启动链
-
-源码、构建与接口证据：
-
-1. 新增 `ats_navigation_interfaces` 的 ATS `NavigateToPose` action、`PlannerGoal`、`PlannerStatus`，以及 `ats_goal_manager`。前者不依赖 `nav2_msgs`；后者处理 `/goal_pose` 与 `/ats_navigate_to_pose`，将单调 `goal_id` 发给 MINCO，并独占正式 `/minco/reference_path` 与 `/planner/emergency_stop`。
-2. MINCO 仅向 `/minco/reference_path_candidate` 与 `/minco/planning_status` 反馈候选；每个 planning-grid callback 仍构造一个不可变本地 snapshot，JPS、二维 RC-ESDF、MINCO clearance、footprint gate 和 repair 不跨 generation 混用。`clearance_aware` yaw 已对末端原地 yaw 过渡逐点复核 footprint gate；MPC 也能在零平移、yaw 变化的 tail segment 按 yaw 推进跟踪时间。
-3. `launch_nav2:=false` 时 MuJoCo 使用 `static_map_publisher.py` 读取 RMUC YAML/PGM 并保持三态 OccupancyGrid、origin、分辨率、`map` frame、reliable/transient-local QoS；没有 `map_server` 或 lifecycle manager。RViz 配置已按当前 ROGMap/adapter、raw/reference/MPC 路径框架更新。
-4. 最终 Release 构建为 `ats_navigation_interfaces`、`ats_goal_manager`、`ats_rog_map_adapter`、`minco_planner`、`ats_swerve_mpc`、`ats_mujoco_sim` 共 `6 packages finished`。`test_goal_lifecycle`、`test_ground_projection_fusion`、`test_yaw_spline_planner`、`test_trajectory_tracker` 与静态地图 Python 单测均通过；launch `--show-args`、改动 Python `py_compile`、两个回归脚本 `bash -n` 通过。`minco_planner` 全包 lint 的既有 `copyright`、`cpplint`、`clang_format` 失败仍不能写成全包测试通过。
-
-所有 P3 名义路线均使用独立 ROS domain、`use_viewer:=false`、`show_viewer:=false`、`launch_mujoco_rviz:=false`、`NAVIGATION_MODE=p3`、`P3_GOAL_ENTRY=action`、`PLANNING_GRID_OWNER=rog_map` 与 `launch_nav2:=false`：
-
-| 场景 | 终点与二维误差 | JPS/MINCO/MPC/底盘证据 | 离散 footprint 冲突 |
-| --- | --- | --- | ---: |
-| single（`ROS_DOMAIN_ID=162` 名义段） | `(-9.017683, 1.463644)`，`0.018791 m` | action feedback + `SUCCEEDED`；raw/reference `3/82`；MPC reference/predicted `21/21`；两级速度非零；adapter generation 名义段 `326 -> 493` | `0` |
-| rectangle stage/east/south/west/north（`ROS_DOMAIN_ID=164`） | `(-9.502665,1.472583)`/`0.003711 m`；`(-8.852614,1.476912)`/`0.033339 m`；`(-8.817343,1.146728)`/`0.004215 m`；`(-9.500722,1.142227)`/`0.007806 m`；`(-9.500829,1.468654)`/`0.001581 m` | raw/reference 依次 `3/58`、`3/42`、`2/26`、`2/27`、`2/25`；south/north 实测非零 `linear.y`；MPC reference/predicted `21/21`、两级速度非零；generation `178 -> 696` | 每段 `0` |
-| red_box 中转（`ROS_DOMAIN_ID=165`） | `(-8.947054,1.467880)`，`0.067088 m` | raw/reference `3/88`，action `SUCCEEDED` | `0` |
-| red_box 最终目标 `(-0.04,-4.08)`（`ROS_DOMAIN_ID=165`） | `(-0.038637,-4.087151)`，`0.007280 m` | 首次捕获 raw/reference `37/128`，最终 MINCO reference `37/708`；MPC reference/predicted `21/21`、两级速度非零；generation `311 -> 989` | `0` |
-
-故障均从新的 MuJoCo launch 和新的 ROS domain 注入，动作前若需要运动证据，先以已验证自由走廊 action 进入 tracking；故障恢复后均不发送新目标并再次采样双零输出：
-
-| 故障 | 实际结果 |
-| --- | --- |
-| adapter lease（`155`） | 暂停 adapter 后 ready heartbeat lease 触发急停，`/cmd_vel_mpc` 与 `/motion_control` 为零；恢复 ready/generation 后无新目标仍为零。 |
-| projection service timeout（`156`） | 暂停 ROGMap 后记录 `projection request timed out`、adapter not-ready、急停与双零；恢复后无旧 reference 复活。 |
-| Point-LIO-compatible input stale（`157`） | 暂停 MuJoCo 输入后 `/rog_map/stale=true`、adapter not-ready、急停与双零；恢复后 generation `584 -> 616`，无新目标仍双零。 |
-| all-unknown planning grid（`162`） | 仅隔离测试参数 `test_force_all_unknown=true`（默认 false）使 adapter 作为唯一 publisher 输出 all-unknown blocked grid；ready=false，正在 tracking 的 ATS action 返回 `RESULT_MAP_UNREADY=4`，双零；关闭参数后 generation `556 -> 726`，无新目标仍双零。 |
-| free-unreachable（`163`） | 动态选取 `(10.175000,-6.875000)` 的 clearance-valid free 且不连通单元；ATS action 返回 `RESULT_PLANNING_FAILED=5`，MINCO 记录 no-path，双零。 |
-| cancel（`148`） | Humble 通过 action `cancel_goal` service 精确 UUID 取消，结果码 `1`，有非空 cancel acknowledgement，急停与双零；恢复后仍双零。 |
-| preempt（`151`） | 第一个 action 结果码 `2`，第二个 action 以超时结果码 `3` 结束，最终急停与双零；恢复后仍双零。 |
-| timeout（`149`） | action 结果码 `3`，急停与双零；恢复后仍双零。 |
-| TF failure（`152`） | 目标 frame 不存在，action 结果码 `6`，急停与双零。 |
-
-`ROS_DOMAIN_ID=166 scripts/test_mujoco_nav_chain.sh` 也完整通过 Nav2 lifecycle、TF、terrain/slope、RC-ESDF、`NavigateToPose`、local elastic path 与速度桥；它是 Nav2 回归对照，不能作为 P3 通过证据。
-
-验证边界：
-
-1. 该批 2026-07-16 P3 结果运行时尚未接入独立 MuJoCo contact evaluator；`footprint_collisions=0` 只能表示 MINCO 离散定向矩形 gate 无冲突采样。P4 新 evaluator 与最终闭环结果见 5.7，不能倒推旧结果的物理 contact。
-2. 专用 unsafe-trajectory 运行注入尚未实现；`publish_unsafe_trajectory=false`、MINCO failed status 到目标管理器急停已在源码中保留，但本轮没有把它单独作为 MuJoCo 故障证据。连续 swept footprint、实车动力学标定和实机验证继续属于 P4。
-3. ROG source generation 尚未以结构化 OccupancyGrid/数值 ESDF 消息端到端传给 MINCO；当前只证明一次 MINCO 局部不可变 snapshot 内的一致性。MINCO 也尚未直接消费 adapter 数值 ESDF。
-4. 本轮未在目标机测量技术报告的 `50 Hz`、约 `6 ms`、CPU、内存或尾延迟；不得写为 ATS 实测性能。
-
-### 5.7 2026-07-17：P4 第一阶段定位融合与四舵轮执行约束
-
-源码与接口：
-
-1. `RelocalizationObservation` 已携带扫描时间、`map -> robot base` 位姿、协方差近似、内点/源点数、归一化配准误差、质量、状态与单调序号。small_gicp 增加两帧一致性确认；协方差来自最终信息矩阵逆与残差尺度，尚未经过实车统计标定。
-2. `localization_fusion` 明确执行 `/odometry -> /localization`，保持 `odom -> gimbal_yaw_odom` 局部连续；用观测时刻 odom 历史插值计算 `map -> odom`，拒绝迟到、重复、历史越界、质量不足和超创新观测，并发布 `UNINITIALIZED/TRACKING/RELOCALIZING/DEGRADED/LOST` 与 localization epoch。
-3. adapter、Goal Manager、MINCO 与 MPC 已校验 localization epoch。定位失效或 epoch 变化会失效 planning snapshot、候选/正式 reference、MPC tracker 与 warm start；恢复时必须先得到同 epoch 新地图，再派发同 epoch planner goal 和新 reference。MPC 还会拒绝定位非 `TRACKING` 期间到达的新 Path，单独的 `emergency_stop=false` 不能解除定位 fail-stop。
-4. P4 MuJoCo 图中 `/odometry` 唯一链为 `ats_mujoco_sim -> localization_fusion`，`/localization`、`/localization/status` 和 `map -> odom` 由 fusion 独占；MuJoCo 的 `publish_map_to_odom_tf=false`。`/planner/emergency_stop` 只有 Goal Manager 一个 publisher，MPC 与 MuJoCo 分别执行 tracker 清理和执行器硬零速。
-
-四舵轮几何与执行器语义：
-
-1. `wheel_base_x/y=270 mm` 按底盘中心到轮心的半轴偏置解释，因此完整前后和左右轮心跨度均为 `0.540 m`。这是由现有碰撞包络和模型轮位交叉确认的源码语义，不再二次除以二。
-2. `wheel_radius=42.5 mm` 是包含 `10 mm` 包胶后的最终滚动半径，模型未叠加到 `52.5 mm`。Shore A 60 未无依据换算为 `solref/solimp`。
-3. 三个 swerve 模型均为根部上装 `23 kg` 加四个 `0.5 kg` 模块，MuJoCo 编译模型总质量 `25 kg`、整车总质心高度 `0.100 m`。轮胎切向摩擦为 `0.8`，扭转/滚动分量保持独立的 `0.02/0.005`，没有把 `0.8` 复制到三个摩擦分量。
-4. 减速比按“电机转速/轮端转速”解释。`450 rpm`、`42.5 mm`、`i_drive=1` 的原始轮缘速度为 `2.002765 m/s`，除以 `1.2` 冗余后为 `1.668971 m/s`，对应保守轮端 `375 rpm`。`120 rpm`、`i_steer=1` 的原始舵速为 `12.566371 rad/s`，保守舵速为 `10.471976 rad/s`。
-5. MPC 与 MuJoCo 均按每轮 $v_i=[v_x-\omega_z y_i,\ v_y+\omega_z x_i]$ 计算，约束每轮合速度、驱动 RPM、轮速向量增量/加速度和运动中舵向变化率；状态仍为世界系 `[x,y,yaw]`，控制仍为车体系 `[vx,vy,wz]`。
-
-构建与测试：
-
-1. Release 构建 `ats_navigation_interfaces`、`small_gicp_relocalization`、`sensor_scan_generation`、`ats_goal_manager`、`ats_rog_map_adapter`、`minco_planner`、`ats_swerve_mpc`、`ats_nav_bringup`、`ats_sentry_bringup`、`ats_mujoco_sim` 共十包通过。
-2. `small_gicp_relocalization 42/42`、Goal Manager `5/5`、MPC `18/18`、adapter `8/8`、MINCO 五个功能 GTest 和 MuJoCo physics `6/6` 通过。四个包仍有既有全包 copyright/Black/cpplint 债务；MINCO 功能 GTest 已从 lint 中单独重跑，不能写成四个包 lint 全通过。
-3. 改动 Python `py_compile`、两个 evaluator 的 Black/`ament_flake8`、YAML/XML 解析、脚本 `bash -n`、四个 launch `--show-args` 与三仓 `git diff --check` 均通过。
-4. `ROS_DOMAIN_ID=215 scripts/test_mujoco_nav_chain.sh` 完整通过 Nav2 lifecycle、`NavigateToPose=SUCCEEDED`、RC-ESDF local elastic path 和底盘转发；该结果只作为 Nav2 对照。
-
-`ROS_DOMAIN_ID=214` 四舵轮动力学矩阵覆盖前进、横移、斜向、纯旋转、组合、加减速、急停和舵向反转，`failures=[]`、违规 contact sample 累计为 `0`。以下 saturation 为该阶段结束时的累计计数，不是单阶段增量：
-
-| 阶段 | 实测底盘峰值 | 轮/舵与滑移证据 | 累计饱和 |
-| --- | --- | --- | --- |
-| 前进 `[0.5,0,0]` | `vx=0.506308 m/s` | `111.255 rpm`；稳定纵滑 P95 `0.011191 m/s` | drive accel `200`，steer `0` |
-| 横移 `[0,0.5,0]` | `vy=0.506533 m/s` | `111.295 rpm`；稳定纵/侧滑 P95 `0.011191/0.000000 m/s` | drive accel `228`，steer `96` |
-| 斜向 `[0.35,0.35,0]` | `vx/vy=0.354632/0.354615 m/s` | `110.186 rpm`；稳定纵滑 P95 `0.011079 m/s` | drive accel `228`，steer `20` |
-| 纯旋转 `[0,0,0.8]` | `wz=0.796517 rad/s` | `67.379 rpm`；舵速达到保守上限 `10.471976 rad/s` | drive accel `132`，steer `60` |
-| 组合 `[0.3,0.2,0.5]` | `0.307571/0.201065/0.510110` | `122.009 rpm`；稳定纵/侧滑 P95 `0.019475/0.003797 m/s` | drive accel `184`，steer `40` |
-| 加速 `[1.5,0,0]` | `vx=1.519071 m/s` | `333.766 rpm`；稳定纵滑 P95 `0.033628 m/s` | drive accel `864`，steer `35` |
-| 舵向反转 | `vy: +0.404548 -> -0.365481 m/s` | 舵速限幅 `10.471976 rad/s`；瞬态侧滑峰值 `0.471973 m/s` | drive accel `670`，steer `649` |
-| 急停 | 最终 `[0,0,0]` | 最终四轮 `[0,0,0,0] rpm` | contact `0` |
-
-六类定位故障均使用新的 MuJoCo launch/domain，故障期观测急停、`/cmd_vel_mpc=0`、`/motion_control=0` 和四轮归零；恢复后必须先发布新 map/planner goal/reference，action 才继续：
-
-| 故障/domain | epoch | 最终二维误差 | 恢复与物理结果 |
-| --- | ---: | ---: | --- |
-| Point-LIO-compatible odometry stale（`207`） | `1 -> 1` | `0.061098 m` | reference `1 -> 2`，四轮 `0 rpm`，contact `0` |
-| 迟到/乱序观测（`208`） | `1 -> 1` | `0.056659 m` | reference `1 -> 2`，四轮 `0 rpm`，contact `0` |
-| GICP 拒绝（`209`） | `1 -> 1` | `0.054846 m` | reference `1 -> 2`，四轮 `0 rpm`，contact `0` |
-| 3 m 假匹配（`210`） | `1 -> 1` | `0.070018 m` | 创新门限拒绝；reference `1 -> 2`，contact `0` |
-| `map -> odom` 跳变（`211`） | `1 -> 2` | `0.065180 m` | planner goal `2 -> 3`、reference `1 -> 2`，contact `0` |
-| TF 丢失/恢复（`212`） | `1 -> 1` | `0.059394 m` | planner goal `2 -> 3`、reference `1 -> 2`，contact `0` |
-
-最终 P4 fusion + Nav2-free 名义闭环均使用 `launch_nav2:=false`、ATS action、ROGMap owner、无 viewer/RViz，且检查了 planning grid、急停、reference、速度和底盘输入的唯一 publisher：
-
-| 场景/domain | 最终结果 | 规划与执行证据 | 物理 contact |
-| --- | --- | --- | ---: |
-| single（`218`） | action `(-9.078995,1.465139)`/`0.079144 m`；独立采样 `0.060029 m` | raw/reference `3/81`，footprint 冲突 `0`，generation `380 -> 612` | `0` |
-| rectangle（`219`） | stage/east/south/west/north action 误差依次 `0.069776/0.046826/0.001796/0.065216/0.000433 m`；最终独立误差 `0.002587 m` | south/north 最大 $|linear.y|$ 为 `0.471399/0.186684 m/s`，每段 footprint 冲突 `0`，generation `451 -> 1094` | `0` |
-| red_box（`220`） | 中转误差 `0.062494 m`；目标 `(-0.04,-4.08)` action `(-0.033339,-4.080146)`/`0.006663 m`，独立采样 `0.006405 m` | 最终 raw `37` 点、reference `708` 点、footprint 冲突 `0`，generation `445 -> 1124` | `0` |
-
-当前边界：连续 swept footprint、unsafe-trajectory 专用注入、small_gicp 协方差/质量的实车统计标定、轮端电流/反馈延迟和 `2.0 m/s^2` 加速度约束的实测标定、Shore A 材料接触模型、控制 mux 与实车灰度均未完成。MuJoCo contact evaluator 把正常轮地接触排除，只累计机器人与非地面几何体或底盘触地的 contact sample；它不是实车碰撞安全证明。
-
-### 5.8 2026-07-17：P4 第二阶段连续安全与执行契约（组件证据）
-
-已实现并通过组件测试的范围：
-
-1. `FootprintSafetyChecker` 保持既有 `0.70 x 0.55 m + margin` 定向矩形栅格语义，在相邻 reference SE(2) 段上新增 swept 检查。分段数由四个最远角点的实际位移除以 `planning_grid.resolution * swept_max_corner_step_cells` 向上取整；默认上限为半个栅格。yaw 使用最短角插值，故跨 `-pi/pi` 不会绕完整圆周。此实现是保守离散 swept 采样，不是解析连续多边形 Minkowski 和；其保守性依赖于栅格分辨率、矩形采样和半格步长。
-2. checker 与 Local Collision Repair 已按 `OccupancyGrid.info.origin` 的平移和 yaw 在世界/栅格坐标间变换。`test_footprint_swept_safety` 覆盖细墙、纯横移、斜切、纯旋转角点、yaw wrap、unknown/outside、非整除分辨率/平移/旋转 origin，以及 repair 后最终 swept 复核；`test_planning_map_snapshot` 继续锁定 immutable snapshot 基础契约。
-3. MINCO 的 center、footprint-aware、fallback、repair 后 candidate 和最终提交前轨迹均使用同一 snapshot 的 checker。提交后，MINCO 按短视域重新检查剩余 reference 对最新 immutable snapshot 的 swept 安全性；发现 unsafe 时只发布结构化 `PlannerStatus::FAILURE_RUNTIME_UNSAFE`，由 Goal Manager 停止并重规划，不由 MINCO 越权发布 P3 正式急停/reference。
-4. 新增 `ExecutionCommand` 作为 Goal Manager 到 MPC 的唯一执行授权，原子携带 `STOP/EXECUTE`、reference、goal id、localization epoch、MINCO local snapshot generation、adapter publication sequence、failure enum 和严格单调命令序号。MPC 对执行命令作 lease、序号、mode、epoch 和 frame/path 校验；旧 `Path` 与 `emergency_stop=false` 不能重新授权 tracker。`/planner/emergency_stop` 与 `/minco/reference_path` 仅保留为诊断兼容输出，不再消除 DDS 跨 topic 顺序风险的依据。
-5. `PlannerStatus.reason` 已替换为稳定的 `failure_reason` 枚举。Goal Manager 的节点 pytest 覆盖旧 localization epoch 和旧 adapter publication sequence reference 拒绝；MPC GTest 覆盖结构化 stop 后旧 sequence 与旧 epoch execute 不得复活。adapter 增加默认关闭的运行期障碍覆盖参数，供“地图提交后变障碍”注入，不使用 `/rog_map/esdf` 可视化点云。
-
-本轮实际通过的命令为 Release 构建 `ats_navigation_interfaces`、`ats_rog_map_adapter`、`minco_planner`、`ats_goal_manager`、`ats_swerve_mpc`、`ats_mujoco_sim`，以及上述 MINCO、Goal Manager、MPC、adapter 聚焦 CTest。`minco_planner` 全包 `copyright/cpplint/clang_format` 仍有既有失败，不能称全包 lint 通过。
-
-本轮运行验证（均关闭 viewer/RViz、显式 `launch_nav2:=false`、`P4_LOCALIZATION_FUSION=true`、`PLANNING_GRID_OWNER=rog_map`）：
-
-1. `ROS_DOMAIN_ID=226` single action 到达 `(-9.032020,1.465134)`，二维误差 `0.032388 m`，MINCO `raw/reference=3/81`、离散+swept footprint 冲突 `0`、MPC reference/predicted path 非空、终态四轮低于 `2 rpm`、MuJoCo contact `0`。过程图验证 `/planner/execution_command` 为 `ats_goal_manager -> ats_swerve_mpc` 的唯一发布/订阅授权链，`/cmd_vel_mpc` 和 `/motion_control` 仍各自一对一。
-2. `ROS_DOMAIN_ID=214` rectangle 五段 action 误差依次为 `0.041995/0.031296/0.005092/0.064109/0.005942 m`；south/north 都观察到真实 `linear.y`，每段 footprint 冲突 `0`，最终四轮低于 `2 rpm`、contact `0`。
-3. `ROS_DOMAIN_ID=217` red_box 中转误差 `0.015724 m`；终点 `(-0.04,-4.08)` 实测 `(-0.037221,-4.076565)`、误差 `0.004419 m`。最终段 MINCO `raw/reference=37/708`、冲突 `0`，两条 MPC debug path、两级速度均非空，终态四轮低于 `2 rpm`、contact `0`。
-4. 新增 unsafe evaluator 各用独立 launch/domain。`map_after_commit`（`229`）、`pure_rotation`（`230`）、`unknown`（`231`）、`outside`（`232`）、`mid_segment`（`219`）、`old_generation`（`220`）、`repair_after_unsafe`（`222`）均进入确定性停止；前六个 runtime/map 用例记录旧 `ExecutionCommand` 序号和 map generation/publication sequence，最终四轮均 `0 rpm`、contact `0`。动态障碍用例要求 `FAILURE_RUNTIME_UNSAFE` 后 Goal Manager 发送 stop；unknown 由 adapter 唯一发布 all-unknown blocked grid；outside-map action 返回 `RESULT_PLANNING_FAILED=5`。`repair_after_unsafe` 的 Local Collision Repair 几何重算和最终 swept gate 由 `test_footprint_swept_safety` 覆盖，MuJoCo 用例验证提交后变障碍时最终 reference 不继续执行，不把它写成解析连续碰撞证明。
-5. 结构化旧版本恢复：`epoch_jump`（`211`）从 epoch `1 -> 2`，reference `1 -> 2`、planner goal `1 -> 2`，终点误差 `0.058543 m`；`tf_loss`（`212`）reference `1 -> 2`、planner goal `2 -> 3`，终点误差 `0.056650 m`。两项均急停、两级零速度、四轮 `0 rpm`、contact `0`，恢复只接受新版本 reference。`odometry_stale` 的本轮补跑在初始 `TRACKING` 前超时，未进入故障注入；迟到/乱序、GICP 拒绝和假匹配保留 5.7 的第一阶段证据，未在本轮最终脚本环境重跑。[Confidence: Medium]。
-6. `ROS_DOMAIN_ID=218 scripts/test_mujoco_nav_chain.sh` 仍通过 Nav2 `NavigateToPose=SUCCEEDED`、RC-ESDF local elastic path 与速度桥，只是对照组；`ROS_DOMAIN_ID=221 scripts/test_mujoco_swerve_dynamics.sh` 的 `failures=[]`，紧急停止终态四轮为 `0 rpm`、contact `0`。
-
-验证边界：swept 实现仍是半栅格最远角点位移约束下的保守栅格采样，不是解析连续 Minkowski sweep；MuJoCo contact evaluator 不是实车碰撞证明。实车只新增 `docs/p4_real_robot_calibration_preflight.md` 的采集与停止门禁，未进行通电或运动。
+1. `footprint_collisions=0` 只表示离散定向矩形 gate 未发现冲突采样；P4 contact evaluator 也不是实车碰撞证明，不得由此推导实车物理零碰撞。
+2. `rog_map_report_025.yaml` 的 `50 Hz`、约 `6 ms`、CPU 与峰值 RSS 未在目标机测量，技术报告数字不得写成 ATS 实测结果。
+3. ROG source generation 仍未结构化传播到 MINCO；MINCO 仍从融合 planning grid 重建二维 RC-ESDF，未直接消费 adapter 数值 ESDF。
+4. `/planner/emergency_stop` 与 `/minco/reference_path` 只保留为诊断兼容输出，不具备 DDS 跨 topic 原子事务。
+5. `minco_planner` 包级 `copyright/cpplint/clang_format` 既有债务未处理，历次只报告聚焦 CTest 通过。
+6. 实车仅完成 `docs/p4_real_robot_calibration_preflight.md` 的采集与停止门禁定义，未通电、未运动。
 
 ### 5.9 2026-07-20：P4 第三阶段转弯/yaw authority/fake-yaw（部分实现与验证）
 
@@ -625,6 +468,50 @@ $$
 
 该阶段涉及的独立仓库不再只有原三仓。实际修改前至少检查根仓、导航仓、MuJoCo 仓、`src/ats_sentry_behavior` 和 `src/sim/loopback_sim` 五个仓库；只在实际修改的仓库创建中文分内容提交并普通 push，未修改仓库不得制造空提交。
 
+### 5.13 2026-07-26 MINCO+MPC 缺陷审查与实车化整改（本轮）
+
+本节记录本轮按"MINCO 稀疏轨迹表示 / MPC 预测模型 / 二者协同"三条线做的静态审查结论与已落地整改。所有结论都给出源码锚点；未运行的部分显式标注，不得当作闭环证据。
+
+**高危：已修复并有测试证据（`已验证`）**
+
+1. 轮速执行器边界整体失效。[se2_mpc_controller.cpp:122-128](../src/ats_sentry_nav/ats_swerve_mpc/src/se2_mpc_controller.cpp#L122-L128) 原 `maxModuleSpeed()` 直接返回 `0.0`，使 `clampControl` 的逐轮速度判据永远不成立，等于把四舵轮的轮缘速度上限关掉。仿真中电机是理想速度源，看不出异常；实车会直接超出 `450 rpm` 能力并进入失速。修复后按 `wheel_base_x/y`、`wheel_radius` 与 `max_wheel_speed` 推导逐轮上限，并对整个车体 Twist 做等比缩放而不是逐轮独立截断，保持四轮速度向量仍来自同一车体 `[vx, vy, wz]`（否则破坏舵轮瞬心一致性）。测试：`ClampsBodyCommandByPerWheelSpeed`、`KeepsWheelSpeedLimitWhenWheelBaseUnset`。
+2. 模型时间轴与执行时间轴不一致。[ats_swerve_mpc.yaml:54-60](../src/ats_sentry_nav/ats_swerve_mpc/config/ats_swerve_mpc.yaml#L54-L60) 原 `dt=0.1` 而 `control_rate_hz=20.0`（周期 `0.05 s`），预测的"一步"实际只执行半步，等价把加速度与舵角速率约束放大 `2` 倍。已改为 `dt=0.05`，并把 `horizon` 定为 `30`（预测时长 `1.5 s`，覆盖 `max_vx=1.5 m/s` 下 $v^2/(2a)\approx0.56\ \mathrm{m}$ 的完整制动过程）。
+3. 舵角 `180°` 反向翻转被判成零变化。[se2_mpc_controller.cpp:159-190](../src/ats_sentry_nav/ats_swerve_mpc/src/se2_mpc_controller.cpp#L159-L190) 原实现对舵角差取绝对值，瞬时反向的实际 $\pi$ 变化被读成 `0`，舵角速率门禁形同失效。改为带符号点积求角差，并在 [se2_mpc_controller.cpp:203-236](../src/ats_sentry_nav/ats_swerve_mpc/src/se2_mpc_controller.cpp#L203-L236) 用 40 次二分把不可行增量收缩到可行域。测试：`RejectsInstantModuleFlipUnderSteerRateLimit`、`ClampsMovingWheelSteerRate`、`ClampsEveryWheelVelocityIncrement`。
+4. 求解成功判据过严与饱和诊断结构性失效。[se2_mpc_controller.cpp:377-487](../src/ats_sentry_nav/ats_swerve_mpc/src/se2_mpc_controller.cpp#L377-L487) 现以"至少一次反向递推成功"置 `solution_certified`，并要求序列长度、代价有限同时满足才算成功；首步饱和在前向生成时捕获，避免原实现里 saturation 报告永远为空。测试：`FailsWhenNoIterationIsCertified`、`FailsWhenReferenceHorizonTooShort`、`SucceedsAtStationaryWarmStart`。
+5. `ats_swerve_mpc` 本轮 `colcon test` 为 `28` 项全通过、`0 error / 0 failure / 0 skip`（本机隔离 domain 运行）。[Confidence: High]
+
+**高危：已实现未运行（`已实现未运行`）**
+
+1. 重规划恒按"车辆静止"播种 MINCO 首端边界。原 `solveMinco` 的 head 恒为零，`p(0)=c_0,\ \dot p(0)=c_1,\ \ddot p(0)=2c_2` 中的一、二阶导数被强制为零，车辆以 `1.5 m/s` 行进时重规划瞬间参考速度从 `0` 起算，MPC 前馈与实际状态出现阶跃（仿真里定位无噪声且重规划稀疏，不易暴露）。已在 [minco_trajectory_optimizer.hpp:56-99](../src/ats_sentry_nav/minco_planner/include/minco_planner/trajectory/minco_trajectory_optimizer.hpp#L56-L99) 引入 `InitialKinematicState`（`valid` 开关 + 默认 `nullptr`，保持既有四个单测与调用点语义不变），在 [minco_trajectory_optimizer.cpp:137-162](../src/ats_sentry_nav/minco_planner/src/trajectory/minco_trajectory_optimizer.cpp#L137-L162) 用 `initial_state_max_speed`/`initial_state_max_acceleration` 与轨迹级 `max_velocity`/`max_acceleration` 双重裁剪（首端速度若本身超限，时间缩放不改变边界条件，永远压不回可行域），并在 ESDF 净空修正 [minco_trajectory_optimizer.cpp:262-272](../src/ats_sentry_nav/minco_planner/src/trajectory/minco_trajectory_optimizer.cpp#L262-L272)、首次求解与时间缩放回代中使用同一 head，保证修正量落在实际会被执行的曲线上。当前 `minco_planner` 已编译通过，但节点侧尚未接线，闭环未运行。
+2. 尚未接线项（`未实现`，属下一阶段）：`minco_planner_node` 未声明/读取上述两个参数、四处 `optimizer_.optimize(...)` 未传入初值、无 `/localization` 里程计订阅、无周期重规划定时器（`onRuntimeSafetyRecheck` 目前只能停不能重规划）、`toPath` 丢弃解析得到的 `vx/vy/ax/ay` 前馈、约 25 处规划失败日志仍为英文。
+
+**中危：已确认未修复（`未实现`）**
+
+1. 无安全走廊约束。MINCO 侧只有航点空间的 ESDF 启发式修正（`maximum_step`/`maximum_deviation` 夹紧、端点锁定）加事后 footprint swept gate，没有把净空写成优化约束，也没有解析梯度回传。窄道下表现为"多次修正仍不可行 → 直接判失败"，而不是收敛到贴边可行解。
+2. 时间缩放是全局均匀的。局部一处超限会把整条轨迹按同一 `scale` 拉长（[minco_trajectory_optimizer.cpp:412-439](../src/ats_sentry_nav/minco_planner/src/trajectory/minco_trajectory_optimizer.cpp#L412-L439)），全程变慢；需要按段自适应 time scaling，属 5.11.1 的 reference feasibility 环节。
+3. MINCO 输出到 MPC 的前馈信息在 `Path` 转换处被截断，MPC 只能靠数值差分恢复参考速度，等于放弃了 MINCO 的解析可微优势。
+
+**协同层结论**
+
+1. 数据格式已对齐：世界系状态 `[x, y, yaw]`、车体系控制 `[vx, vy, wz]`，`ExecutionCommand` 原子携带 reference、goal id、localization epoch、snapshot generation、adapter publication sequence 与单调命令序号，是唯一执行授权。
+2. 频率匹配当前依赖 `command_latency_compensation=0.01 s` 与投影窗口（`projection_backward_window=0.20`、`projection_forward_window=2.00`）吸收规划周期与控制周期差；端到端时延尚未逐段测量，`tau_99` 未知，因此 5.11.2 的净空预算目前不可闭合。
+3. 时间戳同步：reference 在提交点统一重定时，但缺少 route-wide 的 reference age 时序记录，无法给出 p50/p95/p99，属 5.10 的第二条门禁。
+
+**MuJoCo 场地模型冲突（`已验证` 为静态度量，整改 `未实现`）**
+
+1. 碰撞表示重复：hfield 地形与 `1621` 个 group-3 墙体 box 同时为实体，墙体因 `geomgroup[3]=0` 对 LiDAR 不可见，形成"能撞不能看"的不一致。
+2. 高度压缩 `10` 倍：`--z-scale 0.1` 使 PNG `255` 映射为 `0.292571 m`，而 `RM2026场地.pdf` 对应真实高度约 `2.926 m`。
+3. 覆盖不一致：pgm occupied `163545`，hfield`>0` 且 occupied 仅 `104461`，有 `59084` 个 occupied 栅格 hfield 为 `0`（其中 `31014` 贴边界）。
+4. 原点不一致：`8.027637` 与 `8.025` 并存，产生约 `2.6 mm` 的 y 偏移；`clear_nav_free_space` 还会抹平坡道。
+5. 生成顺序存在环形依赖：`rmuc_corridor_patch.py` → `rmuc_hfield.py` → `rmuc_nav_map.py`；墙体只能经 `rmuc_wall_collisions.py` 与 `rmuc_2026_swerve.xml:65` 的 `<include>` 再生。
+6. 图纸目标值（供整改对齐）：场地 `28 m × 15 m`、围挡 `2.4 m`、横向倾角 `1°~2°`、梯形高地 `200~400 mm`（`43°`/`23°`）、中央高地 `10.5°`、装配区 `12°/14°/15°/45°`、公路区 `11°/15°`、飞坡 `17°`、堡垒 `20°`；公差 `<100 mm` 为 `±5 mm`、`≥100 mm` 为 `±5%`、结构 `±3°`、道具 `±1°`。
+
+**本轮不可声明项**
+
+1. 上述 MINCO 首端播种未做 MuJoCo 闭环，也未新增针对性单测，不得写成跟踪精度改善证据。
+2. MPC 三处高危修复只有单测与构建证据，本轮未重跑 rectangle/red_box 闭环，原 5.9 的运行数字仍是当前最新闭环证据。
+3. MuJoCo 场地冲突只有静态度量，未修改模型，因此既有闭环结论仍建立在旧场地模型上。
+
 ## 6. 下一阶段实施顺序
 
 ### P0：架构与交接文档
@@ -696,10 +583,20 @@ P2 后续优化但不阻塞 P3 的范围：
 3. 已按四轮位置落实轮速、轮速增量/加速度与舵速约束，并在三个 MuJoCo 模型落实总质量、总质心、轮位、最终轮径和分离摩擦语义。
 4. swept checker 已覆盖细墙、横移、斜切、旋转角扫、yaw wrap、unknown/outside 和带 yaw 的 grid origin；运行期覆盖提交后变障碍、纯旋转、unknown、outside、旧 generation/epoch、TF 丢失和最终停止。剩余工作是目标机上测量真实 footprint margin、传感器时延与制动距离。
 5. 使用实车电流、轮端阶跃、反馈延迟、rosbag 重定位统计标定协方差、质量门限与加速度约束；完成控制 mux 和灰度门禁后再上车。
+6. 本轮（5.13）已修复 MPC 侧四项高危实车缺陷（轮速边界失效、模型/执行时间轴不一致、舵角翻转判据、求解成功判据与饱和诊断），并在 optimizer 层实现带初速的 MINCO 首端播种。MPC 有单测证据；MINCO 播种属 `已实现未运行`，节点接线、周期重规划、前馈传递与中文分级日志仍未完成。
+
+### P5：实车化整改（本轮新增，未完成）
+
+状态：`迁移中`。范围与门禁见 5.13。
+
+1. `minco_planner_node` 接线带初速播种：两个新参数的声明/读取、四处 `optimize` 调用点传值、`/localization` 里程计订阅、周期重规划定时器（使 `onRuntimeSafetyRecheck` 可触发重规划而非只停止）、`toPath` 保留 `vx/vy/ax/ay` 前馈、规划失败日志改中文分级，并补带初速头状态单测。
+2. 按段自适应 time scaling 替代全局均匀缩放；净空进入优化约束（安全走廊）而非仅事后 gate。
+3. MuJoCo 场地模型单一权威碰撞表示、按图纸校正高度与坡角、统一 `8.025` 原点、固定 pgm→hfield→墙体生成顺序。
+4. 上述任一改动完成后必须重跑 rectangle 与 red_box 闭环，且不得放宽 unknown、footprint、执行器或 stale 门禁换取通过。
 
 ## 7. 下一对话接续入口
 
-下一对话从 P4 第四阶段的统一 telemetry/baseline 与 5.12 的 ATS 行为树 action 迁移开始：先用同一 scenario 进行 BT 离线/loopback 决策验证，再进入 MuJoCo 的真实 Goal Manager/JPS/MINCO/MPC 闭环；reference feasibility/time scaling、实车 rosbag/轮端与时延标定、控制 mux 和受控灰度按门禁后续推进。不得重复实现定位融合、ROGMap/adapter、JPS、MINCO 或 MPC，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint、执行器物理限值或 stale 安全门禁换取路线通过。
+下一对话从 5.13 的 P5 实车化整改开始（`minco_planner` 节点接线与 MuJoCo 场地模型冲突优先），随后继续 P4 第四阶段的统一 telemetry/baseline 与 5.12 的 ATS 行为树 action 迁移：先用同一 scenario 进行 BT 离线/loopback 决策验证，再进入 MuJoCo 的真实 Goal Manager/JPS/MINCO/MPC 闭环；reference feasibility/time scaling、实车 rosbag/轮端与时延标定、控制 mux 和受控灰度按门禁后续推进。不得重复实现定位融合、ROGMap/adapter、JPS、MINCO 或 MPC，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint、执行器物理限值或 stale 安全门禁换取路线通过。
 
 必须保持以下边界：
 
