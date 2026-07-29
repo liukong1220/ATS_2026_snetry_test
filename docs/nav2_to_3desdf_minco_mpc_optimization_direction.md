@@ -561,9 +561,9 @@ $$
 2. 唯一命令通路：[navigation_launch.py](../src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py) 的 `fake_vel_transform_enabled`/`chassis_vel_transform_enabled` 都追加 `and launch_nav2 == 'true'`，因此 Nav2-free 下 MPC 之后不存在任何旋转级或增益级；`gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF 由 `UnlessCondition(fake_vel_transform_enabled)` 提供，每个 profile 各有唯一所有者。
 3. 实车 `GimbalYawStatus` 发布者 `gimbal_yaw_status_bridge_node`（[standard_robot_pp_ros2](../src/standard_robot_pp_ros2/src/gimbal_yaw_status_bridge.cpp)）由串口云台关节反馈驱动，`locked`/`tf_healthy` 均为实测量；`require_gimbal_status` 为假时禁止 `BODY_YAW_FOLLOW`。未伪造任何 ack。
 4. ATS action 行为树节点 `SendAtsNavGoal`（[send_ats_nav_goal.cpp](../src/ats_sentry_behavior/plugins/action/send_ats_nav_goal.cpp)）：正式 RMUC/RMUL 树切到 `/ats_navigate_to_pose` 与 `ats_navigation_interfaces/action/NavigateToPose`，可 halt/cancel，行为层直发 `cmd_vel` 通路已移除，输入改为 `/rc_esdf/planning_grid` 与 `/localization`。
-7. 对照 profile 的 `SendNavThroughPoses` 由 `BT::SyncActionNode` 改为 `BT::StatefulActionNode`（[send_nav_through_poses.cpp](../src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp)）。原实现有两个与「授权 STOP -> 串口零速度」直接冲突的缺陷：`SyncActionNode::halt()` 是 `final`（只做 `resetStatus()`），派生类无法插入 `async_cancel_goal()`，且 `tick()` 在 `async_send_goal()` 之后立刻返回 `SUCCESS`，节点从不停留在 RUNNING——两者叠加使主树 halt 掉导航分支后 Nav2 侧目标仍在执行，对照 profile 下停车链整条失效；另有 `tick()` 内 `wait_for_action_server(2.0s)` 的阻塞等待，最坏每拍阻塞 `2 s`。现改为目标飞行中返回 `RUNNING`、`onHalted()` 真正 cancel，server 就绪判断改为 `action_server_is_ready()` + 跨拍累计等待。顺带修两处判据错误：单点路径句柄在 `current_goal_to_pose_handle_` 而原实现只看 `current_goal_handle_`（单点目标飞行中被判成「无活动目标」反复重发）；`ABORTED` 收尾原本直接重发同一路径使失败永不上报，现返回 `FAILURE`（主动 cancel 不置该标志）。
 5. 实车 `gimbal_yaw_odom -> front_mid360` 静态 TF（[bringup.launch.py](../src/ats_sentry_bringup/launch/bringup.launch.py) 的 `static_tf_gimbal_yaw_odom_to_front_mid360`）：此前实车侧零发布者，而 `sensor_scan_generation::odometryHandler` 在该查询失败时整帧 return，连带 `odom->gimbal_yaw_odom`、`odom->base_footprint` 一起消失。条件为 `use_sim_time == false and launch_lidar_static_tf == true`，不与仿真发布者共存。
 6. Point-LIO 生效值可验证：新增 `logEffectiveParameters()`（[parameters.cpp:268-344](../src/ats_sentry_nav/point_lio/src/parameters.cpp#L268-L344)）在启动时打印七行 `[point_lio 生效参数]`；`point_lio/config/mid360.yaml` 经 launch 图追踪确认不生效，已加 `[Dead Code Suggestion]` 头（未删除）。
+7. 对照 profile 的 `SendNavThroughPoses` 由 `BT::SyncActionNode` 改为 `BT::StatefulActionNode`（[send_nav_through_poses.cpp](../src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp)）。原实现有两个与「授权 STOP -> 串口零速度」直接冲突的缺陷：`SyncActionNode::halt()` 是 `final`（只做 `resetStatus()`），派生类无法插入 `async_cancel_goal()`，且 `tick()` 在 `async_send_goal()` 之后立刻返回 `SUCCESS`，节点从不停留在 RUNNING——两者叠加使主树 halt 掉导航分支后 Nav2 侧目标仍在执行，对照 profile 下停车链整条失效；另有 `tick()` 内 `wait_for_action_server(2.0s)` 的阻塞等待，最坏每拍阻塞 `2 s`。现改为目标飞行中返回 `RUNNING`、`onHalted()` 真正 cancel，server 就绪判断改为 `action_server_is_ready()` + 跨拍累计等待。顺带修两处判据错误：单点路径句柄在 `current_goal_to_pose_handle_` 而原实现只看 `current_goal_handle_`（单点目标飞行中被判成「无活动目标」反复重发）；`ABORTED` 收尾原本直接重发同一路径使失败永不上报，现返回 `FAILURE`（主动 cancel 不置该标志）。
 
 **已测试（本轮实测数字）**
 
@@ -594,7 +594,37 @@ $$
    `20` 个终端位置误差样本 `min=0.002725 m`、`max=0.028782 m`、`p95=0.017402 m`，
    均在 `<= 0.08 m` 判据内。阈值在候选优化之前已冻结，全部样本保留在
    `/tmp/p6_mujoco_10x_summary.txt`。
-7. 注意：`scripts/test_mujoco_minco_mpc_chain.sh` 的 `NAVIGATION_MODE` 默认值是 `nav2`，
+7. 九类故障注入矩阵 `9/9` 通过（每例独立 `ROS_DOMAIN_ID` 130–138、独立 MuJoCo launch、
+   viewer/RViz 关闭，统一 `NAVIGATION_MODE=p3 P3_GOAL_ENTRY=action PLANNING_GRID_OWNER=rog_map
+   TEST_PROFILE=red_box GOAL_TIMEOUT=180`）。全部 `rc=0`、`FAIL` 行数为 `0`，
+   每例都先断言 `/cmd_vel_mpc` 与 `/motion_control` 载过非零命令，再在故障期与恢复期
+   断言两条通路同时为零（判据：`|value| <= 0.001` 且必须是有限数）：
+
+   | 用例 | 注入 | action `result_code` | 归零证据 |
+   | --- | --- | --- | --- |
+   | `P2 adapter_lease` | SIGSTOP adapter 使心跳租约超时 | 不涉及 | `adapter_lease` 与 `adapter_lease_recovery` 两段 `/cmd_vel_mpc`、`/motion_control` 均为零 |
+   | `P2 service_timeout` | SIGSTOP ROGMap 使数值投影服务超时 | 不涉及 | 同上两段共 4 条零断言，且 adapter 发布 not-ready |
+   | `P2 input_stale` | SIGSTOP MuJoCo 使 Point-LIO 兼容输入 stale | 不涉及 | 同上两段共 4 条零断言 |
+   | `P2 unknown` | 规划网格整体置 unknown | `4`（`MAP_UNREADY`） | 同上两段共 4 条零断言 |
+   | `P2 unreachable` | 空闲但不可达目标 | `5`（`PLANNING_FAILED`） | 故障期 2 条零断言（该例无恢复段） |
+   | `P3 cancel` | `action_msgs/srv/CancelGoal` 真实取消 | `1`（`CANCELED`） | `cancel` 与 `cancel_recovery` 共 4 条零断言 |
+   | `P3 preempt` | 第二个目标抢占仍在 tracking 的第一个 | 首个 `2`（`PREEMPTED`）、次个 `3` | `preempt` 与 `preempt_recovery` 共 4 条零断言 |
+   | `P3 timeout` | goal `timeout = 1 s` | `3`（`TIMEOUT`） | `timeout` 与 `timeout_recovery` 共 4 条零断言 |
+   | `P3 tf_failure` | 目标 frame 为不存在的 `p3_missing_goal_frame` | `6`（`TF_FAILED`） | 故障期 2 条零断言 |
+
+   关键点：五个 P2 用例与三个有恢复段的 P3 用例都额外断言了**恢复段仍然为零**，
+   即故障消失本身不会让运动自动恢复——恢复必须经由新的授权序号。
+   全部原始日志保留在 `/tmp/p6_fault_p2_*.log` 与 `/tmp/p6_fault_p3_*.log`，
+   汇总在 `/tmp/p6_fault_matrix_summary.txt`。
+   本矩阵是**仿真**口径：验证的是 `ready=false -> emergency_stop=true -> /cmd_vel_mpc=0
+   -> /motion_control=0` 这一段，串口那一级（`/motion_control=0 -> 串口输出零速度`）
+   在仿真里由 `twist_to_motion_ctrl -> ats_mujoco_sim` 承接，实车串口段仍为 `未实测`。
+8. 抬轮 HIL 需要的行为树开关：`bringup.launch.py` 与 `real_robot_nav2_free.launch.py`
+   新增 `launch_behavior`（默认 `True`）。此前 `start_behavior_launch_cmd` 无条件加入
+   `LaunchDescription`，行为树会自己下发导航目标，五级归零的实测时延就无法归因到
+   某一次授权跳变。抬轮 HIL 必须用 `launch_behavior:=False`。
+   `python3 -m py_compile` 两个 launch 均通过，`ament_pep257` `No problems found`。
+9. 注意：`scripts/test_mujoco_minco_mpc_chain.sh` 的 `NAVIGATION_MODE` 默认值是 `nav2`，
    因此提示词第五节给出的两条命令实际跑的是 Nav2 对照 profile。自研链必须显式加
    `NAVIGATION_MODE=p3`，本轮已补跑并单列在上表第三行。
 
@@ -724,10 +754,11 @@ P2 后续优化但不阻塞 P3 的范围：
 1. 实车 Nav2-free profile：`已实现`。`real_robot_nav2_free.launch.py` 启动 `minco_planner`、`ats_goal_manager`、`ats_swerve_mpc`，钉死 `launch_nav2:=false` 与 `use_sim_time:=False`，与 Nav2 对照 profile 互斥。`已测试`（MuJoCo `NAVIGATION_MODE=p3` 闭环通过），实车 `未验证`。
 2. 唯一命令通路：`已实现`。MPC 以 `mpc_cmd_vel_topic:=/cmd_vel` 直接产出车体系命令，`fake_vel_transform` 与 `chassis_vel_transform` 在 Nav2-free 下不启动，MPC 之后无任何旋转级或增益级。`已测试`（闭环断言 `fake_vel_transform absent` 与 `/cmd_vel_mpc` 唯一所有者），实车 `未验证`。
 3. 串口层：`部分实现`。授权归零绕过瞬时零保持、`serialPortProtect` 重连与重连期零速度、新 epoch 才恢复授权、符号/单位/轮位口径表均已落地并有单测（`test_cmd_vel_authorization` 14 例通过）；**实测归零时延与实测重连行为 `未实测`**，必须抬轮 HIL 补齐。出口限幅问题在正式 profile 中因该节点停用而消解，对照 profile 仍需收紧。
-4. 行为树：`已实现`。`SendAtsNavGoal` 切到 `/ats_navigate_to_pose`，行为层直发底盘通路已移除，输入改用 `/rc_esdf/planning_grid` 与 `/localization`。`已测试`（halt/cancel/迟到 result/主树优先级共 26 例通过）。
+4. 行为树：`已实现`。`SendAtsNavGoal` 切到 `/ats_navigate_to_pose`，行为层直发底盘通路已移除，输入改用 `/rc_esdf/planning_grid` 与 `/localization`；对照 profile 的 `SendNavThroughPoses` 由 `SyncActionNode` 改为可 halt 的 `StatefulActionNode`。`已测试`（halt/cancel/迟到 result/主树优先级/对照节点 halt 共 30 例通过）。抬轮 HIL 用 `launch_behavior:=False` 关掉整棵树，使授权只由测试脚本触发。
 5. 实车 `GimbalYawStatus` 发布者：`已实现`（`gimbal_yaw_status_bridge_node`，由串口云台关节反馈驱动，`已测试` 10 例）。未伪造 ack。实车反馈链路 `未验证`。
 6. MID360：`部分实现`。Point-LIO 实车生效参数已唯一化并在启动时打印，实车 `gimbal_yaw_odom -> front_mid360` 静态 TF 已补齐；**外参仍为未实测值（仿真模型取值），静止 rosbag 采集与漂移统计 `未实现`**，属落地行走前的停止条件。
-7. 分级执行：本轮只推进到「具备不通电检查与抬轮 HIL 的软件条件」。第 1 级不通电检查与第 2 级抬轮 HIL 均 `未执行`（实车未通电），第 3、4 级不在本轮范围。5.11.2 净空预算与实测 `tau_99` 仍未闭合。
+7. 故障判据：`已测试`。九类故障注入 `9/9` 通过，逐例证明 `ready=false -> emergency_stop=true -> /cmd_vel_mpc=0 -> /motion_control=0` 成立，且八例额外证明故障消失本身不恢复运动。第五级（串口输出零速度 -> 四轮 0 rpm）实车 `未实测`。
+8. 分级执行：本轮只推进到「具备不通电检查与抬轮 HIL 的软件条件」。第 1 级不通电检查与第 2 级抬轮 HIL 均 `未执行`（实车未通电），第 3、4 级不在本轮范围。5.11.2 净空预算与实测 `tau_99` 仍未闭合。
 
 ## 7. 下一对话接续入口
 
@@ -738,6 +769,18 @@ P2 后续优化但不阻塞 P3 的范围：
 3. 端到端 $\tau_{99}$ 分解（传感器 → 定位 → 规划 → 授权 → MPC → 底盘），不得用估计值代入 5.11.2。
 
 同时必须完成 MID360 外参实测标定（当前写入值取自仿真模型，是落地行走的停止条件）与静止 rosbag 采集/漂移统计。
+
+抬轮 HIL 的启动方式已就位，直接用：
+
+```bash
+ros2 launch ats_sentry_bringup real_robot_nav2_free.launch.py \
+  launch_behavior:=False require_gimbal_status:=False
+```
+
+`launch_behavior:=False` 是必需的：行为树自己下发目标会让归零时延无法归因到单次授权跳变。
+`require_gimbal_status` 按云台是否通电取值，置 `False` 时 `BODY_YAW_FOLLOW` 被禁止，且不得伪造 ack。
+仿真侧的九类故障判据（`ready=false -> emergency_stop=true -> /cmd_vel_mpc=0 -> /motion_control=0`）
+已 `9/9` 通过，抬轮 HIL 要补的是第五级，即这四级之后串口是否真的输出零速度、四轮是否真的 `0 rpm`。
 
 `minco_planner` 节点接线与 MuJoCo 场地模型冲突（P5，提示词见 `docs/p5_real_robot_hardening_prompt.md`）继续作为仿真侧主线，随后继续 P4 第四阶段的统一 telemetry/baseline 与 5.12 的 ATS 行为树 action 迁移：先用同一 scenario 进行 BT 离线/loopback 决策验证，再进入 MuJoCo 的真实 Goal Manager/JPS/MINCO/MPC 闭环；reference feasibility/time scaling、实车 rosbag/轮端与时延标定、控制 mux 和受控灰度按门禁后续推进。不得重复实现定位融合、ROGMap/adapter、JPS、MINCO 或 MPC，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint、执行器物理限值或 stale 安全门禁换取路线通过。
 
