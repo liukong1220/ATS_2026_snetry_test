@@ -59,6 +59,7 @@ def generate_launch_description():
     chassis_vel_input_topic = LaunchConfiguration("chassis_vel_input_topic")
     launch_nav2 = LaunchConfiguration("launch_nav2")
     launch_swerve_mpc = LaunchConfiguration("launch_swerve_mpc")
+    launch_behavior = LaunchConfiguration("launch_behavior")
     minco_params_file = LaunchConfiguration("minco_params_file")
     goal_manager_params_file = LaunchConfiguration("goal_manager_params_file")
     mpc_params_file = LaunchConfiguration("mpc_params_file")
@@ -334,6 +335,16 @@ def generate_launch_description():
         description=(
             "Whether to start minco_planner/ats_goal_manager/ats_swerve_mpc. "
             "Only effective together with launch_nav2:=False."
+        ),
+    )
+
+    declare_launch_behavior_cmd = DeclareLaunchArgument(
+        "launch_behavior",
+        default_value="True",
+        description=(
+            "Whether to start the behavior tree. Must be False for the wheels-up "
+            "HIL profile: the tree issues navigation goals on its own, which makes "
+            "the measured zeroing latency non-deterministic."
         ),
     )
 
@@ -673,6 +684,9 @@ def generate_launch_description():
         }.items(),
     )
 
+    # 抬轮 HIL 必须能关掉行为树：行为树会自己下发导航目标，
+    # 一旦它在跑，五级归零的实测时延就不是由测试脚本单独触发的，
+    # 「授权 STOP -> 串口零速度」的时延也无法归因到某一次授权。
     start_behavior_launch_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(bt_bringup_dir, "launch", "ats_sentry_behavior_launch.py")
@@ -683,6 +697,7 @@ def generate_launch_description():
             "params_file": behavior_params_file,
             "log_level": log_level,
         }.items(),
+        condition=IfCondition(launch_behavior),
     )
 
     start_rviz_cmd = IncludeLaunchDescription(
@@ -744,6 +759,7 @@ def generate_launch_description():
     ld.add_action(declare_launch_rog_map_cmd)
     ld.add_action(declare_launch_nav2_cmd)
     ld.add_action(declare_launch_swerve_mpc_cmd)
+    ld.add_action(declare_launch_behavior_cmd)
     ld.add_action(declare_minco_params_file_cmd)
     ld.add_action(declare_goal_manager_params_file_cmd)
     ld.add_action(declare_mpc_params_file_cmd)
