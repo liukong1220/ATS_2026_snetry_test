@@ -561,13 +561,14 @@ $$
 2. 唯一命令通路：[navigation_launch.py](../src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py) 的 `fake_vel_transform_enabled`/`chassis_vel_transform_enabled` 都追加 `and launch_nav2 == 'true'`，因此 Nav2-free 下 MPC 之后不存在任何旋转级或增益级；`gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF 由 `UnlessCondition(fake_vel_transform_enabled)` 提供，每个 profile 各有唯一所有者。
 3. 实车 `GimbalYawStatus` 发布者 `gimbal_yaw_status_bridge_node`（[standard_robot_pp_ros2](../src/standard_robot_pp_ros2/src/gimbal_yaw_status_bridge.cpp)）由串口云台关节反馈驱动，`locked`/`tf_healthy` 均为实测量；`require_gimbal_status` 为假时禁止 `BODY_YAW_FOLLOW`。未伪造任何 ack。
 4. ATS action 行为树节点 `SendAtsNavGoal`（[send_ats_nav_goal.cpp](../src/ats_sentry_behavior/plugins/action/send_ats_nav_goal.cpp)）：正式 RMUC/RMUL 树切到 `/ats_navigate_to_pose` 与 `ats_navigation_interfaces/action/NavigateToPose`，可 halt/cancel，行为层直发 `cmd_vel` 通路已移除，输入改为 `/rc_esdf/planning_grid` 与 `/localization`。
+7. 对照 profile 的 `SendNavThroughPoses` 由 `BT::SyncActionNode` 改为 `BT::StatefulActionNode`（[send_nav_through_poses.cpp](../src/ats_sentry_behavior/plugins/action/send_nav_through_poses.cpp)）。原实现有两个与「授权 STOP -> 串口零速度」直接冲突的缺陷：`SyncActionNode::halt()` 是 `final`（只做 `resetStatus()`），派生类无法插入 `async_cancel_goal()`，且 `tick()` 在 `async_send_goal()` 之后立刻返回 `SUCCESS`，节点从不停留在 RUNNING——两者叠加使主树 halt 掉导航分支后 Nav2 侧目标仍在执行，对照 profile 下停车链整条失效；另有 `tick()` 内 `wait_for_action_server(2.0s)` 的阻塞等待，最坏每拍阻塞 `2 s`。现改为目标飞行中返回 `RUNNING`、`onHalted()` 真正 cancel，server 就绪判断改为 `action_server_is_ready()` + 跨拍累计等待。顺带修两处判据错误：单点路径句柄在 `current_goal_to_pose_handle_` 而原实现只看 `current_goal_handle_`（单点目标飞行中被判成「无活动目标」反复重发）；`ABORTED` 收尾原本直接重发同一路径使失败永不上报，现返回 `FAILURE`（主动 cancel 不置该标志）。
 5. 实车 `gimbal_yaw_odom -> front_mid360` 静态 TF（[bringup.launch.py](../src/ats_sentry_bringup/launch/bringup.launch.py) 的 `static_tf_gimbal_yaw_odom_to_front_mid360`）：此前实车侧零发布者，而 `sensor_scan_generation::odometryHandler` 在该查询失败时整帧 return，连带 `odom->gimbal_yaw_odom`、`odom->base_footprint` 一起消失。条件为 `use_sim_time == false and launch_lidar_static_tf == true`，不与仿真发布者共存。
 6. Point-LIO 生效值可验证：新增 `logEffectiveParameters()`（[parameters.cpp:268-344](../src/ats_sentry_nav/point_lio/src/parameters.cpp#L268-L344)）在启动时打印七行 `[point_lio 生效参数]`；`point_lio/config/mid360.yaml` 经 launch 图追踪确认不生效，已加 `[Dead Code Suggestion]` 头（未删除）。
 
 **已测试（本轮实测数字）**
 
 1. 构建：`MAKEFLAGS=-j1 colcon build --base-paths src --packages-select point_lio` → `Finished <<< point_lio [51.7s]`；`ats_sentry_bringup standard_robot_pp_ros2 ats_sentry_behavior` 与 `ats_mujoco_sim` 均 exit 0。
-2. 功能单测 `50/50` 全通过：`test_ats_nav_goal_logic` 11、`test_official_tree_priority` 5、`test_send_ats_nav_goal_action` 10、`test_cmd_vel_authorization` 14、`test_gimbal_yaw_status_logic` 10，failures/errors 均为 0。
+2. 功能单测 `54/54` 全通过：`test_ats_nav_goal_logic` 11、`test_official_tree_priority` 5、`test_send_ats_nav_goal_action` 10、`test_send_nav_through_poses_halt` 4、`test_cmd_vel_authorization` 14、`test_gimbal_yaw_status_logic` 10，failures/errors 均为 0。这是**功能 gtest**口径，不是全包测试口径：`minco_planner` 的 `clang_format`/`copyright`/`cpplint` 既有债务本轮未修，也未加重（详见本节末尾的债务基线）。
 3. MuJoCo 四舵轮动力学 `scripts/test_mujoco_swerve_dynamics.sh` 通过，`failures: []`，17 个相位 `drive_speed_saturations=0`、`contact_violations=0`；`vy` 全程可控（`lateral` 相位 `max_measured_vy=0.5004`），确认车体系全向语义未退化为差速。
 4. MuJoCo 闭环三条全部 `PASS`（每条独立 `ROS_DOMAIN_ID`，viewer/RViz 关闭）：
 
@@ -586,7 +587,14 @@ $$
 5. 门禁顺序（先确定性、后 MuJoCo）第一关通过：固定 revision/config 下把五个功能测试二进制连跑 `20` 轮，
    `20/20` 通过，剥掉每例耗时后的判定签名 `distinct_signatures=1`，即 `50` 个用例的顺序与结论完全一致，
    无非确定性分支或动作序列。
-6. 注意：`scripts/test_mujoco_minco_mpc_chain.sh` 的 `NAVIGATION_MODE` 默认值是 `nav2`，
+6. 门禁顺序第二关通过：同一 revision/config/seed 下把 Nav2-free `red_box` 闭环重复 `10` 次
+   （`ROS_DOMAIN_ID` 101–110，每次独立 MuJoCo launch，viewer/RViz 关闭，
+   `NAVIGATION_MODE=p3 P3_GOAL_ENTRY=action PLANNING_GRID_OWNER=rog_map GOAL_TIMEOUT=180`）：
+   `10/10` 全部 `rc=0`，`footprint_collisions=0`，安全契约断言 `10/10`。
+   `20` 个终端位置误差样本 `min=0.002725 m`、`max=0.028782 m`、`p95=0.017402 m`，
+   均在 `<= 0.08 m` 判据内。阈值在候选优化之前已冻结，全部样本保留在
+   `/tmp/p6_mujoco_10x_summary.txt`。
+7. 注意：`scripts/test_mujoco_minco_mpc_chain.sh` 的 `NAVIGATION_MODE` 默认值是 `nav2`，
    因此提示词第五节给出的两条命令实际跑的是 Nav2 对照 profile。自研链必须显式加
    `NAVIGATION_MODE=p3`，本轮已补跑并单列在上表第三行。
 
@@ -599,6 +607,21 @@ $$
 修复：线程登记到 `workers_` 由析构函数统一 join，hold 循环增加 `shutting_down_` 退出条件避免 join 死锁，
 并把 `server_.reset()` 移到 `executor->cancel()` 之前，使收尾的 `succeed()`/`abort()` 仍打在活着的 executor 上。
 修复后 `30/30` 全部 `rc=0` 且每次 10 个用例齐全。
+
+另外，本轮在写文档时先声称已把 `SendNavThroughPoses` 改成可 halt 的异步节点，
+实际读代码才发现它仍是原始的 `BT::SyncActionNode`（`git log` 显示自
+`24fc53b Initial split` 以来未改动）。已按上面已实现第 7 条真正改造并补测试
+（`test_send_nav_through_poses_halt.cpp` 4 项：单点 halt cancel、多点 halt cancel、
+空路径不下发、server 缺失按超时判失败且首拍耗时 `< 200 ms`）。
+教训：文档条目必须以代码为准回读确认，不能以计划为准书写。
+
+**既有 lint 债务基线（本轮未加重）**
+
+`send_nav_through_poses.cpp` 与 `.hpp` 的 `ament_cpplint` 错误数
+HEAD `7` → 工作区 `7`（`legal/copyright` 2、`build/header_guard` 2、
+`whitespace/line_length` 3，全部为既有项）；`ament_clang_format` divergences
+HEAD `46` → 工作区 `40`。本轮新增文件 `test_send_nav_through_poses_halt.cpp`
+的 `ament_clang_format` 与 `ament_cpplint` 均为 `No problems found`。
 
 **本轮修复的两项阻塞（否则闭环无法运行）**
 
