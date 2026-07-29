@@ -1,3 +1,10 @@
+# 参数权威（P6 零.2）：本文件是实车运行时的唯一生效参数源。
+# `bringup.launch.py` 把本文件作为 `params_file` 一路传到
+# `rm_navigation_reality_launch.py`，覆盖 `ats_nav_bringup/config/reality/nav2_params.yaml`
+# 的默认值；后者只在单独启动导航仓入口时生效。
+# 三条自研链节点（minco_planner / ats_goal_manager / ats_swerve_mpc）不在本文件里，
+# 权威是各包 `config/*_reality.yaml`，禁止在此新增同名段。
+
 standard_robot_pp_ros2:
   ros__parameters:
     # 这里是实车总入口的本体/传感器/导航参数集合。
@@ -39,8 +46,25 @@ standard_robot_pp_ros2:
     transient_zero_cmd_linear_epsilon: 0.001
     # 角速度判零阈值。小于该值视作近似零速。
     transient_zero_cmd_angular_epsilon: 0.001
-    # cmd_vel 断流 watchdog。超过该时间没有新速度就主动清零。
+    # cmd_vel 断流 watchdog。超过该时间没有新速度就主动清零并置 speed_vector.stop。
+    # 时序约束（steady clock，节点启动时会校验）：
+    #   T_hold = 50 ms   = 1 个 MPC 控制周期（control_rate_hz = 20 Hz -> 0.05 s）
+    #   T_wd   = 300 ms  = 6 个 MPC 控制周期
+    #   T_lease = 500 ms = MPC 的 execution_command_timeout / emergency_stop_timeout
+    #                      与 Goal Manager 的 0.5 s 租约
+    # 必须满足 T_hold < T_wd <= T_lease。底盘看门狗宽于上游租约时，
+    # 「上游租约超时 -> 全链归零」的时间上界在出口这一级不再成立。
     cmd_vel_watchdog_timeout_ms: 300
+    # 实车 Nav2-free 官方 profile 的核心安全项：没有 ExecutionCommand 授权时，
+    # 出口恒为零速度且 speed_vector.stop = true。
+    # 单独的 emergency_stop=false、裸 Twist、行为树直发都不能恢复运动；
+    # 串口重连后也必须由 command_sequence 严格更大的新 EXECUTE 重新授权。
+    require_execution_authorization: true
+    execution_command_topic: /planner/execution_command
+    emergency_stop_topic: /planner/emergency_stop
+    # 授权样本可接受的最大时间戳年龄（s），与 MPC 的 execution_command_timeout 一致。
+    # transient_local 会把重启前的旧样本重投给新订阅者，超龄样本必须拒绝。
+    execution_command_timeout: 0.5
     # 行为树姿态模式输入话题。需与行为树配置一致。
     robot_mode_topic: decision/robot_mode
 
@@ -58,6 +82,10 @@ robot_state_publisher:
 
 livox_ros_driver2:
   ros__parameters:
+    # 显式给出时间基准：RewrittenYaml 的 param_rewrites 只能改写已存在的键，
+    # 缺这一行时本节点的 use_sim_time 由 rclcpp 默认值隐式决定、launch 无法覆盖，
+    # 也无法在运行时打印核对。实车全链统一挂钟。
+    use_sim_time: false
     # 当前雷达安装位姿已经发生调整，相关影响会直接传递到：
     # 1. 点云到 costmap 的障碍投影
     # 2. 实车可贴墙程度
@@ -75,6 +103,10 @@ livox_ros_driver2:
 
 point_lio:
   ros__parameters:
+    # 时间基准必须显式：Point-LIO 是 map->odom 之前唯一的里程计源，
+    # 它与 localization_fusion、adapter、MPC 混用不同时钟会直接让 0.5 s 租约
+    # 和 stale 判据失效。RewrittenYaml 只能改写已存在的键，故此处必须成文。
+    use_sim_time: false
     use_imu_as_input: False                             # Change to True to use IMU as input of Point-LIO
     prop_at_freq_of_imu: True
     check_satu: True
@@ -157,6 +189,16 @@ loam_interface:
     base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
 
+# TF 权威（P6 零.5 / 三.2）：本节点是实车 `odom->gimbal_yaw_odom` 与
+# `odom->base_footprint` 的唯一发布者，但它的 `odometryHandler` 在
+# `front_mid360 -> gimbal_yaw_odom` 或 `front_mid360 -> base_footprint`
+# 查询失败时整帧 return（sensor_scan_generation.cpp:57-70），
+# 于是这两条 odom 级 TF 也会一起消失。`gimbal_yaw_odom -> front_mid360`
+# 在实车上没有任何节点发布（全仓 grep TransformBroadcaster，排除 src/sim/），
+# 因此由 `bringup.launch.py` 的 `static_tf_gimbal_yaw_odom_to_front_mid360`
+# 静态 TF 单独提供，且实车只允许这一份。
+# 【未实测】该静态 TF 的数值取自仿真模型（ats_sentry_robot.sdf.xmacro:45），
+# 落地行走前必须替换为实测标定值，属于本轮停止条件。
 sensor_scan_generation:
   ros__parameters:
     use_sim_time: false
@@ -243,6 +285,14 @@ fake_vel_transform:
     input_cmd_vel_topic: "cmd_vel_nav2_result"
     output_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
     cmd_spin_topic: "cmd_spin"
+    # cmd_spin 会在本节点输出上直接叠加车体 wz
+    # （`fake_vel_transform.cpp` 的 `aft_tf_vel.angular.z = twist->angular.z + spin_speed_`）。
+    # 官方 profile 禁止这种叠加：叠加后底盘实际 wz 不再等于授权链算出的 wz，
+    # 「MPC 之后不得改变 [vx, vy, wz]」与统一归零判据同时失效。
+    # 置 false 后节点不创建 cmd_spin 订阅、也不做 wz 叠加。
+    # 双重保障：Nav2-free 下本节点结构性不启动（`any_velocity_transform` 要求
+    # `launch_nav2=='true'`，实车入口另把 launch_fake_vel_transform 钉为 False）。
+    enable_cmd_spin: false
     init_spin_speed: 0.0
 
 chassis_vel_transform:
@@ -252,13 +302,23 @@ chassis_vel_transform:
     input_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
     output_cmd_vel_topic: "/cmd_vel"
     big_yaw_joint_name: "gimbal_yaw_odom_joint"
-    # 出口节点只做坐标转换和保护，不再做激进放大；4m/s 能力交给 MPPI/profile/smoother。
+    # 出口节点只做坐标转换和保护，禁止任何放大：增益恒为 1.0。
     linear_gain: 1.0
     angular_gain: 1.0
-    max_linear_speed: 4.6
-    max_linear_accel: 3.6
-    max_angular_speed: 4.2
-    max_angular_accel: 5.0
+    # 出口限幅收紧到"不松于 MPC 可行域"，理由有两条，任何一条都足以否掉原来的 4.6/3.6/4.2：
+    # 1. 物理上限。舵轮驱动 450 rpm、滚动半径 0.0425 m，单轮线速度上限
+    #    $v_{\mathrm{wheel,max}} = 450 \times \frac{2\pi}{60} \times 0.0425
+    #      = 1.6689711\ \mathrm{m/s}$，
+    #    原 max_linear_speed=4.6 高出物理能力 2.75 倍，是不可达的假限幅。
+    # 2. 判据一致性。若出口比 MPC 松，则"MPC 限幅 = 底盘实际收到的限幅"不成立，
+    #    统一判据 `/cmd_vel_mpc=0 -> /motion_control=0` 的上界推导失去依据。
+    # 这里取 MPC 可行域数值：max_vx/vy=1.5、max_ax/ay=2.0、max_wz=2.0、max_awz=3.0。
+    # 注意：Nav2-free profile 下本节点根本不启动（chassis_vel_transform_enabled 要求
+    # launch_nav2=='true'），这组数值只对 Nav2 对照 profile 生效。
+    max_linear_speed: 1.5
+    max_linear_accel: 2.0
+    max_angular_speed: 2.0
+    max_angular_accel: 3.0
     # 限制大 yaw 反馈进入速度坐标变换的变化率，避免关节角抖动直接变成底盘速度矢量跳变。
     max_yaw_transform_rate: 3.5
     # 若现场下位机在“都涵盖/底盘跟随云台”模式里已经做了大 yaw 解耦，
@@ -267,7 +327,61 @@ chassis_vel_transform:
     invert_big_yaw: false
     invert_output_x: false
     invert_output_y: false
-    pass_through_without_yaw: true
+    # 缺少 serial/gimbal_joint_state 时禁止静默直通：直通会把 gimbal_yaw_odom 系的
+    # [vx, vy] 当成车体系直接下发，方向可能整体偏 $\psi$，属于"命令方向与实际运动
+    # 不符"的立即断电条件。置 false 后节点不再输出该帧。
+    #
+    # 已知残余缺陷（未修，需用户确认仓库归属后才能改代码）：
+    # `sentry_chassis_vel_transform/src/chassis_vel_transform.cpp:120-126` 在
+    # `pass_through_without_yaw=false` 时是 `return`（丢帧），不是"发布零速度"。
+    # 丢帧后底盘保持上一帧速度，直到 `cmd_vel_watchdog_timeout_ms = 300 ms`
+    # 看门狗归零，即最坏 300 ms 的残余运动窗口，不满足"缺反馈立即零速度"。
+    # 该目录是用户未跟踪文件且自带嵌套 .git，本轮不 stage、不覆盖。
+    #
+    # 本轮的实际安全依据不依赖上述代码：Nav2-free profile 下本节点结构性不启动
+    # （`chassis_vel_transform_enabled` 要求 `launch_nav2=='true'`，且
+    # `real_robot_nav2_free.launch.py` 另将 `launch_chassis_vel_transform` 钉为 False），
+    # 因此抬轮 HIL 的命令通路上不存在这一级。
+    pass_through_without_yaw: false
+
+# 实车 GimbalYawStatus 的唯一发布者（P6 零.3）。仿真的模拟 ack 由
+# `src/sim/ats_mujoco_sim/ats_mujoco_sim/sim_node.py` 发布，两者互斥：
+# 本节点只在 `require_gimbal_status:=True` 时启动，MuJoCo profile 下不启动。
+# 本节仅此一处给出数值，Goal Manager / MPC 侧只订阅同名话题，不重复定义时序。
+gimbal_yaw_status_bridge:
+  ros__parameters:
+    # 实车必须为 false：与 Point-LIO、localization_fusion、goal manager、MPC、
+    # 串口节点保持同一时钟口径，否则 0.5 s 租约与 stale 判据都会失效。
+    use_sim_time: false
+    # 反馈来源：串口节点 `publishJointState()` 发布的实测云台关节角。
+    joint_state_topic: "serial/gimbal_joint_state"
+    # 与 ats_goal_manager 的 yaw_authority_request_topic 同名同 QoS。
+    yaw_authority_request_topic: "/gimbal/yaw_authority_request"
+    # 与 ats_goal_manager、ats_swerve_mpc 的 gimbal_status_topic 同名同 QoS。
+    gimbal_status_topic: "/gimbal/yaw_status"
+    # yaw 数值取自实测 TF，不取关节角，避免出现第二个 yaw 口径。
+    odom_frame: "odom"
+    gimbal_yaw_frame: "gimbal_yaw_odom"
+    body_frame: "base_footprint"
+    # 必须与串口 publishJointState() 里的大 yaw 关节名一致。
+    big_yaw_joint_name: "gimbal_yaw_odom_joint"
+    # 时序关系必须满足
+    # $T_{\mathrm{pub}} < T_{\mathrm{joint}} \le T_{\mathrm{tf}} < T_{\mathrm{lease}}$：
+    #   $T_{\mathrm{pub}} = 1/50 = 0.02\ \mathrm{s}$（本节点发布周期）
+    #   $T_{\mathrm{joint}} = 0.1\ \mathrm{s}$（云台关节反馈新鲜度上界）
+    #   $T_{\mathrm{tf}} = 0.2\ \mathrm{s}$（TF 新鲜度上界）
+    #   $T_{\mathrm{lease}} = 0.5\ \mathrm{s}$（上游 gimbal_status_timeout）
+    # 本节点判"不新鲜"必须早于上游租约超时，否则上游会先看到一帧"仍然有效"的旧 ack。
+    joint_state_timeout_ms: 100
+    tf_timeout_ms: 200
+    publish_rate_hz: 50.0
+    # locked 只能来自实测角速度：$|\dot{\psi}| \le 0.05\ \mathrm{rad/s}$
+    # 且连续保持 100 ms 才置 true，单帧静止不算锁定。
+    lock_rate_threshold: 0.05
+    lock_dwell_ms: 100
+    # 实车没有车体 yaw 交接机构：BODY_YAW_FOLLOW 结构性拒绝，恒为 false。
+    # 置 true 只允许出现在明确标注的仿真/对照 profile。
+    allow_body_yaw_follow: false
 
 small_gicp_relocalization:
   ros__parameters:
