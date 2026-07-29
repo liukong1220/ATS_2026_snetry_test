@@ -40,6 +40,7 @@ def generate_launch_description():
     params_file = LaunchConfiguration("params_file")
     planning_grid_owner = LaunchConfiguration("planning_grid_owner")
     require_gimbal_status = LaunchConfiguration("require_gimbal_status")
+    launch_behavior = LaunchConfiguration("launch_behavior")
     use_rviz = LaunchConfiguration("use_rviz")
     use_composition = LaunchConfiguration("use_composition")
     log_level = LaunchConfiguration("log_level")
@@ -85,6 +86,17 @@ def generate_launch_description():
         ),
     )
 
+    declare_launch_behavior_cmd = DeclareLaunchArgument(
+        "launch_behavior",
+        default_value="True",
+        description=(
+            "Set False for the wheels-up HIL profile. The behavior tree issues "
+            "navigation goals on its own, so leaving it running makes the "
+            "measured zeroing latency impossible to attribute to one "
+            "authorization transition."
+        ),
+    )
+
     declare_use_rviz_cmd = DeclareLaunchArgument(
         "use_rviz", default_value="False", description="Whether to start RViz"
     )
@@ -121,6 +133,8 @@ def generate_launch_description():
             "launch_joy_teleop": "False",
             "planning_grid_owner": planning_grid_owner,
             "require_gimbal_status": require_gimbal_status,
+            # 抬轮 HIL 用 launch_behavior:=False，让授权只由测试脚本触发。
+            "launch_behavior": launch_behavior,
             "launch_small_gicp_relocalization": "True",
             "launch_localization_fusion": "True",
             "use_rviz": use_rviz,
@@ -135,6 +149,7 @@ def generate_launch_description():
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_planning_grid_owner_cmd)
     ld.add_action(declare_require_gimbal_status_cmd)
+    ld.add_action(declare_launch_behavior_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_log_level_cmd)
