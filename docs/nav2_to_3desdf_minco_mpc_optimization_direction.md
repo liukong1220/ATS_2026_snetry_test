@@ -1,8 +1,8 @@
 # ATS 自研导航 V1 当前状态与下一阶段交接
 
-更新时间：2026-07-27
+更新时间：2026-07-28
 
-有效更新窗口：2026-07-21 至 2026-07-27（滚动保留最近一周）。窗口外的逐日验证流水（原 5.1~5.8，覆盖 2026-07-13 至 2026-07-17）已按第 9 节维护约束第 2 条合并为 5.1 的当前结论，不再保留分日记录。本文只保留当前有效架构、最近验证结果和下一阶段任务，方便回溯和连续阅读。MuJoCo 继续承担规划、控制、四舵轮动力学和 contact 的完整闭环；`loopback_sim` 只承担低成本行为决策、action 生命周期和任务时间线检查，不能替代 MuJoCo 验收。
+有效更新窗口：2026-07-22 至 2026-07-28（滚动保留最近一周）。窗口外的逐日验证流水（原 5.1~5.8，覆盖 2026-07-13 至 2026-07-17）已按第 9 节维护约束第 2 条合并为 5.1 的当前结论，不再保留分日记录。本文只保留当前有效架构、最近验证结果和下一阶段任务，方便回溯和连续阅读。MuJoCo 继续承担规划、控制、四舵轮动力学和 contact 的完整闭环；`loopback_sim` 只承担低成本行为决策、action 生命周期和任务时间线检查，不能替代 MuJoCo 验收。
 
 本文中的状态含义：
 
@@ -303,9 +303,9 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 5. `minco_planner` 包级 `copyright/cpplint/clang_format` 既有债务未处理，历次只报告聚焦 CTest 通过。
 6. 实车仅完成 `docs/p4_real_robot_calibration_preflight.md` 的采集与停止门禁定义，未通电、未运动。
 
-### 5.9 2026-07-20：P4 第三阶段转弯/yaw authority/fake-yaw（部分实现与验证）
+### 5.9 P4 第三阶段 yaw authority/fake-yaw 结论合并（原 2026-07-20，已按第 9 节第 2 条合并）
 
-本节只记录本轮源码、测试和独立 MuJoCo 运行证据；它不是 P4 第三阶段的完整验收结论。
+本节的逐次 MuJoCo 运行流水（原 `ROS_DOMAIN_ID=34~51` 共 8 条记录）已过滚动窗口，按第 9 节维护约束第 2 条合并为下面的当前结论，不再保留分次记录。它不是 P4 第三阶段的完整验收结论。
 
 **已实现和已测试的契约**
 
@@ -316,21 +316,19 @@ P3 已补齐自研 goal/action 状态机、Nav2-free launch 和不依赖 `Naviga
 5. `fake_vel_transform` 修正为首个有效 odometry yaw 初始化 compatibility frame：令 $\psi_0$ 为初始 gimbal/body yaw、$\psi$ 为当前 yaw，则 `gimbal_yaw_odom -> gimbal_yaw_fake` 为 $\psi_0-\psi$，fake velocity 回 gimbal velocity 为 $R(\psi-\psi_0)$。这保留非零初始摆放 yaw，且速度旋转为 TF 的逆变换；fake frame 不覆盖真实 world-state body yaw。P3/MPC 主链仍关闭 legacy fake velocity adapter，避免二次旋转 `/cmd_vel_mpc`；兼容 TF 未删除。
 6. MuJoCo 订阅 yaw request 并以 transient-local/reliable `/gimbal/yaw_status` 回显 authority、lock、request sequence、body/gimbal/fake yaw。其 status QoS 已与 Goal Manager/MPC 匹配。当前模型的 MID360 固定在 `base_link`，所以只能验证 request/ack、lease 和 fail-stop，**不能**验证真实云台旋转的点云位移、地图匹配漂移或 fake-yaw 传感器补偿保真。
 
-**独立证据**
+**独立证据（合并后的当前结论）**
 
 1. Release 构建通过：`ats_navigation_interfaces`、`fake_vel_transform`、`minco_planner`、`ats_goal_manager`、`ats_swerve_mpc`、`ats_mujoco_sim`。聚焦测试通过：`test_fake_yaw_math`（非零初始 yaw、跨 $\pm\pi$、TF/速度逆变换）、`test_yaw_authority_policy`（开阔/窄道/force profile）、Goal Manager lifecycle/epoch pytest（错误 request、未锁定 body、authority STOP/re-ack、旧 epoch/reference 不复活）、MPC `test_se2_mpc_controller`、`test_trajectory_tracker` 和 `test_mpc_localization_gate`（world/body 变换、yaw wrap、旧 sequence/epoch、gimbal stale/错误 request fail-stop），以及 MuJoCo `test_swerve_physics` 6 项。
-2. 静态审计和 tracker 单测共同证明 SE2 模型仍按 $R(yaw)[v_x,v_y]^T$ 将车体系控制投影到世界系状态，MINCO 世界速度按参考 yaw 变为 body control，yaw error 使用 $\operatorname{atan2}(\sin\Delta\psi,\cos\Delta\psi)$。故“world velocity 被直接当作 body control”与“yaw wrap 缺失”不是本轮首个已证实根因。[Confidence: High，源码加针对性测试；尚非实车动力学证据]
-3. `ROS_DOMAIN_ID=36`、`launch_nav2=false`、`P4_LOCALIZATION_FUSION=true`、`planning_grid_owner=rog_map`、`force_body_yaw_follow=true` 的 single action 已通过。execute capture 为 `yaw_authority=2`、`requires_gimbal_lock=true`、`request_sequence=1`、`feedback_sequence=834`；终点 `(-9.017584,1.464537)` 对 `(-9.0,1.47)` 位置误差 `0.018413 m`，MINCO `raw/reference=3/81`、离散 footprint 冲突 `0`、contact violation `0`、最终四轮 `0 rpm`。终端 action 成功由 position/yaw、body linear/angular velocity 与 `0.30 s` dwell 共同门控，不再仅凭 pose。
-4. `ROS_DOMAIN_ID=38` 自动策略 single action 通过，终点误差 `0.002574 m`、最终四轮 `0 rpm`、contact `0`。MINCO 记录 `minimum_clearance=0.160 m < 0.55 m`，因而 execute 合理为 body（`yaw_authority=2`、locked）。此前 `ROS_DOMAIN_ID=37` 强制期待 gimbal 的断言失败，但 action 自身成功；capture 同样显示 body。这是实测 clearance 分类，不是调低 MPC 权重或云台状态机故障。
-5. `ROS_DOMAIN_ID=34` 的自动 single（authority capture 加入前）闭环成功：终点误差 `0.009832 m`、`raw/reference=3/81`、离散 footprint `0`、contact `0`、最终四轮 `0 rpm`。`ROS_DOMAIN_ID=35` 在 action 前因一次 ros2cli pose discovery 未返回而退出，未产生 execute；脚本已把 pose capture 改为三次有界重试。`ROS_DOMAIN_ID=39` 在 fusion 后的无 timeout `ros2 topic info` 查询挂起且未进入 action，已精确终止；脚本已改为 `timeout 5`，该次不作为控制失败或 gimbal 结果。
-6. 回归脚本随后将所有 event-driven topic capture 改为显式 ROS message type、启动前存活检查和有界 `TERM/KILL/reap`，避免 `ros2 topic echo` 的 graph type discovery 或退出后的无界 `wait` 被误判为路径/控制故障。最终脚本下 `ROS_DOMAIN_ID=50` single action 到达 `(-9.003661,1.467067)`，误差 `0.004691 m`；`raw/reference=3/81`，execute 为 body、`request/feedback=1/979`，MPC reference/predicted 与两级速度非空，终态四轮 `0 rpm`、contact `0`。
-7. `ROS_DOMAIN_ID=48/49` red_box 的目标 action 均实际到达 `(-0.04,-4.08)` 邻域，最终 action 位姿分别为 `(-0.038428,-4.081950)`/`0.002504 m` 和 `(-0.041480,-4.078687)`/`0.001979 m`，第二段均生成 `37/708` raw/reference。但这两次在 action 成功后的脚本 debug/telemetry type discovery 处退出；因此它们是终端到达证据，不是本轮“完整 red_box 回归通过”证据。最后一次脚本修复后仅完成 single，rectangle/red_box 仍须完整重跑。
-8. 最终脚本下 `ROS_DOMAIN_ID=51` red_box 完整通过：最终 action 位姿 `(-0.038022,-4.080458)`、位置误差 `0.002031 m`，第二段 `raw/reference=37/708`、reference duration `53.08 s`、minimum clearance `0.094 m`、footprint collision `0`；终态四轮 `0 rpm`、实测 body velocity `(-0.00306,-0.00067,0.00298)`、contact `0`。累计 drive-acceleration/steer-rate saturation 为 `29234/12840`，该累计量证明约束在运行中频繁介入，但当前没有分段时序和占空比，不能直接归因于转弯误差或据此放宽限值。
+2. 静态审计和 tracker 单测共同证明 SE2 模型仍按 $R(yaw)[v_x,v_y]^T$ 将车体系控制投影到世界系状态，MINCO 世界速度按参考 yaw 变为 body control，yaw error 使用 $\operatorname{atan2}(\sin\Delta\psi,\cos\Delta\psi)$。故“world velocity 被直接当作 body control”与“yaw wrap 缺失”不是已证实根因。[Confidence: High，源码加针对性测试；尚非实车动力学证据]
+3. MuJoCo single 与 red_box 均已完整通过，终端位置误差落在 `0.002 m` 至 `0.019 m` 区间，离散 footprint 冲突与 contact violation 全为 `0`，终态四轮 `0 rpm`。终端 action 成功由 position/yaw、body linear/angular velocity 与 `0.30 s` dwell 共同门控，不再仅凭 pose。
+4. authority 选择由实测 clearance 决定，不是权重或状态机故障：`minimum_clearance` 实测 `0.094` 至 `0.160 m`，均低于 `body_yaw_follow_clearance=0.55 m`，因此 execute 合理落在 `BODY_YAW_FOLLOW`（locked）。开阔 route 的 `GIMBAL_COMPENSATED` 只有单测覆盖。
+5. 累计 drive-acceleration/steer-rate saturation 曾记录为 `29234/12840`，证明约束在运行中频繁介入；但缺分段时序和占空比，不得据此归因转弯误差或放宽限值。
+6. 回归脚本的所有 event-driven topic capture 已改为显式 ROS message type、启动前存活检查和有界 `TERM/KILL/reap`，并给所有 `ros2 topic info` 加 `timeout`，避免 ros2cli graph discovery 挂起被误判为路径/控制故障。
 
 **未完成、不可宣称的范围**
 
 1. 尚未在实测 clearance 大于默认 `0.55 m` 的开阔 route 完成 `GIMBAL_COMPENSATED` MuJoCo action；`0.10 m` 阈值敏感性运行因 ros2cli graph 查询挂起而未进入 action。单元测试覆盖开阔 clearance 的 gimbal 分支，但不是旋转云台物理闭环。
-2. 本轮未完成 90 度转弯、S 弯、保持 yaw 横移、窄道、坡道/起伏专用 route、mode switch while moving、gimbal feedback stale/TF/map stale/旧 generation 故障矩阵；最终脚本已完整重跑 single 与 red_box，但最后一次 Goal Manager/map-sequence 源码修改后仍缺完整 rectangle。既有 P4 第二阶段 rectangle 证据不能代替本轮第三阶段最终验收。
+2. 仍未完成 90 度转弯、S 弯、保持 yaw 横移、窄道、坡道/起伏专用 route、mode switch while moving 专项 route。rectangle 已在 5.15 补跑通过（Nav2 对照 profile），故障矩阵见 5.15。
 3. 未记录整条路线的 cross-track p50/p95/max、along-track、wrapped yaw error、MPC solve time、wheel/steer saturation 时序和完整 physical contact 历史；现有 final telemetry 只证明终端 RPM、末尾 slip/steer sample 和 contact evaluator 计数。不得由离散 `footprint_collisions=0` 推导实车物理零碰撞。
 4. 包级 `minco_planner` 既有 copyright/cpplint/clang-format 债务仍未处理；本轮仅报告聚焦 CTest 通过。真实电控尚未发布 gimbal feedback 时必须保持 `require_gimbal_status=true` 的 fail-stop，不得为兼容旧路径关闭它。
 
@@ -553,6 +551,67 @@ $$
 2. 本轮未修改任何代码或 launch，因此实车不可上车结论在 P6 完成前保持有效。
 3. 本轮未重跑 MuJoCo 闭环，5.9 的运行数字仍是当前最新闭环证据。
 
+### 5.15 2026-07-28 P6 实车接口连通与抬轮 HIL 准备（部分实现，实车未通电）
+
+本节记录 P6 本轮改动与实测证据。**结论边界：本轮只做到"具备不通电检查与抬轮 HIL 的软件条件"，实车未通电、未抬轮、未落地行走。** 所有实车数值项均为 `未实测`。[Confidence: High]
+
+**已实现（有构建与单测证据）**
+
+1. 实车 Nav2-free 入口 [real_robot_nav2_free.launch.py](../src/ats_sentry_bringup/launch/real_robot_nav2_free.launch.py)：钉死 `launch_nav2:=false`、`launch_swerve_mpc:=true`、`launch_fake_vel_transform:=false`、`launch_chassis_vel_transform:=false`、`mpc_cmd_vel_topic:=/cmd_vel`、`use_sim_time:=False`，与 Nav2 对照 profile 互斥。
+2. 唯一命令通路：[navigation_launch.py](../src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py) 的 `fake_vel_transform_enabled`/`chassis_vel_transform_enabled` 都追加 `and launch_nav2 == 'true'`，因此 Nav2-free 下 MPC 之后不存在任何旋转级或增益级；`gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF 由 `UnlessCondition(fake_vel_transform_enabled)` 提供，每个 profile 各有唯一所有者。
+3. 实车 `GimbalYawStatus` 发布者 `gimbal_yaw_status_bridge_node`（[standard_robot_pp_ros2](../src/standard_robot_pp_ros2/src/gimbal_yaw_status_bridge.cpp)）由串口云台关节反馈驱动，`locked`/`tf_healthy` 均为实测量；`require_gimbal_status` 为假时禁止 `BODY_YAW_FOLLOW`。未伪造任何 ack。
+4. ATS action 行为树节点 `SendAtsNavGoal`（[send_ats_nav_goal.cpp](../src/ats_sentry_behavior/plugins/action/send_ats_nav_goal.cpp)）：正式 RMUC/RMUL 树切到 `/ats_navigate_to_pose` 与 `ats_navigation_interfaces/action/NavigateToPose`，可 halt/cancel，行为层直发 `cmd_vel` 通路已移除，输入改为 `/rc_esdf/planning_grid` 与 `/localization`。
+5. 实车 `gimbal_yaw_odom -> front_mid360` 静态 TF（[bringup.launch.py](../src/ats_sentry_bringup/launch/bringup.launch.py) 的 `static_tf_gimbal_yaw_odom_to_front_mid360`）：此前实车侧零发布者，而 `sensor_scan_generation::odometryHandler` 在该查询失败时整帧 return，连带 `odom->gimbal_yaw_odom`、`odom->base_footprint` 一起消失。条件为 `use_sim_time == false and launch_lidar_static_tf == true`，不与仿真发布者共存。
+6. Point-LIO 生效值可验证：新增 `logEffectiveParameters()`（[parameters.cpp:268-344](../src/ats_sentry_nav/point_lio/src/parameters.cpp#L268-L344)）在启动时打印七行 `[point_lio 生效参数]`；`point_lio/config/mid360.yaml` 经 launch 图追踪确认不生效，已加 `[Dead Code Suggestion]` 头（未删除）。
+
+**已测试（本轮实测数字）**
+
+1. 构建：`MAKEFLAGS=-j1 colcon build --base-paths src --packages-select point_lio` → `Finished <<< point_lio [51.7s]`；`ats_sentry_bringup standard_robot_pp_ros2 ats_sentry_behavior` 与 `ats_mujoco_sim` 均 exit 0。
+2. 功能单测 `50/50` 全通过：`test_ats_nav_goal_logic` 11、`test_official_tree_priority` 5、`test_send_ats_nav_goal_action` 10、`test_cmd_vel_authorization` 14、`test_gimbal_yaw_status_logic` 10，failures/errors 均为 0。
+3. MuJoCo 四舵轮动力学 `scripts/test_mujoco_swerve_dynamics.sh` 通过，`failures: []`，17 个相位 `drive_speed_saturations=0`、`contact_violations=0`；`vy` 全程可控（`lateral` 相位 `max_measured_vy=0.5004`），确认车体系全向语义未退化为差速。
+4. MuJoCo 闭环三条全部 `PASS`（每条独立 `ROS_DOMAIN_ID`，viewer/RViz 关闭）：
+
+   | 用例 | 命令要点 | 终端位置误差 | 结果 |
+   | --- | --- | --- | --- |
+   | Nav2 对照 `red_box` | `ROS_DOMAIN_ID=63 TEST_PROFILE=red_box GOAL_TIMEOUT=180` | `0.0073 / 0.0072 m` | PASS，`EXIT=0` |
+   | Nav2 对照 `rectangle` | `ROS_DOMAIN_ID=64 TEST_PROFILE=rectangle GOAL_TIMEOUT=120` | `0.034 / 0.011 / 0.053 / 0.010 m` | PASS，`EXIT=0`，`south`/`north` 段测得横向 MPC 命令 |
+   | **Nav2-free 自研链 `red_box`** | `ROS_DOMAIN_ID=65 NAVIGATION_MODE=p3 P3_GOAL_ENTRY=action TEST_PROFILE=red_box GOAL_TIMEOUT=180` | `0.003081 / 0.005662 m` | PASS，`EXIT=0` |
+
+   Nav2-free 用例是本轮零/二两节的直接证据，实测项：ATS action 返回 `result_code: 0` 且有 feedback；
+   `/planner/execution_command`、`/minco/reference_path`、`/ats_goal_manager/planner_goal`、`/cmd_vel_mpc`、
+   `/motion_control` 各自唯一所有者；`/planner/emergency_stop` 唯一发布者为 `ats_goal_manager`；
+   `footprint_collisions=0`；`execute_yaw_authority=2 requires_gimbal_lock=true request_sequence=2
+   feedback_sequence=748`（云台 ack 由仿真真实反馈驱动，未伪造）；
+   `contact_violation_count=0` 且终局四轮驱动转速低于 `2 rpm`。
+5. 门禁顺序（先确定性、后 MuJoCo）第一关通过：固定 revision/config 下把五个功能测试二进制连跑 `20` 轮，
+   `20/20` 通过，剥掉每例耗时后的判定签名 `distinct_signatures=1`，即 `50` 个用例的顺序与结论完全一致，
+   无非确定性分支或动作序列。
+6. 注意：`scripts/test_mujoco_minco_mpc_chain.sh` 的 `NAVIGATION_MODE` 默认值是 `nav2`，
+   因此提示词第五节给出的两条命令实际跑的是 Nav2 对照 profile。自研链必须显式加
+   `NAVIGATION_MODE=p3`，本轮已补跑并单列在上表第三行。
+
+**本轮修复的自身缺陷（重复运行才暴露）**
+
+`test_send_ats_nav_goal_action.cpp` 的脚本化服务端把 `execute()` 放在 `detach()` 的线程里并持有裸 `this`，
+而 `TearDown()` 在 executor cancel 之后直接销毁该对象，构成 use-after-free。
+单次运行看不出来，重复 30 次时约 `4/30` 出现 `free(): invalid pointer` 或段错误（`rc=134`/`rc=139`），
+且总是发生在最后一个用例的 fixture 析构处，已跑过的用例仍报 OK——**这类缺陷单跑一次会被完全掩盖**。
+修复：线程登记到 `workers_` 由析构函数统一 join，hold 循环增加 `shutting_down_` 退出条件避免 join 死锁，
+并把 `server_.reset()` 移到 `executor->cancel()` 之前，使收尾的 `succeed()`/`abort()` 仍打在活着的 executor 上。
+修复后 `30/30` 全部 `rc=0` 且每次 10 个用例齐全。
+
+**本轮修复的两项阻塞（否则闭环无法运行）**
+
+1. CycloneDDS 参与者索引上限：默认 `MaxAutoParticipantIndex=9`，而 MuJoCo 闭环图有 25 个以上参与者，第 10 个之后的节点在 `rmw_create_node` 阶段直接抛 `Failed to find a free participant index`。本轮用测试专用配置 `/tmp/ats_cyclonedds_loopback.xml`（`lo`、`MaxAutoParticipantIndex=120`）运行，未修改用户的 `~/.ros/cyclonedds.xml`。属环境债务，需要长期方案。
+2. MuJoCo CPU 雷达后端与 `mujoco 3.4.0` 不兼容：[mjlidar_cpu.py](../src/sim/ats_mujoco_sim/mujoco_lidar/core_cpu/mjlidar_cpu.py) 传入已被移除的 `normal=` 形参，且 `pnt`/`vec` 为 `float32`，`mj_multiRay` 抛 `TypeError` 使雷达子进程退出，`/local_pointcloud` 永不发布，连带 ROGMap `odom` 与 `/traversability_grid` 缺失。已修为 `float64` 并去掉 `normal=`；单独验证 RMUC 模型 `2000` 条射线中 `806` 条命中，距离区间 `[1.381, 24.860] m`。
+
+**本节不可声明项**
+
+1. 实车未通电、未抬轮、未落地行走：串口五级归零实测时延、`serialPortProtect` 重连实测行为、端到端 `tau_99` 分解全部 `未实测`，不得代入 5.11.2 净空预算。
+2. MID360 `gimbal_yaw_odom -> front_mid360` 静态 TF 的六个数值取自仿真模型 `ats_sentry_robot.sdf.xmacro:45`，`未实测`；Point-LIO `extrinsic_T` 亦未实测（启动日志会打印全零告警）。落地行走前必须替换为实测标定值，属停止条件。
+3. MuJoCo `max_contact_force` 各相位均为 `0.0`，即本轮没有测得任何接触力，物理接触评估为 `未验证`，不得写成"零碰撞"。
+4. P3 Nav2-free、P5 均未完成；实车定位精度、跟踪性能未验证。
+
 ## 6. 下一阶段实施顺序
 
 ### P0：架构与交接文档
@@ -635,28 +694,37 @@ P2 后续优化但不阻塞 P3 的范围：
 3. MuJoCo 场地模型单一权威碰撞表示、按图纸校正高度与坡角、统一 `8.025` 原点、固定 pgm→hfield→墙体生成顺序。
 4. 上述任一改动完成后必须重跑 rectangle 与 red_box 闭环，且不得放宽 unknown、footprint、执行器或 stale 门禁换取通过。
 
-### P6：实车接口连通（本轮新增，未完成）
+### P6：实车接口连通（软件侧部分完成，实车侧未开始）
 
-状态：`未实现`。范围与门禁见 5.14 与 `docs/p6_real_robot_interface_integration_prompt.md`。
+状态：`部分实现`。软件接线与仿真验证见 5.15；实车实测项全部 `未实测`。范围与门禁见 5.14 与 `docs/p6_real_robot_interface_integration_prompt.md`。
 
-1. 实车 Nav2-free profile：把 `minco_planner`、`ats_goal_manager`、`ats_swerve_mpc` 接入实车入口 launch，补齐实车参数段并统一 `use_sim_time: false`，与 Nav2 对照 profile 互斥。
-2. 唯一命令通路：消除 `/cmd_vel_mpc` 无消费者的断裂，明确 `fake_vel_transform`/`chassis_vel_transform` 去留，禁止在 MPC 之后改变 `[vx, vy, wz]` 或叠加 `cmd_spin`。
-3. 串口层：急停路径不受瞬时零保持抑制、实现 `serialPortProtect` 重连与重连期确定性零速度、出口限幅收紧到不宽于 MPC、缺云台反馈即零速度、符号/单位/轮位与固件口径逐项对齐。
-4. 行为树：新增 ATS action 节点并把正式树切到 `/ats_navigate_to_pose`，移除行为层直发底盘通路，输入改用 `/rc_esdf/planning_grid` 与 `/localization`，补 halt/cancel/迟到 result 功能测试。
-5. 实车 `GimbalYawStatus` 发布者（由串口云台关节反馈驱动，含 ack 与 stale 语义），禁止伪造 ack。
-6. MID360：标定并唯一化外参，固定 Point-LIO 实车生效参数，完成静止 rosbag 采集与漂移/状态统计。
-7. 分级执行只允许推进到不通电检查与抬轮 HIL；落地行走必须先闭合 5.11.2 净空预算与实测 `tau_99`。
+1. 实车 Nav2-free profile：`已实现`。`real_robot_nav2_free.launch.py` 启动 `minco_planner`、`ats_goal_manager`、`ats_swerve_mpc`，钉死 `launch_nav2:=false` 与 `use_sim_time:=False`，与 Nav2 对照 profile 互斥。`已测试`（MuJoCo `NAVIGATION_MODE=p3` 闭环通过），实车 `未验证`。
+2. 唯一命令通路：`已实现`。MPC 以 `mpc_cmd_vel_topic:=/cmd_vel` 直接产出车体系命令，`fake_vel_transform` 与 `chassis_vel_transform` 在 Nav2-free 下不启动，MPC 之后无任何旋转级或增益级。`已测试`（闭环断言 `fake_vel_transform absent` 与 `/cmd_vel_mpc` 唯一所有者），实车 `未验证`。
+3. 串口层：`部分实现`。授权归零绕过瞬时零保持、`serialPortProtect` 重连与重连期零速度、新 epoch 才恢复授权、符号/单位/轮位口径表均已落地并有单测（`test_cmd_vel_authorization` 14 例通过）；**实测归零时延与实测重连行为 `未实测`**，必须抬轮 HIL 补齐。出口限幅问题在正式 profile 中因该节点停用而消解，对照 profile 仍需收紧。
+4. 行为树：`已实现`。`SendAtsNavGoal` 切到 `/ats_navigate_to_pose`，行为层直发底盘通路已移除，输入改用 `/rc_esdf/planning_grid` 与 `/localization`。`已测试`（halt/cancel/迟到 result/主树优先级共 26 例通过）。
+5. 实车 `GimbalYawStatus` 发布者：`已实现`（`gimbal_yaw_status_bridge_node`，由串口云台关节反馈驱动，`已测试` 10 例）。未伪造 ack。实车反馈链路 `未验证`。
+6. MID360：`部分实现`。Point-LIO 实车生效参数已唯一化并在启动时打印，实车 `gimbal_yaw_odom -> front_mid360` 静态 TF 已补齐；**外参仍为未实测值（仿真模型取值），静止 rosbag 采集与漂移统计 `未实现`**，属落地行走前的停止条件。
+7. 分级执行：本轮只推进到「具备不通电检查与抬轮 HIL 的软件条件」。第 1 级不通电检查与第 2 级抬轮 HIL 均 `未执行`（实车未通电），第 3、4 级不在本轮范围。5.11.2 净空预算与实测 `tau_99` 仍未闭合。
 
 ## 7. 下一对话接续入口
 
-下一对话按"P6 实车接口连通优先、P5 并行"的顺序推进：先完成 5.14 列出的实车 launch/命令通路/串口/行为树/MID360 五条阻塞项（提示词见 `docs/p6_real_robot_interface_integration_prompt.md`），使实车具备不通电检查与抬轮 HIL 条件；`minco_planner` 节点接线与 MuJoCo 场地模型冲突（P5，提示词见 `docs/p5_real_robot_hardening_prompt.md`）继续作为仿真侧主线，随后继续 P4 第四阶段的统一 telemetry/baseline 与 5.12 的 ATS 行为树 action 迁移：先用同一 scenario 进行 BT 离线/loopback 决策验证，再进入 MuJoCo 的真实 Goal Manager/JPS/MINCO/MPC 闭环；reference feasibility/time scaling、实车 rosbag/轮端与时延标定、控制 mux 和受控灰度按门禁后续推进。不得重复实现定位融合、ROGMap/adapter、JPS、MINCO 或 MPC，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint、执行器物理限值或 stale 安全门禁换取路线通过。
+下一对话按"实车不通电检查与抬轮 HIL 优先、P5 并行"的顺序推进。P6 软件侧接线已完成（见 5.15），下一轮的第一件事是**在实车上执行第 1 级不通电检查与第 2 级抬轮 HIL**，按 `docs/p4_real_robot_calibration_preflight.md` 逐项记录，并补齐本轮标记为 `未实测` 的三类数值：
+
+1. 串口五级归零实测时延（授权 STOP、急停、定位 stale、串口断连、缺云台 ack 五条路径各自的实测值）。
+2. `serialPortProtect` 断连/重连实测行为，含重连期零速度保持与新 epoch 恢复授权。
+3. 端到端 $\tau_{99}$ 分解（传感器 → 定位 → 规划 → 授权 → MPC → 底盘），不得用估计值代入 5.11.2。
+
+同时必须完成 MID360 外参实测标定（当前写入值取自仿真模型，是落地行走的停止条件）与静止 rosbag 采集/漂移统计。
+
+`minco_planner` 节点接线与 MuJoCo 场地模型冲突（P5，提示词见 `docs/p5_real_robot_hardening_prompt.md`）继续作为仿真侧主线，随后继续 P4 第四阶段的统一 telemetry/baseline 与 5.12 的 ATS 行为树 action 迁移：先用同一 scenario 进行 BT 离线/loopback 决策验证，再进入 MuJoCo 的真实 Goal Manager/JPS/MINCO/MPC 闭环；reference feasibility/time scaling、实车 rosbag/轮端与时延标定、控制 mux 和受控灰度按门禁后续推进。不得重复实现定位融合、ROGMap/adapter、JPS、MINCO 或 MPC，也不得把 `/rog_map/esdf` 调试点云作为规划距离场。不得通过放宽 unknown、frame、footprint、执行器物理限值或 stale 安全门禁换取路线通过。
 
 必须保持以下边界：
 
 1. Point-LIO 链继续提供局部连续 `/odometry` 与 `/registered_scan`，不得用 ROGMap 替换里程计；`localization_fusion` 继续独占 `/localization` 与 `map -> odom`。
 2. RC-ESDF、JPS、MINCO 与全向 SE2 MPC 继续保留；P2、P3 及后续运行中 `/rc_esdf/planning_grid` 始终只能有一个发布者。
-3. 默认保留 `launch_fake_vel_transform:=True` 与 `launch_chassis_vel_transform:=True`。固定雷达迁移时可关闭开关；关闭 fake-yaw 仍保留零旋转兼容 TF，待所有 Nav2/行为参数改为固定 frame 后再删除该兼容层。
+3. 两级速度变换按 profile 分离（P6 零.2 起）：Nav2 对照 profile 默认保留 `launch_fake_vel_transform:=True` 与 `launch_chassis_vel_transform:=True`；Nav2-free 正式 profile 二者强制关闭，MPC 之后不允许存在任何改变 `[vx, vy, wz]` 数值或方向的环节。关闭 fake-yaw 时仍由零旋转兼容静态 TF 提供 `gimbal_yaw_odom -> gimbal_yaw_fake`，两个 profile 各有唯一发布者，待所有 Nav2/行为参数改为固定 frame 后再删除该兼容层。
 4. P3 已保留 P2 owner、heartbeat、snapshot 和急停契约；后续 P3 正式回归必须继续显式 `launch_nav2:=false`、使用 ATS action、拒绝 `/plan`，Nav2 `NavigateToPose` 只能作为独立对照。
+5. 行为树正式树只允许 `/ats_navigate_to_pose`；`/navigate_to_pose` 与 `/navigate_through_poses` 只能出现在明确命名的对照 profile，且两者不得同时启用。
 
 本阶段复验命令：
 
