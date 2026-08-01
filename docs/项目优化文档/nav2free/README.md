@@ -1,62 +1,104 @@
-# ATS 导航项目优化文档
+# ATS Nav2-free 自研导航一体化设计
 
-本目录集中保存 ATS 2026 四驱四转哨兵从 Nav2 双栈过渡到自研 ROGMap、JPS、MINCO S3、全向 SE2 MPC 导航链的审查、迁移和验收资料。
+更新时间：2026-08-01。
 
-截至 2026-08-01，本目录同时保存“架构冻结与实施账本”和本轮实施证据。正式
-`node_params.yaml`、Nav2-free launch、ATS action、ROGMap RViz profile 与 MuJoCo
-action-only 脚本已经进入当前工作树；静态检查和 Fast DDS 本机 MuJoCo 回归见
-`../nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md` 第 5.16 节。该证据
-不等价于 CycloneDDS、实车或完整 P3 验收通过。
+本目录是 ATS 2026 四驱四转哨兵自研导航的唯一设计、实施和验收入口。正式架构只
+包含 Point-LIO/定位融合、ROGMap、地面适配、RC-ESDF、JPS、MINCO S3、独立 yaw、
+footprint safety、Local Collision Repair、Goal Manager、全向 SE2 MPC、速度 frame
+兼容层和四舵轮执行链。Nav2 只作为待清理的源码残余出现，不再作为目标架构、回退
+架构或长期对照架构。
+
+## 证据范围
+
+后续 review、实施和验收只使用以下证据：
+
+1. `/home/ats/ATS_2026_snetry_test/AGENTS.md`；
+2. 当前活动源码、interface、launch、参数、manifest 和测试；
+3. 本目录中的设计与任务账本；
+4. 本轮实际执行的构建、单测、ROS graph、MuJoCo、HIL 和实车结果。
+
+`docs/项目优化文档/nav2移植/**` 是此前迁移框架资料，不属于本设计。禁止读取其内容
+补全当前事实，禁止引用其中状态或性能作为验收证据，也不再从本目录建立到该目录的
+链接。
+
+## 当前结论
+
+| 范围 | 当前状态 | 证据边界 |
+| --- | --- | --- |
+| 专用实机自研入口 | `已实现-静态确认` | `real_robot_nav2_free.launch.py` 固定关闭 Nav2，启动 ATS action/MINCO/MPC，默认保留两级速度兼容层 |
+| 自研 MuJoCo 回归入口 | `已实现-静态确认` | `test_mujoco_minco_mpc_chain.sh` 固定 ATS action，并拒绝 Nav2 节点和 `/plan` |
+| 通用实机/导航 launch | `待清理` | 仍导入 `nav2_common`，保留 `launch_nav2` 与完整 server/lifecycle 分支 |
+| 正式总参数 | `部分统一` | `node_params.yaml` 已有 ROGMap、adapter、MINCO、Goal Manager、MPC 段，但仍含 Nav2 段；behavior 和 ROGMap core 仍有第二来源 |
+| 行为正式 profile | `部分完成` | 正式参数使用 `/ats_navigate_to_pose`，但 Nav2 action plugin、测试和构建依赖仍存在 |
+| ROGMap/RViz | `部分完成` | 四类点云、`/rog_map/bounds` 和 `/goal_pose` 已接入；旧 costmap/MPPI display 与更多 bounds/health 仍待清理 |
+| 仓库级 Nav2-free | `未完成` | manifest、launch、YAML、行为、MuJoCo、loopback、`ats_nav2_plugins` 和 `trajectory_optimizer` 仍有活动依赖 |
+
+上述结论来自当前源码静态交叉核对，不等价于本轮重新运行闭环。
+
+## 唯一目标架构
+
+```text
+LiDAR + IMU
+  -> Point-LIO + localization fusion
+  -> /localization + /localization/status + /registered_scan
+  -> ROGMap 概率占据/膨胀/3D ESDF
+  -> ROGMap ground projection + terrain/static/unknown 融合
+  -> /rc_esdf/planning_grid + 数值 signed distance/clearance
+  -> ATS NavigateToPose + Goal Manager
+  -> PlannerGoal
+  -> JPS -> MINCO S3 -> 独立 yaw -> footprint gate/repair
+  -> Goal Manager 提交安全 reference 与 ExecutionCommand
+  -> 全向 SE2 MPC
+  -> /cmd_vel_mpc -> fake-yaw -> chassis transform -> /cmd_vel
+  -> serial/MuJoCo 唯一执行桥 -> 四舵轮底盘
+```
+
+Nav2 planner/controller/BT/costmap/lifecycle、`nav2_msgs` action 和 `/plan` 不属于该图。
 
 ## 阅读顺序
 
-1. [项目优化总览与问题评分](./项目优化总览与问题评分.md)：当前缺陷、风险分数、优先级和未接接口。
-2. [Nav2移除与导航架构重构计划](./Nav2移除与导航架构重构计划.md)：目标运行图、删除清单、分仓修改顺序。
-3. [导航参数与接口统一配置方案](./导航参数与接口统一配置方案.md)：以 `node_params.yaml` 为唯一总参数文件的迁移规则。
-4. [ROGMap与RViz可视化升级方案](./ROGMap与RViz可视化升级方案.md)：ROGMap 原项目风格图层、RViz 面板和数值/可视化边界。
-5. [分阶段任务清单与验收矩阵](./分阶段任务清单与验收矩阵.md)：可执行 TODO、DoD、测试命令、停止条件和提交拆分。
-6. [下一阶段Nav2移除与统一配置实施提示词](./下一阶段Nav2移除与统一配置实施提示词.md)：下一次新对话可直接使用的 Goal、DoD、范围、约束、验证和交接事实。
+1. [项目优化总览与问题评分](./项目优化总览与问题评分.md)：当前事实、已完成项、剩余风险和优先级。
+2. [Nav2移除与导航架构重构计划](./Nav2移除与导航架构重构计划.md)：唯一目标运行图、owner、接口和分仓清理顺序。
+3. [导航参数与接口统一配置方案](./导航参数与接口统一配置方案.md)：`node_params.yaml` 单一权威与结构化接口账本。
+4. [ROGMap与RViz可视化升级方案](./ROGMap与RViz可视化升级方案.md)：已接显示、剩余显示和数值接口隔离。
+5. [分阶段任务清单与验收矩阵](./分阶段任务清单与验收矩阵.md)：可执行 TODO、DoD、测试、停止条件和提交拆分。
+6. [下一阶段Nav2移除与统一配置实施提示词](./下一阶段Nav2移除与统一配置实施提示词.md)：下一会话可直接执行的提示词。
 
-## 历史与专项资料
-
-- [ATS 自研导航 V1 当前状态与下一阶段交接](../nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md)
-- [P4 实车标定准备与安全门禁](../nav2移植/p4_real_robot_calibration_preflight.md)
-- [P4 第四阶段稳定跟踪、行为决策与双仿真提示词](../nav2移植/p4_stage4_stable_tracking_prompt.md)
-- [P5 实车化整改提示词](../nav2移植/p5_real_robot_hardening_prompt.md)
-- [P6 实车接口连通提示词](../nav2移植/p6_real_robot_interface_integration_prompt.md)
-
-## 证据标签
+## 状态标签
 
 | 标签 | 含义 |
 | --- | --- |
-| `已验证-静态` | 已从活动源码、launch、参数或 interface 定义确认，不等价于运行通过 |
-| `已验证-单测` | 已有针对性单元测试证据；仍不替代跨进程闭环 |
-| `已实现未运行` | 源码存在，但本轮没有运行构建、仿真或实车验证 |
+| `已验证-运行` | 当前 revision 有本轮运行输出、终点或故障链证据 |
+| `已验证-单测` | 当前 revision 的聚焦测试已通过 |
+| `已实现-静态确认` | producer、consumer、launch 和参数已从源码确认，尚未在本轮运行 |
+| `部分完成` | 主体已接入，但仍有第二权威、兼容分支或未闭合门禁 |
 | `未实现` | 活动源码中不存在目标能力 |
-| `待决` | 会影响删除范围或接口设计，需要在对应阶段开始前冻结 |
-
-重要结论必须至少有两类独立证据才能升级为闭环结论。例如源码与单测、launch 与 ROS graph、日志与终点测量。只有静态证据时统一标注 `[Confidence: Medium]` 或明确写出证据边界。
+| `未验证` | 缺少当前 revision 的运行、HIL、实车或独立 evaluator 证据 |
 
 ## 不可突破的边界
 
-- Point-LIO 继续提供 `/localization` 与 `/registered_scan`，ROGMap 不承担定位。
-- ROGMap 活动实现仅为 `src/ats_sentry_nav/ats_rog_map`。
-- 规划数值距离只能来自结构化服务/消息，禁止反解析 `/rog_map/esdf` 可视化点云。
-- 四舵轮状态为世界系 `[x, y, yaw]`，控制为车体系 `[vx, vy, wz]`，不引入 `vy=0`。
-- 实机主入口默认保持 `launch_fake_vel_transform:=True` 和 `launch_chassis_vel_transform:=True`；Nav2 移除不能隐式关闭速度 frame 兼容层。
-- fake-yaw 关闭时保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转 TF；不得新增重复 `base_footprint -> base_link` 发布者。
-- 固定雷达迁移只能通过显式 profile 关闭兼容层，并在关闭前证明 topic、TF 和下游车体系速度契约完整。
-- `ROGMap source generation`、adapter publication 和 `MINCO local snapshot generation` 是三个不同版本域。
-- 未完成 P3 graph 门禁前，不得声称项目已彻底 Nav2-free；未在目标机测量前，不得把参考文章的 50 Hz、约 6 ms 写成 ATS 实测性能。
+- Point-LIO/定位融合继续拥有 `/localization`、`/localization/status` 和
+  `/registered_scan`；ROGMap 不承担定位。
+- 活动 ROGMap 只有 `src/ats_sentry_nav/ats_rog_map`，不得复制参考实现。
+- adapter、MINCO 和 MPC 禁止从 `/rog_map/esdf` 可视化点云反解析数值距离。
+- 物理 occupancy、概率证据、ROG inflation、JPS clearance 和 footprint margin 分层。
+- 静态细栅格按输出 footprint 覆盖面积保守聚合，保留 origin 与 yaw。
+- 四舵轮状态为世界系 `[x, y, yaw]`，控制为车体系 `[vx, vy, wz]`；禁止差速、
+  ICR 或 `vy=0` 约束。
+- 实机默认保持 fake-yaw 和 chassis transform；固定雷达 profile 才能显式关闭。
+- fake-yaw 关闭时保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转 TF；不得新增
+  `base_footprint -> base_link` 第二发布者。
+- source generation、adapter publication、MINCO local snapshot 和 localization epoch
+  是不同版本域，未结构化贯通前不得宣称端到端编号一致。
+- map/localization/gimbal/reference/command stale、unknown、unreachable、unsafe 或 MPC
+  失败必须确定性归零；恢复不得复活旧目标、旧 reference 或旧授权。
+- 未在 ATS 目标机测量前，不得把外部项目的频率、耗时和内存数据写成 ATS 实测。
 
-## 当前文件范围
+## 文档维护规则
 
-`nav2free/` 汇总架构审查、迁移计划、统一配置、ROGMap/RViz、任务矩阵和下一阶段
-提示词；`../nav2移植/` 保存此前 P4/P5/P6 与 V1 状态资料。旧文档由用户从
-`docs/` 移入分类目录，不恢复到根层。
-
-2026-08-01 同步更新了根 README、相关分仓 README 和外层专题 docs：普通入口与
-MuJoCo 都保留显式 Nav2 baseline；专用正式实机入口和 P3 MuJoCo 回归入口固定使用
-ATS action、`launch_nav2:=false` 与 ROGMap planning-grid owner。当前工作树尚未完成
-分仓提交；CycloneDDS 双进程 discovery、Nav2 baseline、RViz live、有效参数 dump 与
-实机门禁仍需独立验证。
+1. 当前事实必须由活动源码与测试/运行证据交叉确认。
+2. 目标接口必须标记 `待实现`，不能与已有 `.msg/.srv/.action` 混写。
+3. Nav2 残余只进入清理清单，不进入目标运行图。
+4. 源码阶段完成后同步更新本目录 7 份文档；其它 README/docs 只在其实际接口受影响时更新。
+5. 仓库级 Nav2-free 只有在 graph、manifest、launch、YAML、RViz、行为与测试均无
+   活动 Nav2 依赖后才能声明完成。
