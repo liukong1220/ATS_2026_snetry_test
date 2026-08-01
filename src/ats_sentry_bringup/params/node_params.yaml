@@ -1,9 +1,7 @@
-# 参数权威（P6 零.2）：本文件是实车运行时的唯一生效参数源。
-# `bringup.launch.py` 把本文件作为 `params_file` 一路传到
-# `rm_navigation_reality_launch.py`，覆盖 `ats_nav_bringup/config/reality/nav2_params.yaml`
-# 的默认值；后者只在单独启动导航仓入口时生效。
-# 三条自研链节点（minco_planner / ats_goal_manager / ats_swerve_mpc）不在本文件里，
-# 权威是各包 `config/*_reality.yaml`，禁止在此新增同名段。
+# 参数权威（P3 配置收敛）：本文件是正式实机入口唯一加载的 ROS 参数源。
+# `bringup.launch.py` 与 `rm_navigation_reality_launch.py` 都把它作为 `params_file`
+# 传给自研导航节点。包内 `*_reality.yaml` 只保留为显式传入的兼容示例，不能是
+# 正式入口的默认值。`.msg`、`.srv`、`.action` 仍是接口 schema 的唯一权威。
 
 standard_robot_pp_ros2:
   ros__parameters:
@@ -282,7 +280,9 @@ fake_vel_transform:
     # 小 yaw `gimbal_yaw` 只用于自瞄云台控制，不再作为底盘运动参考系。
     robot_base_frame: "gimbal_yaw_odom"
     fake_robot_base_frame: "gimbal_yaw_fake"
-    input_cmd_vel_topic: "cmd_vel_nav2_result"
+    # 正式自研链的中间输出，不能借用 Nav2 命名；Nav2 baseline 仅通过 launch
+    # 临时重映射输入，不改写正式参数权威。
+    input_cmd_vel_topic: "/cmd_vel_mpc"
     output_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
     cmd_spin_topic: "cmd_spin"
     # cmd_spin 会在本节点输出上直接叠加车体 wz
@@ -290,8 +290,7 @@ fake_vel_transform:
     # 官方 profile 禁止这种叠加：叠加后底盘实际 wz 不再等于授权链算出的 wz，
     # 「MPC 之后不得改变 [vx, vy, wz]」与统一归零判据同时失效。
     # 置 false 后节点不创建 cmd_spin 订阅、也不做 wz 叠加。
-    # 双重保障：Nav2-free 下本节点结构性不启动（`any_velocity_transform` 要求
-    # `launch_nav2=='true'`，实车入口另把 launch_fake_vel_transform 钉为 False）。
+    # Nav2-free 正式链同样经过本节点；它不订阅 cmd_spin，wz 只来自 MPC。
     enable_cmd_spin: false
     init_spin_speed: 0.0
 
@@ -313,8 +312,7 @@ chassis_vel_transform:
     # 2. 判据一致性。若出口比 MPC 松，则"MPC 限幅 = 底盘实际收到的限幅"不成立，
     #    统一判据 `/cmd_vel_mpc=0 -> /motion_control=0` 的上界推导失去依据。
     # 这里取 MPC 可行域数值：max_vx/vy=1.5、max_ax/ay=2.0、max_wz=2.0、max_awz=3.0。
-    # 注意：Nav2-free profile 下本节点根本不启动（chassis_vel_transform_enabled 要求
-    # launch_nav2=='true'），这组数值只对 Nav2 对照 profile 生效。
+    # Nav2-free 正式 profile 也经过本节点；出口限幅不得宽于 MPC 可行域。
     max_linear_speed: 1.5
     max_linear_accel: 2.0
     max_angular_speed: 2.0
@@ -338,10 +336,8 @@ chassis_vel_transform:
     # 看门狗归零，即最坏 300 ms 的残余运动窗口，不满足"缺反馈立即零速度"。
     # 该目录是用户未跟踪文件且自带嵌套 .git，本轮不 stage、不覆盖。
     #
-    # 本轮的实际安全依据不依赖上述代码：Nav2-free profile 下本节点结构性不启动
-    # （`chassis_vel_transform_enabled` 要求 `launch_nav2=='true'`，且
-    # `real_robot_nav2_free.launch.py` 另将 `launch_chassis_vel_transform` 钉为 False），
-    # 因此抬轮 HIL 的命令通路上不存在这一级。
+    # 实机正式 profile 经过该节点；缺反馈的出站归零时延仍须在抬轮 HIL 实测，
+    # 在此之前不得把 watchdog 设计值当成实测结果。
     pass_through_without_yaw: false
 
 # 实车 GimbalYawStatus 的唯一发布者（P6 零.3）。仿真的模拟 ack 由
@@ -1440,3 +1436,213 @@ rosbag_recorder:
     disable_discovery: False
     start_recording_immediately: False
     max_bagfile_duration: 15
+
+# 正式实机 Nav2-free 链。以下节点必须与本文件其余节点一并由正式入口加载，
+# launch 仅允许覆盖 use_sim_time、地图/PCD 等资产路径及受控 HIL 开关。
+ats_rog_map:
+  ros__parameters:
+    use_sim_time: false
+    map_frame: odom
+    base_frame: gimbal_yaw_odom
+    sensor_frame: front_mid360
+    odom_topic: /localization
+    cloud_topic: /registered_scan
+    cloud_timeout_sec: 2.0
+    odom_timeout_sec: 2.0
+    tf_timeout_sec: 0.1
+    debug_rate_hz: 2.0
+    esdf_visualization_height: 0.15
+    self_filter_radius: 0.45
+    debug_qos_depth: 1
+    input_qos_reliable: false
+    debug_qos_reliable: false
+    debug_bounds_topic: /rog_map/bounds
+
+ats_rog_map_adapter:
+  ros__parameters:
+    use_sim_time: false
+    projection_service: /rog_map/get_ground_projection
+    projection_rate_hz: 2.0
+    projection_request_timeout_sec: 2.0
+    projection_snapshot_timeout_sec: 2.0
+    input_sync_tolerance_sec: 1.0
+    projection_min_height: 0.10
+    projection_max_height: 0.80
+    planning_resolution: 0.10
+    static_map_topic: /map
+    traversability_grid_topic: /traversability_grid
+    traversability_slope_grid_topic: /traversability_slope_grid
+    planning_grid_topic: /rc_esdf/planning_grid
+    signed_distance_grid_topic: /rc_esdf/signed_distance_grid
+    footprint_clearance_grid_topic: /rc_esdf/footprint_clearance_grid
+    ready_topic: /rog_map_adapter/ready
+    generation_topic: /rog_map_adapter/generation
+    map_status_topic: /rog_map_adapter/status
+    localization_status_topic: /localization/status
+    require_localization_status: true
+    localization_status_timeout_sec: 1.0
+    static_obstacle_value_threshold: 50
+    terrain_obstacle_value_threshold: 50
+    slope_grid_max_degrees: 45.0
+    slope_obstacle_degrees: 28.0
+    unknown_is_obstacle: true
+    input_timeout_sec: 2.0
+    signed_distance_max_m: 2.0
+    footprint_length: 0.70
+    footprint_width: 0.55
+    footprint_safety_margin: 0.05
+    robot_frame: gimbal_yaw_odom
+    robot_unknown_clear_radius: 0.0
+
+minco_planner:
+  ros__parameters:
+    use_sim_time: false
+    grid_topic: /rc_esdf/planning_grid
+    goal_topic: ""
+    global_plan_topic: ""
+    goal_request_topic: /ats_goal_manager/planner_goal
+    planner_status_topic: /minco/planning_status
+    raw_path_topic: minco/raw_path
+    reference_path_topic: minco/reference_path
+    candidate_reference_path_topic: /minco/reference_path_candidate
+    debug_marker_topic: minco/debug_markers
+    map_ready_topic: /rog_map_adapter/ready
+    emergency_stop_topic: /planner/emergency_stop
+    planner_manages_emergency_stop: false
+    map_ready_timeout_sec: 3.0
+    emergency_stop_heartbeat_period_sec: 0.1
+    runtime_safety_recheck_hz: 10.0
+    runtime_safety_horizon_sec: 1.0
+    global_frame: odom
+    robot_frame: gimbal_yaw_odom
+    obstacle_value_threshold: 50
+    unknown_is_obstacle: true
+    allow_diagonal: true
+    search_algorithm: jps
+    astar_fallback: true
+    jps_max_expanded_nodes: -1
+    jps_safe_distance: 0.57
+    publish_unsafe_trajectory: false
+    reference_speed: 1.5
+    min_segment_time: 0.05
+    sample_spacing: 0.12
+    max_velocity: 2.0
+    max_acceleration: 2.5
+    max_time_scaling_iterations: 5
+    time_scaling_factor: 1.25
+    esdf_obstacle_optimization_enabled: true
+    esdf_obstacle_clearance: 0.45
+    esdf_obstacle_max_iterations: 6
+    esdf_obstacle_control_point_spacing: 0.30
+    esdf_obstacle_max_step: 0.10
+    esdf_obstacle_max_deviation: 0.50
+    esdf_footprint_optimization_enabled: true
+    esdf_footprint_clearance: 0.10
+    esdf_footprint_sample_spacing: 0.10
+    yaw_mode: clearance_aware
+    yaw_rate_limit: 2.5
+    narrow_clearance_enter: 0.55
+    narrow_clearance_exit: 0.70
+    terminal_yaw_sample_period: 0.10
+    footprint_length: 0.70
+    footprint_width: 0.55
+    footprint_safety_margin: 0.05
+    swept_max_corner_step_cells: 0.5
+    body_yaw_follow_clearance: 0.55
+    force_body_yaw_follow: false
+    local_repair_enabled: false
+    local_repair_max_iterations: 2
+    local_repair_search_radius: 0.35
+
+ats_goal_manager:
+  ros__parameters:
+    use_sim_time: false
+    input_goal_topic: /goal_pose
+    planner_goal_topic: /ats_goal_manager/planner_goal
+    planner_status_topic: /minco/planning_status
+    candidate_reference_topic: /minco/reference_path_candidate
+    reference_path_topic: /minco/reference_path
+    emergency_stop_topic: /planner/emergency_stop
+    execution_command_topic: /planner/execution_command
+    yaw_authority_request_topic: /gimbal/yaw_authority_request
+    gimbal_status_topic: /gimbal/yaw_status
+    require_gimbal_status: true
+    gimbal_status_timeout_sec: 0.5
+    map_ready_topic: /rog_map_adapter/ready
+    map_status_topic: /rog_map_adapter/status
+    localization_status_topic: /localization/status
+    odom_topic: /localization
+    action_name: /ats_navigate_to_pose
+    goal_frame: map
+    planning_frame: odom
+    map_ready_timeout_sec: 3.0
+    localization_status_timeout_sec: 1.0
+    require_localization_status: true
+    require_map_status: true
+    emergency_stop_heartbeat_period_sec: 0.1
+    map_wait_timeout_sec: 5.0
+    default_goal_timeout_sec: 120.0
+    goal_position_tolerance: 0.08
+    goal_yaw_tolerance: 0.15
+    terminal_linear_velocity_tolerance: 0.05
+    terminal_angular_velocity_tolerance: 0.10
+    terminal_dwell_sec: 0.30
+
+ats_swerve_mpc:
+  ros__parameters:
+    use_sim_time: false
+    odom_topic: /localization
+    trajectory_topic: /minco/reference_path
+    execution_command_topic: /planner/execution_command
+    execution_command_timeout: 0.5
+    gimbal_status_topic: /gimbal/yaw_status
+    require_gimbal_status: true
+    gimbal_status_timeout: 0.5
+    # 自研 MPC 的 frame 明确中间 topic。fake-yaw/chassis 兼容层之后才由
+    # chassis_vel_transform 唯一发布串口消费的 /cmd_vel。
+    command_topic: /cmd_vel_mpc
+    emergency_stop_topic: /planner/emergency_stop
+    localization_status_topic: /localization/status
+    require_localization_status: true
+    emergency_stop_timeout: 0.5
+    frame_id: odom
+    control_rate_hz: 20.0
+    fallback_path_dt: 0.1
+    trajectory_timeout: 0.5
+    goal_position_tolerance: 0.08
+    goal_yaw_tolerance: 0.15
+    publish_debug_paths: true
+    projection_backward_window: 0.20
+    projection_forward_window: 2.00
+    cross_track_slowdown_start: 0.15
+    cross_track_slowdown_end: 0.60
+    min_reference_progress_scale: 0.25
+    command_latency_compensation: 0.01
+    horizon: 30
+    dt: 0.05
+    max_iterations: 6
+    regularization: 1.0e-5
+    line_search_decay: 0.5
+    min_line_search_step: 0.05
+    convergence_tolerance: 1.0e-3
+    state_weight: [18.0, 18.0, 4.0]
+    terminal_weight: [28.0, 28.0, 8.0]
+    control_weight: [0.12, 0.12, 0.08]
+    control_delta_weight: [0.7, 0.7, 0.25]
+    max_vx: 1.5
+    max_vy: 1.5
+    max_wz: 2.0
+    max_ax: 2.0
+    max_ay: 2.0
+    max_awz: 3.0
+    wheel_base_x: 0.270
+    wheel_base_y: 0.270
+    wheel_radius: 0.0425
+    drive_gear_ratio: 1.0
+    steer_gear_ratio: 1.0
+    motor_max_rpm: 450.0
+    steer_max_rpm: 120.0
+    actuator_redundancy: 1.2
+    max_wheel_speed: 1.6689711
+    max_wheel_acceleration: 2.0
+    max_steer_rate: 10.4719755

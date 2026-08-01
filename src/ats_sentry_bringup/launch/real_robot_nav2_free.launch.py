@@ -9,14 +9,17 @@ transient-local 契约发布。
 命令通路是唯一的：
 
     minco_planner -> ats_goal_manager(/planner/execution_command)
-      -> ats_swerve_mpc -> /cmd_vel -> standard_robot_pp_ros2 speed_vector
+      -> ats_swerve_mpc(/cmd_vel_mpc) -> fake-yaw -> chassis transform
+      -> /cmd_vel -> standard_robot_pp_ros2 speed_vector
 
-MPC 之后不存在任何级：`fake_vel_transform` 与 `chassis_vel_transform` 在本
-入口被结构性禁止（它们会按云台 yaw 二次旋转 `[vx, vy]`，或叠加 `cmd_spin`
-的车体 `wz`），因此 `[vx, vy, wz]` 的数值与方向从 MPC 输出到串口不被改变。
+两级速度兼容层是实机 gimbal_yaw_odom 到底盘车体系的契约，默认开启且与
+Nav2 无关。`cmd_spin` 在正式参数中关闭，兼容层只转换 frame、限幅并把失效
+输入收敛到串口唯一的 `/cmd_vel`。固定雷达迁移可显式关闭两级；此时内层仍会
+发布 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF。
 
-参数权威：三条自研链节点只从各自包内的 `*_reality.yaml` 读取，
-`node_params.yaml` 与 `reality/nav2_params.yaml` 不再给出同名段。
+参数权威：正式入口把同一份 `node_params.yaml` 传给 ROGMap、adapter、MINCO、
+Goal Manager 与 MPC。包内 `*_reality.yaml` 仅是显式传入的兼容示例，不能成为
+本入口的默认值。
 
 本入口只用于本轮允许的两级：不通电检查、抬轮 HIL。落地行走不在本轮范围内。
 `require_gimbal_status` 默认保持 `True`；只有受控 HIL 才可显式改为 `False`，
@@ -43,6 +46,8 @@ def generate_launch_description():
     launch_behavior = LaunchConfiguration("launch_behavior")
     use_rviz = LaunchConfiguration("use_rviz")
     use_composition = LaunchConfiguration("use_composition")
+    launch_fake_vel_transform = LaunchConfiguration("launch_fake_vel_transform")
+    launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
     log_level = LaunchConfiguration("log_level")
 
     declare_world_cmd = DeclareLaunchArgument(
@@ -64,9 +69,8 @@ def generate_launch_description():
         "params_file",
         default_value=os.path.join(bringup_dir, "params", "node_params.yaml"),
         description=(
-            "Shared parameter file for sensors, localization and the serial "
-            "driver. The MINCO/goal-manager/MPC sections live only in their "
-            "own *_reality.yaml files."
+            "Single formal parameter file for sensors, localization, serial, ROGMap, "
+            "adapter, MINCO, Goal Manager, and MPC."
         ),
     )
 
@@ -107,6 +111,18 @@ def generate_launch_description():
         description="Whether to use composed bringup",
     )
 
+    declare_launch_fake_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_fake_vel_transform",
+        default_value="True",
+        description="Keep the real-robot fake-yaw velocity compatibility layer enabled.",
+    )
+
+    declare_launch_chassis_vel_transform_cmd = DeclareLaunchArgument(
+        "launch_chassis_vel_transform",
+        default_value="True",
+        description="Keep the real-robot gimbal-yaw to chassis velocity transform enabled.",
+    )
+
     declare_log_level_cmd = DeclareLaunchArgument(
         "log_level", default_value="info", description="log level"
     )
@@ -124,10 +140,9 @@ def generate_launch_description():
             # 也没有 /plan；自研链由 launch_swerve_mpc 打开。
             "launch_nav2": "False",
             "launch_swerve_mpc": "True",
-            # MPC 之后不允许任何变换级。
-            "launch_fake_vel_transform": "False",
-            "launch_chassis_vel_transform": "False",
-            "mpc_cmd_vel_topic": "/cmd_vel",
+            # 兼容层的默认值属于实机 profile，不随 Nav2 开关改变。
+            "launch_fake_vel_transform": launch_fake_vel_transform,
+            "launch_chassis_vel_transform": launch_chassis_vel_transform,
             # Nav2 对照链专属节点（依赖 /plan 与 Nav2 cmd_vel）在本 profile 关闭。
             "launch_trajectory_optimizer": "False",
             "launch_joy_teleop": "False",
@@ -152,6 +167,8 @@ def generate_launch_description():
     ld.add_action(declare_launch_behavior_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_composition_cmd)
+    ld.add_action(declare_launch_fake_vel_transform_cmd)
+    ld.add_action(declare_launch_chassis_vel_transform_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(bringup_cmd)
     return ld
