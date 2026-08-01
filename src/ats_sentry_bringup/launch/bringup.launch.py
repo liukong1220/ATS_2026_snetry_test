@@ -60,9 +60,6 @@ def generate_launch_description():
     launch_nav2 = LaunchConfiguration("launch_nav2")
     launch_swerve_mpc = LaunchConfiguration("launch_swerve_mpc")
     launch_behavior = LaunchConfiguration("launch_behavior")
-    minco_params_file = LaunchConfiguration("minco_params_file")
-    goal_manager_params_file = LaunchConfiguration("goal_manager_params_file")
-    mpc_params_file = LaunchConfiguration("mpc_params_file")
     mpc_cmd_vel_topic = LaunchConfiguration("mpc_cmd_vel_topic")
     require_gimbal_status = LaunchConfiguration("require_gimbal_status")
     launch_lidar_static_tf = LaunchConfiguration("launch_lidar_static_tf")
@@ -75,14 +72,13 @@ def generate_launch_description():
     planning_grid_owner = LaunchConfiguration("planning_grid_owner")
     launch_rog_map = LaunchConfiguration("launch_rog_map")
     rog_map_config_file = LaunchConfiguration("rog_map_config_file")
-    rog_map_adapter_params_file = LaunchConfiguration("rog_map_adapter_params_file")
     use_composition = LaunchConfiguration("use_composition")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
 
-    # Nav2-free profile 下 MPC 之后不允许任何旋转级或增益级，
-    # 因此速度变换级的存在性判断必须同时要求 launch_nav2 为真。
-    any_velocity_transform = PythonExpression(
+    # Nav2 输出只在对照链启用时才需要重映射到兼容层输入。兼容层自身
+    # 是实机 frame 契约的一部分，不能由 launch_nav2 隐式关闭。
+    nav2_velocity_transform = PythonExpression(
         [
             "'",
             launch_nav2,
@@ -97,8 +93,6 @@ def generate_launch_description():
     chassis_vel_transform_enabled = PythonExpression(
         [
             "'",
-            launch_nav2,
-            "'.lower() == 'true' and '",
             launch_chassis_vel_transform,
             "'.lower() == 'true'",
         ]
@@ -299,7 +293,7 @@ def generate_launch_description():
     declare_nav_cmd_vel_topic_cmd = DeclareLaunchArgument(
         "nav_cmd_vel_topic",
         default_value=IfElseSubstitution(
-            any_velocity_transform, "cmd_vel_nav2_result", "/cmd_vel"
+            nav2_velocity_transform, "cmd_vel_nav2_result", "/cmd_vel"
         ),
         description="Nav2 velocity output selected for the enabled transform chain",
     )
@@ -315,9 +309,11 @@ def generate_launch_description():
     declare_chassis_vel_input_topic_cmd = DeclareLaunchArgument(
         "chassis_vel_input_topic",
         default_value=IfElseSubstitution(
-            launch_fake_vel_transform, "cmd_vel_gimbal_yaw_odom", "cmd_vel_nav2_result"
+            launch_fake_vel_transform,
+            "cmd_vel_gimbal_yaw_odom",
+            IfElseSubstitution(launch_nav2, nav_cmd_vel_topic, mpc_cmd_vel_topic),
         ),
-        description="Chassis-frame adapter input topic",
+        description="Chassis-frame adapter input selected from Nav2 or MPC",
     )
 
     declare_launch_nav2_cmd = DeclareLaunchArgument(
@@ -348,42 +344,18 @@ def generate_launch_description():
         ),
     )
 
-    declare_minco_params_file_cmd = DeclareLaunchArgument(
-        "minco_params_file",
-        default_value=os.path.join(
-            get_package_share_directory("minco_planner"),
-            "config",
-            "minco_planner_reality.yaml",
-        ),
-        description="Authoritative minco_planner parameter file for this profile",
-    )
-
-    declare_goal_manager_params_file_cmd = DeclareLaunchArgument(
-        "goal_manager_params_file",
-        default_value=os.path.join(
-            get_package_share_directory("ats_goal_manager"),
-            "config",
-            "ats_goal_manager_reality.yaml",
-        ),
-        description="Authoritative ats_goal_manager parameter file for this profile",
-    )
-
-    declare_mpc_params_file_cmd = DeclareLaunchArgument(
-        "mpc_params_file",
-        default_value=os.path.join(
-            get_package_share_directory("ats_swerve_mpc"),
-            "config",
-            "ats_swerve_mpc_reality.yaml",
-        ),
-        description="Authoritative ats_swerve_mpc parameter file for this profile",
-    )
-
     declare_mpc_cmd_vel_topic_cmd = DeclareLaunchArgument(
         "mpc_cmd_vel_topic",
-        default_value="/cmd_vel",
+        default_value=IfElseSubstitution(
+            launch_fake_vel_transform,
+            "/cmd_vel_mpc",
+            IfElseSubstitution(
+                launch_chassis_vel_transform, "cmd_vel_gimbal_yaw_odom", "/cmd_vel"
+            ),
+        ),
         description=(
-            "MPC body-frame [vx, vy, wz] output topic; the serial chassis is the "
-            "single consumer and no stage may follow the MPC."
+            "MPC body-frame [vx, vy, wz] source. The enabled compatibility chain "
+            "is the only route to the serial /cmd_vel consumer."
         ),
     )
 
@@ -471,16 +443,6 @@ def generate_launch_description():
         description="ROGMap probabilistic/ESDF map configuration file",
     )
 
-    declare_rog_map_adapter_params_file_cmd = DeclareLaunchArgument(
-        "rog_map_adapter_params_file",
-        default_value=os.path.join(
-            get_package_share_directory("ats_rog_map_adapter"),
-            "config",
-            "rog_map_ground_planning.yaml",
-        ),
-        description="ROGMap ground-projection adapter parameter file",
-    )
-
     declare_use_composition_cmd = DeclareLaunchArgument(
         "use_composition",
         default_value="True",
@@ -563,8 +525,8 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Nav2-free profile 下这一级必须不存在：它会在 MPC 之后按云台 yaw 再旋转一次
-    # [vx, vy]，并且缺少 serial/gimbal_joint_state 时会静默直通。
+    # 实机兼容层独立于 Nav2。它将 gimbal_yaw_odom 速度变换为底盘速度，
+    # 并独占串口消费的 /cmd_vel；固定雷达迁移 profile 可显式关闭此节点。
     start_chassis_vel_transform_cmd = Node(
         package="sentry_chassis_vel_transform",
         executable="chassis_vel_transform_node",
@@ -597,8 +559,8 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", log_level],
     )
 
-    # 实车 ROGMap：frame 与话题在此处显式给出（node_params.yaml 无 rog_map 段），
-    # 避免出现第二处不同数值的地图参数来源。
+    # 正式 ROGMap ROS 参数统一来自 node_params.yaml；map_config_file 是 ROGMap
+    # 内核的地图资产，不与 ROS topic/frame/lease 参数混在同一权威层。
     start_rog_map_cmd = Node(
         package="ats_rog_map",
         executable="ats_rog_map_node",
@@ -609,17 +571,8 @@ def generate_launch_description():
         respawn=use_respawn,
         respawn_delay=2.0,
         parameters=[
-            {
-                "use_sim_time": use_sim_time,
-                "map_frame": "odom",
-                "base_frame": "gimbal_yaw_odom",
-                "sensor_frame": "front_mid360",
-                "odom_topic": "/localization",
-                "cloud_topic": "/registered_scan",
-                "map_config_file": rog_map_config_file,
-                "cloud_timeout_sec": 2.0,
-                "odom_timeout_sec": 2.0,
-            }
+            configured_params,
+            {"use_sim_time": use_sim_time, "map_config_file": rog_map_config_file},
         ],
         arguments=["--ros-args", "--log-level", log_level],
     )
@@ -636,7 +589,7 @@ def generate_launch_description():
         respawn=use_respawn,
         respawn_delay=2.0,
         parameters=[
-            ParameterFile(rog_map_adapter_params_file, allow_substs=True),
+            configured_params,
             {
                 "use_sim_time": use_sim_time,
                 # 实车必须要求定位健康，投影快照不得跨 epoch 复用。
@@ -672,9 +625,9 @@ def generate_launch_description():
             "chassis_vel_input_topic": chassis_vel_input_topic,
             "launch_nav2": launch_nav2,
             "launch_swerve_mpc": launch_swerve_mpc,
-            "minco_params_file": minco_params_file,
-            "goal_manager_params_file": goal_manager_params_file,
-            "mpc_params_file": mpc_params_file,
+            "minco_params_file": params_file,
+            "goal_manager_params_file": params_file,
+            "mpc_params_file": params_file,
             "mpc_cmd_vel_topic": mpc_cmd_vel_topic,
             "require_gimbal_status": require_gimbal_status,
             "planning_grid_owner": planning_grid_owner,
@@ -760,9 +713,6 @@ def generate_launch_description():
     ld.add_action(declare_launch_nav2_cmd)
     ld.add_action(declare_launch_swerve_mpc_cmd)
     ld.add_action(declare_launch_behavior_cmd)
-    ld.add_action(declare_minco_params_file_cmd)
-    ld.add_action(declare_goal_manager_params_file_cmd)
-    ld.add_action(declare_mpc_params_file_cmd)
     ld.add_action(declare_mpc_cmd_vel_topic_cmd)
     ld.add_action(declare_require_gimbal_status_cmd)
     ld.add_action(declare_launch_lidar_static_tf_cmd)
@@ -774,7 +724,6 @@ def generate_launch_description():
     ld.add_action(declare_lidar_static_tf_yaw_cmd)
     ld.add_action(declare_planning_grid_owner_cmd)
     ld.add_action(declare_rog_map_config_file_cmd)
-    ld.add_action(declare_rog_map_adapter_params_file_cmd)
     ld.add_action(declare_use_composition_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
