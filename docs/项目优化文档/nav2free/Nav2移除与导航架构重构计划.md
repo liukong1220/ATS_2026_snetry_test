@@ -1,6 +1,6 @@
 # ATS 自研导航一体化架构与 Nav2 清理计划
 
-更新时间：2026-08-01。
+更新时间：2026-08-02。
 
 本文件定义唯一目标架构、当前源码边界和删除顺序。Nav2 不再是目标运行图的一部分；
 源码中尚存的 Nav2 兼容分支只能作为清理对象，不能被新功能继续依赖。
@@ -74,13 +74,14 @@ flowchart LR
 | `/ats_navigate_to_pose` | Goal Manager action server -> behavior/RViz/test | 已接；支持 feedback/result/cancel/preempt/timeout |
 | `/ats_goal_manager/planner_goal` | Goal Manager -> MINCO | 已接；当前 `goal_id` 只在进程内单调 |
 | `/minco/planning_status` + `/minco/reference_path_candidate` | MINCO -> Goal Manager | 已接但 candidate/status 不是同一结构化样本 |
-| `/planner/execution_command` | Goal Manager -> MPC/serial gate | 已接；reference 与授权在同一消息，但缺 restart incarnation |
+| `/planner/execution_command` | Goal Manager -> MPC/serial gate | 已接；reference、授权和 `manager_incarnation` 在同一消息。MPC 已要求新 incarnation 先 `MODE_STOP`；serial gate 与 content digest 未覆盖 |
 | `/cmd_vel_mpc` | MPC -> fake-yaw/chassis transform | 已接；body frame `[vx,vy,wz]` |
 | `/cmd_vel` | chassis transform -> serial bridge | 已接；必须唯一 publisher |
 | `/motion_control` | MuJoCo bridge -> MuJoCo | 已接；必须唯一 publisher/subscriber |
 
-`PlanningMapSnapshot`、`PlannerCandidate` 和 `authority_incarnation` 是目标接口，当前
-活动 `.msg` 尚未完整提供，不能把设计名当作已经存在的 topic。
+`PlanningMapSnapshot`、`PlannerCandidate` 和全链 `authority_incarnation` 仍是目标接口。
+当前只有 `ExecutionCommand.manager_incarnation` 已在 Goal Manager -> MPC 链落地，不能
+把该局部字段写成 goal/candidate/serial 的端到端版本契约。
 
 ## 3. 地图、时间和安全语义
 

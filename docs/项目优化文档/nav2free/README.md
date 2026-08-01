@@ -1,6 +1,6 @@
 # ATS Nav2-free 自研导航一体化设计
 
-更新时间：2026-08-01。
+更新时间：2026-08-02。
 
 本目录是 ATS 2026 四驱四转哨兵自研导航的唯一设计、实施和验收入口。正式架构只
 包含 Point-LIO/定位融合、ROGMap、地面适配、RC-ESDF、JPS、MINCO S3、独立 yaw、
@@ -31,6 +31,7 @@ footprint safety、Local Collision Repair、Goal Manager、全向 SE2 MPC、速�
 | 正式总参数 | `部分统一` | `node_params.yaml` 已有 ROGMap、adapter、MINCO、Goal Manager、MPC 段，但仍含 Nav2 段；behavior 和 ROGMap core 仍有第二来源 |
 | 行为正式 profile | `部分完成` | 正式参数使用 `/ats_navigate_to_pose`，但 Nav2 action plugin、测试和构建依赖仍存在 |
 | ROGMap/RViz | `部分完成` | 四类点云、`/rog_map/bounds` 和 `/goal_pose` 已接入；旧 costmap/MPPI display 与更多 bounds/health 仍待清理 |
+| 执行授权重启交接 | `部分完成，已验证-单测` | `ExecutionCommand` 已携带 `manager_incarnation`；MPC 只在新实例先收到 `MODE_STOP` 后接收其 `MODE_EXECUTE`。Goal/candidate/serial 与内容 digest 尚未结构化贯通，未做进程重启注入 |
 | 仓库级 Nav2-free | `未完成` | manifest、launch、YAML、行为、MuJoCo、loopback、`ats_nav2_plugins` 和 `trajectory_optimizer` 仍有活动依赖 |
 
 上述结论来自当前源码静态交叉核对，不等价于本轮重新运行闭环。
