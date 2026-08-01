@@ -1,235 +1,210 @@
-# Nav2 移除与导航架构重构计划
+# ATS 自研导航一体化架构与 Nav2 清理计划
 
-## 1. 目标与 Definition of Done
+更新时间：2026-08-01。
 
-目标是让 ATS 自研导航链成为工作区内唯一活动导航实现，而不是继续维护 `launch_nav2:=false` 的旁路模式。
+本文件定义唯一目标架构、当前源码边界和删除顺序。Nav2 不再是目标运行图的一部分；
+源码中尚存的 Nav2 兼容分支只能作为清理对象，不能被新功能继续依赖。
 
-最终 DoD：
+## 1. 最终 Definition of Done
 
-1. 实机、MuJoCo、loopback 和行为决策入口均只调用 `/ats_navigate_to_pose` 或 `/goal_pose`，不调用 `nav2_msgs` action。
-2. 活动 ROS graph 无 `bt_navigator`、`planner_server`、`controller_server`、`behavior_server`、Nav2 lifecycle manager 和 `/plan`。
-3. 活动 package manifest、CMake、launch、YAML、RViz 和测试中无 `navigation2`、`nav2_*` 构建/运行依赖。
-4. `ats_nav2_plugins` 不再作为活动包；有价值的非 Nav2 算法必须先迁入中立 owner 并有测试。
-5. `node_params.yaml` 是正式实机 profile 的唯一参数权威；不再通过 package 私有 YAML 覆盖同名节点参数。
-6. planning grid、目标、候选轨迹、执行授权和底盘命令均有唯一 owner，stale/unknown/unreachable/unsafe/MPC failure 均确定性归零。
-7. 默认矩形、红框、自研 action cancel/preempt/timeout、故障注入和实车前静态/HIL 门禁全部通过。
-8. 实机 fake/chassis velocity compatibility 默认开启并与 Nav2 完全解耦；固定雷达 profile 才能显式关闭，且兼容 TF 与车体系速度契约完整。
+只有同时满足以下条件，才能写“仓库级 Nav2-free 已完成”：
 
-本计划不保留仓库内 Nav2 对照 profile。对照能力由删除前基线 commit、版本标签、测试日志和必要的 rosbag 保存，不再让两套运行实现共享活动目录和参数。
+1. 实机、MuJoCo、loopback 和行为正式入口均由 ATS action/Goal Manager 接收目标，
+   不使用 `nav2_msgs` action、`/plan` 或 Nav2 lifecycle。
+2. 默认运行图没有 `bt_navigator`、`planner_server`、`controller_server`、
+   `behavior_server`、`map_server`、Nav2 lifecycle manager 或 Nav2 composition。
+3. 活动 package manifest、CMake、launch、YAML、RViz、行为树和测试不再依赖
+   `navigation2`、`nav2_common`、`nav2_msgs`、`nav2_core`、`nav2_costmap_2d`。
+4. `node_params.yaml` 是正式 profile 的唯一参数文件；behavior、ROGMap core 和
+   package 私有 reality YAML 不再作为第二权威加载。
+5. `/rc_esdf/planning_grid`、map snapshot、goal、candidate、execution authorization、
+   `/cmd_vel` 和 `/motion_control` 各只有一个活动 owner。
+6. map/localization/gimbal/reference/command 任一 stale、unknown、unreachable、unsafe
+   或 MPC failure 都在 deadline 内发布 STOP 并令底盘输入为零；恢复不得复活旧数据。
+7. default、rectangle、red_box、cancel、preempt、timeout、restart、unknown、
+   unreachable、projection timeout、heartbeat stale 和 unsafe trajectory 均有独立证据。
+8. P4 实车静态、抬轮 HIL、低速准入和独立 contact evaluator 完成前，不得声称实车安全。
 
-## 2. 当前与目标运行图
-
-### 2.1 当前过渡结构
-
-```mermaid
-flowchart TD
-  B[bringup.launch.py] --> N{launch_nav2}
-  N -->|true| N2[Nav2 servers + plugins + /plan]
-  N -->|false| ATS[Goal Manager + MINCO + MPC]
-  C[node_params.yaml] --> B
-  C2[reality/simulation nav2_params.yaml] --> N2
-  C3[minco/goal/mpc/rog private YAML] --> ATS
-  N2 --> T[velocity transforms]
-  ATS --> V[/cmd_vel]
-  T --> V
-```
-
-双栈问题并不只在启动开关，而是贯穿依赖、参数、行为树、RViz、仿真脚本和 README。只把 `launch_nav2` 默认值改成 false 不能完成移除。
-
-### 2.2 目标结构
+## 2. 唯一目标运行图
 
 ```mermaid
-flowchart TD
-  B[ats_sentry_bringup] --> L[Point-LIO + localization fusion]
-  B --> R[ROGMap + adapter]
-  B --> G[ATS Goal Manager]
-  B --> P[JPS + MINCO]
-  B --> M[SE2 MPC]
-  B --> S[Serial or MuJoCo bridge]
-  Y[node_params.yaml] --> B
-  R -->|PlanningMapSnapshot| P
-  G -->|PlannerGoal| P
-  P -->|PlannerCandidate| G
-  G -->|ExecutionCommand| M
-  M --> V[fake-yaw + chassis velocity compatibility]
-  V -->|authorized body twist| S
+flowchart LR
+  S[LiDAR + IMU] --> L[Point-LIO + localization fusion]
+  L -->|/localization| R[ROGMap]
+  L -->|/registered_scan| R
+  L -->|/localization/status| A[Ground Adapter]
+  R -->|GetRogMapProjection: grid + SDF + gradient + generation| A
+  A -->|planning grid + status/lease| P[Immutable planning snapshot]
+  G[ATS NavigateToPose action] --> M[Goal Manager]
+  M -->|PlannerGoal| J[JPS + MINCO S3 + yaw]
+  P --> J
+  J -->|candidate + PlannerStatus| M
+  M -->|ExecutionCommand + reference + stop| C[全向 SE2 MPC]
+  C -->|/cmd_vel_mpc body [vx,vy,wz]| F[fake-yaw/chassis compatibility]
+  F -->|/cmd_vel body [vx,vy,wz]| X[Serial or MuJoCo bridge]
+  X --> W[四舵轮底盘]
+  W --> L
+  R -. debug only .-> V[RViz]
+  J -. debug only .-> V
+  C -. telemetry .-> V
 ```
 
-## 3. 删除、迁移与保留清单
+### 2.1 责任分层
 
-### 3.1 根仓 `src/ats_sentry_bringup`
-
-| 对象 | 动作 | 前置条件 |
+| 层 | 唯一责任 | 不得承担的责任 |
 | --- | --- | --- |
-| `launch/bringup.launch.py` | 移除 `nav2_common.RewrittenYaml`、`launch_nav2` 分支和 Nav2 topic 命名；直接加载总 YAML | 总 YAML 已通过 launch syntax/show-args |
-| `launch/real_robot_nav2_free.launch.py` | 功能并入正式入口后改名或删除包装层 | 默认 `bringup.launch.py` 已唯一自研 |
-| `launch/loopback_navigation.launch.py` | 重写为 ATS action + Goal Manager + MINCO + MPC | loopback 能提供 planning grid/localization |
-| `launch/loopback_nav_only.launch.py` | 删除 Nav2 map/server/bringup，替换为自研最小链 | 静态 `/map` publisher 已验证 |
-| `launch/loopback_decision_sim.launch.py` | 删除 Nav2 server 与 `nav2_loopback_sim` action 依赖 | 行为树只使用 `SendAtsNavGoal` |
-| `params/node_params.yaml` | 原路径保留，删除所有 Nav2 段并合入自研节点参数 | 见统一配置方案 |
-| `rviz/sentry_default_view.rviz` | 删除 costmap/MPPI/Nav2 GoalTool，增加 ROGMap/MINCO/MPC/health | 见 RViz 方案 |
-| `package.xml` | 删除 Nav2 exec depends | launch 已无 Nav2 import |
+| Point-LIO/定位融合 | 局部连续 odom、定位健康、`map -> odom` | 不由 ROGMap 估计位姿 |
+| ROGMap | 概率 occupancy、inflation、unknown、3D ESDF、数值 projection | 不发布规划 grid，不从 RViz 点云提供数值距离 |
+| Ground Adapter | ground projection、terrain/static/slope/unknown 融合、planning grid lease | 不订阅 `/rog_map/esdf` 反解析 |
+| Goal Manager | ATS action 生命周期、目标 identity、PlannerGoal、candidate 验证、ExecutionCommand 和急停 | 不执行 JPS/MINCO 数值优化 |
+| JPS/MINCO | 路径搜索、S3 trajectory、独立 yaw、footprint gate/repair | 不直接向底盘发布速度 |
+| SE2 MPC | 世界系状态 `[x,y,yaw]` 跟踪 reference，输出车体系 `[vx,vy,wz]` | 不改变规划 frame 或绕过授权 |
+| fake-yaw/chassis transform | 实机云台/底盘 frame 兼容、限幅和失效归零 | 不生成第二份命令源 |
+| Serial/MuJoCo bridge | 唯一执行出口、watchdog、协议/动力学转换 | 不接受未授权旧 command |
+| RViz/diagnostics | 只读显示、健康和调试 | 不成为规划输入或安全判定源 |
 
-### 3.2 导航仓 `src/ats_sentry_nav`
+### 2.2 当前接口账本
 
-| 对象 | 动作 | 说明 |
+| 接口 | 当前 producer -> consumer | 当前状态 |
 | --- | --- | --- |
-| `ats_nav_bringup` | 保留定位、传感器、静态图和自研导航编排；删除 Nav2 server/composition/lifecycle 分支 | 包名可暂保留，避免无收益的大规模 rename |
-| `ats_nav_bringup/config/*/nav2_params.yaml` | 迁移非 Nav2 参数到总 YAML 后删除 | 禁止作为第二权威保留 |
-| `ats_nav_bringup/rviz/nav2_*.rviz` | 删除或移出活动安装 | 新主 RViz 通过后执行 |
-| `ats_nav2_plugins` | 物理删除活动包 | 用户已授权去除 Nav2；先确认没有非 Nav2 consumer |
-| `trajectory_optimizer` | 拆分 | MINCO 仍依赖 RC traversability ESDF provider，不能整包删除 |
-| `trajectory_optimizer/src/nav2/*`、Nav2 smoother/BT plugin | 删除 | 先把公共 ESDF provider 迁至 `minco_planner` 或独立中立库 |
-| `fake_vel_transform`、`sentry_chassis_vel_transform` | 从 `launch_nav2` 条件中解耦，正式实机默认都启用；中间 topic 去 Nav2 命名 | 固定雷达 profile 才可显式关闭，且必须保持速度 frame 契约 |
-| `ats_goal_manager`、`minco_planner`、`ats_swerve_mpc` | 保留并加固 | 是目标主链 owner |
-| `ats_navigation_interfaces` | 扩展结构化 snapshot/candidate/incarnation | schema 仍由 `.msg/.action` 唯一权威 |
-| `ats_rog_map`、`ats_rog_map_adapter` | 保留 | 禁止从可视化点云反解析数值 ESDF |
+| `/localization` | localization/Point-LIO -> ROGMap、Goal Manager、MPC | 已接；时间戳和 stale 仍需目标机测量 |
+| `/registered_scan` | Point-LIO 链 -> ROGMap | 已接；stale 由 ROGMap health 传播 |
+| `/rog_map/get_ground_projection` | ROGMap -> adapter | 已接；response 含 occupancy、signed distance、gradient、generation、ready/stale |
+| `/rc_esdf/planning_grid` | adapter 或旧 RC-ESDF 二选一 -> JPS/行为 | 运行时可选 owner；最终必须固定 `rog_map` |
+| `/ats_navigate_to_pose` | Goal Manager action server -> behavior/RViz/test | 已接；支持 feedback/result/cancel/preempt/timeout |
+| `/ats_goal_manager/planner_goal` | Goal Manager -> MINCO | 已接；当前 `goal_id` 只在进程内单调 |
+| `/minco/planning_status` + `/minco/reference_path_candidate` | MINCO -> Goal Manager | 已接但 candidate/status 不是同一结构化样本 |
+| `/planner/execution_command` | Goal Manager -> MPC/serial gate | 已接；reference 与授权在同一消息，但缺 restart incarnation |
+| `/cmd_vel_mpc` | MPC -> fake-yaw/chassis transform | 已接；body frame `[vx,vy,wz]` |
+| `/cmd_vel` | chassis transform -> serial bridge | 已接；必须唯一 publisher |
+| `/motion_control` | MuJoCo bridge -> MuJoCo | 已接；必须唯一 publisher/subscriber |
 
-### 3.3 行为仓 `src/ats_sentry_behavior`
+`PlanningMapSnapshot`、`PlannerCandidate` 和 `authority_incarnation` 是目标接口，当前
+活动 `.msg` 尚未完整提供，不能把设计名当作已经存在的 topic。
 
-| 对象 | 动作 |
-| --- | --- |
-| `send_nav2_goal.*`、`pub_nav2_goal.*` | 删除 plugin build、注册和源码 |
-| `send_nav_through_poses.*` 及 Nav2 test | 自研多航点 action 未完成前先用行为层逐点调用 ATS action；随后删除 Nav2 类型 |
-| `package.xml` | 删除 `nav2_util`、`nav2_msgs` |
-| `CMakeLists.txt` | 删除 Nav2 plugin 和测试 target |
-| 参数/XML | 删除 `nav2_action_server`、`nav2_to_pose_action_server`，只保留 `ats_action_server` |
+## 3. 地图、时间和安全语义
 
-### 3.4 仿真仓
+### 3.1 地图
 
-| 仓库/对象 | 动作 |
-| --- | --- |
-| `ats_mujoco_sim/twist_to_motion_ctrl.py` | 去掉“Nav2 Twist”命名；接收 MPC 唯一命令，clamp 与 MPC/总 YAML 同源 |
-| MuJoCo launch | 删除 `launch_nav2` 兼容分支，固定自研 action |
-| `loopback_sim` | 将 `nav2_loopback_sim` 包名与 Nav2 action server 迁移为 ATS loopback simulator |
-| loopback params | 删除 `nav2_params.yaml`，改为总 YAML 的仿真 profile 或最窄 override |
+- planning frame 当前为 `odom`；全局 goal 从 `map` 变换到 `odom`。
+- ROG projection 的 occupancy：`0=free`、`100=occupied`、`-1=unknown`。
+- signed distance：正值为 free clearance，负值为 occupied，unknown 为 NaN。
+- 任一来源 occupied 必须保持 occupied；明确新鲜 free 才能消解另一来源 unknown；
+  所有来源无证据时输出 unknown，并按障碍处理。
+- 静态细图到 planning grid 必须按输出 footprint 覆盖面积保守聚合，不做中心点采样。
+- ROG source generation、adapter publication sequence、MINCO local snapshot generation
+  和 localization epoch 不能复用同一个编号。
 
-## 4. 必须先解耦的隐含依赖
+### 3.2 时间与恢复
 
-### 4.1 RC-ESDF provider
+- 观测 stamp 保留 ROS/sim time；projection deadline、lease 和超时使用 steady clock。
+- `ready=true` 是持续 heartbeat，不是永久授权；lease 过期必须同时使规划和执行失效。
+- 最终 reference 在安全提交点统一重定时，再由同一互斥区发布 STOP 状态和
+  `ExecutionCommand`；旧 reference 不得在恢复后复活。
+- map/localization/gimbal stale、投影超时、目标不可达、unsafe trajectory、MPC 失败和
+  serial watchdog 都输出确定性零速度。
 
-`minco_planner` 当前直接 include `trajectory_optimizer/esdf/rc_traversability_esdf_provider.hpp`。因此删除 `trajectory_optimizer` 前必须：
+### 3.3 运动契约
 
-1. 将 RC-ESDF signed distance、unknown、梯度、插值语义迁入 `minco_planner` 或中立 `ats_rc_esdf` library；
-2. 保留原测试，并新增 identical-input identical-output 回归；
-3. 删除对 `nav2_costmap_2d`、Nav2 smoother/BT 的传递依赖；
-4. 重新核对 JPS clearance、MINCO clearance、footprint gate、repair 是否使用同一 immutable snapshot。
+- 状态为世界系 `[x,y,yaw]`，控制为车体系 `[vx,vy,wz]`，单位为 m/s、rad/s。
+- 四舵轮 footprint 为 `0.70 m x 0.55 m + margin`，必须进行带 yaw 的 footprint 和
+  swept motion 检查。
+- `contact_violation_count=0` 或离散 footprint collision 为零，不等价于物理接触为零。
 
-### 4.2 静态图服务
+## 4. 当前残余与删除顺序
 
-Nav2-free 定位入口已有 `static_map_publisher.py`，可替代 `nav2_map_server`。正式删除前必须验证：
+### N1：运行入口自研化
 
-- `/map` 使用 reliable + transient local，late joiner 能收到；
-- YAML origin 的 `x/y/yaw` 完整保留；
-- image negate/occupied/free thresholds 与当前地图一致；
-- 细栅格融合到 planning grid 时按面积重叠保守聚合，不做中心点采样。
+目标是让正式入口不再有 `launch_nav2` 条件分支，而不是继续增加一个 free wrapper。
 
-### 4.3 RViz 目标入口
+| 范围 | 当前残余 | 动作 |
+| --- | --- | --- |
+| 根 `bringup.launch.py` | `nav2_common.RewrittenYaml`、`launch_nav2`、Nav2 topic 选择 | 固定自研节点和 `rog_map` owner，保留速度兼容层独立开关 |
+| 导航 `navigation_launch.py` | server/lifecycle/composable Nav2 分支 | 删除 Nav2 分支，只保留 ROGMap、adapter、MINCO、Goal Manager、MPC 和传感器 |
+| `localization_launch.py` | map_server/lifecycle 分支 | 固定 `static_map_publisher.py`，保留 `/map` transient-local 和 origin/yaw |
+| `rm_navigation_reality_launch.py` | 私有 params file 和 Nav2 参数 | 所有正式节点只接收根 `node_params.yaml` |
+| `joy_teleop_launch.py`、`slam_launch.py` | `nav2_common` 兼容导入 | 迁移为中立 ROS 参数处理或移出正式安装 |
 
-短期使用 RViz 默认 `SetGoal` 发布 `/goal_pose`，由 Goal Manager 统一接管并转为内部 action goal；长期再实现 `ats_rviz_plugins/NavigateToPoseTool`，显示 accept/result/cancel。删除 `nav2_rviz_plugins/GoalTool` 不得导致用户绕过 Goal Manager 直发 planner goal。
+### N2：参数单一权威
 
-## 5. 分阶段实施
+当前 `node_params.yaml` 已包含 ROGMap、adapter、MINCO、Goal Manager 和 MPC 段，但仍
+包含 Nav2 段；behavior 默认仍使用 `sentry_behavior.yaml`；ROGMap core 仍可从
+`map_config_file` 读取自定义 YAML。实施顺序必须是：
 
-### N0：冻结 Nav2 对照基线
+1. 生成每个活动节点的 effective `ros2 param dump`；
+2. 镜像字段到 `node_params.yaml`，并增加重复 key/topic/frame/timeout 校验；
+3. 让 ROGMap core 从 ROS parameter struct 构造 Config，禁止双来源；
+4. 让 behavior、serial 和所有正式自研节点只加载根文件；
+5. 删除 Nav2 段和正式 launch 对 package 私有 YAML 的引用；
+6. 只允许 launch 覆盖 `use_sim_time`、地图/PCD/设备路径和受控 HIL 开关。
 
-文件不修改。保存：
+### N3：行为、MuJoCo 和 loopback
 
-- 三个核心仓库 branch、HEAD、origin/develop；
-- Nav2 默认矩形和红框日志；
-- ROS graph、topic ownership、终点误差与故障注入结果；
-- 当前 Nav2 参数和 RViz 截图。
+- 删除 `send_nav2_goal.*`、Nav2 `send_nav_through_poses` 类型和正式构建注册；多航点
+  由 behavior 逐点调用 ATS action，保留 cancel/preempt/timeout 测试。
+- MuJoCo 官方入口固定 ATS action、静态地图 publisher、ROGMap owner 和 MPC；删除
+  `mujoco_navigation.launch.py`/`rmuc_2026_mujoco.launch.py` 中的 Nav2 condition、
+  `nav2_common` import、`/plan` remap 和 Nav2 map/lifecycle。
+- loopback 若继续保留，只能作为无物理动力学的自研 action/behavior 回归；删除
+  Nav2 server、`nav2_params.yaml` 和 Nav2 action 依赖，包名变更必须先审计所有 include。
 
-Codex 不执行 git 写操作；基线 commit/tag、后续提交和 push 交给 Claude 按分仓执行。
+### N4：公共算法和构建依赖解耦
 
-### N1：让正式入口不再包含 Nav2 条件分支
+`minco_planner` 当前 include 并链接 `trajectory_optimizer` 的 RC-ESDF provider。先
+迁移并回归以下公共能力，再删除旧包中的 Nav2 专属部分：
 
-修改 bringup 和 navigation launch，使正式入口直接启动自研链。速度兼容层不再由 `launch_nav2` 决定，而由各自参数独立控制，实机默认保持两者为 true。暂不删除 package，以便小步验证。
+- `trajectory_optimizer/esdf/rc_traversability_esdf_provider.*`；
+- `trajectory_optimizer/esdf/esdf_provider.hpp`；
+- `trajectory_optimizer/esdf/static_map_fusion.*`；
+- 必要的 terrain/static ESDF provider 和测试。
 
-DoD：
+不得在迁移前删除整个 `trajectory_optimizer`，不得把 `ats_nav2_plugins` 中无法证明
+为 Nav2-only 的能力一并删除。迁移完成后再删除 `nav2_core`、`nav2_costmap_2d`、
+`nav2_msgs`、`navigation2`、`nav2_common` manifest/CMake 依赖和 Nav2-only 资源。
 
-- `ros2 launch ats_sentry_bringup bringup.launch.py --show-args` 无 `launch_nav2`；
-- graph 无 Nav2 server、`/plan`；
-- `/ats_navigate_to_pose` 唯一 action server；
-- `/rc_esdf/planning_grid`、`/cmd_vel`、`/motion_control` owner 唯一。
-- fake-yaw 关闭时 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF 存在，且 `base_footprint -> base_link` 无重复 publisher。
+### N5：RViz 和文档收口
 
-### N2：行为、loopback 和 MuJoCo 切换
+- 保留 ROGMap 四类点云和 `/rog_map/bounds`，补齐 update/search bounds、health、
+  candidate/reference、footprint/repair 和 MPC telemetry。
+- 删除 costmap、MPPI、`/plan`、Nav2 GoalTool 等活动 display；`SetGoal` 只能通过
+  Goal Manager 的 `/goal_pose` consumer 进入规划。
+- 本目录成为自研设计唯一文档源；其它 README/docs 只同步已确认的活动接口。
 
-所有测试入口改为 ATS action。先让行为决策、最小 loopback、自研 MuJoCo 默认/红框通过，再删除旧 action plugin。
+## 5. 验收矩阵
 
-DoD：cancel、preempt、timeout、goal reject、server restart 和重复 tick 均有确定性结果；无 preempt storm，旧 result 不修改新任务。
-
-### N3：解耦公共算法并删除 Nav2 构建依赖
-
-迁移 RC-ESDF provider，删除 `ats_nav2_plugins`、Nav2 CMake/package dependencies、Nav2-only launch/RViz/config。
-
-DoD：
+### 静态门禁
 
 ```bash
-rg -n 'navigation2|nav2_|nav2_msgs|nav2_common|nav2_core|nav2_costmap' \
-  src/ats_sentry_bringup src/ats_sentry_behavior src/ats_sentry_nav \
+rg -n 'nav2_common|nav2_msgs|nav2_core|nav2_costmap_2d|navigation2|/plan|bt_navigator|planner_server|controller_server|behavior_server' \
+  src/ats_sentry_bringup src/ats_sentry_nav src/ats_sentry_behavior \
   src/sim/ats_mujoco_sim src/sim/loopback_sim
 ```
 
-结果只允许出现在历史迁移说明或明确的第三方目录，不得出现在活动 manifest、launch、源码、参数和测试。
+结果只允许出现在明确的清理任务、第三方目录或测试 fixture；活动正式 launch、
+manifest、YAML、行为树和 RViz 不得出现。
 
-### N4：物理清理与文档收口
+### 运行门禁
 
-删除旧包/资源，更新 `dependencies.repos`、README、docs、构建脚本和 CI。此阶段前禁止声称仓库级 Nav2-free。
-
-## 6. 接口替换表
-
-| Nav2 契约 | ATS 替代契约 | owner |
-| --- | --- | --- |
-| `nav2_msgs/NavigateToPose` | `ats_navigation_interfaces/NavigateToPose` | `ats_goal_manager` |
-| `nav2_msgs/NavigateThroughPoses` | 行为层逐点 ATS action；后续可新增 ATS through-poses action | behavior/goal manager |
-| `/plan` | `PlannerGoal -> JPS/MINCO`，debug 为 `/minco/raw_path` | `minco_planner` |
-| global/local costmap | `/rc_esdf/planning_grid` + signed distance/clearance snapshot | ROGMap adapter |
-| controller server | `ExecutionCommand -> ats_swerve_mpc -> velocity compatibility` | Goal Manager/MPC/transform owner |
-| Nav2 behavior server | Goal Manager fail-stop + Local Collision Repair + 行为树策略 | 各行为 owner |
-| lifecycle manager | heartbeat/lease + process supervision | bringup + 节点健康状态 |
-| map server | `static_map_publisher.py` | `ats_nav_bringup` |
-| Nav2 GoalTool | `/goal_pose` 或 ATS RViz action tool | Goal Manager |
-
-## 7. 验证命令
-
-每个源码阶段至少执行：
+每个 case 使用新的 `ROS_DOMAIN_ID` 和新的 MuJoCo launch：
 
 ```bash
-MAKEFLAGS=-j1 colcon build --base-paths src --packages-select \
-  ats_navigation_interfaces ats_rog_map_interfaces ats_rog_map ats_rog_map_adapter \
-  minco_planner ats_goal_manager ats_swerve_mpc ats_nav_bringup \
-  ats_sentry_bringup ats_sentry_behavior --parallel-workers 1
-
-colcon test --base-paths src --packages-select \
-  ats_rog_map ats_rog_map_adapter minco_planner ats_goal_manager ats_swerve_mpc \
-  ats_sentry_behavior
-
-python3 -m py_compile <本阶段修改的 launch 文件>
-ros2 launch ats_sentry_bringup bringup.launch.py --show-args
+scripts/test_mujoco_nav_chain.sh                 # 仅历史基线，不是目标架构
+PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  TEST_PROFILE=red_box GOAL_TIMEOUT=180 \
+  scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
-运行门禁使用全新 `ROS_DOMAIN_ID` 和全新 MuJoCo 进程：
+必须记录 action result、终点误差、raw/reference 点数、footprint 冲突采样、owner 数量、
+generation/epoch、stop 时间、恢复次数和物理 contact evaluator 状态。
 
-```bash
-PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  TEST_PROFILE=default GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+### 停止条件
 
-PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  TEST_PROFILE=red_box GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
-```
+- planner 需要订阅 `/rog_map/esdf` 点云或混合时间的地图层；
+- planning grid、`/cmd_vel`、`/motion_control` 出现两个活动 owner；
+- 新旧 YAML 同时生效且 effective param 未闭合；
+- stale/unknown/unreachable/unsafe/MPC failure 后仍有非零底盘命令；
+- RC-ESDF 迁移前删除 `trajectory_optimizer` 导致公共能力无 owner；
+- 修改地图、规划、安全或控制源码后沿用旧闭环结果；
+- 目标机尚未测量却把参考项目性能写成 ATS 实测。
 
-脚本必须固定 `NAVIGATION_MODE=ats` 或等价自研入口，并明确拒绝 `/plan` 与 Nav2 server。旧的 Nav2 `NavigateToPose` 基线不能作为本计划验收结果。
-
-## 8. 停止条件与回滚点
-
-满足任一条件立即停止继续删除：
-
-- 尚未迁移的非 Nav2 consumer 仍链接 `trajectory_optimizer` 或 `ats_nav2_plugins` 中待删符号；
-- `/map` late joiner、origin yaw 或 occupied 保守聚合回归失败；
-- 自研 action 的 cancel/preempt/result 不确定；
-- Nav2 移除时速度兼容层被隐式关闭、下游不再收到车体系速度或 TF owner 重复；
-- stale/unknown/unreachable/unsafe/MPC failure 任一注入出现非零 `/cmd_vel` 或 `/motion_control`；
-- 用户现有修改与目标文件重叠且无法安全合并。
-
-每阶段以阶段开始前的分仓 HEAD 为回滚点。禁止 `git reset --hard` 或 force push。
+每个阶段使用阶段开始时各仓 HEAD 作为回滚点；不得 reset 用户修改，不得 force push。
