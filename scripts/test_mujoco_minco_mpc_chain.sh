@@ -108,7 +108,7 @@ if [[ "${PLANNING_GRID_OWNER}" == "rog_map" || "${LAUNCH_ROG_MAP,,}" == "true" ]
 fi
 
 case "${TEST_PROFILE}" in
-  single)
+  default|single)
     GOAL_NAMES=(single)
     GOAL_XS=("${GOAL_X}")
     GOAL_YS=("${GOAL_Y}")
@@ -129,7 +129,7 @@ case "${TEST_PROFILE}" in
     GOAL_YS=(1.47 -4.08)
     ;;
   *)
-    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'single', 'rectangle', or 'red_box'."
+    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', or 'red_box'."
     exit 2
     ;;
 esac
