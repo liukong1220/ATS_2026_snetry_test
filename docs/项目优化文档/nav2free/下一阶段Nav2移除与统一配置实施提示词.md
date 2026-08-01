@@ -1,10 +1,31 @@
-# 下一阶段 Nav2-free 移除与统一配置实施提示词
+# 下一阶段 P2/P3 安全故障注入与恢复实施提示词
 
-更新时间：2026-08-01。
+更新时间：2026-08-02。
 
-本文件是下一次新对话的可执行 handoff。它描述实施边界和验收门禁，不把本轮静态审查当作运行证据。新对话必须重新读取当前工作树、`AGENTS.md`、活动源码和测试结果。
+本文件是下一次新对话的可执行 handoff。下一阶段先关闭已经存在的运行期安全门禁；
+不得把名义路线通过、静态源码检查或 topic 存在写成故障恢复、仓库级 Nav2-free 或
+实车安全通过。
 
-## 直接复制的下一轮提示词
+## 1. 已完成内容
+
+1. 导航仓 `718ceb6`：`ExecutionCommand` 新增 `manager_incarnation`；Goal Manager
+   以 `steady_clock` 为每次进程启动生成 token，启动发布 `MODE_STOP`；MPC 按
+   `(manager_incarnation, command_sequence)` 拒绝旧实例，且新实例必须先 STOP 再
+   EXECUTE。Goal Manager pytest 和 MPC gtest 已通过。
+   `[已验证-单测, Confidence: High]`
+2. 根仓 `70af093` 与 `df96ad7`：MuJoCo 自研脚本接受 `TEST_PROFILE=default`，并记录
+   default/red_box 的名义运行。两次运行检查没有 Nav2 server、没有 `/plan`，确认
+   `/rc_esdf/planning_grid`、`/planner/execution_command`、`/cmd_vel_mpc`、
+   `/motion_control` 的指定 owner 唯一；终点误差分别为 `0.003553 m`、`0.003347 m`。
+   `[已验证-运行, Confidence: High]`
+3. 脚本已经实现 P2 `adapter_lease`、`service_timeout`、`input_stale`、`unknown`、
+   `unreachable` 和 P3 `cancel`、`preempt`、`timeout`、`tf_failure`，但尚无这些用例
+   的当前 revision 运行结果。`[已实现未运行, Confidence: High]`
+
+未完成：上述 9 个故障门禁、Goal Manager/MPC/serial 的真实进程重启注入、serial
+incarnation/digest 契约、独立 physical contact evaluator、P3 仓库级 Nav2-free 和实车/HIL。
+
+## 2. 直接复制的下一轮提示词
 
 ```text
 新线程。请从当前工作区重新开始证据优先的实施，不沿用旧会话的未验证结论。
@@ -13,146 +34,104 @@
 
 一、绝对范围
 
-1. 当前目标是 `nav2free`：把 ATS 自研导航链做成正式运行架构，并逐阶段移除活动代码中的 Nav2 依赖。
-2. `docs/项目优化文档/nav2移植/**` 是历史迁移资料，不属于本设计。禁止读取、搜索、引用、修改、链接或从该目录推断任何事实、状态和性能；所有证据只来自 `AGENTS.md`、当前活动源码、接口定义、实际 launch、测试和本目录文档。
-3. 不要把“存在 Nav2 兼容源码”写成“目标架构使用 Nav2”，也不要把“编译通过、topic 存在、单次局部运动”写成闭环通过。
-4. 用户要求由当前执行者完成定位、修改、构建、单测、仿真、文档、提交和推送；不要把任务转交给其他代理。
+1. 本轮只完成 P2/P3 运行期安全故障注入与恢复闭环。优先运行已有脚本入口；任一
+   用例失败时只修改拥有该失败状态转换的模块并补最窄回归。
+2. 禁止删除 Nav2、重构总 YAML、迁移 RC-ESDF、修改 RViz 或扩展目标功能。这些工作
+   必须等待本轮所有故障门禁通过。
+3. `docs/项目优化文档/nav2移植/**` 是排除目录。禁止读取、搜索、引用、修改或从中
+   推断事实；证据只来自 `AGENTS.md`、活动源码、接口、launch、测试、日志和本目录。
+4. 不得把编译通过、topic 存在或一次名义运动写成故障闭环通过。用户要求当前执行者
+   完成定位、修改、构建、单测、仿真、文档、分仓提交和推送，不转交给其他代理。
 
-二、目标架构与不可替换契约
+二、本轮已完成上下文（只作定位线索，不能代替当前 revision 验证）
 
-目标链固定为：
+- `ExecutionCommand.manager_incarnation` 已从 Goal Manager 传至 MPC；新实例先 STOP
+  后 EXECUTE 的聚焦测试已通过。serial gate 和 content digest 尚未覆盖。
+- `TEST_PROFILE=default` 和 `red_box` 名义 MuJoCo 路线曾通过；P2/P3 fault case 已实现
+  但未运行。
+- 目标链固定为 Point-LIO/定位 -> ROGMap -> adapter -> RC-ESDF -> JPS/MINCO ->
+  Goal Manager -> 全向 SE2 MPC -> 速度兼容层 -> 四舵轮/MuJoCo。状态为世界系
+  `[x, y, yaw]`，控制为车体系 `[vx, vy, wz]`，禁止引入 `vy=0`、差速或 ICR 约束。
 
-`Point-LIO/定位融合 -> ROGMap -> ROGMap ground adapter -> RC-ESDF -> JPS -> MINCO S3 + 独立 yaw -> footprint gate/Local Collision Repair -> ATS Goal Manager -> 全向 SE2 MPC -> 速度兼容层 -> 四舵轮底盘或 MuJoCo`
+三、开始前必须输出
 
-- Point-LIO 继续拥有 `/localization`、`/localization/status`、`/registered_scan`；ROGMap 不承担定位。
-- ROGMap 活动实现只有 `src/ats_sentry_nav/ats_rog_map`，adapter 必须消费数值 projection service，禁止从 `/rog_map/esdf` 的 `PointCloud2` 反解析 signed distance。
-- RC-ESDF 必须保留 signed distance 的符号、梯度方向、截断、unknown、outside-map 和 footprint 语义。
-- JPS、MINCO S3、独立 yaw、footprint safety、Local Collision Repair、`ats_swerve_mpc` 均属于目标链，不得用差速、ICR 或 `vy=0` 约束替换四舵轮车体系 `[vx, vy, wz]`。
-- 状态使用世界系 `[x, y, yaw]`，底盘控制使用车体系 `[vx, vy, wz]`；所有 producer/consumer 必须同时核对 frame、单位、时间戳、QoS、超时和 owner。
-- 正式实机默认保持 `launch_fake_vel_transform:=True` 与 `launch_chassis_vel_transform:=True`。fake-yaw 关闭时仍发布 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF；不得增加第二个 `base_footprint -> base_link` publisher。
-- `/rc_esdf/planning_grid`、`/cmd_vel_mpc`、`/motion_control`、急停和 TF 各自只能有一个权威 owner。安全状态必须是输入健康与规划安全的合取。
-- `ROGMap source generation`、adapter publication、`MINCO local snapshot generation` 和 localization epoch 是不同版本域。除非同一不可变接口显式携带并由 consumer 校验，否则禁止声称端到端编号一致。
+- DoD、根仓/导航仓/MuJoCo 仓的精确文件范围、命令清单和通过判据；
+- 三仓 branch、HEAD、origin/develop、未知用户修改；
+- 假设、未验证项、风险和停止条件。
 
-三、先输出再实施
+先用 rg 定位 P2_FAULT_CASE、P3_FAULT_CASE、run_p2_fault_injection、
+run_p3_action_fault_injection、emergency_stop、ready、generation、ExecutionCommand 的
+producer/consumer。读取完整函数、直接 launch 和测试；默认忽略 build/install/log/cache，
+且绝不读取排除目录。
 
-开始修改前，在回复中明确：
+四、DoD
 
-- Definition of Done（DoD）；
-- 精确文件范围，按根仓、导航仓、MuJoCo 仓分组；
-- 可执行验证清单和预期判据；
-- 当前假设、未验证项、风险和停止条件；
-- 三个仓库当前 branch、HEAD、`origin/develop` 和未知用户修改。
+1. 9 个 fault case 均在各自新的 ROS_DOMAIN_ID 和各自新的无 viewer MuJoCo launch 中
+   执行，不能在同一次 launch 中串行污染状态。
+2. P2 每例必须在配置 deadline/lease 内观测：预期 ready/stale 状态 ->
+   `/planner/emergency_stop=true` -> `/cmd_vel_mpc=0` -> `/motion_control=0`。对可恢复
+   用例，恢复后 adapter generation 必须递增；没有新目标时不得复活旧 reference 或旧
+   command。
+3. P3 每例必须得到正确 action result（cancel/preempt/timeout/tf_failure）和同样的
+   双零输出；停止后等待至少一个 watchdog 周期，确认不自行恢复运动。
+4. 每例保存 launch log、action 输出、命令流和 telemetry。没有独立 physical contact
+   evaluator 时只记录 telemetry 的 contact_violation_count，不声称物理碰撞为零。
+5. 任一失败先定位 owner，添加最窄单测/脚本断言，重跑该例；所有通过后再更新文档、
+   显式 stage、按仓提交和普通 push。
 
-任何与用户已有修改重叠的文件都必须先读取并合并理解；不得删除、覆盖或恢复未知修改。禁止 `git add .`、`git add -A`、`git reset --hard`、`git checkout --`。
+五、运行命令
 
-四、精确证据范围
-
-先用 `rg` 定位 symbol、topic、参数和调用点，再读取完整函数/类作用域及直接 producer、consumer、launch、manifest 和测试。默认忽略 `build/`、`install/`、`log/`、缓存、二进制、媒体、生成物和参考资料。
-
-优先核对这些活动路径（按实际存在情况取证，不要盲目修改）：
-
-- 根仓：`src/ats_sentry_bringup/launch/bringup.launch.py`、`src/ats_sentry_bringup/launch/real_robot_nav2_free.launch.py`、`src/ats_sentry_bringup/params/node_params.yaml`、`src/ats_sentry_bringup/rviz/*.rviz`、`scripts/test_mujoco_minco_mpc_chain.sh`、相关 README/docs；
-- 导航仓：`ats_nav_bringup/launch`、`ats_rog_map`、`ats_rog_map_adapter`、`minco_planner`、`ats_goal_manager`、`ats_swerve_mpc`、`ats_navigation_interfaces`、behavior、`trajectory_optimizer` 的直接接口和测试；
-- MuJoCo 仓：`src/sim/ats_mujoco_sim/launch`、传感器桥、执行桥和直接测试；
-- manifest/CMake/package.xml 中的 `nav2_common`、`nav2_msgs`、Nav2 plugin/server/lifecycle 依赖；
-- 当前实际加载的 YAML、behavior tree、RViz profile 和测试脚本，而不是同名示例文件。
-
-对每条重要结论建立账本：`claim | confirmed/inference/hypothesis/unknown | evidence A | evidence B | counterevidence | validation`。
-
-五、分阶段实施顺序
-
-P2：运行入口和 ROGMap 唯一规划地图
-
-1. 明确 `planning_grid_owner` 仅接受 `rc_esdf|rog_map`；`rog_map` 启动 adapter 并抑制 `rc_esdf_map`，`rc_esdf` 执行反向选择；没有显式 arbiter 前禁止运行中热切换。
-2. 核对并修复 ROGMap ground planning 参数：高度带必须排除有运行证据的地面回波，同时保留墙体、低矮障碍、terrain、slope、unknown 语义。
-3. 验证 `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf`、`/rog_map/bounds` 非空；adapter 不订阅 ESDF 点云。
-4. 对 source occupied/free/unknown、全来源 unknown、范围外、非整除分辨率、平移 origin、地图 yaw 和 footprint overlap 补最窄单测；occupied 永不被 free 覆盖，unknown 默认按障碍处理。
-5. projection 使用 steady-clock deadline；timeout 必须移除 pending client、清除 pending 状态并允许重试，迟到回调按单调 epoch 丢弃。
-
-P3：Nav2-free 正式入口和统一总 YAML
-
-1. 将正式实机 MINCO、Goal Manager、MPC、ROGMap adapter 及 owner/topic/frame/QoS/timeout 参数迁入 `src/ats_sentry_bringup/params/node_params.yaml`，使其成为正式实机唯一总 YAML。`.msg/.srv/.action` 仍是 schema 唯一权威，不把消息字段伪装成参数。
-2. 逐个 launch 追踪实际参数加载路径，先增加重复 key/effective parameter 检查，再切换入口；不能先删除 `*_reality.yaml` 再补连接。
-3. 正式自研入口必须 `launch_nav2:=false`，无 `bt_navigator`、`planner_server`、`controller_server`、`behavior_server`，MINCO 不订阅 `/plan`，目标入口不调用 `nav2_msgs/action/NavigateToPose`。
-4. ATS action/goal manager 必须覆盖 feedback、result、cancel、preempt、timeout、server restart incarnation；无新目标时恢复不能复活旧 response、旧 generation、急停前 reference 或 command。
-5. 保留单独且明确命名的 Nav2 baseline 仅用于对照，不能让 baseline 参数或 topic 泄漏到正式 profile；在 P3 扩大矩形和红框均通过前，不删除公共算法的兼容依赖。
-
-P4：行为、RViz 与 MuJoCo 闭环
-
-1. 正式行为树只通过 `/ats_navigate_to_pose` 进入自研 action；Nav2 plugin、测试和构建残余列入清理清单，逐项确认无 owner 后再删除。
-2. RViz 复用原项目可视化方式，显示 `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 和 bounds Marker；明确各 display 的 frame、颜色、点尺寸、alpha、QoS、开关。可视化只消费显示 topic，规划只消费数值 projection。
-3. MuJoCo 自研入口从 ATS action 发目标，验证无 Nav2 process、无 `/plan`、`/cmd_vel_mpc` 和 `/motion_control` 唯一 owner；默认路线与红框分开运行。
-4. projection timeout、Point-LIO stale、adapter heartbeat lease 超时、真实 unknown、unreachable 和 unsafe trajectory 分别使用新的 `ROS_DOMAIN_ID` 与新 launch 注入，观察 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0` 的 deadline 内闭环；恢复后 generation 继续递增且旧授权不复活。
-5. 成功场景必须记录终点坐标/误差、JPS/MINCO/reference 点数、离散 footprint 冲突采样数、失败/恢复次数；没有独立 contact evaluator 时物理接触写为“未验证”。
-
-P5：RC-ESDF 和公共依赖解耦
-
-1. 只有在 P2-P4 门禁通过后，才清理 `trajectory_optimizer` 中不再属于目标链的 Nav2 继承、plugin、CMake/package 依赖和旧资源。
-2. 每次删除前用 `rg` 证明无活动 producer/consumer；保留 `[Dead Code Suggestion]` 标记，不因整洁而删除未授权代码。
-3. 清理后重新运行最窄构建、聚焦单测、launch `--show-args`、无 viewer MuJoCo、P3 扩大矩形和红框。
-
-六、验证命令与门禁
-
-静态与构建：
+每条命令的 N 必须不同，且在一条新 launch 中只启用一个故障。先运行默认名义路线，
+确认基础图和 owner，再运行对应 fault case：
 
 ```bash
-source /opt/ros/humble/setup.bash
-python3 -m py_compile <changed_launch_files>
-MAKEFLAGS=-j1 colcon build --base-paths src --packages-select <targets> --parallel-workers 1
-colcon test --base-paths src --packages-select <targets>
-colcon test-result --test-result-base build/<package> --verbose
-ros2 launch <package> <launch> --show-args
-git diff --check
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none P3_FAULT_CASE=none \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=adapter_lease P3_FAULT_CASE=none \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=service_timeout P3_FAULT_CASE=none \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=input_stale P3_FAULT_CASE=none \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=unknown P3_FAULT_CASE=none \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=unreachable P3_FAULT_CASE=none \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none P3_FAULT_CASE=cancel \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none P3_FAULT_CASE=preempt \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none P3_FAULT_CASE=timeout \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none P3_FAULT_CASE=tf_failure \
+  ROS_DOMAIN_ID=N GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
-运行图和参数：
+六、不可突破的契约
 
-- 使用新的 `ROS_DOMAIN_ID`、新的 daemon 状态和无 viewer/RViz MuJoCo；
-- `ros2 node list --no-daemon` 确认正式 profile 没有 Nav2 server；
-- `ros2 topic info -v` 核对 planning grid、`/cmd_vel_mpc`、`/motion_control`、急停和 TF 的唯一 owner、QoS、frame；
-- `ros2 param dump` 核对 MINCO、Goal Manager、MPC、adapter 的 effective values 确实来自总 YAML；
-- `rg` 检查正式入口、参数和行为树不再引用 `/plan`、Nav2 action 或 Nav2 server；
-- 用接口定义和 producer/consumer 两侧核对 frame、时间、单位、generation、unknown、outside-map、QoS、timeout 和 fallback。
+- ROGMap adapter 只能消费数值 projection service，不得反解析 `/rog_map/esdf`。
+- `/rc_esdf/planning_grid`、`/cmd_vel_mpc`、`/motion_control`、急停和 TF 各有唯一 owner。
+- unknown 默认按障碍处理；occupied 不得被 free/unknown 覆盖；不得以 ego 外接圆清除
+  footprint 外 unknown。
+- 只可在现有 `ExecutionCommand` 契约中验证 Goal Manager -> MPC；没有读取 serial
+  producer/consumer 之前，不得把 `manager_incarnation` 宣称为端到端 serial 契约。
+- 实机入口的 fake-yaw/chassis transform 默认保持启用；不得新增重复 TF publisher。
 
-闭环场景：
+七、停止条件
 
-```bash
-TEST_PROFILE=default PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
-
-TEST_PROFILE=red_box PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+出现任一情况即保留日志和工作树，停止扩大修改并报告：急停链未在 deadline/lease 内
+双零、恢复时旧 reference/command 自动复活、存在第二个 owner、故障注入未实际触达目标
+状态、或只能用静态推断替代运行证据。
 ```
 
-`scripts/test_mujoco_nav_chain.sh` 只能作为显式 Nav2 baseline 对照，不能作为 P3/Nav2-free 通过证据。故障注入必须分场景、分 domain 运行，不能串行污染同一机器人状态。不得用旧 revision 的 MuJoCo 结果覆盖最后一次地图、规划、安全或控制源码修改后的证据。
+## 3. 本轮交付规则
 
-七、文档与交付
-
-1. 只更新活动源码对应的 README 和 `docs/项目优化文档/nav2free/` 文档；不得读取或修改被排除的历史迁移目录。
-2. 每条结论标注 `已验证-运行`、`已验证-单测`、`已实现-静态确认`、`已实现未运行`、`未实现` 或 `未验证`，并注明 `[Confidence: High/Medium/Low]` 和证据边界。
-3. 根仓、导航仓、MuJoCo 仓分别显式 stage 本轮文件，禁止 `git add .`/`-A`；提交标题使用中文并按接口、配置、算法、安全、仿真、可视化、文档拆分。
-4. 每个仓库提交前运行 `git diff --cached --stat`、`git diff --cached --check`，确认未混入用户文件、测试 log、编译残留、模型或缓存；推送 `develop -> origin/develop`，不 force push。
-5. 最终报告按仓列出修改文件、命令及结果、默认/红框终点与误差、路径/reference/MPC/底盘 owner、generation/effective-param、stale/unknown/unreachable/timeout/heartbeat 归零与恢复、未运行项、残余风险、commit ID 与远端一致性。
-
-停止条件：发现用户修改无法安全合并、接口/参数语义冲突未能由源码和测试判定、急停链不能在 deadline 内归零、或实际运行证据缺失而只能靠推断时，保留日志和工作树，停止扩大改动并报告阻塞点。
-
-现在立即执行“定位 -> 最小修改 -> 构建 -> 单测 -> launch 检查 -> MuJoCo -> 文档 -> 分仓提交/推送”，不要只输出计划。
-```
-
-## 使用说明
-
-1. 新会话第一条消息粘贴上面的代码块。
-2. 新会话必须重新读取 `AGENTS.md`、三个仓库状态和活动源码；本文件中的事实只作定位线索，不能替代当前 revision 证据。
-3. 若只做 review，明确写“只做 review，不修改代码”，并删除提示词中的实施、提交和推送授权。
-4. 若只做参数统一，应明确把 MuJoCo、RViz 和 Nav2 依赖清理标为 out of scope，避免跨越多个安全边界。
-
-## 推荐提交拆分
-
-1. `[接口]` 固化参数 schema、重复 key 和 effective-load 检查；
-2. `[配置]` 将正式实机参数迁入总 YAML；
-3. `[接口]` 让 launch 与行为正式 profile 使用 ATS action 并断开 Nav2；
-4. `[安全]` 固化 Goal Manager/MPC 重启、时序、快照和旧授权回归；
-5. `[仿真]` 接入 MuJoCo ATS action 入口和分场景故障注入；
-6. `[可视化]` 更新 ROGMap RViz profile；
-7. `[文档]` 记录实际证据、边界和残余风险；
-8. `[清理]` 仅在 P3/P4 通过后移除 Nav2 构建依赖与旧资源。
+1. 修改前后运行三个仓库各自的 `git status --short --branch`；未知文件归用户，禁止
+   `git add .`、`git add -A`、破坏性恢复或 force push。
+2. 有源码修改时先运行最窄构建与单测，再运行受影响 launch 的 `--show-args`，最后才运行
+   对应的单一 fault case。
+3. 文档必须分别标注 `已验证-运行`、`已验证-单测`、`已实现未运行`、`未验证` 及
+   `[Confidence: High/Medium/Low]`。不得把 `contact_violation_count=0` 写为物理接触
+   已验证。
