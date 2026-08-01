@@ -36,6 +36,9 @@ CTestTestfile.cmake
 .local/
 rosbag*/
 records/
+.claude/
+.codex/
+.agentbridge/
 
 # Temporary and backup files
 *~
@@ -54,7 +57,10 @@ __pycache__/
 src/*
 !src/ats_sentry_bringup/
 !src/ats_sentry_bringup/**
+src/ats_sentry_bringup/**/__pycache__/
+src/ats_sentry_bringup/**/*.pyc
 *.pcd
 src/sp_vision25/
 *.pdf
 参考*
+minco+mpc_reference*
