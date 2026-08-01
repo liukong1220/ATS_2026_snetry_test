@@ -1,6 +1,6 @@
 # ATS P6 实车接口连通提示词（串口、行为树、实车 launch 接线、MID360）
 
-本文件是 5.14 实车接口连通性审计之后的下一阶段提示词，直接复制下面代码块作为新对话的第一条消息。它承接 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md` 的 5.12、5.14 与第 6 节 P6，不重复 P1~P4 已完成范围，也不替代 P5 的 MINCO 接线与场地模型整改。
+本文件是 5.14 实车接口连通性审计之后的下一阶段提示词，直接复制下面代码块作为新对话的第一条消息。它承接 `docs/项目优化文档/nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md` 的 5.12、5.14 与第 6 节 P6，不重复 P1~P4 已完成范围，也不替代 P5 的 MINCO 接线与场地模型整改。
 
 结论前置：**当前不能直接上车。** 自研 MINCO+MPC 链只存在于 MuJoCo 入口与各包自带 launch，实车入口 `bringup.launch.py` 仍走 Nav2 + `trajectory_optimizer`，`/cmd_vel_mpc` 在实车侧没有任何消费者，行为树用的是 `nav2_msgs` action，`GimbalYawStatus` 在实车没有发布者。串口协议本身是车体系 `[vx, vy, wz]`，与四舵轮语义天然兼容，是唯一无需改造的一层。
 
@@ -11,9 +11,9 @@
 
 必须完整阅读并遵守：
 1. `AGENTS.md` 与 `CLAUDE.md` 的全部约束（提交、分支、colcon、破坏性操作、用户文件归属）。
-2. `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`，重点 5.9~5.14、第 6 节 P5/P6、第 7 节边界、第 8 节回归入口、第 9 节维护约束。
-3. `docs/p4_real_robot_calibration_preflight.md`（不通电检查、待标定量、分级执行、稳定跟踪准入、行为决策准入、立即停止条件）。
-4. `docs/p5_real_robot_hardening_prompt.md`（P5 仍未完成，本轮不得覆盖或声称已完成）。
+2. `docs/项目优化文档/nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md`，重点 5.9~5.14、第 6 节 P5/P6、第 7 节边界、第 8 节回归入口、第 9 节维护约束。
+3. `docs/项目优化文档/nav2移植/p4_real_robot_calibration_preflight.md`（不通电检查、待标定量、分级执行、稳定跟踪准入、行为决策准入、立即停止条件）。
+4. `docs/项目优化文档/nav2移植/p5_real_robot_hardening_prompt.md`（P5 仍未完成，本轮不得覆盖或声称已完成）。
 5. `docs/视觉与串口桥说明.md`、`docs/行为树决策链路.md`、`docs/启动入口与运行链路.md`、`docs/接口消息与话题约定.md`。
 6. 本文件。
 7. 五个独立仓库的 git 状态与用户已有改动。
@@ -70,9 +70,9 @@
 8. `fake_vel_transform` 的 `cmd_spin` 会把行为层角速度直接叠加到输出 `angular.z`，是绕过 MPC 的车体角速度入口。正式 profile 必须关闭该叠加或移除该级。
 
 二. 行为树接口迁移（`src/ats_sentry_behavior`）
-1. 接口不匹配（高危）：`plugins/action/send_nav2_goal.cpp:12-53` 与 `plugins/action/send_nav_through_poses.cpp` 使用 `nav2_msgs/action/NavigateToPose`、`NavigateThroughPoses`，默认 action 名 `"/navigate_to_pose"`（`include/.../send_nav_through_poses.hpp:80`、`params/sentry_behavior.yaml:184`、`trees/dev_rm.xml`）；而 Goal Manager 提供的是 `ats_navigation_interfaces/action/NavigateToPose`，服务名 `/ats_navigate_to_pose`（`src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp:154-155, 191-218`）。两者消息定义不同（ATS 版 result 携带 `result_code` 0~7、`final_pose`、`final_distance`；feedback 携带 `state` 0~5、`goal_id`、`distance_remaining`、`elapsed_sec`）。必须新增 ATS action BT 节点并把正式 RMUC/RMUL 树切到 `/ats_navigate_to_pose`，旧 Nav2 节点只保留在命名清楚的对照 profile。
+1. 接口不匹配（高危）：`plugins/action/send_nav2_goal.cpp:12-53` 与 `plugins/action/send_nav_through_poses.cpp` 使用 `nav2_msgs/action/NavigateToPose`、`NavigateThroughPoses`，默认 action 名 `"/navigate_to_pose"`（`include/.../send_nav_through_poses.hpp:80`、`params/sentry_behavior.yaml:184`、`behavior_trees/dev_rm.xml`）；而 Goal Manager 提供的是 `ats_navigation_interfaces/action/NavigateToPose`，服务名 `/ats_navigate_to_pose`（`src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp:154-155, 191-218`）。两者消息定义不同（ATS 版 result 携带 `result_code` 0~7、`final_pose`、`final_distance`；feedback 携带 `state` 0~5、`goal_id`、`distance_remaining`、`elapsed_sec`）。必须新增 ATS action BT 节点并把正式 RMUC/RMUL 树切到 `/ats_navigate_to_pose`，旧 Nav2 节点只保留在命名清楚的对照 profile。
 2. 按 5.12.4 锁定 goal、feedback、result、cancel、halt、preempt、timeout、server unavailable/restart 与 result-code 映射；`SendNavThroughPoses` 当前是 `BT::SyncActionNode`、发出 goal 立即返回 `SUCCESS`、无 halt 回调，必须收敛为可 halt/可取消的异步语义，且不得在 sync tick 中无界等待 action server。
-3. 按 `docs/p4_real_robot_calibration_preflight.md` 行为决策准入：正式 profile 只能通过 ATS action 驱动 Goal Manager；禁止 `PublishTwist`、禁止 `cmd_spin` 在 MPC 之后叠加车体 `wz`、禁止用 `IsPathGoalReached` 的位置容差替代 ATS action 的终端成功（位置、wrapped yaw、终端线/角速度、dwell 全部由 Goal Manager 判定）、禁止伪造云台 ack。`src/ats_sentry_behavior_server.cpp` 中 `decision.topics.cmd_vel` 这条直发底盘通路必须从正式 profile 移除。
+3. 按 `docs/项目优化文档/nav2移植/p4_real_robot_calibration_preflight.md` 行为决策准入：正式 profile 只能通过 ATS action 驱动 Goal Manager；禁止 `PublishTwist`、禁止 `cmd_spin` 在 MPC 之后叠加车体 `wz`、禁止用 `IsPathGoalReached` 的位置容差替代 ATS action 的终端成功（位置、wrapped yaw、终端线/角速度、dwell 全部由 Goal Manager 判定）、禁止伪造云台 ack。`src/ats_sentry_behavior_server.cpp` 中 `decision.topics.cmd_vel` 这条直发底盘通路必须从正式 profile 移除。
 4. 行为层输入改为正式权威源：`/rc_esdf/planning_grid` 与 `/localization`，替换硬编码的 `global_costmap/costmap`、`odom`、`odometry`；并为地图、定位、action 输入补显式 topic/QoS/freshness 参数。
 5. 补聚焦功能测试：主树优先级、action halt/cancel、迟到 result、waypoint 状态机；当前行为仓 `BUILD_TESTING` 只有 ament lint。README 里"`/navigate_through_poses` 是统一执行接口"必须随迁移修正，不得先改文档声称已接入。
 6. 门禁顺序不可颠倒：loopback 决策场景先固定 revision/config/seed 重复 `20` 次无非确定性 branch/action 序列，再用完全相同的树、参数与场景输入进入 MuJoCo 关键场景 `10/10`。
@@ -85,7 +85,7 @@
 5. 云台旋转时的定位鲁棒性必须单独评估（MID360 装在云台上，`odom->gimbal_yaw_odom` 与 `fake_vel_transform` 的 `\psi_0-\psi` 约定必须与实车关节零位一致）；该项在抬轮 HIL 阶段完成，不得推迟到落地。
 
 四. 分级上车计划（本轮只允许执行第 1、2 级）
-1. 不通电检查（复用 `docs/p4_real_robot_calibration_preflight.md`）：TF 唯一发布者、`/planner/execution_command` 为唯一授权、符号/单位/轮位/滚动半径审计、物理急停与远程急停与 Goal Manager/lease/watchdog 急停演练（执行器断开）。
+1. 不通电检查（复用 `docs/项目优化文档/nav2移植/p4_real_robot_calibration_preflight.md`）：TF 唯一发布者、`/planner/execution_command` 为唯一授权、符号/单位/轮位/滚动半径审计、物理急停与远程急停与 Goal Manager/lease/watchdog 急停演练（执行器断开）。
 2. 抬轮 HIL：车轮离地或执行器断开，跑通"MID360 -> Point-LIO -> localization_fusion -> rog_map/adapter -> Goal Manager -> JPS/MINCO -> ExecutionCommand -> MPC -> 串口"整链，验证五级归零实测延迟、断串口重连、定位 stale/丢失、云台 ack 缺失、地图未就绪五类注入下均确定性零速度。
 3. 台架单自由度（下一轮，需第 1、2 级全绿）：依次 `vx`、`vy`、`wz`，每次只放开一个自由度，标定轮 RPM↔车体速度、轮/舵动力学、制动距离与命令时延。
 4. 受控低速地面（更后一轮）：必须先满足稳定跟踪准入的净空预算
@@ -106,6 +106,6 @@
 六. 提交与交付
 1. 按内容拆分提交，使用详细中文标签（`[安全]`、`[接口]`、`[行为]`、`[控制]`、`[仿真]`、`[文档]`、`[规范]`），只显式 stage 本轮列出的文件；禁止 `git add -A`、`git add .`。
 2. 只在实际修改的仓库提交并普通 push 到 `origin/develop`；推送失败保留本地提交并报告远端错误，不做 force push。
-3. 必须更新 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`：滚动窗口、5.14 之后的新验证记录、第 6 节 P6 状态、第 7 节接续入口；同时更新 `docs/启动入口与运行链路.md`、`docs/接口消息与话题约定.md`、`docs/行为树决策链路.md`、`docs/视觉与串口桥说明.md` 中受本轮改动影响的部分。
+3. 必须更新 `docs/项目优化文档/nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md`：滚动窗口、5.14 之后的新验证记录、第 6 节 P6 状态、第 7 节接续入口；同时更新 `docs/启动入口与运行链路.md`、`docs/接口消息与话题约定.md`、`docs/行为树决策链路.md`、`docs/视觉与串口桥说明.md` 中受本轮改动影响的部分。
 4. 最终报告必须列出：改动文件清单；构建/单测/闭环实测数字；实车侧每项检查的实测值；每项结论的 `已实现`/`已测试`/`已验证`/`未实现` 标注与 Confidence；本轮不可声明项；下一阶段建议顺序。
 ```

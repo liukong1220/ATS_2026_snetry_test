@@ -9,9 +9,9 @@
 
 必须完整阅读并遵守：
 1. `/home/kong/ATS_2026_snetry_test/AGENTS.md`
-2. `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`，重点是 5.9~5.12
-3. `docs/p4_real_robot_calibration_preflight.md`
-4. `docs/p4_stage4_stable_tracking_prompt.md`
+2. `docs/项目优化文档/nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md`，重点是 5.9~5.12
+3. `docs/项目优化文档/nav2移植/p4_real_robot_calibration_preflight.md`
+4. `docs/项目优化文档/nav2移植/p4_stage4_stable_tracking_prompt.md`
 5. 五个独立仓库的 branch、status、HEAD、origin/develop 和最近提交
 6. 本轮直接相关的 producer/consumer、launch、配置和测试完整函数/类作用域，特别是 `ats_sentry_behavior` 的 action/条件节点、主树、server、参数，Goal Manager ATS action，以及两套仿真入口
 7. 不得读取或修改 `参考/`

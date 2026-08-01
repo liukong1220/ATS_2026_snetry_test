@@ -1,6 +1,6 @@
 # ATS P5 实车化整改提示词（MINCO 接线、场地模型、统一 telemetry）
 
-本文件是 5.13 缺陷审查之后的下一阶段提示词，直接复制下面代码块作为新对话的第一条消息。它承接 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md` 的 5.13 与第 6 节 P5，不重复 P1~P4 已完成范围。
+本文件是 5.13 缺陷审查之后的下一阶段提示词，直接复制下面代码块作为新对话的第一条消息。它承接 `docs/项目优化文档/nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md` 的 5.13 与第 6 节 P5，不重复 P1~P4 已完成范围。
 
 ```text
 请继续在工作区 `/home/ats/ATS_2026_snetry_test` 开展 ATS 2026 四驱四转哨兵导航研发。
@@ -9,9 +9,9 @@
 
 必须完整阅读并遵守：
 1. `AGENTS.md` 与 `CLAUDE.md` 的全部约束（提交、分支、colcon、破坏性操作、用户文件归属）。
-2. `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`，重点 5.9~5.13、第 6 节 P5、第 7 节边界、第 8 节回归入口、第 9 节维护约束。
-3. `docs/p4_real_robot_calibration_preflight.md`。
-4. `docs/p4_stage4_stable_tracking_prompt.md`（telemetry/baseline/门禁定义仍然有效）。
+2. `docs/项目优化文档/nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md`，重点 5.9~5.13、第 6 节 P5、第 7 节边界、第 8 节回归入口、第 9 节维护约束。
+3. `docs/项目优化文档/nav2移植/p4_real_robot_calibration_preflight.md`。
+4. `docs/项目优化文档/nav2移植/p4_stage4_stable_tracking_prompt.md`（telemetry/baseline/门禁定义仍然有效）。
 5. 本文件。
 6. 五个独立仓库的 git 状态与用户已有改动。
 7. 不得读取或修改 `参考/` 与 `minco+mpc_reference/` 下的任何内容，它们不是运行时依赖。
@@ -92,6 +92,6 @@
 六. 提交与交付
 1. 按内容拆分提交，使用详细中文标签（`[安全]`、`[仿真]`、`[规划]`、`[控制]`、`[文档]`、`[规范]`），只显式 stage 本轮列出的文件；禁止 `git add -A`、`git add .`。
 2. 只在实际修改的仓库提交并普通 push 到 `origin/develop`；推送失败保留本地提交并报告远端错误，不做 force push。
-3. 必须更新 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`：滚动窗口、5.13 之后的新验证记录、第 6 节 P5 状态、第 7 节接续入口。
+3. 必须更新 `docs/项目优化文档/nav2移植/nav2_to_3desdf_minco_mpc_optimization_direction.md`：滚动窗口、5.13 之后的新验证记录、第 6 节 P5 状态、第 7 节接续入口。
 4. 最终报告必须列出：改动文件清单；构建/单测/闭环实测数字；每项结论的 `已实现`/`已测试`/`已验证`/`未实现` 标注与 Confidence；本轮不可声明项；下一阶段建议顺序。
 ```

@@ -1,579 +1,361 @@
 # ATS 2026 Sentry Workspace
 
-安徽信息工程学院 Artisans 战队 2026 哨兵机器人 ROS 2 工作区。
+安徽信息工程学院 Artisans 战队 2026 四驱四转舵轮哨兵 ROS 2 工作区。
 
-当前仓库以实机总启动、行为树决策、Nav2 导航执行、MuJoCo 仿真、轻量 loopback 仿真和上下位机串口桥接为主线，所有说明以当前工作区代码、launch 文件和参数文件为准。Gazebo 入口和依赖已清理，后续仿真统一使用 MuJoCo；loopback 保留用于快速决策和导航链路测试。
+本仓库组织实机启动、行为决策、定位与地图、自研规划控制、MuJoCo 仿真、
+loopback 快速回归和上下位机通信。当前同时保留 Nav2 对照链与专用
+Nav2-free 实机入口；“全仓已移除 Nav2”尚不成立。
 
-## 项目概览
+> 文档状态：2026-07-31，依据当前源码、launch、参数与接口静态核对。
+> 本轮仅更新文档，未重跑 colcon、MuJoCo 或实车验收。
 
-当前主线由 5 层组成：
+## 目录
 
-1. 启动编排层：`src/ats_sentry_bringup`
-2. 决策层：`src/ats_sentry_behavior`
-3. 导航与定位层：`src/ats_sentry_nav`
-4. MuJoCo 动力学仿真层：`src/sim/ats_mujoco_sim`
-5. 轻量闭环仿真层：`src/sim/loopback_sim`
-6. 串口与裁判系统接口层：`src/standard_robot_pp_ros2`
+- [项目简介](#项目简介)
+- [当前状态](#当前状态)
+- [核心模块](#核心模块)
+- [依赖环境](#依赖环境)
+- [Quick Start](#quick-start)
+- [启动入口](#启动入口)
+- [接口与所有权](#接口与所有权)
+- [配置文件](#配置文件)
+- [数据流](#数据流)
+- [软件架构](#软件架构)
+- [目录结构](#目录结构)
+- [测试与验收](#测试与验收)
+- [文档导航](#文档导航)
+- [验证边界](#验证边界)
+- [参考与致谢](#参考与致谢)
 
-当前默认执行链为：
+## 项目简介
 
-```text
-ats_sentry_bringup/bringup.launch.py
-  -> standard_robot_pp_ros2
-  -> ats_nav_bringup
-  -> ats_sentry_behavior
-  -> /navigate_through_poses
-  -> SmacPlannerHybrid
-  -> Nav2BSplineSmoother
-  -> MPPI Controller
-  -> trajectory_speed_governor
-  -> velocity_smoother
-  -> fake_vel_transform
-  -> /cmd_vel
-  -> 下位机底盘 / loopback_sim
-```
-
-当前导航地图/轨迹优化过渡链为：
+V1 目标链为：
 
 ```text
-registered_scan / lidar_odometry
-  -> terrain_analysis
-  -> terrain_analysis_ext
-  -> terrain_map_ext
-  -> traversability_grid
-  -> traversability_height_diff_grid / traversability_occupancy_ratio_grid / traversability_ground_confidence_grid
-  -> signed Traversability ESDF
-  -> Nav2BSplineSmoother / trajectory_optimizer_node
-  -> trajectory_profile / trajectory_esdf_debug
+传感器 + 独立状态估计
+  -> ROGMap 概率占据 / 膨胀 / 3D ESDF
+  -> 地面投影与 2.5D 可通行语义
+  -> RC-ESDF 规划接口
+  -> 自研目标管理
+  -> JPS
+  -> MINCO S3 + 独立 yaw
+  -> footprint safety + Local Collision Repair
+  -> 全向 SE2 MPC
+  -> 四舵轮底盘
 ```
 
-当前 `trajectory_optimizer` 主线分工是：
+Point-LIO 继续拥有 `/localization` 与 `/registered_scan` 定位输出；ROGMap
+只负责概率占据、3D ESDF 和地面投影，不替代定位器。底盘命令是车体系
+`[vx, vy, wz]`，状态是世界系 `[x, y, yaw]`，不能引入差速底盘的
+`vy=0` 约束。
 
-1. `Nav2BSplineSmoother` 和 `trajectory_optimizer_node` 都支持 `esdf_source: traversability_grid`
-2. `TraversabilityEsdfProvider` 会融合 `traversability_grid` 与三类地形语义调试栅格
-3. `fake_costmap` 和 `terrain_pointcloud` ESDF 仍保留为 fallback / 对照后端
+## 当前状态
 
-当前导航恢复链为：
+| 范围 | 当前事实 | 结论 |
+| :--- | :--- | :--- |
+| 普通实机总入口 | `bringup.launch.py` 默认 `launch_nav2:=true`、`planning_grid_owner:=rc_esdf` | Nav2 对照 profile 仍是默认值 |
+| 专用实机入口 | `real_robot_nav2_free.launch.py` 固定 `launch_nav2:=false`、`launch_swerve_mpc:=true` | 自研 action/MINCO/MPC 入口已实现 |
+| MuJoCo | `mujoco_navigation.launch.py` 默认 `launch_nav2:=true`，MPC 模式仍可依赖 `/plan` | 不能据此声明 P3 通过 |
+| 规划地图 | `planning_grid_owner` 只允许 `rc_esdf|rog_map` | launch 负责抑制非 owner，禁止热切换 |
+| 自研接口 | `/ats_navigate_to_pose`、`PlannerGoal`、`PlannerStatus`、`ExecutionCommand` 已定义 | schema 权威在 `.msg/.action/.srv` |
+| 参数 | 实机感知/串口在总 YAML，自研三节点仍各有 `*_reality.yaml` | “单一总 YAML”仍是待实施目标 |
+| ROGMap 可视化 | 支持占据、膨胀、unknown、ESDF 调试输出；P2 配置默认关闭 visualization | RViz 方案已规划，未在本轮运行确认 |
 
-```text
-FollowPath 失败
-  -> behavior_server / BackUpFreeSpace
-  -> 局部走廊搜索
-  -> 必要时 centroid fallback
-  -> 速度平滑与高 cost 自动降速
-```
+阶段边界：
 
-## 工作区结构
+- P2：ROGMap 地面适配、唯一地图 owner、单次 MINCO 不可变 snapshot 与失效安全。
+- P3：自研 goal/action 生命周期和所有运行入口 Nav2-free。
+- P4：连续 swept footprint、实车动力学约束与实车验证。
 
-当前根目录中与维护直接相关的内容：
+## 核心模块
 
-```text
-.
-├── build.sh                            # 推荐构建脚本
-├── mapping.sh                          # 建图 + 保存地图/PCD 辅助脚本
-├── NAV2.sh                             # 实机导航辅助脚本
-├── docs/                               # 项目专项文档
-├── src/
-│   ├── ats_sentry_bringup/           # 根仓保留：实机与 loopback 总入口、参数、地图、RViz
-│   ├── ats_sentry_behavior/          # 行为树、视觉接管、姿态切换、路径输出
-│   ├── ats_sentry_nav/               # Nav2、平滑、定位、点云、恢复插件、底盘速度坐标转换
-│   │   └── sentry_chassis_vel_transform/
-│   ├── sim/                          # 仿真域
-│   │   ├── ats_mujoco_sim/
-│   │   └── loopback_sim/
-│   ├── standard_robot_pp_ros2/        # 串口桥、裁判系统、底盘命令接口
-│   ├── interfaces/                    # ats_rm_interfaces / sp_msgs / carstatemsgs / manda_can_control
-│   └── tools/                         # pcd2pgm、rosbag recorder、键盘云台控制等
-├── install/
-└── log/
-```
+| 模块 | 路径 | 主要职责 |
+| :--- | :--- | :--- |
+| 总启动 | `src/ats_sentry_bringup` | 实机编排、总参数、地图/PCD、RViz、rosbag |
+| 行为决策 | `src/ats_sentry_behavior` | 行为树、巡逻/补给/视觉目标、自研与对照 action client |
+| 导航定位 | `src/ats_sentry_nav` | Point-LIO、ROGMap、adapter、RC-ESDF、JPS/MINCO、Goal Manager、MPC、Nav2 对照资源 |
+| MuJoCo | `src/sim/ats_mujoco_sim` | 四舵轮动力学、LiDAR/ToF、真值、速度桥和闭环回归 |
+| loopback | `src/sim/loopback_sim` | 不含物理动力学的轻量 Nav2/行为回归 |
+| 串口桥 | `src/standard_robot_pp_ros2` | `/cmd_vel` 到下位机、裁判系统、云台状态和 watchdog |
+| 接口域 | `src/interfaces` 与 `ats_navigation_interfaces` | 业务消息、导航 action、地图/规划状态 schema |
 
-## 环境要求
-
-根据当前代码和构建脚本，推荐环境：
+## 依赖环境
 
 - Ubuntu 22.04
 - ROS 2 Humble
-- GCC / G++ 11
+- GCC/G++ 11
 - CMake 3.16+
 - Python 3
+- Eigen3、PCL、OpenCV、yaml-cpp
+- MuJoCo Python 运行环境，仅仿真需要
 
-至少需要的常用系统依赖：
+常用基础依赖：
 
 ```bash
 sudo apt update
 sudo apt install -y \
-  git git-lfs curl wget \
+  git git-lfs build-essential cmake pkg-config \
   python3-pip python3-vcstool python3-rosdep \
-  build-essential cmake pkg-config \
   libeigen3-dev libomp-dev
 ```
 
-首次使用 ROS 2 工作区时：
+## Quick Start
+
+### 拉取工作区
 
 ```bash
-sudo rosdep init
-rosdep update
-```
-
-## 仓库组织与异地部署
-
-当前仓库采用“根仓保留总启动 + vcstool 清单 + 功能完整分包”的方式组织。
-
-根仓 `ATS_2026_snetry_test` 直接保留：
-
-- 工作区说明、部署脚本、构建脚本和 [dependencies.repos](./dependencies.repos)
-- `src/ats_sentry_bringup`
-
-`src/ats_sentry_bringup` 不再拆成独立仓库。原因是它不是普通算法包，而是实机和仿真的总入口，集中维护：
-
-- `bringup.launch.py`、loopback、MuJoCo、视觉专测等 launch 入口
-- 实机 `node_params.yaml`、MID360 配置、RViz 视图
-- 比赛/测试地图资产，以及 PCD 的本地目录约定
-- `mapping.sh`、`NAV2.sh` 等根脚本实际依赖的路径约定
-
-这部分留在根仓后，新机器克隆根仓即可获得可启动的部署入口；再通过 `dependencies.repos` 拉取行为、导航、接口、仿真和第三方依赖，工作区才完整。
-
-`src/ats_sentry_bringup` 对应的独立远端仓库/分支不再维护，也不应重新加入 `dependencies.repos`。它随根仓 `ATS_2026_snetry_test` 一起被 `colcon` 发现和构建。
-
-`dependencies.repos` 中按功能域维护以下路径：
-
-- 主线功能域：`src/ats_sentry_nav`、`src/ats_sentry_behavior`、`src/standard_robot_pp_ros2`
-- 仿真域：`src/sim/ats_mujoco_sim`、`src/sim/loopback_sim`
-- 接口域：`src/interfaces`、`src/interfaces/carstatemsgs`、`src/interfaces/manda_can_control`
-- 导航辅助域：`src/ats_sentry_nav/sentry_chassis_vel_transform`
-- 机器人描述：`src/ats_robot_description`
-- 第三方工具和依赖仓库：fork 到 `https://github.com/liukong1220` 后由清单统一拉取，避免部署时跨多个账号找依赖
-
-开源部署约定：
-
-- 根仓、自研分包仓库、fork 后的工具/依赖仓库面向开源使用，`dependencies.repos` 统一使用 `https://github.com/liukong1220/...` URL。
-- 新机器不需要配置 GitHub SSH key 就能执行 `./import_workspace_repos.sh --shallow`。
-- 自研分包仓库、fork 后的工具/依赖仓库应保持 public，并统一加入 GitHub topic `ats-nav`。该 topic 对应本项目的 `ATS_NAV` 研发归类。
-- 仓库迁移、fork 归类和建仓工作已经完成，对应一次性迁移脚本不再保留。
-- `src/ats_sentry_bringup/pcd/*.pcd` 只作为本机运行资产，不提交、不上传。
-
-分包边界按“功能完整性”确定，而不是按每个 ROS package 机械拆分。例如 `src/ats_sentry_nav` 内部同时包含 Nav2 bringup、定位、点云转换、地形分析、轨迹优化、恢复插件和底盘速度转换相关工具；`sentry_chassis_vel_transform` 负责底盘速度坐标转换和 fake yaw 相关逻辑，归入导航域后更便于和 `fake_vel_transform`、控制器输出链路一起维护。
-
-### 快速部署
-
-新机器推荐按下面流程创建工作区：
-
-```bash
-git clone --depth=1 -b develop https://github.com/liukong1220/ATS_2026_snetry_test.git
+git clone --depth=1 -b develop \
+  https://github.com/liukong1220/ATS_2026_snetry_test.git
 cd ATS_2026_snetry_test
 git lfs install
 ./import_workspace_repos.sh --shallow
 ```
 
-说明：
+`src/ats_sentry_bringup/pcd/*.pcd` 是本地实机资产，不随 Git 分发。缺少目标
+场地 PCD 时不得把定位链降级为可用状态。
 
-- `git clone --depth=1` 只拉根仓最近一次提交，避免下载旧大仓历史
-- `./import_workspace_repos.sh --shallow` 会按 `dependencies.repos` 浅克隆除 `ats_sentry_bringup` 之外的功能仓和第三方依赖；已存在且工作树干净、分支和 `origin` URL 与清单一致的仓库会同时以 fast-forward 方式同步到清单版本
-- 若只需导入缺失仓库，可使用 `./import_workspace_repos.sh --no-sync`；脚本不会拉取工作树有改动、分支不同、远端 URL 不同、领先或分叉的仓库，并会以非零状态提醒处理这些仓库
-- 部署脚本会临时设置 `init.defaultBranch=main` 和 `advice.detachedHead=false`，用于屏蔽 `git init` 默认分支提示；如果后续清单再次锁定到 commit hash，也会减少 detached HEAD 提示噪声
-- `src/ats_sentry_bringup/pcd/*.pcd` 不提交到 Git；需要实机建图或从队内离线介质拷贝到本地
-- 如果你要在部署机器上长期开发，可以去掉 `--shallow`，保留各子仓库完整历史
+### 构建
 
-导入完成后，目录结构会变成：
+```bash
+source /opt/ros/humble/setup.bash
+MAKEFLAGS=-j1 colcon build \
+  --base-paths src \
+  --symlink-install \
+  --parallel-workers 1
+source install/setup.bash
+```
+
+活动源码与 `参考/` 可能存在同名包，因此所有 `colcon build/test` 必须显式
+使用 `--base-paths src`。
+
+## 启动入口
+
+### 实机 Nav2-free 专用入口
+
+```bash
+ros2 launch ats_sentry_bringup real_robot_nav2_free.launch.py \
+  world:=rmuc_2026 \
+  planning_grid_owner:=rog_map \
+  use_rviz:=false
+```
+
+该入口固定关闭 Nav2 和两级 Nav2 速度变换，MPC 直接向 `/cmd_vel` 输出
+车体系速度。当前源码注释将它限制在不通电检查与抬轮 HIL；落地实车闭环
+尚需按 P4 门禁执行。
+
+### 普通实机总入口/对照 profile
+
+```bash
+ros2 launch ats_sentry_bringup bringup.launch.py \
+  world:=rmuc_2026 \
+  launch_nav2:=true
+```
+
+普通入口默认仍启动 Nav2。其 `launch_fake_vel_transform:=True` 和
+`launch_chassis_vel_transform:=True` 是云台雷达兼容链默认值，不能仅因移除
+Nav2 就静默删除；固定雷达迁移必须同时保持 topic、TF 和速度 frame 契约。
+
+### MuJoCo 导航
+
+```bash
+ros2 launch ats_mujoco_sim mujoco_navigation.launch.py \
+  use_viewer:=false \
+  show_viewer:=false \
+  use_rviz:=false
+```
+
+MuJoCo 当前默认是 Nav2 基线。P2 红框回归必须通过脚本显式选择 ROGMap owner：
+
+```bash
+PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  TEST_PROFILE=red_box GOAL_TIMEOUT=180 \
+  scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+### loopback 快速回归
+
+```bash
+ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py
+```
+
+loopback 用于低成本验证行为和 Nav2 话题，不提供真实接触、传感器噪声或舵轮
+动力学证据。
+
+## 接口与所有权
+
+### 自研导航主接口
+
+| 名称 | 类型 | Producer | Consumer/用途 |
+| :--- | :--- | :--- | :--- |
+| `/ats_navigate_to_pose` | `ats_navigation_interfaces/action/NavigateToPose` | `ats_goal_manager` server | 行为树/测试客户端 |
+| `/ats_goal_manager/planner_goal` | `PlannerGoal` | Goal Manager | MINCO planner |
+| `/minco/planning_status` | `PlannerStatus` | MINCO planner | Goal Manager |
+| `/minco/reference_path_candidate` | `nav_msgs/Path` | MINCO planner | Goal Manager 复核 |
+| `/planner/execution_command` | `ExecutionCommand` | Goal Manager 唯一 owner | MPC 唯一执行授权 |
+| `/cmd_vel` | `geometry_msgs/Twist` | Nav2-free 下 MPC 唯一 owner | 串口底盘 |
+
+### 地图接口
+
+| 名称 | 类型 | 约定 |
+| :--- | :--- | :--- |
+| `/rog_map/get_ground_projection` | `GetRogMapProjection` | 同一 response 原子携带 grid、signed distance、gradient 与 ROG generation |
+| `/rc_esdf/planning_grid` | `nav_msgs/OccupancyGrid` | `rc_esdf_map` 或 adapter 二选一 owner |
+| `/rog_map_adapter/status` | `PlanningMapStatus` | 携带 adapter publication sequence，不等于 MINCO snapshot generation |
+| `/rog_map_adapter/ready` | `std_msgs/Bool` | 持续 heartbeat/lease，不是永久 ready |
+
+ROS schema 只能由 `.msg/.srv/.action` 定义。总 YAML 未来只统一参数、topic、
+frame、QoS、timeout 和 owner，不能复制消息字段成为第二份接口定义。
+
+## 配置文件
+
+### 当前有效配置
+
+| 文件 | 当前所有权 |
+| :--- | :--- |
+| `src/ats_sentry_bringup/params/node_params.yaml` | 实机传感器、定位、串口、Nav2 对照和兼容速度链 |
+| `src/ats_sentry_nav/minco_planner/config/minco_planner_reality.yaml` | 实机 MINCO/JPS/footprint 参数 |
+| `src/ats_sentry_nav/ats_goal_manager/config/ats_goal_manager_reality.yaml` | 实机 action、lease、提交和终点判据 |
+| `src/ats_sentry_nav/ats_swerve_mpc/config/ats_swerve_mpc_reality.yaml` | 实机 MPC 与舵轮约束 |
+| `src/ats_sentry_nav/ats_rog_map/config/rog_map_ground_planning_mujoco.yaml` | P2 ROGMap 地图参数 |
+| `src/ats_sentry_nav/ats_rog_map_adapter/config/rog_map_ground_planning.yaml` | P2 投影、融合、snapshot、heartbeat 参数 |
+
+目标状态是将正式实机参数收敛到 `node_params.yaml` 一个总 YAML，并保持原参数
+键可直接修改/移除。迁移必须先让 launch 真正加载新段，再删除分散配置；当前还未
+完成，详见 [导航参数与接口统一配置方案](./docs/项目优化文档/nav2free/导航参数与接口统一配置方案.md)。
+
+## 数据流
+
+### Nav2-free 目标链
+
+```text
+/livox/lidar + /livox/imu
+  -> Point-LIO
+  -> /localization + /registered_scan
+  -> ROGMap + terrain/static map
+  -> ats_rog_map_adapter
+  -> /rc_esdf/planning_grid + numeric signed distance
+  -> ats_goal_manager -> PlannerGoal
+  -> JPS -> MINCO S3 -> yaw -> footprint/repair
+  -> candidate reference
+  -> Goal Manager atomic ExecutionCommand
+  -> ats_swerve_mpc
+  -> /cmd_vel
+  -> standard_robot_pp_ros2
+  -> 四舵轮底盘
+```
+
+### generation 边界
+
+```text
+ROGMap source generation
+  != adapter publication sequence
+  != MINCO local immutable snapshot generation
+```
+
+当前 `OccupancyGrid` 不携带 ROG source generation。只能证明单次规划内部的
+JPS、二维 RC-ESDF、MINCO clearance、footprint gate 和 repair 共用一份
+MINCO snapshot；不能声称 generation 编号端到端一致。
+
+## 软件架构
+
+```text
+任务/视觉/裁判系统
+        |
+        v
+ats_sentry_behavior
+        |
+        v
+ats_navigation_interfaces/action/NavigateToPose
+        |
+        v
+ats_goal_manager <---- localization/map heartbeat
+        |                              ^
+        v                              |
+minco_planner <---- ats_rog_map_adapter <---- ROGMap/terrain/static map
+        |
+        v
+atomic ExecutionCommand
+        |
+        v
+ats_swerve_mpc ----> /cmd_vel ----> standard_robot_pp_ros2
+```
+
+Nav2 对照资源在 P3 完成前保留，用于基线比较；它们不应再成为新自研接口的
+依赖。公共算法解耦、构建依赖移除和旧资源归档必须分阶段完成。
+
+## 目录结构
 
 ```text
 .
+├── README.md
+├── AGENTS.md
 ├── dependencies.repos
-├── build.sh
 ├── docs/
-├── tools/
-└── src/
-    ├── ats_sentry_bringup/
-    ├── ats_sentry_behavior/
-    ├── ats_sentry_nav/
-    │   └── sentry_chassis_vel_transform/
-    ├── sim/
-    │   ├── ats_mujoco_sim/
-    │   └── loopback_sim/
-    ├── standard_robot_pp_ros2/
-    ├── dependencies/
-    ├── interfaces/
-    │   ├── ats_rm_interfaces/
-    │   ├── sp_msgs/
-    │   ├── carstatemsgs/
-    │   └── manda_can_control/
-    └── tools/
+│   └── 项目优化文档/
+├── scripts/
+├── src/
+│   ├── ats_sentry_bringup/
+│   ├── ats_sentry_behavior/
+│   ├── ats_sentry_nav/
+│   ├── interfaces/
+│   ├── sim/
+│   │   ├── ats_mujoco_sim/
+│   │   └── loopback_sim/
+│   └── standard_robot_pp_ros2/
+└── 参考/                    # 许可证/算法溯源，不是活动构建输入
 ```
 
-### 开发流程
+根仓、导航仓、行为仓、MuJoCo 仓、loopback 仓和串口仓都是独立 Git 仓库。
+提交、状态检查和推送必须分别进行。
 
-根仓和拆分功能包是不同 Git 仓库，提交时需要区分：
+## 测试与验收
+
+最窄静态与包级检查：
 
 ```bash
-# 查看所有子仓状态
-vcs status src
-
-# 更新所有子仓
-vcs pull src
-
-# 在某个功能包内提交代码
-cd src/ats_sentry_nav
-git status
-git add <files>
-git commit -m "<message>"
-git push origin develop
+python3 -m py_compile <changed_launch_files>
+MAKEFLAGS=-j1 colcon build --base-paths src \
+  --packages-select <targets> --parallel-workers 1
+colcon test --base-paths src --packages-select <targets>
+colcon test-result --test-result-base build/<package> --verbose
+git diff --check
 ```
 
-如果修改的是已经归入导航域的底盘速度坐标转换包，路径是：
-
-```bash
-cd src/ats_sentry_nav/sentry_chassis_vel_transform
-```
-
-根仓提交这些内容：
-
-- `dependencies.repos`
-- 根目录脚本，例如 `build.sh`、`mapping.sh`、`NAV2.sh`
-- `tools/` 下的工作区维护脚本
-- `docs/` 和 README
-- `.gitignore`、`.gitattributes` 等根仓配置
-- `src/ats_sentry_bringup` 下的总启动入口、参数、地图和 RViz 配置
-
-拆分功能包源码、第三方依赖、构建产物都不应直接提交到根仓。
-
-如果新增正式地图或 PCD：
-
-- 地图文件放入 `src/ats_sentry_bringup/map`
-- PCD 文件放入 `src/ats_sentry_bringup/pcd` 供本机运行使用，但不提交、不上传
-- 临时建图结果不要直接提交，先确认命名、场地版本和是否确实要作为部署资产
-
-### 清单维护
-
-新增一个功能域仓库时，先确认它是否应独立于根仓维护。
-
-不应加入 `dependencies.repos` 的内容：
-
-- `src/ats_sentry_bringup`
-- 只服务于根仓部署脚本的临时文件
-- build/install/log 等构建产物
-
-应加入 `dependencies.repos` 的内容：
-
-- 能独立表达一个功能域的自研仓库
-- 需要跟随上游更新的第三方依赖
-- 与 bringup 松耦合、可以单独开发和复用的工具仓库
-
-确认需要新增后，创建并推送独立仓库，然后在 [dependencies.repos](./dependencies.repos) 中添加条目：
-
-```yaml
-repositories:
-  src/example_package:
-    type: git
-    url: https://github.com/liukong1220/example_package.git
-    version: develop
-```
-
-如果某个功能包要锁定到确定版本，可以把 `version` 从分支名改成 commit hash：
-
-```yaml
-version: 0123456789abcdef0123456789abcdef01234567
-```
-
-部署机器要复现固定版本时，优先使用 commit hash；日常开发可以继续使用 `develop`。
-
-### 部署脚本
-
-仓库根目录保留部署拉取脚本：
-
-```bash
-# 按 dependencies.repos 导入 src/
-./import_workspace_repos.sh --shallow
-```
-
-`import_workspace_repos.sh` 是部署机器需要保留的脚本。拆仓、建仓、fork 上游依赖和 topic 归类属于一次性迁移工作，完成后不再保留迁移脚本，避免开源仓库中出现无关维护入口。
-
-该脚本只在当前命令进程中设置 Git 临时配置，不修改用户全局 `git config`。当前 `dependencies.repos` 优先使用分支名；如果后续为了复现固定版本而临时使用 commit hash，部署输出也不会出现大段分离头指针建议。
-
-### 旧仓历史说明
-
-根仓当前 HEAD 只跟踪 `src/ats_sentry_bringup`，其余 `src/` 功能域由 `dependencies.repos` 拉取。旧提交里曾经包含过更多源码和依赖，所以普通 clone 仍可能下载旧历史。异地部署时请使用：
-
-```bash
-git clone --depth=1 -b develop https://github.com/liukong1220/ATS_2026_snetry_test.git
-```
-
-如果要让根仓普通 clone 也彻底变小，需要重写 Git 历史或新建一个全新的壳仓。这会影响所有已有 clone 的同步方式，因此没有在本次迁移中自动执行。
-
-## 构建
-
-### 推荐方式
-
-当前推荐直接使用根目录脚本：
-
-```bash
-source /opt/ros/humble/setup.bash
-./build.sh
-source install/setup.bash
-```
-
-`build.sh` 当前会：
-
-1. 强制切回工作区根目录
-2. 自动 `source /opt/ros/${ROS_DISTRO}/setup.bash`
-3. 清理旧 overlay 环境变量
-4. 先单独编译重包：
-   `livox_ros_driver2`、`point_lio`、`small_gicp_relocalization`、`terrain_analysis`、`terrain_analysis_ext`
-5. 再编译剩余包
-6. 默认使用低性能机器策略：`--parallel-workers 1`，单包内部 `CMAKE_BUILD_PARALLEL_LEVEL=2` / `MAKEFLAGS=-j2`
-
-如需临时调整构建强度：
-
-```bash
-COLCON_WORKERS=1 BUILD_THREADS=2 ./build.sh
-```
-
-如果整理目录或迁移工作区后遇到 CMake cache 记录旧源码路径，可清一次缓存：
-
-```bash
-CMAKE_CLEAN_CACHE=1 COLCON_WORKERS=1 BUILD_THREADS=2 ./build.sh
-```
-
-### 手动构建
-
-如果要手动安装依赖并编译：
-
-```bash
-source /opt/ros/humble/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=2
-export MAKEFLAGS=-j2
-rosdep install -r --from-paths src --ignore-src --rosdistro humble -y
-colcon build --symlink-install --parallel-workers 1 \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release
-source install/setup.bash
-```
-
-### 低性能机器单包构建
-
-如果电脑内存或 CPU 余量较小，不建议直接全工作区并行构建。当前默认构建强度就是单包双核，也可以按依赖顺序单包构建，并同时限制 colcon worker 和 CMake 底层并行度：
-
-```bash
-source /opt/ros/humble/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=2
-export MAKEFLAGS=-j2
-colcon build --symlink-install --packages-select sp_msgs \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 1
-source install/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=2
-export MAKEFLAGS=-j2
-colcon build --symlink-install --packages-select trajectory_optimizer \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 1
-source install/setup.bash
-```
-
-注意：`--parallel-workers 1` 只限制 colcon 同时构建几个包，`CMAKE_BUILD_PARALLEL_LEVEL=2` 和 `MAKEFLAGS=-j2` 限制单个包内部最多使用 2 个编译任务。
-
-## 当前主要参数入口
-
-当前最重要的参数文件如下：
-
-- 实机总入口参数：
-  [src/ats_sentry_bringup/params/node_params.yaml](./src/ats_sentry_bringup/params/node_params.yaml)
-- 实机行为树参数：
-  [src/ats_sentry_behavior/params/sentry_behavior.yaml](./src/ats_sentry_behavior/params/sentry_behavior.yaml)
-- loopback 行为树参数：
-  [src/ats_sentry_behavior/params/sentry_behavior_loopback.yaml](./src/ats_sentry_behavior/params/sentry_behavior_loopback.yaml)
-- 视觉专测行为树参数：
-  [src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml](./src/ats_sentry_behavior/params/sentry_behavior_vision_test.yaml)
-- loopback Nav2 参数：
-  [src/sim/loopback_sim/params/nav2_params.yaml](./src/sim/loopback_sim/params/nav2_params.yaml)
-- `ats_nav_bringup` reality 默认参数：
-  [src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml](./src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml)
-- 串口桥默认参数：
-  [src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml](./src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml)
-
-## 运行
-
-### 实机总入口
-
-当前推荐的实机总入口是：
-
-- [src/ats_sentry_bringup/launch/bringup.launch.py](./src/ats_sentry_bringup/launch/bringup.launch.py)
-
-示例：
-
-```bash
-source install/setup.bash
-ros2 launch ats_sentry_bringup bringup.launch.py \
-  world:=<YOUR_WORLD_NAME> \
-  slam:=False \
-  use_rviz:=True
-```
-
-这个入口会同时启动：
-
-1. `standard_robot_pp_ros2`
-2. `ats_nav_bringup` 实机导航链
-3. `ats_sentry_behavior`
-4. RViz（可选）
-5. `rosbag2_composable_recorder`（由 `node_params.yaml` 控制）
-
-### 建图
-
-当前推荐使用根脚本：
-
-```bash
-./mapping.sh <MAP_NAME>
-```
-
-它会调用：
-
-```bash
-ros2 launch ats_sentry_bringup bringup.launch.py \
-  world:=<MAP_NAME> \
-  slam:=True \
-  use_rviz:=True
-```
-
-退出时脚本会提示是否：
-
-1. 保存栅格地图到 `src/ats_sentry_bringup/map/<MAP_NAME>.{yaml,pgm}`
-2. 复制最新 Point-LIO PCD 到 `src/ats_sentry_bringup/pcd/<MAP_NAME>.pcd`
-
-### loopback 通用决策仿真
-
-入口：
-
-- [src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py](./src/ats_sentry_bringup/launch/loopback_decision_sim.launch.py)
-
-示例：
-
-```bash
-source install/setup.bash
-ros2 launch ats_sentry_bringup loopback_decision_sim.launch.py use_rviz:=True
-```
-
-### loopback 视觉专测
-
-入口：
-
-- [src/ats_sentry_bringup/launch/loopback_vision_test.launch.py](./src/ats_sentry_bringup/launch/loopback_vision_test.launch.py)
-
-示例：
-
-```bash
-source install/setup.bash
-ros2 launch ats_sentry_bringup loopback_vision_test.launch.py \
-  use_rviz:=True \
-  publish_referee_inputs:=True \
-  current_hp:=400 \
-  projectile_allowance_17mm:=200 \
-  publish_vision_target:=True \
-  vision_tracking:=True \
-  vision_nav_hold:=True \
-  vision_has_target_position_map:=True \
-  vision_target_position_map_frame:=map \
-  vision_target_position_map_x:=5.0 \
-  vision_target_position_map_y:=2.0 \
-  vision_target_position_map_z:=0.0 \
-  vision_target_yaw:=0.30 \
-  vision_target_pitch:=-0.06
-```
-
-### loopback 纯导航观察
-
-入口：
-
-- [src/ats_sentry_bringup/launch/loopback_nav_only.launch.py](./src/ats_sentry_bringup/launch/loopback_nav_only.launch.py)
-
-示例：
-
-```bash
-source install/setup.bash
-ros2 launch ats_sentry_bringup loopback_nav_only.launch.py use_rviz:=True
-```
-
-这个入口更适合单独观察：
-
-- `plan`
-- `smoothed_path_visual`
-- `trajectory_profile_markers`
-- `trajectory_esdf_debug`
-- `traversability_grid`
-- `traversability_height_diff_grid`
-- `traversability_occupancy_ratio_grid`
-- `traversability_ground_confidence_grid`
-- `back_up_free_space_markers`
-- `/cmd_vel_controller`
-- `/cmd_vel_controller_governed`
-- `/cmd_vel_nav2_result`
-
-## 常见链路说明
-
-### 姿态模式
-
-当前行为树通过 `decision/robot_mode` 发布姿态模式，下位机串口桥最终写入：
-
-- `move = 3`
-- `attack = 1`
-- `defend = 2`
-
-对应协议字段在：
-
-- [src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp](./src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/packet_typedef.hpp)
-
-### 视觉融合
-
-当前视觉侧与行为树、导航的消息契约使用：
-
-- [src/interfaces/sp_msgs](./src/interfaces/sp_msgs)
-
-核心消息为：
-
-- [src/interfaces/sp_msgs/msg/VisionTargetMsg.msg](./src/interfaces/sp_msgs/msg/VisionTargetMsg.msg)
-
-### 恢复行为
-
-当前 `BackUpFreeSpace` 已支持：
-
-1. 主走廊搜索
-2. centroid fallback
-3. 平均走廊代价高时自动降速
-4. RViz marker 区分主方案与 fallback 方案
-
-如果 `behavior_server.visualize: true`，可在 RViz 观察：
-
-- `back_up_free_space_markers`
+运行门禁不能由 topic 存在替代。P2/P3 报告至少应包含：
+
+- 规划地图、`/cmd_vel_mpc`/`/cmd_vel`、`/motion_control` 的唯一 producer/consumer；
+- stale、unknown、unreachable、projection timeout、heartbeat 中断的确定性零速度；
+- 路径点数、reference 点数、离散 footprint 冲突采样数；
+- 终点坐标与位置误差；
+- MuJoCo 物理接触 evaluator 结果；没有 evaluator 时必须写“未验证”；
+- 恢复后旧 reference、迟到 response 和旧 generation 不复活运动。
 
 ## 文档导航
 
-当前建议阅读顺序：
+- [工作区总览](./docs/总览.md)
+- [代码范围与目录结构](./docs/代码范围与目录结构.md)
+- [启动入口与运行链路](./docs/启动入口与运行链路.md)
+- [导航定位与轨迹链路](./docs/导航定位与轨迹链路.md)
+- [接口消息与话题约定](./docs/接口消息与话题约定.md)
+- [行为树决策链路](./docs/行为树决策链路.md)
+- [仿真域说明](./docs/仿真域说明.md)
+- [视觉与串口桥说明](./docs/视觉与串口桥说明.md)
+- [构建与维护说明](./docs/构建与维护说明.md)
+- [Nav2-free 优化文档索引](./docs/项目优化文档/nav2free/README.md)
+- [下一阶段实施提示词](./docs/项目优化文档/nav2free/下一阶段Nav2移除与统一配置实施提示词.md)
 
-1. [docs/总览.md](./docs/总览.md)
-2. [docs/代码范围与目录结构.md](./docs/代码范围与目录结构.md)
-3. [docs/启动入口与运行链路.md](./docs/启动入口与运行链路.md)
-4. [docs/导航定位与轨迹链路.md](./docs/导航定位与轨迹链路.md)
-5. [docs/行为树决策链路.md](./docs/行为树决策链路.md)
-6. [docs/接口消息与话题约定.md](./docs/接口消息与话题约定.md)
-7. [docs/仿真域说明.md](./docs/仿真域说明.md)
-8. [docs/视觉与串口桥说明.md](./docs/视觉与串口桥说明.md)
-9. [docs/构建与维护说明.md](./docs/构建与维护说明.md)
-10. [docs/nav2_to_3desdf_minco_mpc_optimization_direction.md](./docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)
+## 验证边界
 
-说明：
+- **已验证**：本 README 中的文件、launch 默认值、接口 schema 和参数文件归属已做静态交叉核对。
+- **已实现未运行**：专用实机 Nav2-free launch、ATS action、Goal Manager、原子 `ExecutionCommand` 链。
+- **未验证**：本轮没有执行 colcon、MuJoCo、红框、故障注入或实车测试。
+- **未完成**：全仓 Nav2 构建依赖移除、单一总 YAML、ROGMap 新 RViz profile、P3 两场景闭环和 P4 实车验收。
 
-- `docs` 已按当前 `src` 目录和功能域重新整理，除 PDF 与 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md` 外，旧文档不再作为维护入口。
-- `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md` 是保留的专项规划文档，用于承接 3D ESDF、MINCO、MPC 等后续方向。
+[Confidence: High] 静态架构结论由 launch 与接口/参数源码交叉支持；运行性能和
+安全闭环没有本轮证据，禁止引用参考项目的频率、耗时或内存数据作为 ATS 实测值。
 
-## 维护约定
+## 参考与致谢
 
-1. 修改主启动逻辑、参数入口或地图/PCD 目录时，优先同步本 README 与 `docs/总览.md`
-2. 修改行为树决策、视觉接管、姿态切换时，优先同步 `ats_sentry_behavior/README.md` 与 `docs/行为树决策链路.md`
-3. 修改 Nav2 参数、恢复行为、轨迹优化、底盘速度坐标转换时，优先同步 `ats_sentry_nav/README.md` 与 `docs/导航定位与轨迹链路.md`
-4. 修改消息、服务、串口桥或视觉桥接时，优先同步 `docs/接口消息与话题约定.md` 与 `docs/视觉与串口桥说明.md`
-5. 修改仿真入口或新增仿真包时，优先同步 `docs/仿真域说明.md`
-6. 若文档内容无法从当前仓库代码、参数或 launch 中直接确认，应明确标注“待补充”或“需要人工确认”
-
-## 待人工确认
-
-以下内容当前无法仅从本仓库直接严格确认，后续如需写入正式对外文档，应由维护者补充：
-
-1. 实车底盘、电控和传感器的最终硬件型号清单
-2. 现场网络、交换机、串口适配器和供电拓扑
-3. 比赛现场使用的固定地图名与 PCD 文件命名规范
-4. 真实视觉算法包 `sp_vision25` 的完整运行依赖、构建方式和部署步骤
+项目使用或参考 ROS 2、Nav2 baseline、Point-LIO、ROGMap、MINCO、MuJoCo、
+BehaviorTree.CPP/BehaviorTree.ROS2 等开源项目。具体许可证、版权和修改说明以各包
+源码与许可证文件为准；参考实现不自动构成本仓活动构建输入。
