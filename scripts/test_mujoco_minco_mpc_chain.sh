@@ -24,12 +24,8 @@ TEST_PROFILE="${TEST_PROFILE:-single}"
 MIN_LEG_PROGRESS="${MIN_LEG_PROGRESS:-0.20}"
 # 每段终点的平面位置误差门限（m）。
 GOAL_TOLERANCE="${GOAL_TOLERANCE:-0.30}"
-# P2 回归默认由 ROGMap adapter 唯一发布规划栅格；可设为 rc_esdf 做对照。
+# P3 自研链由 ROGMap adapter 唯一发布规划栅格。
 PLANNING_GRID_OWNER="${PLANNING_GRID_OWNER:-rog_map}"
-# nav2 保留为 P2 对照；p3 必须显式关闭 Nav2 并使用 ATS 自有入口。
-NAVIGATION_MODE="${NAVIGATION_MODE:-nav2}"
-# P3 先允许用现有 /goal_pose 打通，再以 action 做正式任务生命周期验收。
-P3_GOAL_ENTRY="${P3_GOAL_ENTRY:-action}"
 LAUNCH_ROG_MAP="${LAUNCH_ROG_MAP:-true}"
 ROG_MAP_CONFIG_FILE="${ROG_MAP_CONFIG_FILE:-${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map/config/rog_map_ground_planning_mujoco.yaml}"
 LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-24}"
@@ -48,30 +44,12 @@ BODY_YAW_FOLLOW_CLEARANCE="${BODY_YAW_FOLLOW_CLEARANCE:-0.55}"
 YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
 
 case "${PLANNING_GRID_OWNER}" in
-  rc_esdf|rog_map) ;;
+  rog_map) ;;
   *)
-    echo "Unsupported PLANNING_GRID_OWNER='${PLANNING_GRID_OWNER}'; use 'rc_esdf' or 'rog_map'."
+    echo "P3 ATS action regression requires PLANNING_GRID_OWNER='rog_map'."
     exit 2
     ;;
 esac
-case "${NAVIGATION_MODE}" in
-  nav2|p3) ;;
-  *)
-    echo "Unsupported NAVIGATION_MODE='${NAVIGATION_MODE}'; use 'nav2' or 'p3'."
-    exit 2
-    ;;
-esac
-case "${P3_GOAL_ENTRY}" in
-  topic|action) ;;
-  *)
-    echo "Unsupported P3_GOAL_ENTRY='${P3_GOAL_ENTRY}'; use 'topic' or 'action'."
-    exit 2
-    ;;
-esac
-if [[ "${NAVIGATION_MODE}" == "p3" && "${PLANNING_GRID_OWNER}" != "rog_map" ]]; then
-  echo "NAVIGATION_MODE='p3' requires PLANNING_GRID_OWNER='rog_map'."
-  exit 2
-fi
 case "${P2_FAULT_CASE}" in
   none|adapter_lease|service_timeout|input_stale|unknown|unreachable) ;;
   *)
@@ -80,10 +58,6 @@ case "${P2_FAULT_CASE}" in
     exit 2
     ;;
 esac
-if [[ "${P2_FAULT_CASE}" != "none" && "${PLANNING_GRID_OWNER}" != "rog_map" ]]; then
-  echo "P2_FAULT_CASE='${P2_FAULT_CASE}' requires PLANNING_GRID_OWNER='rog_map'."
-  exit 2
-fi
 case "${P3_FAULT_CASE}" in
   none|cancel|preempt|timeout|tf_failure) ;;
   *)
@@ -92,10 +66,6 @@ case "${P3_FAULT_CASE}" in
     exit 2
     ;;
 esac
-if [[ "${P3_FAULT_CASE}" != "none" && "${NAVIGATION_MODE}" != "p3" ]]; then
-  echo "P3_FAULT_CASE='${P3_FAULT_CASE}' requires NAVIGATION_MODE='p3'."
-  exit 2
-fi
 case "${P4_LOCALIZATION_FUSION,,}" in
   true|false) ;;
   *)
@@ -123,8 +93,8 @@ if [[ "${FORCE_BODY_YAW_FOLLOW,,}" == "true" &&
   exit 2
 fi
 if [[ "${P4_LOCALIZATION_FUSION,,}" == "true" &&
-  ("${NAVIGATION_MODE}" != "p3" || "${PLANNING_GRID_OWNER}" != "rog_map") ]]; then
-  echo "P4 localization fusion requires NAVIGATION_MODE=p3 and PLANNING_GRID_OWNER=rog_map."
+  "${PLANNING_GRID_OWNER}" != "rog_map" ]]; then
+  echo "P4 localization fusion requires PLANNING_GRID_OWNER=rog_map."
   exit 2
 fi
 P3_GOAL_FRAME="${P3_GOAL_FRAME:-$(
@@ -292,6 +262,21 @@ read_positive_topic_field() {
   return 1
 }
 
+read_swerve_telemetry_sequence() {
+  local attempt output
+  for attempt in 1 2 3; do
+    output="$(timeout 5 ros2 topic echo --no-daemon --once /swerve/telemetry \
+      ats_navigation_interfaces/msg/SwerveTelemetry 2>/dev/null || true)"
+    output="$(awk '$1 == "sequence:" {print $2; exit}' <<<"${output}")"
+    if [[ "${output}" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "${output}"
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 wait_for_generation_advance() {
   local baseline="$1"
   local timeout_sec="$2"
@@ -357,10 +342,70 @@ node_exposes_endpoint() {
 
 assert_final_swerve_telemetry() {
   local output_file="$1"
-  local contact_count drive_count
-  timeout 8 ros2 topic echo --no-daemon --once /swerve/telemetry \
-    ats_navigation_interfaces/msg/SwerveTelemetry >"${output_file}" \
-    2>/dev/null || fail "cannot capture final /swerve/telemetry"
+  local minimum_sequence="$2"
+  local minimum_stamp_sec="$3"
+  local minimum_stamp_nanosec="$4"
+  local raw_file="${output_file}.raw"
+  local contact_count drive_count sequence stamp_sec stamp_nanosec
+
+  # A one-shot subscriber can consume a queued sample that predates the last
+  # action. Capture a short stream and keep only telemetry newer than both the
+  # pre-goal sequence and the wall-clock action submission time.
+  : >"${raw_file}"
+  timeout 4 ros2 topic echo --no-daemon /swerve/telemetry \
+    ats_navigation_interfaces/msg/SwerveTelemetry >"${raw_file}" 2>/dev/null || true
+  awk -v min_sequence="${minimum_sequence}" \
+    -v min_sec="${minimum_stamp_sec}" \
+    -v min_nanosec="${minimum_stamp_nanosec}" '
+    function reset_message() {
+      block = ""
+      sequence = -1
+      stamp_sec = -1
+      stamp_nanosec = -1
+      expect_stamp = 0
+    }
+    function keep_message() {
+      if (block == "" || sequence <= min_sequence || stamp_sec < 0 || stamp_nanosec < 0) {
+        return
+      }
+      if (stamp_sec > min_sec || (stamp_sec == min_sec && stamp_nanosec > min_nanosec)) {
+        latest = block
+      }
+    }
+    $0 == "---" {
+      keep_message()
+      reset_message()
+      next
+    }
+    {
+      block = block $0 ORS
+      if ($1 == "stamp:") {
+        expect_stamp = 1
+      } else if (expect_stamp && $1 == "sec:") {
+        stamp_sec = $2
+      } else if (expect_stamp && $1 == "nanosec:") {
+        stamp_nanosec = $2
+        expect_stamp = 0
+      } else if ($1 == "sequence:") {
+        sequence = $2
+      }
+    }
+    END {
+      keep_message()
+      printf "%s", latest
+    }
+  ' "${raw_file}" >"${output_file}"
+  [[ -s "${output_file}" ]] || fail "cannot capture post-action /swerve/telemetry"
+
+  sequence="$(awk '$1 == "sequence:" {print $2; exit}' "${output_file}")"
+  stamp_sec="$(awk '$1 == "sec:" {print $2; exit}' "${output_file}")"
+  stamp_nanosec="$(awk '$1 == "nanosec:" {print $2; exit}' "${output_file}")"
+  [[ "${sequence}" =~ ^[0-9]+$ ]] &&
+    awk -v current="${sequence}" -v baseline="${minimum_sequence}" \
+      'BEGIN {exit current > baseline ? 0 : 1}' ||
+    fail "final telemetry sequence did not advance after the last action"
+  [[ "${stamp_sec}" =~ ^[0-9]+$ && "${stamp_nanosec}" =~ ^[0-9]+$ ]] ||
+    fail "final telemetry has no valid header stamp"
   contact_count="$(awk '$1 == "contact_violation_count:" {print $2}' "${output_file}")"
   [[ "${contact_count}" =~ ^[0-9]+$ ]] || \
     fail "final telemetry has no valid contact_violation_count"
@@ -379,7 +424,8 @@ assert_final_swerve_telemetry() {
     END {if (count != 4) exit 3; print count}
   ' "${output_file}")" || fail "final four-wheel drive RPM did not settle below 2 rpm"
   [[ "${drive_count}" == "4" ]] || fail "final telemetry did not contain four drive RPM values"
-  echo "RESULT: MuJoCo contact_violation_count=0 and final four-wheel drive RPM is below 2 rpm"
+  echo "RESULT: MuJoCo post-action telemetry sequence=${sequence} " \
+    "contact_violation_count=0 and final four-wheel drive RPM is below 2 rpm"
   sed -n '/^drive_rpm:/,/^command_vx:/p; /^contact_violation_count:/,/^max_contact_force:/p' \
     "${output_file}"
 }
@@ -436,22 +482,6 @@ verify_rog_map_planning_interface() {
   generation="$(read_positive_topic_field /rog_map_adapter/generation data 30)" || \
     fail "cannot read ROGMap adapter generation"
   wait_for_generation_advance "${generation}" 30
-}
-
-wait_for_lifecycle_active() {
-  local node="$1"
-  local deadline=$((SECONDS + 90))
-  while (( SECONDS < deadline )); do
-    if timeout 4 ros2 lifecycle get --no-daemon "${node}" 2>/dev/null | grep -q "active"; then
-      echo "OK: lifecycle ${node} active"
-      return 0
-    fi
-    if ! kill -0 "${LAUNCH_PID}" 2>/dev/null; then
-      fail "launch exited while waiting for lifecycle ${node}"
-    fi
-    sleep 1
-  done
-  fail "timeout waiting for lifecycle ${node}"
 }
 
 capture_pose() {
@@ -598,21 +628,12 @@ send_fault_goal() {
   local timeout_sec="${5:-30}"
   FAULT_ACTION_OUTPUT="/tmp/ats_p3_fault_${label}_action.out"
   FAULT_ACTION_ERROR="/tmp/ats_p3_fault_${label}_action.err"
-  if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-    timeout "$((timeout_sec + 10))" ros2 action send_goal --feedback /ats_navigate_to_pose \
-      ats_navigation_interfaces/action/NavigateToPose \
-      "{goal_pose: {header: {frame_id: ${frame}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: 1.0}}}, timeout: {sec: ${timeout_sec}, nanosec: 0}}" \
-      >"${FAULT_ACTION_OUTPUT}" 2>"${FAULT_ACTION_ERROR}" &
-    FAULT_ACTION_PID=$!
-    CAPTURE_PIDS+=("${FAULT_ACTION_PID}")
-    return
-  fi
-  timeout 8 ros2 topic pub --rate 2 --times 3 --wait-matching-subscriptions 2 \
-    --qos-durability volatile \
-    /goal_pose geometry_msgs/msg/PoseStamped \
-    "{header: {frame_id: ${frame}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: 1.0}}}" \
-    >"${FAULT_ACTION_OUTPUT}" 2>"${FAULT_ACTION_ERROR}" || \
-    fail "cannot publish fault goal for ${label}"
+  timeout "$((timeout_sec + 10))" ros2 action send_goal --feedback /ats_navigate_to_pose \
+    ats_navigation_interfaces/action/NavigateToPose \
+    "{goal_pose: {header: {frame_id: ${frame}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: 1.0}}}, timeout: {sec: ${timeout_sec}, nanosec: 0}}" \
+    >"${FAULT_ACTION_OUTPUT}" 2>"${FAULT_ACTION_ERROR}" &
+  FAULT_ACTION_PID=$!
+  CAPTURE_PIDS+=("${FAULT_ACTION_PID}")
 }
 
 wait_for_fault_action_result() {
@@ -628,11 +649,10 @@ publish_relative_fault_goal() {
   local pose_file="/tmp/ats_p2_fault_${label}_pose.out"
   local command_file="/tmp/ats_p2_fault_${label}_motion_start.out"
   local goal_output="/tmp/ats_p2_fault_${label}_goal.out"
-  local current_x current_y goal_x p3_goal_x monitor_pid
+  local current_x current_y p3_goal_x monitor_pid
   capture_pose "${pose_file}" || fail "cannot capture pose for ${label}"
   current_x="$(pose_axis "${pose_file}" x)"
   current_y="$(pose_axis "${pose_file}" y)"
-  goal_x="$(awk -v x="${current_x}" 'BEGIN {printf "%.6f", x + 0.60}')"
   : >"${command_file}"
   # 重定向到文件时 ros2 Python CLI 会块缓冲；强制无缓冲才能在 tracking 期间
   # 立即观察到非零控制量，而不是等采样 timeout 后才注入故障。
@@ -640,18 +660,10 @@ publish_relative_fault_goal() {
   monitor_pid=$!
   CAPTURE_PIDS+=("${monitor_pid}")
   sleep 2
-  if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-    # nominal single 由西向东完成；故障前置段改为反向 1.80 m，复用已经通过
-    # footprint gate 的自由走廊，并给 DDS 采样与故障注入保留稳定 tracking 窗口。
-    p3_goal_x="$(awk -v x="${current_x}" 'BEGIN {printf "%.6f", x - 1.80}')"
-    send_fault_goal "${label}" odom "${p3_goal_x}" "${current_y}" 30
-  else
-    timeout 8 ros2 topic pub --rate 2 --times 3 --wait-matching-subscriptions 2 \
-      --qos-durability volatile \
-      /goal_pose geometry_msgs/msg/PoseStamped \
-      "{header: {frame_id: map}, pose: {position: {x: ${goal_x}, y: ${current_y}, z: 0.0}, orientation: {w: 1.0}}}" \
-      >"${goal_output}" 2>&1 || fail "cannot publish relative goal for ${label}"
-  fi
+  # nominal single 由西向东完成；故障前置段改为反向 1.80 m，复用已经通过
+  # footprint gate 的自由走廊，并给 DDS 采样与故障注入保留稳定 tracking 窗口。
+  p3_goal_x="$(awk -v x="${current_x}" 'BEGIN {printf "%.6f", x - 1.80}')"
+  send_fault_goal "${label}" odom "${p3_goal_x}" "${current_y}" 30
   wait_for_command "${label} clears emergency stop" 12 \
     topic_field_equals /planner/emergency_stop data false
   wait_for_command "${label} produces MPC motion" 12 \
@@ -666,6 +678,8 @@ resume_process() {
   echo "OK: resumed ${label} process ${pid}"
 }
 
+# [Dead Code Suggestion] 旧 Nav2/static-map unknown 注入路径的查询 helper。
+# P3 action-only 回归不再调用；待 P3 运行验收完成后再单独清理。
 find_unknown_goal() {
   local query_output query_error="/tmp/ats_p2_fault_unknown_query.err"
   local attempt
@@ -714,8 +728,8 @@ run_p2_fault_injection() {
       process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_rog_map_adapter_node' | head -n 1 || true)"
       [[ -n "${process_pid}" ]] || fail "cannot locate adapter process for fault injection"
       publish_relative_fault_goal adapter_lease
-      baseline="$(read_topic_field /rog_map_adapter/generation data)"
-      [[ "${baseline}" =~ ^[0-9]+$ ]] || fail "cannot read generation before adapter lease fault"
+      baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
+        fail "cannot read generation before adapter lease fault"
       kill -STOP "${process_pid}" || fail "cannot pause adapter process"
       STOPPED_PIDS+=("${process_pid}")
       wait_for_command "adapter heartbeat lease triggers emergency stop" 8 \
@@ -731,8 +745,8 @@ run_p2_fault_injection() {
       process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_rog_map_node' | head -n 1 || true)"
       [[ -n "${process_pid}" ]] || fail "cannot locate ROGMap process for fault injection"
       publish_relative_fault_goal service_timeout
-      baseline="$(read_topic_field /rog_map_adapter/generation data)"
-      [[ "${baseline}" =~ ^[0-9]+$ ]] || fail "cannot read generation before service timeout"
+      baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
+        fail "cannot read generation before service timeout"
       log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
       kill -STOP "${process_pid}" || fail "cannot pause ROGMap process"
       STOPPED_PIDS+=("${process_pid}")
@@ -753,8 +767,8 @@ run_p2_fault_injection() {
       process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_mujoco_sim/lib/ats_mujoco_sim/ats_mujoco_sim' | head -n 1 || true)"
       [[ -n "${process_pid}" ]] || fail "cannot locate MuJoCo process for fault injection"
       publish_relative_fault_goal input_stale
-      baseline="$(read_topic_field /rog_map_adapter/generation data)"
-      [[ "${baseline}" =~ ^[0-9]+$ ]] || fail "cannot read generation before input stale"
+      baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
+        fail "cannot read generation before input stale"
       kill -STOP "${process_pid}" || fail "cannot pause MuJoCo input process"
       STOPPED_PIDS+=("${process_pid}")
       wait_for_command "ROGMap detects stale Point-LIO-compatible inputs" 8 \
@@ -773,76 +787,39 @@ run_p2_fault_injection() {
       capture_zero_outputs input_stale_recovery
       ;;
     unknown)
-      if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-        # P3 在前一任务成功后按契约保持急停，先进入独立的 tracking 任务；
-        # adapter 自身再发布 all-unknown blocked grid，避免临时 /map 写者与
-        # 多源 known-free 证据竞争，也保持 planning-grid 单一发布者不变。
-        publish_relative_fault_goal unknown
-        baseline="$(read_topic_field /rog_map_adapter/generation data)"
-        [[ "${baseline}" =~ ^[0-9]+$ ]] || fail "cannot read generation before unknown fault"
-        timeout 8 ros2 param set /ats_rog_map_adapter test_force_all_unknown true \
-          >/tmp/ats_p3_fault_unknown_enable.out 2>&1 || \
-          fail "cannot enable adapter all-unknown fault"
-        wait_for_command "unknown fault publishes all-unknown planning grid" 10 \
-          bash -c "timeout 5 python3 '${WORKSPACE_DIR}/scripts/query_occupancy_grid.py' --topic /rc_esdf/planning_grid --timeout 4 value --value -1 >/dev/null"
-        wait_for_command "unknown fault publishes adapter not-ready" 8 \
-          topic_field_equals /rog_map_adapter/ready data false
-        wait_for_fault_action_result unknown 4 12
-        wait_for_command "unknown fault triggers emergency stop" 8 \
-          topic_field_equals /planner/emergency_stop data true
-        capture_zero_outputs unknown
-        timeout 8 ros2 param set /ats_rog_map_adapter test_force_all_unknown false \
-          >/tmp/ats_p3_fault_unknown_disable.out 2>&1 || \
-          fail "cannot disable adapter all-unknown fault"
-        wait_for_command "unknown recovery restores adapter ready" 15 \
-          topic_field_equals /rog_map_adapter/ready data true
-        wait_for_generation_advance "${baseline}" 15
-        capture_zero_outputs unknown_recovery
-      else
-        wait_for_command "nominal emergency stop is clear" 10 \
-          topic_field_equals /planner/emergency_stop data false
-        timeout 15 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-          --topic /map --timeout 10 publish-unknown --output-topic /map --count 3 --period 0.2 \
-          >/tmp/ats_p2_fault_unknown_static_map.out 2>&1 || \
-          fail "cannot inject an unknown static-map snapshot"
-        find_unknown_goal
-        log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
-        timeout 8 ros2 topic pub --rate 2 --times 3 --wait-matching-subscriptions 2 \
-          --qos-durability volatile \
-          /goal_pose geometry_msgs/msg/PoseStamped \
-          "{header: {frame_id: ${UNKNOWN_GOAL_FRAME}}, pose: {position: {x: ${UNKNOWN_GOAL_X}, y: ${UNKNOWN_GOAL_Y}, z: 0.0}, orientation: {w: 1.0}}}" \
-          >/tmp/ats_p2_fault_unknown_pub.out 2>&1 || fail "cannot publish unknown goal"
-        wait_for_command "unknown goal triggers emergency stop" 10 \
-          topic_field_equals /planner/emergency_stop data true
-        wait_for_command "unknown goal is rejected as occupied" 6 \
-          bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'goal is occupied'"
-        capture_zero_outputs unknown
-      fi
+      # 前一任务成功后按契约保持急停，先进入独立的 ATS action tracking 任务；
+      # adapter 自身再发布 all-unknown blocked grid，避免临时 /map 写者与多源
+      # known-free 证据竞争，也保持 planning-grid 单一发布者不变。
+      publish_relative_fault_goal unknown
+      baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
+        fail "cannot read generation before unknown fault"
+      timeout 8 ros2 param set /ats_rog_map_adapter test_force_all_unknown true \
+        >/tmp/ats_p3_fault_unknown_enable.out 2>&1 || \
+        fail "cannot enable adapter all-unknown fault"
+      wait_for_command "unknown fault publishes all-unknown planning grid" 10 \
+        bash -c "timeout 5 python3 '${WORKSPACE_DIR}/scripts/query_occupancy_grid.py' --topic /rc_esdf/planning_grid --timeout 4 value --value -1 >/dev/null"
+      wait_for_command "unknown fault publishes adapter not-ready" 8 \
+        topic_field_equals /rog_map_adapter/ready data false
+      wait_for_fault_action_result unknown 4 12
+      wait_for_command "unknown fault triggers emergency stop" 8 \
+        topic_field_equals /planner/emergency_stop data true
+      capture_zero_outputs unknown
+      timeout 8 ros2 param set /ats_rog_map_adapter test_force_all_unknown false \
+        >/tmp/ats_p3_fault_unknown_disable.out 2>&1 || \
+        fail "cannot disable adapter all-unknown fault"
+      wait_for_command "unknown recovery restores adapter ready" 15 \
+        topic_field_equals /rog_map_adapter/ready data true
+      wait_for_generation_advance "${baseline}" 15
+      capture_zero_outputs unknown_recovery
       ;;
     unreachable)
-      if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-        # 该查询会在大规划栅格上保守展开，先在静止状态找目标；随后立即用
-        # free-unreachable action 抢占 tracking 任务，避免查询耗时让前置目标自然完成。
-        find_unreachable_goal
-        publish_relative_fault_goal unreachable_precondition
-      else
-        wait_for_command "nominal emergency stop is clear" 10 \
-          topic_field_equals /planner/emergency_stop data false
-        find_unreachable_goal
-      fi
+      # 该查询会在大规划栅格上保守展开，先在静止状态找目标；随后立即用
+      # free-unreachable action 抢占 tracking 任务，避免查询耗时让前置目标自然完成。
+      find_unreachable_goal
+      publish_relative_fault_goal unreachable_precondition
       log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
-      if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-        send_fault_goal unreachable "${UNREACHABLE_GOAL_FRAME}" "${UNREACHABLE_GOAL_X}" "${UNREACHABLE_GOAL_Y}" 30
-      else
-        timeout 8 ros2 topic pub --rate 2 --times 3 --wait-matching-subscriptions 2 \
-          --qos-durability volatile \
-          /goal_pose geometry_msgs/msg/PoseStamped \
-          "{header: {frame_id: ${UNREACHABLE_GOAL_FRAME}}, pose: {position: {x: ${UNREACHABLE_GOAL_X}, y: ${UNREACHABLE_GOAL_Y}, z: 0.0}, orientation: {w: 1.0}}}" \
-          >/tmp/ats_p2_fault_unreachable_pub.out 2>&1 || fail "cannot publish unreachable goal"
-      fi
-      if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-        wait_for_fault_action_result unreachable 5 12
-      fi
+      send_fault_goal unreachable "${UNREACHABLE_GOAL_FRAME}" "${UNREACHABLE_GOAL_X}" "${UNREACHABLE_GOAL_Y}" 30
+      wait_for_fault_action_result unreachable 5 12
       wait_for_command "unreachable goal triggers emergency stop" 10 \
         topic_field_equals /planner/emergency_stop data true
       wait_for_command "free unreachable goal is classified no-path" 8 \
@@ -1060,6 +1037,8 @@ assert_pose_near_goal() {
   fi
 }
 
+# [Dead Code Suggestion] 旧 /goal_pose topic fallback 的到达检查。
+# P3 action-only 回归只由 action result 驱动；待 P3 运行验收完成后再单独清理。
 wait_for_pose_near_goal() {
   local label="$1"
   local goal_x="$2"
@@ -1187,16 +1166,16 @@ run_navigation_goal() {
   local goal_output="${prefix}_goal.out"
   local goal_error="${prefix}_goal.err"
   local command_output="${prefix}_cmd_vel.out"
-  local topic output_file pid log_line_count log_start_line
+  local topic output_file pid log_line_count log_start_line telemetry_sequence goal_send_stamp
   local -a topic_pids=()
 
   log_line_count="$(wc -l < "${LAUNCH_LOG}")"
   log_start_line=$((log_line_count + 1))
   capture_pose "${before_pose}" || fail "cannot capture pose before ${name}"
+  telemetry_sequence="$(read_swerve_telemetry_sequence)"
+  [[ "${telemetry_sequence}" =~ ^[0-9]+$ ]] || \
+    fail "cannot capture /swerve/telemetry sequence before ${name}"
   local -a path_topics=(/minco/raw_path /minco/reference_path)
-  if [[ "${NAVIGATION_MODE}" == "nav2" ]]; then
-    path_topics=(/plan "${path_topics[@]}")
-  fi
   for topic in "${path_topics[@]}"; do
     output_file="${prefix}_${topic//\//_}.out"
     ensure_topic_capture_ready "${name} ${topic}" "${topic}" nav_msgs/msg/Path \
@@ -1212,52 +1191,34 @@ run_navigation_goal() {
   # 避免目标触发后多个路径话题瞬时发布而被测试遗漏。
   sleep 2
 
-  if [[ "${NAVIGATION_MODE}" == "nav2" ]]; then
-    timeout "${GOAL_TIMEOUT}" ros2 action send_goal /navigate_to_pose \
-      nav2_msgs/action/NavigateToPose \
-      "{pose: {header: {frame_id: map}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}}" \
-      >"${goal_output}" 2>"${goal_error}" &
-    GOAL_PID=$!
-  elif [[ "${P3_GOAL_ENTRY}" == "action" ]]; then
-    timeout "${GOAL_TIMEOUT}" ros2 action send_goal --feedback /ats_navigate_to_pose \
-      ats_navigation_interfaces/action/NavigateToPose \
-      "{goal_pose: {header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
-      >"${goal_output}" 2>"${goal_error}" &
-    GOAL_PID=$!
-  else
-    # P3 中 /goal_pose 只由目标管理器消费；MINCO 直接目标订阅已显式关闭。
-    timeout 8 ros2 topic pub --once --wait-matching-subscriptions 1 \
-      /goal_pose geometry_msgs/msg/PoseStamped \
-      "{header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}" \
-      >"${goal_output}" 2>"${goal_error}" || fail "${name} P3 /goal_pose was not delivered"
-  fi
+  goal_send_stamp="$(date +%s.%N)"
+  LAST_GOAL_SEND_EPOCH_SEC="${goal_send_stamp%%.*}"
+  LAST_GOAL_SEND_EPOCH_NANOSEC="${goal_send_stamp##*.}"
+  LAST_GOAL_TELEMETRY_SEQUENCE="${telemetry_sequence}"
+  timeout "${GOAL_TIMEOUT}" ros2 action send_goal --feedback /ats_navigate_to_pose \
+    ats_navigation_interfaces/action/NavigateToPose \
+    "{goal_pose: {header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
+    >"${goal_output}" 2>"${goal_error}" &
+  GOAL_PID=$!
 
-  if [[ "${P3_GOAL_ENTRY}" == "topic" && "${NAVIGATION_MODE}" == "p3" ]]; then
-    wait_for_pose_near_goal "${name} P3 /goal_pose" "${goal_x}" "${goal_y}" "${after_pose}"
-  else
-    local goal_deadline=$((SECONDS + GOAL_TIMEOUT + 5))
-    while kill -0 "${GOAL_PID}" 2>/dev/null && (( SECONDS < goal_deadline )); do
-      if ! kill -0 "${LAUNCH_PID}" 2>/dev/null; then
-        fail "launch exited while ${name} goal was active"
-      fi
-      sleep 1
-    done
-    if kill -0 "${GOAL_PID}" 2>/dev/null; then
-      fail "${name} navigation action did not finish before timeout"
+  local goal_deadline=$((SECONDS + GOAL_TIMEOUT + 5))
+  while kill -0 "${GOAL_PID}" 2>/dev/null && (( SECONDS < goal_deadline )); do
+    if ! kill -0 "${LAUNCH_PID}" 2>/dev/null; then
+      fail "launch exited while ${name} goal was active"
     fi
-    wait "${GOAL_PID}" 2>/dev/null || true
-    unset GOAL_PID
-    cat "${goal_output}"
-    grep -q 'Goal accepted' "${goal_output}" || fail "${name} goal was not accepted"
-    grep -q 'Goal finished with status: SUCCEEDED' "${goal_output}" || \
-      fail "${name} navigation action did not succeed"
-    if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-      grep -q 'Feedback:' "${goal_output}" || fail "${name} ATS action did not return feedback"
-      echo "OK: ${name} ATS Navigate action returned feedback and SUCCEEDED"
-    else
-      echo "OK: ${name} NavigateToPose returned SUCCEEDED"
-    fi
+    sleep 1
+  done
+  if kill -0 "${GOAL_PID}" 2>/dev/null; then
+    fail "${name} ATS action did not finish before timeout"
   fi
+  wait "${GOAL_PID}" 2>/dev/null || true
+  unset GOAL_PID
+  cat "${goal_output}"
+  grep -q 'Goal accepted' "${goal_output}" || fail "${name} ATS action was not accepted"
+  grep -q 'Goal finished with status: SUCCEEDED' "${goal_output}" || \
+    fail "${name} ATS action did not succeed"
+  grep -q 'Feedback:' "${goal_output}" || fail "${name} ATS action did not return feedback"
+  echo "OK: ${name} ATS Navigate action returned feedback and SUCCEEDED"
 
   for capture in "${topic_pids[@]}"; do
     pid="${capture%%:*}"
@@ -1282,14 +1243,13 @@ run_navigation_goal() {
 LAUNCH_ARGS=(
   ats_mujoco_sim
   rmuc_2026_mujoco.launch.py
-  # P2 保留 Nav2 action 对照；P3 显式关闭 Nav2 并改用 ATS /goal_pose 或 action。
+  # P3 回归固定自研 ATS action 链；Nav2 基线由 test_mujoco_nav_chain.sh 独立执行。
   launch_swerve_mpc:=true
   use_viewer:=false
   show_viewer:=false
   launch_mujoco_rviz:=false
-  # 当前兼容回归需 Nav2 生成 /plan；Nav2-free 回归应另建脚本，不能复用这里的 action。
-  launch_nav2:="$( [[ "${NAVIGATION_MODE}" == "nav2" ]] && echo true || echo false )"
-  launch_trajectory_optimizer:=true
+  launch_nav2:=false
+  launch_trajectory_optimizer:=false
   launch_twist_bridge:=true
   launch_rog_map:="${LAUNCH_ROG_MAP}"
   launch_localization_fusion:="${P4_LOCALIZATION_FUSION}"
@@ -1333,17 +1293,9 @@ if [[ "${P4_LOCALIZATION_FUSION,,}" == "true" ]]; then
 fi
 wait_for_topic_once /traversability_grid 120
 wait_for_topic_once /rc_esdf/planning_grid 120
-if [[ "${NAVIGATION_MODE}" == "nav2" ]]; then
-  for node in /controller_server /planner_server /bt_navigator; do
-    wait_for_lifecycle_active "${node}"
-  done
-else
-  assert_p3_process_graph
-fi
+assert_p3_process_graph
 
-if [[ "${PLANNING_GRID_OWNER}" == "rog_map" ]]; then
-  verify_rog_map_planning_interface
-fi
+verify_rog_map_planning_interface
 
 wait_for_command "minco_planner node" 30 node_is_present /minco_planner
 wait_for_command "ats_swerve_mpc node" 30 node_is_present /ats_swerve_mpc
@@ -1356,15 +1308,13 @@ echo "OK: MPC nodes present and fake_vel_transform absent"
 
 assert_topic_ownership /cmd_vel_mpc ats_swerve_mpc twist_to_motion_ctrl
 assert_topic_ownership /motion_control twist_to_motion_ctrl ats_mujoco_sim
-if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-  assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
-  assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
-  assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mpc
-  # MPC 清 tracker，MuJoCo 执行器做硬零速；安全信号允许多个 consumer，但只有
-  # Goal Manager 可以发布最终急停权威。
-  assert_topic_ownership /planner/emergency_stop ats_goal_manager
-  wait_for_topic_once /gimbal/yaw_status 20
-fi
+assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
+assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
+assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mpc
+# MPC 清 tracker，MuJoCo 执行器做硬零速；安全信号允许多个 consumer，但只有
+# Goal Manager 可以发布最终急停权威。
+assert_topic_ownership /planner/emergency_stop ats_goal_manager
+wait_for_topic_once /gimbal/yaw_status 20
 wait_for_topic_once /swerve/telemetry 20
 
 declare -a DEBUG_TOPICS=(
@@ -1388,12 +1338,10 @@ CAPTURE_PIDS+=("${CMD_STREAM_PID}")
 ensure_topic_capture_ready "Motion control stream" /motion_control manda_can_control/msg/MotionCtrl \
   /tmp/ats_minco_mpc_motion_stream.out MOTION_STREAM_PID
 CAPTURE_PIDS+=("${MOTION_STREAM_PID}")
-if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-  EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
-  ensure_topic_capture_ready "P3 ExecutionCommand" /planner/execution_command \
-    ats_navigation_interfaces/msg/ExecutionCommand "${EXECUTION_STREAM}" EXECUTION_STREAM_PID
-  CAPTURE_PIDS+=("${EXECUTION_STREAM_PID}")
-fi
+EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
+ensure_topic_capture_ready "P3 ExecutionCommand" /planner/execution_command \
+  ats_navigation_interfaces/msg/ExecutionCommand "${EXECUTION_STREAM}" EXECUTION_STREAM_PID
+CAPTURE_PIDS+=("${EXECUTION_STREAM_PID}")
 
 for index in "${!GOAL_NAMES[@]}"; do
   echo "RUN: ${TEST_PROFILE} goal $((index + 1))/${#GOAL_NAMES[@]} '${GOAL_NAMES[index]}' -> " \
@@ -1404,14 +1352,12 @@ done
 sleep 1
 stop_capture_process "${CMD_STREAM_PID}"
 stop_capture_process "${MOTION_STREAM_PID}"
-if [[ "${NAVIGATION_MODE}" == "p3" ]]; then
-  stop_capture_process "${EXECUTION_STREAM_PID}"
-  [[ -s "${EXECUTION_STREAM}" ]] || fail "ExecutionCommand did not publish during P3 run"
-  assert_execution_yaw_authority "${EXECUTION_STREAM}" "${YAW_AUTHORITY_EXPECTED}"
-  if [[ "${YAW_AUTHORITY_EXPECTED}" == "body" ]]; then
-    wait_for_command "BODY_YAW_FOLLOW gimbal lock acknowledgement" 10 \
-      topic_field_equals /gimbal/yaw_status locked true
-  fi
+stop_capture_process "${EXECUTION_STREAM_PID}"
+[[ -s "${EXECUTION_STREAM}" ]] || fail "ExecutionCommand did not publish during P3 run"
+assert_execution_yaw_authority "${EXECUTION_STREAM}" "${YAW_AUTHORITY_EXPECTED}"
+if [[ "${YAW_AUTHORITY_EXPECTED}" == "body" ]]; then
+  wait_for_command "BODY_YAW_FOLLOW gimbal lock acknowledgement" 10 \
+    topic_field_equals /gimbal/yaw_status locked true
 fi
 
 for index in "${!DEBUG_TOPICS[@]}"; do
@@ -1425,13 +1371,14 @@ done
 assert_nonzero_stream /cmd_vel_mpc /tmp/ats_minco_mpc_cmd_vel_stream.out
 assert_nonzero_stream /motion_control /tmp/ats_minco_mpc_motion_stream.out
 assert_final_swerve_telemetry \
-  "/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_final_swerve_telemetry.out"
+  "/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_final_swerve_telemetry.out" \
+  "${LAST_GOAL_TELEMETRY_SEQUENCE}" \
+  "${LAST_GOAL_SEND_EPOCH_SEC}" \
+  "${LAST_GOAL_SEND_EPOCH_NANOSEC}"
 
-if [[ "${PLANNING_GRID_OWNER}" == "rog_map" ]]; then
-  wait_for_generation_advance "${P2_LAST_GENERATION}" 30
-  if [[ "${P2_FAULT_CASE}" != "none" ]]; then
-    run_p2_fault_injection "${P2_FAULT_CASE}"
-  fi
+wait_for_generation_advance "${P2_LAST_GENERATION}" 30
+if [[ "${P2_FAULT_CASE}" != "none" ]]; then
+  run_p2_fault_injection "${P2_FAULT_CASE}"
 fi
 if [[ "${P3_FAULT_CASE}" != "none" ]]; then
   run_p3_action_fault_injection "${P3_FAULT_CASE}"
