@@ -36,6 +36,45 @@ footprint safety、Local Collision Repair、Goal Manager、全向 SE2 MPC、速�
 
 上述结论来自当前源码静态交叉核对，不等价于本轮重新运行闭环。
 
+## 1. 已完成内容
+
+以下记录对应根仓 `df96ad7` 与导航仓 `718ceb6`，均已推送到各自的
+`origin/develop`：
+
+1. `ExecutionCommand` 增加 `manager_incarnation`。Goal Manager 以
+   `steady_clock` 生成实例 token，并在启动时发布 `MODE_STOP`；MPC 以
+   `(manager_incarnation, command_sequence)` 接收授权。新实例未经该实例
+   `MODE_STOP` 的 `MODE_EXECUTE` 会归零，旧实例的延迟命令不能复活 tracker。
+   该局部契约已由 Goal Manager pytest 和 MPC gtest 验证。
+   `[已验证-单测, Confidence: High]`
+2. 自研 MuJoCo 回归脚本接受稳定的 `TEST_PROFILE=default`。`default` 与
+   `red_box` 名义路线均已在 `PLANNING_GRID_OWNER=rog_map` 下运行：终点误差分别为
+   `0.003553 m` 与 `0.003347 m`，离散 footprint 冲突采样均为 `0`；运行图检查没有
+   Nav2 server 或 `/plan`，并确认 planning grid、执行授权、MPC 和底盘输出的指定
+   owner 唯一。`contact_violation_count=0` 只表示 MuJoCo telemetry 计数，不是独立
+   physical contact evaluator。`[已验证-运行, Confidence: High]`
+3. 回归脚本已实现但尚未运行的独立门禁包括 P2 的 `adapter_lease`、
+   `service_timeout`、`input_stale`、`unknown`、`unreachable`，以及 P3 action 的
+   `cancel`、`preempt`、`timeout`、`tf_failure`。`[已实现未运行, Confidence: High]`
+
+## 2. 当前下一阶段
+
+下一阶段是 **P2/P3 运行期安全故障注入与恢复闭环**，而不是立即清理 Nav2 或重构总
+YAML。每个 fault case 必须用新的 `ROS_DOMAIN_ID` 和新的无 viewer MuJoCo launch
+独立运行，验证其完整链路：
+
+```text
+故障注入 -> ready/stale 或 action result 的预期状态
+         -> /planner/emergency_stop=true
+         -> /cmd_vel_mpc=0
+         -> /motion_control=0
+         -> 恢复后 generation 前进，且无新目标时旧 reference/旧授权不复活
+```
+
+只有这 9 个运行门禁全部通过，才进入 Goal Manager/MPC/serial 的真实进程重启注入；
+只有安全和恢复门禁闭合，才允许开始正式入口、总 YAML 或 Nav2 依赖清理。
+`[未验证, Confidence: High]`
+
 ## 唯一目标架构
 
 ```text
@@ -63,7 +102,7 @@ Nav2 planner/controller/BT/costmap/lifecycle、`nav2_msgs` action 和 `/plan` �
 3. [导航参数与接口统一配置方案](./导航参数与接口统一配置方案.md)：`node_params.yaml` 单一权威与结构化接口账本。
 4. [ROGMap与RViz可视化升级方案](./ROGMap与RViz可视化升级方案.md)：已接显示、剩余显示和数值接口隔离。
 5. [分阶段任务清单与验收矩阵](./分阶段任务清单与验收矩阵.md)：可执行 TODO、DoD、测试、停止条件和提交拆分。
-6. [下一阶段Nav2移除与统一配置实施提示词](./下一阶段Nav2移除与统一配置实施提示词.md)：下一会话可直接执行的提示词。
+6. [下一阶段 P2/P3 安全故障注入与恢复实施提示词](./下一阶段Nav2移除与统一配置实施提示词.md)：下一会话可直接执行的提示词。
 
 ## 状态标签
 
