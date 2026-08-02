@@ -73,14 +73,6 @@ def launch_defaults(path: Path):
     return result
 
 
-def assert_default_is_params_file(path: Path, argument_names):
-    defaults = launch_defaults(path)
-    for name in argument_names:
-        default = defaults.get(name)
-        if not isinstance(default, ast.Name) or default.id != "params_file":
-            raise AssertionError(f"{path}: {name} must default to params_file")
-
-
 def assert_default_expression(path: Path, argument_name: str, expected: str):
     default = launch_defaults(path).get(argument_name)
     if default is None:
@@ -164,21 +156,18 @@ def main():
 
     root_launch = workspace / "src/ats_sentry_bringup/launch/bringup.launch.py"
     root_text = root_launch.read_text(encoding="utf-8")
-    for legacy_path in (
-        "minco_planner_reality.yaml",
-        "ats_goal_manager_reality.yaml",
-        "ats_swerve_mpc_reality.yaml",
-        "rog_map_ground_planning.yaml",
+    for forbidden in (
+        "nav2_common",
+        "RewrittenYaml",
+        "launch_nav2",
+        "launch_swerve_mpc",
+        "launch_trajectory_optimizer",
+        "nav_cmd_vel_topic",
+        "planning_grid_owner",
     ):
-        assert (
-            legacy_path not in root_text
-        ), f"formal root launch still loads {legacy_path}"
-    for forwarded_name in (
-        "minco_params_file",
-        "goal_manager_params_file",
-        "mpc_params_file",
-    ):
-        assert f'"{forwarded_name}": params_file' in root_text
+        assert forbidden not in root_text, f"formal root launch retains {forbidden}"
+    assert 'executable="ats_rog_map_node"' in root_text
+    assert 'executable="ats_rog_map_adapter_node"' in root_text
 
     nav_real = (
         workspace
@@ -194,13 +183,20 @@ def main():
         'os.path.join(assets_dir, "params", "node_params.yaml")'
         in nav_real.read_text(encoding="utf-8")
     )
-    formal_arguments = (
-        "minco_params_file",
-        "goal_manager_params_file",
-        "mpc_params_file",
-    )
-    assert_default_is_params_file(nav_real, formal_arguments)
-    assert_default_is_params_file(nav_bringup, formal_arguments)
+    for launch_path in (nav_real, nav_bringup, nav_launch):
+        launch_text = launch_path.read_text(encoding="utf-8")
+        for forbidden in (
+            "nav2_common",
+            "RewrittenYaml",
+            "launch_nav2",
+            "launch_swerve_mpc",
+            "launch_trajectory_optimizer",
+            "nav_cmd_vel_topic",
+            "planning_grid_owner",
+            "map_server",
+            "lifecycle_manager",
+        ):
+            assert forbidden not in launch_text, f"{launch_path} retains {forbidden}"
 
     mpc_topic_default = (
         "IfElseSubstitution(launch_fake_vel_transform, '/cmd_vel_mpc', "
@@ -209,47 +205,33 @@ def main():
     )
     chassis_input_default = (
         "IfElseSubstitution(launch_fake_vel_transform, "
-        "'cmd_vel_gimbal_yaw_odom', IfElseSubstitution(launch_nav2, "
-        "nav_cmd_vel_topic, mpc_cmd_vel_topic))"
+        "'cmd_vel_gimbal_yaw_odom', mpc_cmd_vel_topic)"
     )
-    for launch_path in (root_launch, nav_real, nav_bringup, nav_launch):
+    for launch_path in (root_launch, nav_real, nav_launch):
         assert_default_expression(launch_path, "mpc_cmd_vel_topic", mpc_topic_default)
-        assert_default_expression(
-            launch_path, "chassis_vel_input_topic", chassis_input_default
-        )
+    for launch_path in (root_launch, nav_real, nav_launch):
+        assert_default_expression(launch_path, "chassis_vel_input_topic", chassis_input_default)
 
-    nav2_free = (
+    real_robot_navigation = (
+        workspace / "src/ats_sentry_bringup/launch/real_robot_navigation.launch.py"
+    )
+    assert not (
         workspace / "src/ats_sentry_bringup/launch/real_robot_nav2_free.launch.py"
-    )
-    nav2_free_text = nav2_free.read_text(encoding="utf-8")
-    assert '"launch_nav2": "False"' in nav2_free_text
-    assert '"launch_swerve_mpc": "True"' in nav2_free_text
-    assert '"launch_fake_vel_transform": launch_fake_vel_transform' in nav2_free_text
+    ).exists()
+    real_robot_text = real_robot_navigation.read_text(encoding="utf-8")
+    for forbidden in ("nav2", "launch_swerve_mpc", "planning_grid_owner"):
+        assert forbidden not in real_robot_text.lower(), (
+            f"neutral real-robot entry retains {forbidden}"
+        )
+    assert '"launch_fake_vel_transform": launch_fake_vel_transform' in real_robot_text
     assert (
-        '"launch_chassis_vel_transform": launch_chassis_vel_transform' in nav2_free_text
+        '"launch_chassis_vel_transform": launch_chassis_vel_transform' in real_robot_text
     )
-    nav2_free_defaults = launch_defaults(nav2_free)
-    assert isinstance(nav2_free_defaults["launch_fake_vel_transform"], ast.Constant)
-    assert nav2_free_defaults["launch_fake_vel_transform"].value == "True"
-    assert isinstance(nav2_free_defaults["launch_chassis_vel_transform"], ast.Constant)
-    assert nav2_free_defaults["launch_chassis_vel_transform"].value == "True"
-
-    for launch_path, condition_names in (
-        (root_launch, ("chassis_vel_transform_enabled",)),
-        (
-            nav_launch,
-            ("fake_vel_transform_enabled", "chassis_vel_transform_enabled"),
-        ),
-    ):
-        launch_text = launch_path.read_text(encoding="utf-8")
-        for condition_name in condition_names:
-            condition_marker = f"{condition_name} = PythonExpression"
-            condition_block = launch_text.split(condition_marker, 1)[1].split(
-                "\n\n", 1
-            )[0]
-            assert (
-                "launch_nav2" not in condition_block
-            ), f"{launch_path}: {condition_name} must not depend on launch_nav2"
+    real_robot_defaults = launch_defaults(real_robot_navigation)
+    assert isinstance(real_robot_defaults["launch_fake_vel_transform"], ast.Constant)
+    assert real_robot_defaults["launch_fake_vel_transform"].value == "True"
+    assert isinstance(real_robot_defaults["launch_chassis_vel_transform"], ast.Constant)
+    assert real_robot_defaults["launch_chassis_vel_transform"].value == "True"
 
     behavior_path = workspace / "src/ats_sentry_behavior/params/sentry_behavior.yaml"
     behavior_text = behavior_path.read_text(encoding="utf-8")
