@@ -19,8 +19,11 @@
    `/motion_control` 的指定 owner 唯一；终点误差分别为 `0.003553 m`、`0.003347 m`。
    `[已验证-运行, Confidence: High]`
 3. 脚本已经实现 P2 `adapter_lease`、`service_timeout`、`input_stale`、`unknown`、
-   `unreachable` 和 P3 `cancel`、`preempt`、`timeout`、`tf_failure`，但尚无这些用例
-   的当前 revision 运行结果。`[已实现未运行, Confidence: High]`
+   `unreachable` 和 P3 `cancel`、`preempt`、`timeout`、`tf_failure`。2026-08-02 在
+   domain `241` 及 `ROS_LOCALHOST_ONLY=1` 的 domain `243` 尝试运行
+   `adapter_lease`，两次均在 ROS graph 建立前因 CycloneDDS `failed to enumerate
+   interfaces for "udp": -1` 失败，尚无 fault 链运行结果。
+   `[已实现-静态确认，运行阻塞, Confidence: High]`
 
 未完成：上述 9 个故障门禁、Goal Manager/MPC/serial 的真实进程重启注入、serial
 incarnation/digest 契约、独立 physical contact evaluator、P3 仓库级 Nav2-free 和实车/HIL。
@@ -42,6 +45,11 @@ incarnation/digest 契约、独立 physical contact evaluator、P3 仓库级 Nav
    推断事实；证据只来自 `AGENTS.md`、活动源码、接口、launch、测试、日志和本目录。
 4. 不得把编译通过、topic 存在或一次名义运动写成故障闭环通过。用户要求当前执行者
    完成定位、修改、构建、单测、仿真、文档、分仓提交和推送，不转交给其他代理。
+
+若 CycloneDDS 在当前环境不能枚举 UDP interface，先记录完整 launch log 并修复执行
+环境（例如提供可用 localhost/UDP interface 或目标机 ROS middleware 配置）；不能把
+`timeout waiting for node graph` 当成故障用例结果，也不能在没有运行证据时进入 Nav2
+结构删除。
 
 二、本轮已完成上下文（只作定位线索，不能代替当前 revision 验证）
 
