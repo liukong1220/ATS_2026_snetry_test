@@ -53,9 +53,26 @@ footprint safety、Local Collision Repair、Goal Manager、全向 SE2 MPC、速�
    Nav2 server 或 `/plan`，并确认 planning grid、执行授权、MPC 和底盘输出的指定
    owner 唯一。`contact_violation_count=0` 只表示 MuJoCo telemetry 计数，不是独立
    physical contact evaluator。`[已验证-运行, Confidence: High]`
-3. 回归脚本已实现但尚未运行的独立门禁包括 P2 的 `adapter_lease`、
+3. 回归脚本已实现但尚无成功运行证据的独立门禁包括 P2 的 `adapter_lease`、
    `service_timeout`、`input_stale`、`unknown`、`unreachable`，以及 P3 action 的
-   `cancel`、`preempt`、`timeout`、`tf_failure`。`[已实现未运行, Confidence: High]`
+   `cancel`、`preempt`、`timeout`、`tf_failure`。`[已实现-静态确认, Confidence: High]`
+
+### 运行期检查记录（2026-08-02）
+
+已对 `adapter_lease` 进行独立启动尝试：
+
+```text
+ROS_DOMAIN_ID=241 P2_FAULT_CASE=adapter_lease P3_FAULT_CASE=none
+ROS_DOMAIN_ID=243 ROS_LOCALHOST_ONLY=1 P2_FAULT_CASE=adapter_lease P3_FAULT_CASE=none
+```
+
+两次均在 ROS graph 建立前失败，CycloneDDS 报 `failed to enumerate interfaces for
+"udp": -1`，节点随后报 `rcl node's rmw handle is invalid`；脚本最终为
+`timeout waiting for node graph`。因此本轮没有触达 `adapter_lease` 注入，也没有获得
+`emergency_stop -> /cmd_vel_mpc=0 -> /motion_control=0` 或恢复 generation 证据。
+原始日志保存在 `/tmp/ats_minco_mpc_test_launch_241.log` 和
+`/tmp/ats_minco_mpc_test_launch_243.log`，状态为
+`[未验证, Confidence: High；环境阻塞]`，不能写成 fault 通过。
 
 ## 2. 当前下一阶段
 
