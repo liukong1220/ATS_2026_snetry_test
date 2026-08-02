@@ -15,9 +15,7 @@ USE_RVIZ="${USE_RVIZ:-True}"
 RVIZ_FORCE_SOFTWARE="${RVIZ_FORCE_SOFTWARE:-0}"
 NAV_LOG_LEVEL="${NAV_LOG_LEVEL:-warn}"
 LAUNCH_ROSBAG_RECORDER="${LAUNCH_ROSBAG_RECORDER:-False}"
-LAUNCH_TRAJECTORY_OPTIMIZER="${LAUNCH_TRAJECTORY_OPTIMIZER:-False}"
 LAUNCH_SMALL_GICP_RELOCALIZATION="${LAUNCH_SMALL_GICP_RELOCALIZATION:-False}"
-USE_COMPOSITION="${USE_COMPOSITION:-False}"
 USE_RESPAWN="${USE_RESPAWN:-True}"
 
 RESTART_DELAY="${RESTART_DELAY:-2}"
@@ -100,7 +98,7 @@ cleanup() {
   echo
   echo "[$(date '+%H:%M:%S')] 比赛看门狗退出，清理子进程"
   terminate_process "vision" "$VISION_PID"
-  terminate_process "nav2" "$NAV_PID"
+  terminate_process "navigation" "$NAV_PID"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -121,11 +119,11 @@ command_prefix() {
   fi
 }
 
-start_nav2() {
+start_navigation() {
   local -a prefix
   command_prefix "$NAV_CPUSET" "$NAV_NICE" prefix
 
-  echo "[$(date '+%H:%M:%S')] 启动 Nav2: world=${WORLD_NAME}, cpuset=${NAV_CPUSET:-all}, nice=${NAV_NICE}"
+  echo "[$(date '+%H:%M:%S')] 启动 ATS 导航: world=${WORLD_NAME}, cpuset=${NAV_CPUSET:-all}, nice=${NAV_NICE}"
   (
     # shellcheck disable=SC1090
     set +u
@@ -137,19 +135,16 @@ start_nav2() {
     export MKL_NUM_THREADS="$NAV_OMP_NUM_THREADS"
     exec "${prefix[@]}" ros2 launch ats_sentry_bringup bringup.launch.py\
       world:="$WORLD_NAME" \
-      slam:=False \
       params_file:="$NAV_PARAMS_FILE" \
       use_rviz:="$USE_RVIZ" \
       rviz_force_software:="$RVIZ_FORCE_SOFTWARE" \
-      use_composition:="$USE_COMPOSITION" \
       use_respawn:="$USE_RESPAWN" \
       launch_rosbag_recorder:="$LAUNCH_ROSBAG_RECORDER" \
-      launch_trajectory_optimizer:="$LAUNCH_TRAJECTORY_OPTIMIZER" \
       launch_small_gicp_relocalization:="$LAUNCH_SMALL_GICP_RELOCALIZATION" \
       log_level:="$NAV_LOG_LEVEL"
-  ) >>"$ROS_LOG_DIR/nav2.log" 2>&1 &
+  ) >>"$ROS_LOG_DIR/navigation.log" 2>&1 &
   NAV_PID="$!"
-  echo "$NAV_PID" >"$ROS_HOME/nav2_watchdog.pid"
+  echo "$NAV_PID" >"$ROS_HOME/navigation_watchdog.pid"
 }
 
 start_vision() {
@@ -175,25 +170,25 @@ start_vision() {
 
 echo "=========================================="
 echo "比赛看门狗已启动，Ctrl+C 退出"
-echo "Nav2 world: ${WORLD_NAME}"
-echo "Nav2 params: ${NAV_PARAMS_FILE}"
+echo "ATS navigation world: ${WORLD_NAME}"
+echo "ATS navigation params: ${NAV_PARAMS_FILE}"
 echo "Vision config: ${VISION_CONFIG}"
 echo "Logs: ${ROS_LOG_DIR}"
 echo "Watchdog log: ${WATCHDOG_LOG_FILE}"
-echo "Nav2: cpuset=${NAV_CPUSET:-all}, nice=${NAV_NICE}, OMP=${NAV_OMP_NUM_THREADS}"
-echo "Nav2 options: composition=${USE_COMPOSITION}, small_gicp=${LAUNCH_SMALL_GICP_RELOCALIZATION}, trajectory_optimizer=${LAUNCH_TRAJECTORY_OPTIMIZER}, rviz=${USE_RVIZ}"
+echo "ATS navigation: cpuset=${NAV_CPUSET:-all}, nice=${NAV_NICE}, OMP=${NAV_OMP_NUM_THREADS}"
+echo "ATS navigation options: small_gicp=${LAUNCH_SMALL_GICP_RELOCALIZATION}, rviz=${USE_RVIZ}"
 echo "Vision: cpuset=${VISION_CPUSET:-all}, nice=${VISION_NICE}, OpenCV=${VISION_OPENCV_THREADS}, OMP=${VISION_OMP_NUM_THREADS}"
 echo "=========================================="
 
-start_nav2
+start_navigation
 sleep "$STARTUP_GAP"
 start_vision
 
 while true; do
   if ! is_running "$NAV_PID"; then
-    echo "[$(date '+%H:%M:%S')] Nav2 已退出，${RESTART_DELAY}s 后重启"
+    echo "[$(date '+%H:%M:%S')] ATS 导航已退出，${RESTART_DELAY}s 后重启"
     sleep "$RESTART_DELAY"
-    start_nav2
+    start_navigation
   fi
 
   if ! is_running "$VISION_PID"; then

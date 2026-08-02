@@ -114,6 +114,20 @@ def main():
         else workspace / args.params_file
     )
     document = load_yaml(params_path)
+    navigation_root_nodes = (
+        "bt_navigator",
+        "controller_server",
+        "planner_server",
+        "behavior_server",
+        "map_server",
+        "smoother_server",
+        "waypoint_follower",
+        "velocity_smoother",
+        "local_costmap",
+        "global_costmap",
+    )
+    for node_name in navigation_root_nodes:
+        assert node_name not in document, f"root YAML retains {node_name}"
 
     rog_map = parameters(document, "ats_rog_map")
     adapter = parameters(document, "ats_rog_map_adapter")
@@ -124,12 +138,18 @@ def main():
 
     assert rog_map["map_frame"] == "odom"
     assert rog_map["debug_bounds_topic"] == "/rog_map/bounds"
+    assert rog_map["core.esdf.enable"] is True
+    assert rog_map["core.esdf.update_interval_updates"] == 1
+    assert rog_map["core.raycasting.p_occupied"] == 0.80
+    assert rog_map["core.raycasting.p_miss"] == 0.30
+    assert rog_map["core.map_size"] == [10.0, 10.0, 1.0]
+    assert "map_config_file" not in rog_map
     assert adapter["projection_service"] == "/rog_map/get_ground_projection"
     assert adapter["planning_grid_topic"] == "/rc_esdf/planning_grid"
     assert adapter["unknown_is_obstacle"] is True
     assert adapter["require_localization_status"] is True
     assert minco["goal_topic"] == ""
-    assert minco["global_plan_topic"] == ""
+    assert "global_plan_topic" not in minco
     assert minco["goal_request_topic"] == "/ats_goal_manager/planner_goal"
     assert minco["map_ready_topic"] == "/rog_map_adapter/ready"
     assert minco["unknown_is_obstacle"] is True
@@ -164,10 +184,14 @@ def main():
         "launch_trajectory_optimizer",
         "nav_cmd_vel_topic",
         "planning_grid_owner",
+        "map_config_file",
     ):
         assert forbidden not in root_text, f"formal root launch retains {forbidden}"
     assert 'executable="ats_rog_map_node"' in root_text
     assert 'executable="ats_rog_map_adapter_node"' in root_text
+    assert "rog_map_params_file" not in root_text
+    assert "rog_map_adapter_params_file" not in root_text
+    assert "parameters=[params_file" in root_text
 
     nav_real = (
         workspace
@@ -179,10 +203,7 @@ def main():
     nav_launch = (
         workspace / "src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py"
     )
-    assert (
-        'os.path.join(assets_dir, "params", "node_params.yaml")'
-        in nav_real.read_text(encoding="utf-8")
-    )
+    assert 'assets_dir = LaunchConfiguration("assets_dir")' in nav_real.read_text(encoding="utf-8")
     for launch_path in (nav_real, nav_bringup, nav_launch):
         launch_text = launch_path.read_text(encoding="utf-8")
         for forbidden in (
@@ -195,8 +216,30 @@ def main():
             "planning_grid_owner",
             "map_server",
             "lifecycle_manager",
+            "trajectory_optimizer",
+            "ats_nav2_plugins",
         ):
             assert forbidden not in launch_text, f"{launch_path} retains {forbidden}"
+        for forbidden_source in (
+            "minco_params_file",
+            "goal_manager_params_file",
+            "mpc_params_file",
+            "minco_planner_reality.yaml",
+            "ats_goal_manager_reality.yaml",
+            "ats_swerve_mpc_reality.yaml",
+        ):
+            assert forbidden_source not in launch_text, (
+                f"{launch_path} retains a second navigation parameter source"
+            )
+    assert "parameters=[params_file" in nav_launch.read_text(encoding="utf-8")
+
+    for removed_path in (
+        workspace / "src/ats_sentry_nav/trajectory_optimizer",
+        workspace / "src/ats_sentry_nav/ats_nav2_plugins",
+        workspace / "src/ats_sentry_nav/ats_nav_bringup/config/reality/nav2_params.yaml",
+        workspace / "src/ats_sentry_nav/ats_nav_bringup/config/simulation/nav2_params.yaml",
+    ):
+        assert not removed_path.exists(), f"Nav2-only resource still exists: {removed_path}"
 
     mpc_topic_default = (
         "IfElseSubstitution(launch_fake_vel_transform, '/cmd_vel_mpc', "
@@ -241,6 +284,8 @@ def main():
 
     rog_source = workspace / "src/ats_sentry_nav/ats_rog_map/src/ats_rog_map_node.cpp"
     rog_text = rog_source.read_text(encoding="utf-8")
+    assert "map_config_file" not in rog_text
+    assert "makeRogMapConfig(declareCoreParameters(*this))" in rog_text
     for required in (
         '"rog_map/occ"',
         '"rog_map/inf_occ"',
@@ -278,8 +323,15 @@ def main():
         "Reliability Policy: Best Effort",
         "Style: Boxes",
         "Color Transformer: Intensity",
+        "Name: Planning Grid",
+        "Name: MINCO Raw Path",
+        "Name: MINCO Reference",
+        "Name: MPC Reference Horizon",
+        "Name: MPC Predicted Path",
     ):
         assert required in rviz_text, f"RViz ROGMap display contract missing {required}"
+    for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool"):
+        assert forbidden not in rviz_text, f"RViz retains Nav2 display/tool: {forbidden}"
 
     print("PASS: formal Nav2-free configuration and ROGMap visualization contract")
 

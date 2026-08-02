@@ -9,17 +9,12 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <exec_depend>nav2_common</exec_depend>
-  <exec_depend>nav2_lifecycle_manager</exec_depend>
-  <exec_depend>nav2_loopback_sim</exec_depend>
-  <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>standard_robot_pp_ros2</exec_depend>
   <exec_depend>sentry_chassis_vel_transform</exec_depend>
   <exec_depend>ats_nav_bringup</exec_depend>
   <exec_depend>ats_rog_map</exec_depend>
-  <!-- bringup.launch.py 直接启动 adapter 节点并从这三个包的 share 目录取权威参数文件，
-       缺少声明时 real_robot_nav2_free.launch.py 会在 launch 期解析路径失败。 -->
+  <!-- bringup.launch.py 直接启动 adapter 节点并从这些包的 share 目录取权威参数文件。 -->
   <exec_depend>ats_rog_map_adapter</exec_depend>
   <exec_depend>minco_planner</exec_depend>
   <exec_depend>ats_goal_manager</exec_depend>
