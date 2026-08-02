@@ -1,14 +1,12 @@
-# 参数权威（P3 配置收敛）：本文件是正式实机入口唯一加载的 ROS 参数源。
+# 参数权威（P3/S1 配置收敛）：本文件是正式实机入口唯一加载的 ROS 参数源。
 # `bringup.launch.py` 与 `rm_navigation_reality_launch.py` 都把它作为 `params_file`
-# 传给自研导航节点。包内 `*_reality.yaml` 只保留为显式传入的兼容示例，不能是
-# 正式入口的默认值。`.msg`、`.srv`、`.action` 仍是接口 schema 的唯一权威。
+# 传给串口、行为树与自研导航节点。包内 `*_reality.yaml` 和 behavior example 只保留为
+# 显式传入的兼容/示例资源，不能是正式入口的默认值。`.msg`、`.srv`、`.action` 仍是
+# 接口 schema 的唯一权威。
 
 standard_robot_pp_ros2:
   ros__parameters:
     # 这里是实车总入口的本体/传感器/导航参数集合。
-    # 行为树决策参数不在这份文件里，而在：
-    # src/ats_sentry_behavior/params/sentry_behavior.yaml
-    # bringup.launch.py 会同时加载本文件和 sentry_behavior.yaml。
     # 串口设备路径。实车上若换 USB 口或 udev 名称，这里要同步更新。
     device_name: /dev/ttyACM0
     # 串口波特率。必须与下位机固件配置完全一致。
@@ -65,6 +63,150 @@ standard_robot_pp_ros2:
     execution_command_timeout: 0.5
     # 行为树姿态模式输入话题。需与行为树配置一致。
     robot_mode_topic: decision/robot_mode
+
+ats_sentry_behavior_server:
+  ros__parameters:
+    # S1 正式 profile 的唯一行为参数源。实车使用挂钟，仿真只由 launch 覆盖。
+    use_sim_time: false
+    action_name: ats_sentry_behavior
+    tick_frequency: 15
+    groot2_port: 17777
+    ros_plugins_timeout: 1000
+    use_cout_logger: false
+    plugins:
+      - ats_sentry_behavior/bt_plugins
+    behavior_trees:
+      - ats_sentry_behavior/behavior_trees
+    decision:
+      input_source: referee
+      goal_points:
+        x: [0.20, 4.16, 4.92, 1.51, 0.0]
+        y: [-0.18, -3.45, 0.11, -2.19, 0.0]
+        z: [0.00, 0.00, 0.00, 0.00, 0.00]
+      point_roles:
+        supply_safe_point_index: 0
+        patrol_indices: [1, 2, 3]
+        low_hp_candidate_indices: [1, 2]
+        critical_time_target_index: 1
+        anchor_target_index: 2
+      simulation:
+        default_mode: patrol
+        mode_topic: decision/sim_mode
+      referee:
+        start_gate:
+          expected_game_progress: 4
+          min_remain_time: 0
+          max_remain_time: 420
+      topics:
+        spin: cmd_spin
+        gimbal_cmd: cmd_gimbal
+        robot_mode: decision/robot_mode
+      motion:
+        default_spin_speed: 3.0
+        hit_spin_speed: 3.0
+        hit_spin_stop_after_no_hp_drop_s: 2.0
+      mode_limits:
+        switch_cooldown_s: 5.0
+        max_cumulative_s: 175.0
+      mode_visualization:
+        enabled: true
+        topic: decision/robot_mode_markers
+      vision:
+        topic: vision/target
+        timeout_s: 0.3
+        activation_hold_s: 0.25
+        switch_target_hold_s: 0.3
+        override_hold_s: 0.6
+        attack_radius: 0.5
+        follow_occupied_threshold: 40
+        follow_sample_count: 16
+        follow_arc_half_angle_deg: 90.0
+        follow_candidate_clearance_radius_m: 0.45
+        follow_max_path_length_ratio: 1.8
+        follow_reachability_max_expansions: 5000
+        follow_reachability_top_candidates: 6
+        min_replan_interval_s: 0.4
+        min_goal_shift_m: 0.45
+        min_goal_distance_from_robot_m: 0.35
+        prefer_previous_goal_side: true
+        max_target_shift_for_side_hold_m: 0.8
+        max_goal_angle_step_deg: 18.0
+        pose_jump_reset_distance_m: 0.8
+        visualization_enabled: true
+        visualization_topic: decision/vision_follow_markers
+      resource_policy:
+        defend_enter_hp: 280
+        defend_exit_hp: 300
+        resupply_enter_hp: 150
+        resupply_exit_hp: 300
+        resupply_enter_ammo: 50
+        resupply_exit_ammo: 100
+        require_valid_ammo_before_resupply: true
+      inputs:
+        planning_grid:
+          topic: /rc_esdf/planning_grid
+          qos_depth: 1
+          qos_reliable: true
+          qos_transient_local: true
+          timeout_s: 2.0
+        localization:
+          topic: /localization
+          qos_depth: 5
+          qos_reliable: false
+      pose:
+        expected_frame: map
+        timeout_s: 0.5
+        tf_fallback_enabled: true
+      time_thresholds:
+        abundant: 300
+        normal: 240
+        tense: 120
+        critical: 40
+      hp_thresholds:
+        abundant:
+          high: 400
+          medium: 300
+          low: 120
+        normal:
+          high: 400
+          medium: 300
+          low: 150
+        tense:
+          high: 400
+          medium: 300
+          low: 150
+        critical:
+          high: 400
+          medium: 300
+          low: 150
+      decision_config:
+        path_tolerance: 0.2
+        ats_action_server: /ats_navigate_to_pose
+        ats_goal_timeout_s: 0.0
+        decision_period_ms: 100
+        goal_position_tolerance: 0.2
+        path_goal_reached_tolerance: 0.4
+        active_goal_hold_tolerance: 0.25
+        active_goal_min_resend_interval_s: 0.8
+        vision_active_goal_hold_tolerance: 0.24
+        vision_active_goal_min_resend_interval_s: 0.40
+        waypoint_stop_duration_s: 0.0
+        patrol_preview_points: 1
+        action_server_wait_timeout_s: 0.0
+      rmuc:
+        csv_waypoints_file: params/rmuc_waypoints.csv
+        patrol_csv_file: params/rmuc_patrol_waypoints.csv
+        endgame_time_threshold: 0
+        supply_point:
+          x: -5.35
+          y: 0.60
+          z: 0.0
+
+ats_sentry_behavior_client:
+  ros__parameters:
+    use_sim_time: false
+    goal_retry_delay_ms: 100
+    target_tree: rmuc_2026_mapping
 
 joint_state_publisher:
   ros__parameters:
