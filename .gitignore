@@ -64,3 +64,6 @@ src/sp_vision25/
 *.pdf
 参考*
 minco+mpc_reference*
+
+# 本地研发过程文档：保留在工作区，不纳入版本库。
+/docs/项目优化文档/
