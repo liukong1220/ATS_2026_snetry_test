@@ -6,7 +6,6 @@ FAULT_CASE="${P4_UNSAFE_FAULT_CASE:-map_after_commit}"
 DOMAIN_ID="${ROS_DOMAIN_ID:-201}"
 RESULT_FILE="${P4_UNSAFE_RESULT_FILE:-/tmp/ats_p4_unsafe_${FAULT_CASE}_${DOMAIN_ID}.json}"
 LAUNCH_LOG="${P4_UNSAFE_LAUNCH_LOG:-/tmp/ats_p4_unsafe_${FAULT_CASE}_${DOMAIN_ID}.log}"
-ROG_MAP_CONFIG_FILE="${ROG_MAP_CONFIG_FILE:-${ROOT_DIR}/src/ats_sentry_nav/ats_rog_map/config/rog_map_ground_planning_mujoco.yaml}"
 
 case "${FAULT_CASE}" in
   mid_segment|pure_rotation|unknown|outside|map_after_commit|old_generation|repair_after_unsafe) ;;
@@ -33,11 +32,6 @@ python3 scripts/evaluate_mujoco_unsafe_trajectory.py \
 EVALUATOR_PID=$!
 
 setsid ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
-  launch_swerve_mpc:=true launch_nav2:=false launch_twist_bridge:=true \
-  launch_trajectory_optimizer:=true \
-  launch_rog_map:=true planning_grid_owner:=rog_map \
-  launch_localization_fusion:=true \
-  rog_map_config_file:="${ROG_MAP_CONFIG_FILE}" \
   use_viewer:=false show_viewer:=false launch_mujoco_rviz:=false \
   enable_lidar:=true lidar_backend:=cpu lidar_downsample:=24 enable_tof:=false \
   start_x:=-10.66 start_y:=1.47 start_z:=0.42 start_yaw:=0.0 \

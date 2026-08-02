@@ -24,17 +24,11 @@ TEST_PROFILE="${TEST_PROFILE:-single}"
 MIN_LEG_PROGRESS="${MIN_LEG_PROGRESS:-0.20}"
 # 每段终点的平面位置误差门限（m）。
 GOAL_TOLERANCE="${GOAL_TOLERANCE:-0.30}"
-# P3 自研链由 ROGMap adapter 唯一发布规划栅格。
-PLANNING_GRID_OWNER="${PLANNING_GRID_OWNER:-rog_map}"
-LAUNCH_ROG_MAP="${LAUNCH_ROG_MAP:-true}"
-ROG_MAP_CONFIG_FILE="${ROG_MAP_CONFIG_FILE:-${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map/config/rog_map_ground_planning_mujoco.yaml}"
 LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-24}"
 # 故障注入必须单独启动一套 MuJoCo，避免目标与机器人状态跨用例污染。
 P2_FAULT_CASE="${P2_FAULT_CASE:-none}"
 # P3 action 生命周期故障；每次也必须使用新的 ROS_DOMAIN_ID 和 MuJoCo launch。
 P3_FAULT_CASE="${P3_FAULT_CASE:-none}"
-# P4 定位融合回归；默认关闭以保持既有 P3/Nav2 对照基线。
-P4_LOCALIZATION_FUSION="${P4_LOCALIZATION_FUSION:-false}"
 # Route-profile input for narrow/slope/contact-sensitive BODY_YAW_FOLLOW
 # regressions. This is not a runtime authority hot switch.
 FORCE_BODY_YAW_FOLLOW="${FORCE_BODY_YAW_FOLLOW:-false}"
@@ -43,13 +37,6 @@ BODY_YAW_FOLLOW_CLEARANCE="${BODY_YAW_FOLLOW_CLEARANCE:-0.55}"
 # execute lease and simulated gimbal acknowledgement contract.
 YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
 
-case "${PLANNING_GRID_OWNER}" in
-  rog_map) ;;
-  *)
-    echo "P3 ATS action regression requires PLANNING_GRID_OWNER='rog_map'."
-    exit 2
-    ;;
-esac
 case "${P2_FAULT_CASE}" in
   none|adapter_lease|service_timeout|input_stale|unknown|unreachable) ;;
   *)
@@ -63,13 +50,6 @@ case "${P3_FAULT_CASE}" in
   *)
     echo "Unsupported P3_FAULT_CASE='${P3_FAULT_CASE}'; use 'none', 'cancel', " \
       "'preempt', 'timeout', or 'tf_failure'."
-    exit 2
-    ;;
-esac
-case "${P4_LOCALIZATION_FUSION,,}" in
-  true|false) ;;
-  *)
-    echo "P4_LOCALIZATION_FUSION must be true or false."
     exit 2
     ;;
 esac
@@ -92,20 +72,7 @@ if [[ "${FORCE_BODY_YAW_FOLLOW,,}" == "true" &&
   echo "FORCE_BODY_YAW_FOLLOW=true cannot expect GIMBAL_COMPENSATED."
   exit 2
 fi
-if [[ "${P4_LOCALIZATION_FUSION,,}" == "true" &&
-  "${PLANNING_GRID_OWNER}" != "rog_map" ]]; then
-  echo "P4 localization fusion requires PLANNING_GRID_OWNER=rog_map."
-  exit 2
-fi
-P3_GOAL_FRAME="${P3_GOAL_FRAME:-$(
-  [[ "${P4_LOCALIZATION_FUSION,,}" == "true" ]] && echo map || echo odom
-)}"
-if [[ "${PLANNING_GRID_OWNER}" == "rog_map" || "${LAUNCH_ROG_MAP,,}" == "true" ]]; then
-  [[ -r "${ROG_MAP_CONFIG_FILE}" ]] || {
-    echo "ROGMap config is not readable: ${ROG_MAP_CONFIG_FILE}"
-    exit 2
-  }
-fi
+P3_GOAL_FRAME="${P3_GOAL_FRAME:-map}"
 
 case "${TEST_PROFILE}" in
   default|single)
@@ -1243,20 +1210,11 @@ run_navigation_goal() {
 LAUNCH_ARGS=(
   ats_mujoco_sim
   rmuc_2026_mujoco.launch.py
-  # P3 回归固定自研 ATS action 链；Nav2 基线由 test_mujoco_nav_chain.sh 独立执行。
-  launch_swerve_mpc:=true
   use_viewer:=false
   show_viewer:=false
   launch_mujoco_rviz:=false
-  launch_nav2:=false
-  launch_trajectory_optimizer:=false
-  launch_twist_bridge:=true
-  launch_rog_map:="${LAUNCH_ROG_MAP}"
-  launch_localization_fusion:="${P4_LOCALIZATION_FUSION}"
-  planning_grid_owner:="${PLANNING_GRID_OWNER}"
   force_body_yaw_follow:="${FORCE_BODY_YAW_FOLLOW}"
   body_yaw_follow_clearance:="${BODY_YAW_FOLLOW_CLEARANCE}"
-  rog_map_config_file:="${ROG_MAP_CONFIG_FILE}"
   enable_lidar:=true
   lidar_backend:=cpu
   lidar_downsample:="${LIDAR_DOWNSAMPLE}"
@@ -1277,20 +1235,18 @@ LAUNCH_PID=$!
 
 wait_for_command "node graph" 60 timeout 4 ros2 node list --no-daemon
 wait_for_topic_once /localization 70
-if [[ "${P4_LOCALIZATION_FUSION,,}" == "true" ]]; then
-  wait_for_topic_once /odometry 30
-  wait_for_topic_once /localization/status 30
-  wait_for_command "localization tracking" 30 \
-    topic_field_equals /localization/status state 1
-  wait_for_command "MuJoCo map->odom disabled" 10 \
-    bash -c "ros2 param get --no-daemon /ats_mujoco_sim publish_map_to_odom_tf | grep -q 'Boolean value is: False'"
-  wait_for_command "fusion map->odom enabled" 10 \
-    bash -c "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
-  assert_topic_ownership /odometry ats_mujoco_sim localization_fusion
-  assert_topic_ownership /localization localization_fusion
-  assert_topic_ownership /localization/status localization_fusion
-  echo "OK: P4 /odometry -> fusion -> /localization contract is active"
-fi
+wait_for_topic_once /odometry 30
+wait_for_topic_once /localization/status 30
+wait_for_command "localization tracking" 30 \
+  topic_field_equals /localization/status state 1
+wait_for_command "MuJoCo map->odom disabled" 10 \
+  bash -c "ros2 param get --no-daemon /ats_mujoco_sim publish_map_to_odom_tf | grep -q 'Boolean value is: False'"
+wait_for_command "fusion map->odom enabled" 10 \
+  bash -c "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
+assert_topic_ownership /odometry ats_mujoco_sim localization_fusion
+assert_topic_ownership /localization localization_fusion
+assert_topic_ownership /localization/status localization_fusion
+echo "OK: /odometry -> fusion -> /localization contract is active"
 wait_for_topic_once /traversability_grid 120
 wait_for_topic_once /rc_esdf/planning_grid 120
 assert_p3_process_graph

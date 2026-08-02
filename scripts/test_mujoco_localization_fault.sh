@@ -32,7 +32,7 @@ python3 scripts/evaluate_mujoco_localization_fault.py \
 EVALUATOR_PID=$!
 
 setsid ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
-  launch_swerve_mpc:=true launch_nav2:=false launch_twist_bridge:=true \
+  launch_swerve_mpc:=true launch_twist_bridge:=true \
   launch_rog_map:=true planning_grid_owner:=rog_map \
   launch_localization_fusion:=true \
   mujoco_odom_topic:=/odometry_raw fusion_odom_topic:=/odometry \

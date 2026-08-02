@@ -44,7 +44,6 @@ def generate_launch_description():
     lidar_static_tf_roll = LaunchConfiguration("lidar_static_tf_roll")
     lidar_static_tf_pitch = LaunchConfiguration("lidar_static_tf_pitch")
     lidar_static_tf_yaw = LaunchConfiguration("lidar_static_tf_yaw")
-    rog_map_config_file = LaunchConfiguration("rog_map_config_file")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
 
@@ -110,10 +109,6 @@ def generate_launch_description():
         DeclareLaunchArgument("lidar_static_tf_roll", default_value="0.0"),
         DeclareLaunchArgument("lidar_static_tf_pitch", default_value="0.0"),
         DeclareLaunchArgument("lidar_static_tf_yaw", default_value="-1.0646508437165408"),
-        DeclareLaunchArgument(
-            "rog_map_config_file",
-            default_value=os.path.join(get_package_share_directory("ats_rog_map"), "config", "rog_map.yaml"),
-        ),
         DeclareLaunchArgument("use_respawn", default_value="True"),
         DeclareLaunchArgument("log_level", default_value="info"),
     ]
@@ -145,7 +140,7 @@ def generate_launch_description():
     rog_map = Node(
         package="ats_rog_map", executable="ats_rog_map_node", name="ats_rog_map", namespace=namespace,
         output="screen", respawn=use_respawn, respawn_delay=2.0,
-        parameters=[params_file, {"use_sim_time": use_sim_time, "map_config_file": rog_map_config_file}],
+        parameters=[params_file, {"use_sim_time": use_sim_time}],
         arguments=["--ros-args", "--log-level", log_level],
     )
     rog_map_adapter = Node(
@@ -159,6 +154,7 @@ def generate_launch_description():
     navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(navigation_bringup_dir, "launch", "rm_navigation_reality_launch.py")),
         launch_arguments={
+            "assets_dir": bringup_dir,
             "world": world, "map": map_yaml_file, "prior_pcd_file": prior_pcd_file,
             "namespace": namespace, "use_sim_time": use_sim_time, "params_file": params_file,
             "use_robot_state_pub": use_robot_state_pub, "use_rviz": "False",
