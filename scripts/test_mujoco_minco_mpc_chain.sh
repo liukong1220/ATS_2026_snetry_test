@@ -20,6 +20,14 @@ GOAL_YAW_W="${GOAL_YAW_W:-1.0}"
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
 # 回归路线：single、rectangle（验证横移）、red_box（长距离路线）。
 TEST_PROFILE="${TEST_PROFILE:-single}"
+# RViz must be optional in the same scenario runner so a display-only change
+# can be checked against the identical closed-loop route and fault gates.
+USE_RVIZ="${USE_RVIZ:-false}"
+if [[ "${USE_RVIZ}" == "true" ]]; then
+  RVIZ_DELAY_SEC="${RVIZ_DELAY_SEC:-18.0}"
+else
+  RVIZ_DELAY_SEC="${RVIZ_DELAY_SEC:-1000.0}"
+fi
 # 每一段至少应产生的位姿位移（m），低于此值视为控制未真正跟随。
 MIN_LEG_PROGRESS="${MIN_LEG_PROGRESS:-0.20}"
 # 每段终点的平面位置误差门限（m）。
@@ -97,6 +105,13 @@ case "${TEST_PROFILE}" in
     ;;
   *)
     echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', or 'red_box'."
+    exit 2
+    ;;
+esac
+case "${USE_RVIZ}" in
+  true|false) ;;
+  *)
+    echo "Unsupported USE_RVIZ='${USE_RVIZ}'; use 'true' or 'false'."
     exit 2
     ;;
 esac
@@ -181,13 +196,25 @@ wait_for_command() {
 wait_for_topic_once() {
   local topic="$1"
   local timeout_sec="$2"
-  wait_for_command "topic ${topic}" "${timeout_sec}" timeout 4 ros2 topic echo --no-daemon --once "${topic}"
+  local qos_reliability="${3:-}"
+  local -a echo_args=(ros2 topic echo --no-daemon --once)
+  if [[ -n "${qos_reliability}" ]]; then
+    echo_args+=(--qos-reliability "${qos_reliability}")
+  fi
+  echo_args+=("${topic}")
+  wait_for_command "topic ${topic}" "${timeout_sec}" timeout 4 "${echo_args[@]}"
 }
 
 read_topic_field() {
   local topic="$1"
   local field="$2"
-  timeout 5 ros2 topic echo --no-daemon --once "${topic}" --field "${field}" 2>/dev/null | awk '
+  local qos_reliability="${3:-}"
+  local -a echo_args=(ros2 topic echo --no-daemon --once)
+  if [[ -n "${qos_reliability}" ]]; then
+    echo_args+=(--qos-reliability "${qos_reliability}")
+  fi
+  echo_args+=("${topic}" --field "${field}")
+  timeout 5 "${echo_args[@]}" 2>/dev/null | awk '
     $1 ~ /^[[:alnum:]_]+:$/ && NF >= 2 {print $2; exit}
     NF == 1 && $1 != "---" {print $1; exit}
   '
@@ -197,16 +224,18 @@ topic_field_equals() {
   local topic="$1"
   local field="$2"
   local expected="$3"
+  local qos_reliability="${4:-}"
   local value
-  value="$(read_topic_field "${topic}" "${field}")"
+  value="$(read_topic_field "${topic}" "${field}" "${qos_reliability}")"
   [[ "${value,,}" == "${expected,,}" ]]
 }
 
 topic_field_positive() {
   local topic="$1"
   local field="$2"
+  local qos_reliability="${3:-}"
   local value
-  value="$(read_topic_field "${topic}" "${field}")"
+  value="$(read_topic_field "${topic}" "${field}" "${qos_reliability}")"
   [[ "${value}" =~ ^[0-9]+$ ]] && awk -v value="${value}" 'BEGIN {exit value > 0 ? 0 : 1}'
 }
 
@@ -268,6 +297,7 @@ assert_topic_ownership() {
   local topic="$1"
   local expected_publisher="$2"
   local expected_subscriber="${3:-}"
+  local allowed_observer="${4:-}"
   local topic_info publisher_block subscription_block deadline
   deadline=$((SECONDS + 30))
   while (( SECONDS < deadline )); do
@@ -284,16 +314,25 @@ assert_topic_ownership() {
       return
     fi
     subscription_block="$(sed -n '/^Subscription count:/,$p' <<<"${topic_info}")"
-    if grep -q '^Subscription count: 1$' <<<"${topic_info}" &&
-      grep -q "Node name: ${expected_subscriber}$" <<<"${subscription_block}"
+    if [[ -z "${allowed_observer}" ]] &&
+      grep -q '^Subscription count: 1$' <<<"${topic_info}" &&
+      [[ "$(grep -c "^Node name: ${expected_subscriber}$" <<<"${subscription_block}")" -eq 1 ]]
     then
       echo "OK: ${topic} ownership ${expected_publisher} -> ${expected_subscriber} is unique"
+      return
+    fi
+    if [[ -n "${allowed_observer}" ]] &&
+      grep -q '^Subscription count: 2$' <<<"${topic_info}" &&
+      [[ "$(grep -c "^Node name: ${expected_subscriber}$" <<<"${subscription_block}")" -eq 1 ]] &&
+      [[ "$(grep -c "^Node name: ${allowed_observer}$" <<<"${subscription_block}")" -eq 1 ]]
+    then
+      echo "OK: ${topic} ownership ${expected_publisher} -> ${expected_subscriber}; observer ${allowed_observer} is read-only"
       return
     fi
     sleep 1
   done
   echo "${topic_info}" >&2
-  fail "${topic} ownership did not converge to ${expected_publisher} -> ${expected_subscriber:-<none>}"
+  fail "${topic} ownership did not converge to ${expected_publisher} -> ${expected_subscriber:-<none>}${allowed_observer:+ with observer ${allowed_observer}}"
 }
 
 node_is_present() {
@@ -419,7 +458,7 @@ assert_p3_process_graph() {
 verify_rog_map_planning_interface() {
   local topic node_info generation node_list
   for topic in /rog_map/occ /rog_map/inf_occ /rog_map/unk /rog_map/esdf; do
-    wait_for_command "non-empty ${topic}" 120 topic_field_positive "${topic}" width
+    wait_for_command "non-empty ${topic}" 120 topic_field_positive "${topic}" width best_effort
   done
   wait_for_command "ROGMap input fresh" 30 topic_field_equals /rog_map/stale data false
   wait_for_command "ROGMap adapter ready" 120 \
@@ -451,6 +490,60 @@ verify_rog_map_planning_interface() {
   wait_for_generation_advance "${generation}" 30
 }
 
+assert_rviz_best_effort_observer() {
+  local topic="$1"
+  local topic_info reliabilities deadline
+  deadline=$((SECONDS + 30))
+  while (( SECONDS < deadline )); do
+    topic_info="$(timeout 5 ros2 topic info --no-daemon --verbose "${topic}" 2>/dev/null || true)"
+    printf '\n=== %s ===\n%s\n' "${topic}" "${topic_info}" >>"${RVIZ_QOS_LOG}"
+    reliabilities="$(awk -v node='mujoco_navigation_rviz2' '
+      $0 == "Node name: " node {in_node = 1; next}
+      /^Node name:/ {in_node = 0}
+      in_node && $1 == "Reliability:" {print $2}
+    ' <<<"${topic_info}")"
+    if [[ -n "${reliabilities}" ]] && ! grep -qvx 'BEST_EFFORT' <<<"${reliabilities}"; then
+      echo "OK: RViz observer uses best-effort QoS on ${topic}"
+      return
+    fi
+    sleep 1
+  done
+  cat "${RVIZ_QOS_LOG}" >&2
+  fail "RViz observer on ${topic} did not converge to best-effort QoS"
+}
+
+assert_rviz_runtime_contract() {
+  local topic
+  [[ "${USE_RVIZ}" == "true" ]] || return
+  : >"${RVIZ_QOS_LOG}"
+  wait_for_command "MuJoCo navigation RViz node" 30 \
+    node_is_present /mujoco_navigation_rviz2
+  for topic in /rog_map/occ /rog_map/inf_occ /rog_map/bounds /localization; do
+    assert_rviz_best_effort_observer "${topic}"
+  done
+  echo "OK: RViz runtime QoS contract saved to ${RVIZ_QOS_LOG}"
+}
+
+capture_rviz_screenshot() {
+  local window_id xwd_file deadline
+  [[ "${USE_RVIZ}" == "true" ]] || return
+  [[ -n "${DISPLAY:-}" ]] || fail "USE_RVIZ=true requires DISPLAY for screenshot capture"
+  deadline=$((SECONDS + 20))
+  while (( SECONDS < deadline )); do
+    window_id="$(xwininfo -root -tree 2>/dev/null | awk '/mujoco_navigation\.rviz - RViz/ {print $1; exit}')"
+    [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]] && break
+    sleep 0.5
+  done
+  [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]] || fail "cannot find MuJoCo navigation RViz window"
+  xwd_file="${RVIZ_SCREENSHOT%.png}.xwd"
+  xwd -id "${window_id}" -silent -out "${xwd_file}" || \
+    fail "cannot capture MuJoCo navigation RViz window"
+  ffmpeg -y -v error -f xwd_pipe -i "${xwd_file}" -frames:v 1 "${RVIZ_SCREENSHOT}" || \
+    fail "cannot convert MuJoCo navigation RViz screenshot"
+  [[ -s "${RVIZ_SCREENSHOT}" ]] || fail "MuJoCo navigation RViz screenshot is empty"
+  echo "OK: RViz screenshot saved to ${RVIZ_SCREENSHOT}"
+}
+
 capture_pose() {
   local output_file="$1"
   local attempt
@@ -458,7 +551,8 @@ capture_pose() {
   # lease. Retry boundedly so one missed transient-local discovery window is
   # not reported as a control or yaw-authority failure.
   for attempt in 1 2 3; do
-    timeout 5 ros2 topic echo --no-daemon --once /localization --field pose.pose.position \
+    timeout 5 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
+      /localization --field pose.pose.position \
       >"${output_file}" 2>/dev/null || true
     if grep -q '^x:' "${output_file}" && grep -q '^y:' "${output_file}"; then
       return 0
@@ -1212,6 +1306,7 @@ LAUNCH_ARGS=(
   rmuc_2026_mujoco.launch.py
   use_viewer:=false
   show_viewer:=false
+  use_rviz:="${USE_RVIZ}"
   launch_mujoco_rviz:=false
   force_body_yaw_follow:="${FORCE_BODY_YAW_FOLLOW}"
   body_yaw_follow_clearance:="${BODY_YAW_FOLLOW_CLEARANCE}"
@@ -1226,7 +1321,7 @@ LAUNCH_ARGS=(
   nav_start_delay_sec:=9.0
   rog_map_start_delay_sec:=15.0
   map_start_delay_sec:=2.0
-  rviz_delay_sec:=1000.0
+  rviz_delay_sec:="${RVIZ_DELAY_SEC}"
   log_level:=warn
 )
 
@@ -1234,8 +1329,8 @@ setsid ros2 launch "${LAUNCH_ARGS[@]}" >"${LAUNCH_LOG}" 2>&1 &
 LAUNCH_PID=$!
 
 wait_for_command "node graph" 60 timeout 4 ros2 node list --no-daemon
-wait_for_topic_once /localization 70
-wait_for_topic_once /odometry 30
+wait_for_topic_once /localization 70 best_effort
+wait_for_topic_once /odometry 30 best_effort
 wait_for_topic_once /localization/status 30
 wait_for_command "localization tracking" 30 \
   topic_field_equals /localization/status state 1
@@ -1265,7 +1360,14 @@ echo "OK: MPC nodes present and fake_vel_transform absent"
 assert_topic_ownership /cmd_vel_mpc ats_swerve_mpc twist_to_motion_ctrl
 assert_topic_ownership /motion_control twist_to_motion_ctrl ats_mujoco_sim
 assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
-assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
+# RViz may observe the reference in the UI, but it must never gain execution
+# authority.  The assertion still accepts exactly one controller and one named
+# display subscriber; command topics below remain strictly single-subscriber.
+if [[ "${USE_RVIZ}" == "true" ]]; then
+  assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc mujoco_navigation_rviz2
+else
+  assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
+fi
 assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mpc
 # MPC 清 tracker，MuJoCo 执行器做硬零速；安全信号允许多个 consumer，但只有
 # Goal Manager 可以发布最终急停权威。
@@ -1295,6 +1397,10 @@ ensure_topic_capture_ready "Motion control stream" /motion_control manda_can_con
   /tmp/ats_minco_mpc_motion_stream.out MOTION_STREAM_PID
 CAPTURE_PIDS+=("${MOTION_STREAM_PID}")
 EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
+RVIZ_QOS_LOG="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz_qos.out"
+RVIZ_SCREENSHOT="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz.png"
+assert_rviz_runtime_contract
+capture_rviz_screenshot
 ensure_topic_capture_ready "P3 ExecutionCommand" /planner/execution_command \
   ats_navigation_interfaces/msg/ExecutionCommand "${EXECUTION_STREAM}" EXECUTION_STREAM_PID
 CAPTURE_PIDS+=("${EXECUTION_STREAM_PID}")

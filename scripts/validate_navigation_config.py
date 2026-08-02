@@ -98,6 +98,36 @@ def collect_topic_values(value):
     return topics
 
 
+def named_display(value, name: str):
+    if isinstance(value, dict):
+        if value.get("Name") == name:
+            return value
+        for child in value.values():
+            result = named_display(child, name)
+            if result is not None:
+                return result
+    elif isinstance(value, list):
+        for child in value:
+            result = named_display(child, name)
+            if result is not None:
+                return result
+    return None
+
+
+def displays_for_topic(value, topic: str):
+    displays = []
+    if isinstance(value, dict):
+        display_topic = value.get("Topic")
+        if isinstance(display_topic, dict) and display_topic.get("Value") == topic:
+            displays.append(value)
+        for child in value.values():
+            displays.extend(displays_for_topic(child, topic))
+    elif isinstance(value, list):
+        for child in value:
+            displays.extend(displays_for_topic(child, topic))
+    return displays
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -135,6 +165,8 @@ def main():
     goal_manager = parameters(document, "ats_goal_manager")
     mpc = parameters(document, "ats_swerve_mpc")
     serial = parameters(document, "standard_robot_pp_ros2")
+    behavior_server = parameters(document, "ats_sentry_behavior_server")
+    behavior_client = parameters(document, "ats_sentry_behavior_client")
 
     assert rog_map["map_frame"] == "odom"
     assert rog_map["debug_bounds_topic"] == "/rog_map/bounds"
@@ -173,6 +205,14 @@ def main():
         serial["cmd_vel_watchdog_timeout_ms"] / 1000.0
         <= mpc["execution_command_timeout"]
     )
+    assert behavior_server["action_name"] == "ats_sentry_behavior"
+    assert behavior_server["decision"]["inputs"]["planning_grid"]["topic"] == "/rc_esdf/planning_grid"
+    assert behavior_server["decision"]["inputs"]["localization"]["topic"] == "/localization"
+    assert behavior_server["decision"]["pose"]["expected_frame"] == "map"
+    assert behavior_server["decision"]["decision_config"]["ats_action_server"] == "/ats_navigate_to_pose"
+    assert behavior_server["use_sim_time"] is False
+    assert behavior_client["target_tree"] == "rmuc_2026_mapping"
+    assert behavior_client["use_sim_time"] is False
 
     root_launch = workspace / "src/ats_sentry_bringup/launch/bringup.launch.py"
     root_text = root_launch.read_text(encoding="utf-8")
@@ -185,6 +225,7 @@ def main():
         "nav_cmd_vel_topic",
         "planning_grid_owner",
         "map_config_file",
+        "behavior_params_file",
     ):
         assert forbidden not in root_text, f"formal root launch retains {forbidden}"
     assert 'executable="ats_rog_map_node"' in root_text
@@ -192,6 +233,18 @@ def main():
     assert "rog_map_params_file" not in root_text
     assert "rog_map_adapter_params_file" not in root_text
     assert "parameters=[params_file" in root_text
+
+    behavior_launch = workspace / "src/ats_sentry_behavior/launch/ats_sentry_behavior_launch.py"
+    behavior_launch_defaults = launch_defaults(behavior_launch)
+    assert "params_file" in behavior_launch_defaults
+    assert behavior_launch_defaults["params_file"] is None, (
+        "standalone behavior launch must require an explicit params_file"
+    )
+    assert not (
+        workspace / "src/ats_sentry_behavior/params/sentry_behavior.yaml"
+    ).exists()
+    behavior_example = workspace / "src/ats_sentry_behavior/params/sentry_behavior.example.yaml"
+    assert behavior_example.exists()
 
     nav_real = (
         workspace
@@ -276,8 +329,7 @@ def main():
     assert isinstance(real_robot_defaults["launch_chassis_vel_transform"], ast.Constant)
     assert real_robot_defaults["launch_chassis_vel_transform"].value == "True"
 
-    behavior_path = workspace / "src/ats_sentry_behavior/params/sentry_behavior.yaml"
-    behavior_text = behavior_path.read_text(encoding="utf-8")
+    behavior_text = behavior_example.read_text(encoding="utf-8")
     assert "nav2_action_server" not in behavior_text
     assert "nav2_to_pose_action_server" not in behavior_text
     assert 'ats_action_server: "/ats_navigate_to_pose"' in behavior_text
@@ -314,6 +366,9 @@ def main():
     assert "nav2_rviz_plugins" not in rviz_text
     assert "rviz_default_plugins/SetGoal" in rviz_text
     assert "Value: /goal_pose" in rviz_text
+    bounds_display = named_display(rviz, "ROGMap Local Bounds")
+    assert bounds_display is not None
+    assert bounds_display["Topic"]["Reliability Policy"] == "Best Effort"
     for required in (
         "Name: ROGMap Occupied",
         "Name: ROGMap Inflated",
@@ -333,7 +388,52 @@ def main():
     for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool"):
         assert forbidden not in rviz_text, f"RViz retains Nav2 display/tool: {forbidden}"
 
-    print("PASS: formal Nav2-free configuration and ROGMap visualization contract")
+    mujoco_rviz_path = workspace / "src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz"
+    mujoco_rviz = load_yaml(mujoco_rviz_path)
+    mujoco_rviz_topics = set(collect_topic_values(mujoco_rviz))
+    for topic in (
+        "/rog_map/occ",
+        "/rog_map/inf_occ",
+        "/rog_map/unk",
+        "/rog_map/esdf",
+        "/rog_map/bounds",
+        "/rc_esdf/planning_grid",
+        "/minco/raw_path",
+        "/minco/reference_path",
+        "/ats_swerve_mpc/predicted_path",
+    ):
+        assert topic in mujoco_rviz_topics, f"MuJoCo RViz config missing {topic}"
+    mujoco_rviz_text = mujoco_rviz_path.read_text(encoding="utf-8")
+    mujoco_bounds_display = named_display(mujoco_rviz, "ROGMap Local Bounds")
+    assert mujoco_bounds_display is not None
+    assert mujoco_bounds_display["Topic"]["Reliability Policy"] == "Best Effort"
+    for topic in ("/rog_map/occ", "/rog_map/inf_occ", "/rog_map/unk", "/rog_map/esdf", "/rog_map/bounds"):
+        displays = displays_for_topic(mujoco_rviz, topic)
+        assert len(displays) == 1, f"MuJoCo RViz must have one {topic} display"
+        assert displays[0]["Topic"]["Reliability Policy"] == "Best Effort"
+    localization_displays = displays_for_topic(mujoco_rviz, "/localization")
+    assert len(localization_displays) == 2, "MuJoCo RViz must have two localization displays"
+    assert all(
+        display["Class"] == "rviz_default_plugins/Odometry"
+        and display["Topic"]["Reliability Policy"] == "Best Effort"
+        for display in localization_displays
+    )
+    for required in (
+        "Name: ROGMap Occupied",
+        "Name: ROGMap Inflated",
+        "Name: ROGMap Unknown",
+        "Name: ROGMap ESDF Debug",
+        "Name: ROGMap Local Bounds",
+        "Name: MINCO Raw Path",
+        "Name: MINCO Reference",
+        "Name: MPC Predicted Path",
+        "Value: /goal_pose",
+    ):
+        assert required in mujoco_rviz_text, f"MuJoCo RViz display contract missing {required}"
+    for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool", "nav2_rviz_plugins"):
+        assert forbidden not in mujoco_rviz_text, f"MuJoCo RViz retains Nav2 display/tool: {forbidden}"
+
+    print("PASS: formal single-source behavior, Nav2-free configuration, and ROGMap visualization contract")
 
 
 if __name__ == "__main__":

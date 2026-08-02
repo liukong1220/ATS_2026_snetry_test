@@ -13,7 +13,6 @@ def generate_launch_description():
     bringup_dir = get_package_share_directory("ats_sentry_bringup")
     serial_bringup_dir = get_package_share_directory("standard_robot_pp_ros2")
     navigation_bringup_dir = get_package_share_directory("ats_nav_bringup")
-    behavior_bringup_dir = get_package_share_directory("ats_sentry_behavior")
     robot_name = LaunchConfiguration("robot_name")
     world = LaunchConfiguration("world")
     map_yaml_file = LaunchConfiguration("map")
@@ -21,7 +20,6 @@ def generate_launch_description():
     namespace = LaunchConfiguration("namespace")
     use_sim_time = LaunchConfiguration("use_sim_time")
     params_file = LaunchConfiguration("params_file")
-    behavior_params_file = LaunchConfiguration("behavior_params_file")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     rviz_force_software = LaunchConfiguration("rviz_force_software")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
@@ -66,11 +64,7 @@ def generate_launch_description():
         DeclareLaunchArgument("use_sim_time", default_value="False"),
         DeclareLaunchArgument(
             "params_file", default_value=os.path.join(bringup_dir, "params", "node_params.yaml"),
-            description="Serial, transform, localization and sensor parameters.",
-        ),
-        DeclareLaunchArgument(
-            "behavior_params_file",
-            default_value=os.path.join(behavior_bringup_dir, "params", "sentry_behavior.yaml"),
+            description="Formal serial, behavior, transform, localization, map, planning and control parameters.",
         ),
         DeclareLaunchArgument(
             "rviz_config_file", default_value=os.path.join(bringup_dir, "rviz", "sentry_default_view.rviz"),
@@ -171,10 +165,12 @@ def generate_launch_description():
         }.items(),
     )
     behavior = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(behavior_bringup_dir, "launch", "ats_sentry_behavior_launch.py")),
+        PythonLaunchDescriptionSource(
+            os.path.join(get_package_share_directory("ats_sentry_behavior"), "launch", "ats_sentry_behavior_launch.py")
+        ),
         condition=IfCondition(launch_behavior),
         launch_arguments={
-            "namespace": namespace, "use_sim_time": use_sim_time, "params_file": behavior_params_file,
+            "namespace": namespace, "use_sim_time": use_sim_time, "params_file": params_file,
             "log_level": log_level,
         }.items(),
     )

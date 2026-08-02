@@ -21,7 +21,7 @@ def generate_launch_description():
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     use_sim_time = LaunchConfiguration("use_sim_time")
     params_file = LaunchConfiguration("params_file")
-    behavior_params_file = LaunchConfiguration("behavior_params_file")
+    behavior_test_params_file = LaunchConfiguration("behavior_test_params_file")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     rviz_force_software = LaunchConfiguration("rviz_force_software")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
@@ -84,7 +84,7 @@ def generate_launch_description():
             "prior_pcd_file": prior_pcd_file,
             "use_sim_time": use_sim_time,
             "params_file": params_file,
-            "behavior_params_file": behavior_params_file,
+            "launch_behavior": "False",
             "rviz_config_file": rviz_config_file,
             "rviz_force_software": rviz_force_software,
             "use_robot_state_pub": use_robot_state_pub,
@@ -92,6 +92,20 @@ def generate_launch_description():
             "launch_joy_teleop": launch_joy_teleop,
             "use_composition": use_composition,
             "use_respawn": use_respawn,
+            "log_level": log_level,
+        }.items(),
+    )
+
+    # This is an explicit test-only caller. The formal root profile always passes
+    # its single node_params.yaml source to behavior.
+    behavior_test_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(behavior_dir, "launch", "ats_sentry_behavior_launch.py")
+        ),
+        launch_arguments={
+            "namespace": namespace,
+            "use_sim_time": use_sim_time,
+            "params_file": behavior_test_params_file,
             "log_level": log_level,
         }.items(),
     )
@@ -201,11 +215,11 @@ def generate_launch_description():
     )
     ld.add_action(
         DeclareLaunchArgument(
-            "behavior_params_file",
+            "behavior_test_params_file",
             default_value=os.path.join(
                 behavior_dir, "params", "sentry_behavior_decision_vision_test.yaml"
             ),
-            description="Behavior parameters for pure vision-follow test without referee or decision fallback.",
+            description="Explicit test-only behavior parameters for pure vision-follow without referee fallback.",
         )
     )
     ld.add_action(
@@ -427,5 +441,6 @@ def generate_launch_description():
     )
 
     ld.add_action(bringup_cmd)
+    ld.add_action(behavior_test_cmd)
     ld.add_action(fake_inputs_cmd)
     return ld
