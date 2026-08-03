@@ -14,13 +14,27 @@
 #   src/sim/*                  simulation repositories
 #   src/interfaces/*           message/interface repositories
 #   src/ats_sentry_nav/*       navigation-domain packages and helpers
+#   src/dependencies/*         source dependencies unavailable/incomplete in rosdep
 #   src/tools/*                workspace tools
+#
+# Nav2-free boundary:
+# - No Navigation2 server/plugin repository is imported by this manifest.
+# - src/sim/loopback_sim is intentionally retained as the lightweight ATS
+#   kinematics/grid/behavior regression domain. Its historical ROS package name
+#   is not evidence that the formal navigation graph depends on Nav2.
 repositories:
+  # Simulation.
   src/sim/ats_mujoco_sim:
     type: git
     url: https://github.com/liukong1220/ats_mujoco_sim.git
     version: develop
 
+  src/sim/loopback_sim:
+    type: git
+    url: https://github.com/liukong1220/loopback_sim.git
+    version: develop
+
+  # Robot, behavior and self-developed navigation.
   src/ats_robot_description:
     type: git
     url: https://github.com/liukong1220/ats_robot_description.git
@@ -34,26 +48,6 @@ repositories:
   src/ats_sentry_nav:
     type: git
     url: https://github.com/liukong1220/ats_sentry_nav.git
-    version: develop
-
-  src/interfaces:
-    type: git
-    url: https://github.com/liukong1220/interfaces.git
-    version: develop
-
-  src/interfaces/carstatemsgs:
-    type: git
-    url: https://github.com/liukong1220/carstatemsgs.git
-    version: develop
-
-  src/sim/loopback_sim:
-    type: git
-    url: https://github.com/liukong1220/loopback_sim.git
-    version: develop
-
-  src/interfaces/manda_can_control:
-    type: git
-    url: https://github.com/liukong1220/manda_can_control.git
     version: develop
 
   src/ats_sentry_nav/sentry_chassis_vel_transform:
@@ -71,6 +65,24 @@ repositories:
     url: https://github.com/liukong1220/sp_vision25.git
     version: de
 
+  # ATS messages. The interfaces repository owns ats_rm_interfaces and sp_msgs;
+  # the two ignored chassis protocol directories remain separate repositories.
+  src/interfaces:
+    type: git
+    url: https://github.com/liukong1220/interfaces.git
+    version: develop
+
+  src/interfaces/carstatemsgs:
+    type: git
+    url: https://github.com/liukong1220/carstatemsgs.git
+    version: develop
+
+  src/interfaces/manda_can_control:
+    type: git
+    url: https://github.com/liukong1220/manda_can_control.git
+    version: develop
+
+  # Workspace tools.
   src/tools/teleop_gimbal_keyboard:
     type: git
     url: https://github.com/liukong1220/teleop_gimbal_keyboard.git
@@ -86,6 +98,8 @@ repositories:
     url: https://github.com/liukong1220/rosbag2_composable_recorder.git
     version: main
 
+  # Source dependencies that are patched or unavailable through the target
+  # machine's rosdep/apt baseline.
   src/dependencies/sdformat_tools:
     type: git
     url: https://github.com/liukong1220/sdformat_tools.git
