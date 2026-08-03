@@ -118,6 +118,29 @@ Nav2 server、costmap、BT navigator，也不消费 `/plan`；这不改变 `Nav2
 - LiDAR/IMU、底盘串口与云台的真实设备依赖见根参数和各上游驱动说明；
 - MuJoCo、NumPy、SciPy、Pillow、PyYAML（仅物理仿真）。
 
+### 获取完整源码依赖
+
+首次创建工作区时，先克隆根仓，再用根 `dependencies.repos` 导入所有独立源码仓：
+
+```bash
+git clone -b develop \
+  https://github.com/liukong1220/ATS_2026_snetry_test.git \
+  /home/ats/ATS_2026_snetry_test
+cd /home/ats/ATS_2026_snetry_test
+vcs import --recursive --skip-existing . < dependencies.repos
+```
+
+清单包含根 bringup 之外的导航、行为、接口、实机驱动、MuJoCo、loopback、工具和必须从
+源码构建的依赖。`src/sim/loopback_sim` 被明确保留为自研导航框架的轻量运动学/栅格/行为
+回归域；正式导航运行图仍不启动 Nav2 server、plugin 或 costmap。
+
+导入后先检查分支和缺失仓库：
+
+```bash
+vcs status --repos
+colcon list --base-paths src --names-only
+```
+
 优先让 `rosdep` 从活动源码解析可安装依赖：
 
 ```bash
@@ -138,15 +161,15 @@ rosdep install --from-paths src --ignore-src -r -y
 ```bash
 cd /home/ats/ATS_2026_snetry_test
 source /opt/ros/humble/setup.bash
-MAKEFLAGS=-j1 colcon build --base-paths src --symlink-install --parallel-workers 1
+MAKEFLAGS=-j6 colcon build --base-paths src --symlink-install --parallel-workers 6
 source install/setup.bash
 ```
 
 只需构建仿真及其上游依赖时：
 
 ```bash
-MAKEFLAGS=-j1 colcon build --base-paths src --symlink-install \
-  --packages-up-to ats_mujoco_sim --parallel-workers 1
+MAKEFLAGS=-j6 colcon build --base-paths src --symlink-install \
+  --packages-up-to ats_mujoco_sim --parallel-workers 6
 source install/setup.bash
 ```
 
