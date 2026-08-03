@@ -1,17 +1,34 @@
 # ATS 自研导航 V1 状态
 
-更新时间：2026-08-03。本页只记录当前活动源码和已保存的运行证据。
+更新时间：2026-08-03。本页只记录当前活动源码和已保存的本轮运行证据。
 
 ## P2
+
+- `ROGMap` 可视化第一步已实现并完成构建、单测和 MuJoCo 运行期复验：活动 ROS 2
+  wrapper 按官方 `robot_state +/- visualization_range / 2` 语义裁剪 debug cloud，并在
+  `/rog_map/bounds` 以稳定 namespace 发布橙色 `Local Map Range`、紫色
+  `Visualization Range` 和绿色 `Raycast Update Range`。绿色框来自核心量化并裁剪后的
+  raycast update box；数值 projection service、occupancy、signed-distance、unknown 和
+  adapter owner 未改变。运行期 domain `156` 观察到四类 ROGMap topic 非空、adapter
+  `ready=true`、generation 递增，以及 `cells=10000/stale=false` 的连续 projection。
+  `/rog_map/bounds` 三色框尚未保存独立截图，故只对消息实现与运行链路给出高置信结论，RViz
+  视觉效果仍待截图回归。[Confidence: High，三色几何视觉为实现证据，截图为未验证项]
+- 淡蓝色 JPS 搜索框不属于 ROGMap owner；官方 A* 每次 start/goal 生成临时搜索框，ATS
+  后续应由 `minco_planner` 发布同一 frame 的 JPS debug marker，不能混入 ROGMap 数值服务。
 
 - `planning_grid_owner:=rog_map` 时，`ats_rog_map_adapter` 是
   `/rc_esdf/planning_grid` 的唯一发布者；adapter 直接调用
   `/rog_map/get_ground_projection` 数值服务，不使用 `/rog_map/esdf` 点云作为数值输入。
 - MINCO 使用本地不可变 snapshot；RC-ESDF 保留 signed-distance、unknown、梯度、
   map 外、origin/yaw 和保守静态栅格融合语义。
-- 已在独立 MuJoCo domain 运行 rectangle、red_box、adapter lease、projection service
-  timeout、Point-LIO 输入 stale、all unknown 和 unreachable。每个故障都观察到
-  `emergency_stop=true -> /cmd_vel_mpc=0 -> /motion_control=0`。
+- 已在独立 MuJoCo domain 验证 ROGMap topic、adapter lease/generation、projection 数值
+  服务与部分故障停机链路；故障注入日志需按用例分别保存，不能合并成一次红框通过结论。
+  最终 red-box 运行未通过：虽然生成了 `generation=50`、`raw_points=3`、
+  `reference_points=88`、`collisions=0`、`minimum_clearance=0.157` 的 MINCO candidate，
+  但机器人约移动 `0.8 m` 后，MPC 日志多次报告“尚未收到有效参考轨迹，保持零速度”。旧
+  reference 因急停时间戳被正确拒绝（`Ignoring a trajectory older than the latest emergency stop`），
+  没有新的 reference 恢复，action 在 `180 s` 超时，最终距离约 `1.52 m`。因此 P2 红框闭环
+  尚未通过；MuJoCo 独立 contact evaluator 未接入，物理接触为“未验证”。
 
 ## P3
 
@@ -43,11 +60,10 @@
   `/tmp/ats_s1_pre_behavior_params/` 与 `/tmp/ats_s1_post_behavior_params/`。两节点的顶层
   参数名和 YAML 值/类型一致；action graph 为一个 server、一个 client。正式根入口的完整
   实机资产启动仍未在本机复验。[Confidence: Medium]
-- 相同 `planning_grid_owner=rog_map` 的 rectangle 在新 DDS domain 分别完成：无界面
-  `186` 的 generation `309 -> 1264`，最大五段终点误差 `0.041613 m`；RViz `184` 的
-  generation `313 -> 1328`，最大五段终点误差 `0.038681 m`。两例的每段 MINCO 离散
-  footprint collision sample 都是 0，south/north 均观测到非零 `vy` 横移，MPC reference /
-  predicted 均非空，最终四轮 RPM、`/cmd_vel_mpc` 与 `/motion_control` 均为零。
+- 历史 rectangle 基线在新 DDS domain `186`/`184` 曾观察到 generation 递增、非零 `vy`
+  横移、MPC reference/predicted 非空和离散 footprint collision sample 为 0；这些结果用于
+  对比，不替代本轮 red-box 最终验收。无独立 contact evaluator 时，MuJoCo 接触只能写为
+  “未验证”。
 - RViz `184` 已将 `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/bounds` 和两个
   `/localization` display 的运行期 subscriber 与 producer 都核验为 `BEST_EFFORT`；端点工件为
   `/tmp/ats_minco_mpc_rectangle_184_rviz_qos.out`，窗口级非黑截图为
@@ -105,8 +121,9 @@
 - 当前 S1 记录的最新 rectangle 运行结果见上文：domain `184`（RViz）为 `0.038681 m`，
   domain `186`（headless）为 `0.041613 m`，均为五段路线的最大终点误差。此前记录的
   单路线 rectangle `0.004126 m` 和 red_box `0.003696 m` 属于较早 revision 的独立运行，
-  不与当前 S1 结果混合比较。所有这些运行的离散 footprint 冲突为 `0`、MuJoCo
-  `contact_violation_count=0`；它们不替代 P4 的连续 swept footprint 和实车动力学验证。
+  不与当前 S1 结果混合比较。本轮 ROGMap 时间/owner 修改后的 red-box 因 reference 恢复
+  缺陷未完成，详见 P2。离散 footprint 冲突为 `0` 不替代连续 swept footprint、MuJoCo
+  物理接触评估和实车动力学验证。
 
 ## README 同步说明（2026-08-03）
 

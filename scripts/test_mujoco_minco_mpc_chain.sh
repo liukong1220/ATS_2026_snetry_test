@@ -35,6 +35,10 @@ GOAL_TOLERANCE="${GOAL_TOLERANCE:-0.30}"
 LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-24}"
 # 故障注入必须单独启动一套 MuJoCo，避免目标与机器人状态跨用例污染。
 P2_FAULT_CASE="${P2_FAULT_CASE:-none}"
+# Planning-grid ownership is a launch-time contract; it is intentionally not
+# changed while a robot is running.  The current MuJoCo chain implements the
+# ROGMap adapter owner only.
+PLANNING_GRID_OWNER="${PLANNING_GRID_OWNER:-rog_map}"
 # P3 action 生命周期故障；每次也必须使用新的 ROS_DOMAIN_ID 和 MuJoCo launch。
 P3_FAULT_CASE="${P3_FAULT_CASE:-none}"
 # Route-profile input for narrow/slope/contact-sensitive BODY_YAW_FOLLOW
@@ -50,6 +54,17 @@ case "${P2_FAULT_CASE}" in
   *)
     echo "Unsupported P2_FAULT_CASE='${P2_FAULT_CASE}'; use 'none', 'adapter_lease', " \
       "'service_timeout', 'input_stale', 'unknown', or 'unreachable'."
+    exit 2
+    ;;
+esac
+case "${PLANNING_GRID_OWNER}" in
+  rog_map) ;;
+  rc_esdf)
+    echo "PLANNING_GRID_OWNER=rc_esdf is not implemented by the current MuJoCo launch; refusing to claim a publisher."
+    exit 2
+    ;;
+  *)
+    echo "Unsupported PLANNING_GRID_OWNER='${PLANNING_GRID_OWNER}'; use 'rog_map' or 'rc_esdf'."
     exit 2
     ;;
 esac
@@ -1322,6 +1337,7 @@ LAUNCH_ARGS=(
   rog_map_start_delay_sec:=15.0
   map_start_delay_sec:=2.0
   rviz_delay_sec:="${RVIZ_DELAY_SEC}"
+  planning_grid_owner:="${PLANNING_GRID_OWNER}"
   log_level:=warn
 )
 
@@ -1335,9 +1351,11 @@ wait_for_topic_once /localization/status 30
 wait_for_command "localization tracking" 30 \
   topic_field_equals /localization/status state 1
 wait_for_command "MuJoCo map->odom disabled" 10 \
-  bash -c "ros2 param get --no-daemon /ats_mujoco_sim publish_map_to_odom_tf | grep -q 'Boolean value is: False'"
+  timeout --kill-after=1 4 bash -c \
+  "ros2 param get --no-daemon /ats_mujoco_sim publish_map_to_odom_tf | grep -q 'Boolean value is: False'"
 wait_for_command "fusion map->odom enabled" 10 \
-  bash -c "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
+  timeout --kill-after=1 4 bash -c \
+  "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
 assert_topic_ownership /odometry ats_mujoco_sim localization_fusion
 assert_topic_ownership /localization localization_fusion
 assert_topic_ownership /localization/status localization_fusion
