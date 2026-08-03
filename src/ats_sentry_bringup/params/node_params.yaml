@@ -709,6 +709,7 @@ ats_rog_map:
     input_qos_reliable: false
     debug_qos_reliable: false
     debug_bounds_topic: /rog_map/bounds
+    debug_bounds_show_labels: true
     core.esdf.enable: true
     core.esdf.resolution: 0.10
     core.esdf.local_update_box: [8.0, 8.0, 1.0]
@@ -728,7 +729,9 @@ ats_rog_map:
     core.visualization.frame_id: world
     core.visualization.time_rate: 0.0
     core.visualization.frame_rate: 0
-    core.visualization.range: [0.0, 0.0, 0.0]
+    # Official ROG-Map semantics: this is the robot-centred visualization box,
+    # not the sliding-map storage bounds. ROS debug clouds use this same box.
+    core.visualization.range: [8.0, 8.0, 1.0]
     core.resolution: 0.10
     core.inflation_resolution: 0.10
     core.unknown_inflation.enable: false
@@ -762,10 +765,16 @@ ats_rog_map_adapter:
   ros__parameters:
     use_sim_time: false
     projection_service: /rog_map/get_ground_projection
-    projection_rate_hz: 2.0
-    projection_request_timeout_sec: 2.0
-    projection_snapshot_timeout_sec: 2.0
-    input_sync_tolerance_sec: 1.0
+    # The 100 x 100 x 7 numerical projection takes 0.9--3.2 s in the
+    # MuJoCo CPU profile.  Do not queue another request while its immutable
+    # snapshot is still being built; the service's own 2.0 s input-health
+    # gate remains the source-data freshness authority.
+    projection_rate_hz: 0.5
+    projection_request_timeout_sec: 4.0
+    projection_snapshot_timeout_sec: 4.0
+    # CPU projection latency was measured at up to 1.794 s; both sources
+    # still have to pass the independent 2.0 s freshness gate below.
+    input_sync_tolerance_sec: 1.8
     projection_min_height: 0.10
     projection_max_height: 0.80
     planning_resolution: 0.10
@@ -808,7 +817,9 @@ minco_planner:
     map_ready_topic: /rog_map_adapter/ready
     emergency_stop_topic: /planner/emergency_stop
     planner_manages_emergency_stop: false
-    map_ready_timeout_sec: 3.0
+    # Projection publication jitter reaches 3.55 s in the measured CPU
+    # profile; keep the lease fail-safe while allowing that bounded gap.
+    map_ready_timeout_sec: 5.0
     emergency_stop_heartbeat_period_sec: 0.1
     runtime_safety_recheck_hz: 10.0
     runtime_safety_horizon_sec: 1.0
@@ -874,7 +885,9 @@ ats_goal_manager:
     action_name: /ats_navigate_to_pose
     goal_frame: map
     planning_frame: odom
-    map_ready_timeout_sec: 3.0
+    # Must match MINCO's 5 s lease so the goal state machine and controller
+    # observe the same adapter heartbeat contract.
+    map_ready_timeout_sec: 5.0
     localization_status_timeout_sec: 1.0
     require_localization_status: true
     require_map_status: true
