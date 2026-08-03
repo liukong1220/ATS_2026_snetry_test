@@ -1,6 +1,6 @@
 # ATS 自研导航 V1 状态
 
-更新时间：2026-08-02。本页只记录当前活动源码和本轮运行证据。
+更新时间：2026-08-03。本页只记录当前活动源码和已保存的运行证据。
 
 ## P2
 
@@ -102,6 +102,16 @@
   正式 profile 不接受第二份地图或 behavior 参数源。
 - `static_map_publisher.py` 保留 `/map` 的 frame、origin/yaw、resolution、占据语义和
   transient-local QoS。
-- 已验证 rectangle 终点误差 `0.004126 m`、red_box 终点误差 `0.003696 m`，两例离散
-  footprint 冲突为 `0`、MuJoCo `contact_violation_count=0`。这不替代 P4 的连续 swept
-  footprint 和实车动力学验证。
+- 当前 S1 记录的最新 rectangle 运行结果见上文：domain `184`（RViz）为 `0.038681 m`，
+  domain `186`（headless）为 `0.041613 m`，均为五段路线的最大终点误差。此前记录的
+  单路线 rectangle `0.004126 m` 和 red_box `0.003696 m` 属于较早 revision 的独立运行，
+  不与当前 S1 结果混合比较。所有这些运行的离散 footprint 冲突为 `0`、MuJoCo
+  `contact_violation_count=0`；它们不替代 P4 的连续 swept footprint 和实车动力学验证。
+
+## README 同步说明（2026-08-03）
+
+- 根仓、导航仓和 MuJoCo 仓的 README 已按当前正式源码、P2/P3 状态与上述已保存运行证据
+  更新，并补充了部署、接口所有权、回归入口、致谢和许可证指引。
+- 此次是文档同步，不是新的构建、MuJoCo 或实车验收；README 中的“已验证”均指向本页先前
+  记录的运行证据。P4 的原子链、连续 swept footprint、HIL 与实车门禁状态不因 README 更新
+  而改变。
