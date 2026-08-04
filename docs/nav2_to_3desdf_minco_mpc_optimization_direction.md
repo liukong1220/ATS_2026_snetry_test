@@ -37,6 +37,37 @@
   没有新的 reference 恢复，action 在 `180 s` 超时，最终距离约 `1.52 m`。因此 P2 红框闭环
   尚未通过；MuJoCo 独立 contact evaluator 未接入，物理接触为“未验证”。
 
+### P2.3/P2.4 当前事实（2026-08-04）
+
+- **已实现且已做最窄验证**：规划请求使用
+  `goal_id + localization_epoch + plan_request_sequence` 身份；adapter 的
+  `PlanningMapSnapshot` 提供数值 occupancy/ESDF/gradient、frame/origin/yaw 与三类时序字段；
+  Goal Manager 在最终提交点复核当前 snapshot、heartbeat、frame、inside-map/free/footprint，
+  并在提交点重定时后先清 emergency stop、再发布新的 reference。`ROGMap source generation`、
+  adapter publication sequence、MINCO local snapshot generation 不端到端等同。
+- **参数证据**：`input_sync_tolerance_sec` 由 `1.8` 调整为 `2.0`，仅对齐 181 域实测
+  `1.83--1.94 s` 的 projection/terrain/slope stamp delta；`input_timeout_sec`、projection
+  deadline、unknown/occupied 和 MPC 旧 reference 拒绝规则均未放宽。
+- **已实现且已做最窄验证**：Goal Manager 的 `PlanProgressWatchdog` 使用 steady clock；
+  `0.10 m / 4.0 s / 2.0 s / 2` 分别为最小进展、stall timeout、最小重规划间隔和最多连续
+  replan。它只在 map/localization/TF/free/footprint/reference 全部健康时执行 bounded replan；
+  任务级超限返回 `RESULT_PLANNING_FAILED` 并持续急停，health/TF 暂态则 fail-closed 后进入
+  map-wait/recovery。相关 Goal Manager 4 项、adapter 2 项、MINCO 5 项聚焦测试均通过。
+- **已验证**：headless MuJoCo domain `185` nominal 达成一条完整成功闭环，终点
+  `(-8.999925, 1.490465)` 到 `(-9.0, 1.47)` 的误差 `0.020465 m`，末次 MINCO 为
+  `generation=52 raw_points=2 reference_points=5 minimum_clearance=0.397
+  footprint_collisions=0`，MPC reference/predicted 各 3782 poses，最终
+  `contact_violation_count=0` 与四轮 RPM 为零。该 contact telemetry 不是实车/HIL 物理无碰撞
+  证明。[Confidence: High，脚本和日志；实车物理结论未验证]
+- **未通过**：headless domain `186` red-box 第一段成功（误差 `0.016202 m`），第二段因
+  ROGMap projection/input stale 与 MPC odometry timeout 进入 map-wait，最终返回
+  `RESULT_MAP_UNREADY=4`，`final_distance=10.011419 m`。此 revision 的红框 P2 门禁不通过；
+  不得将单段 nominal、MINCO candidate 或 topic 存在写成 red-box 通过。
+- **已实现未运行**：MuJoCo `freeze_motion` 运行时故障入口保持 sensors/localization/map
+  fresh 而阻断底盘执行；脚本验收 watchdog 的 1--2 次 bounded replan、耗尽后两级零速度和旧
+  reference 不复活。原启动期冻结用例已修正为运行时切换，但最终闭环受已有用户 `rviz2` 的资源
+  占用阻断，仍需无 viewer/低负载重跑。
+
 ## P3
 
 - 正式入口为 `ats_sentry_bringup/launch/bringup.launch.py` 和中立命名的
@@ -46,6 +77,10 @@
   `/ats_navigate_to_pose`。
 - 本轮 MuJoCo 已验证 cancel、preempt、timeout、TF failure：action 分别返回预期结果，
   且急停后的两级速度为零。
+- P3 **未完成且不得标记 Nav2-free**：即使当前 MuJoCo graph 未见 Nav2 server 且 MINCO
+  不订阅 `/plan`，尚未按 P3 门禁以 `launch_nav2:=false` 完整验证自研 action 的
+  feedback/result/cancel/preempt/timeout 与扩大矩形、red-box；本页 P2.3/P2.4 运行证据不能升级
+  为 P3 验收，也未复现或宣称实机 `50 Hz`、约 `6 ms` 等性能。
 
 ## S1 收口
 
