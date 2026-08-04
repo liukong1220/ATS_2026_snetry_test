@@ -772,9 +772,10 @@ ats_rog_map_adapter:
     projection_rate_hz: 0.5
     projection_request_timeout_sec: 4.0
     projection_snapshot_timeout_sec: 4.0
-    # CPU projection latency was measured at up to 1.794 s; both sources
-    # still have to pass the independent 2.0 s freshness gate below.
-    input_sync_tolerance_sec: 1.8
+    # The CPU profile shows up to 1.94 s between projection and terrain/slope
+    # stamps; align this with the independent 2.0 s source-health gate without
+    # extending the source input timeout itself.
+    input_sync_tolerance_sec: 2.0
     projection_min_height: 0.10
     projection_max_height: 0.80
     planning_resolution: 0.10
@@ -787,6 +788,7 @@ ats_rog_map_adapter:
     ready_topic: /rog_map_adapter/ready
     generation_topic: /rog_map_adapter/generation
     map_status_topic: /rog_map_adapter/status
+    planning_snapshot_topic: /rog_map_adapter/planning_snapshot
     localization_status_topic: /localization/status
     require_localization_status: true
     localization_status_timeout_sec: 1.0
@@ -880,6 +882,7 @@ ats_goal_manager:
     gimbal_status_timeout_sec: 0.5
     map_ready_topic: /rog_map_adapter/ready
     map_status_topic: /rog_map_adapter/status
+    planning_snapshot_topic: /rog_map_adapter/planning_snapshot
     localization_status_topic: /localization/status
     odom_topic: /localization
     action_name: /ats_navigate_to_pose
@@ -899,6 +902,15 @@ ats_goal_manager:
     terminal_linear_velocity_tolerance: 0.05
     terminal_angular_velocity_tolerance: 0.10
     terminal_dwell_sec: 0.30
+    require_planning_snapshot: true
+    planning_snapshot_timeout_sec: 1.0
+    progress_min_delta_m: 0.10
+    replan_stall_timeout_sec: 4.0
+    replan_min_interval_sec: 2.0
+    max_consecutive_replans: 2
+    footprint_length: 0.70
+    footprint_width: 0.55
+    footprint_safety_margin: 0.05
 
 ats_swerve_mpc:
   ros__parameters:

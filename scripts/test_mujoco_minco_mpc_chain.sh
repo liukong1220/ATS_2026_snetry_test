@@ -50,10 +50,10 @@ BODY_YAW_FOLLOW_CLEARANCE="${BODY_YAW_FOLLOW_CLEARANCE:-0.55}"
 YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
 
 case "${P2_FAULT_CASE}" in
-  none|adapter_lease|service_timeout|input_stale|unknown|unreachable) ;;
+  none|adapter_lease|service_timeout|input_stale|unknown|unreachable|freeze) ;;
   *)
     echo "Unsupported P2_FAULT_CASE='${P2_FAULT_CASE}'; use 'none', 'adapter_lease', " \
-      "'service_timeout', 'input_stale', 'unknown', or 'unreachable'."
+      "'service_timeout', 'input_stale', 'unknown', 'unreachable', or 'freeze'."
     exit 2
     ;;
 esac
@@ -494,7 +494,19 @@ verify_rog_map_planning_interface() {
   fi
   wait_for_command "ROGMap numeric projection client" 30 \
     node_exposes_endpoint /ats_rog_map_adapter /rog_map/get_ground_projection
-  node_info="$(ros2 node info --no-daemon /ats_rog_map_adapter)"
+  # Discovery can briefly lose a node between the presence and endpoint checks
+  # under the CPU-heavy MuJoCo/ROGMap startup.  Retry the same bounded query
+  # instead of treating that DDS window as an adapter contract failure.
+  wait_for_command "ROGMap adapter node info" 30 \
+    node_exposes_endpoint /ats_rog_map_adapter /rog_map/get_ground_projection
+  node_info=""
+  local node_info_deadline=$((SECONDS + 30))
+  while (( SECONDS < node_info_deadline )); do
+    node_info="$(timeout 5 ros2 node info --no-daemon /ats_rog_map_adapter 2>/dev/null || true)"
+    [[ -n "${node_info}" ]] && break
+    sleep 0.5
+  done
+  [[ -n "${node_info}" ]] || fail "ROGMap adapter node info disappeared after bounded discovery retry"
   if grep -q '/rog_map/esdf' <<<"${node_info}"; then
     fail "ats_rog_map_adapter must not subscribe to the ROGMap visualization ESDF cloud"
   fi
@@ -797,7 +809,7 @@ find_unreachable_goal() {
 
 run_p2_fault_injection() {
   local fault_case="$1"
-  local process_pid baseline log_start_line
+  local process_pid baseline log_start_line replan_count
 
   case "${fault_case}" in
     adapter_lease)
@@ -901,6 +913,38 @@ run_p2_fault_injection() {
       wait_for_command "free unreachable goal is classified no-path" 8 \
         bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'failed.*no path'"
       capture_zero_outputs unreachable
+      ;;
+    freeze)
+      # 机器人保持静止，但 MuJoCo、LiDAR、里程计和 ROGMap 继续运行；这只
+      # 覆盖健康输入下的真实无进展，不把输入 stale 混入同一故障用例。
+      log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
+      timeout 8 ros2 param set /ats_mujoco_sim freeze_motion true \
+        >/tmp/ats_p2_fault_freeze_enable.out 2>&1 || \
+        fail "cannot enable MuJoCo freeze_motion fault"
+      wait_for_command "freeze fault keeps localization tracking" 8 \
+        topic_field_equals /localization/status state 1
+      wait_for_command "freeze fault keeps ROGMap inputs fresh" 8 \
+        topic_field_equals /rog_map/stale data false
+      wait_for_command "freeze fault keeps adapter ready" 8 \
+        topic_field_equals /rog_map_adapter/ready data true
+      baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
+        fail "cannot read generation before freeze fault"
+      publish_relative_fault_goal freeze
+      wait_for_fault_action_result freeze 5 35
+      wait_for_command "freeze fault triggers emergency stop" 8 \
+        topic_field_equals /planner/emergency_stop data true
+      wait_for_command "freeze fault logs bounded replan" 12 \
+        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'Progress watchdog replan='"
+      wait_for_command "freeze fault logs bounded exhaustion" 12 \
+        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'progress watchdog exhausted bounded replans'"
+      replan_count="$(tail -n +"${log_start_line}" "${LAUNCH_LOG}" | grep -c 'Progress watchdog replan=' || true)"
+      [[ "${replan_count}" =~ ^[0-9]+$ && "${replan_count}" -ge 1 && "${replan_count}" -le 2 ]] || \
+        fail "freeze fault exceeded bounded replan count: ${replan_count}"
+      capture_zero_outputs freeze
+      wait_for_generation_advance "${baseline}" 15
+      # 没有新目标时，旧急停前 reference 不得恢复运动。
+      capture_zero_outputs freeze_recovery
+      echo "OK: freeze fault observed ${replan_count} bounded replans before terminal failure"
       ;;
   esac
   echo "PASS: independent P2 '${fault_case}' fault gate completed."
@@ -1329,6 +1373,7 @@ LAUNCH_ARGS=(
   lidar_backend:=cpu
   lidar_downsample:="${LIDAR_DOWNSAMPLE}"
   enable_tof:=false
+  freeze_motion:=false
   start_x:="${START_X}"
   start_y:="${START_Y}"
   start_z:="${START_Z}"
