@@ -1,8 +1,8 @@
 # ATS Sentry 导航优化 TODO
 
-更新时间：2026-08-03
+更新时间：2026-08-04
 
-本文是 ATS 四驱四转舵轮哨兵的执行清单，不把“源码对比”“编译通过”或“topic 存在”写成闭环通过。每一项优化必须在根仓、导航仓、MuJoCo 仓分别检查归属；只提交本轮显式列出的文件，并在 `develop` 上完成对应提交和 `origin/develop` 推送。当前推送凭据在本机不可用，已提交内容必须保留本地并在凭据恢复后重试，禁止 force push。
+本文是 ATS 四驱四转舵轮哨兵的执行清单，不把“源码对比”“编译通过”或“topic 存在”写成闭环通过。每一项优化必须在根仓、导航仓、MuJoCo 仓分别检查归属；只提交本轮显式列出的文件，并在 `develop` 上完成对应提交和 `origin/develop` 推送。三个仓库当前统一使用 `git@github.com:liukong1220/<repo>.git` SSH remote；禁止 force push、空提交和将未验证性能写成实测结论。
 
 ## Definition of Done
 
@@ -10,6 +10,21 @@
 - MINCO：轨迹至少满足离散 footprint 安全、段间位置/速度/加速度连续、有效 reference 时间单调；规划存在但机器人位姿在地图内长期无进展时触发有界重规划，不能因为一个不可行点永久停死；地图 stale、目标不可达、优化/修复失败仍 fail-closed 零速度。
 - RViz：全局控制路径、局部控制/reference、MPC prediction 使用独立 topic/display 名称、颜色、线宽和 QoS；不将调试 Marker 当数值规划输入。
 - 验收：最窄单测、包构建、launch Python/`--show-args`、隔离 DDS domain 的 MuJoCo nominal/red-box/fault case、话题唯一所有权和安全停机证据齐全；实车 Gate 0--3 未完成前不声称实车通过。
+
+## 下一阶段执行地图（P2.1--P2.4）
+
+| 批次 | 直接行为所有者与文件范围 | 必须保持的契约 | 验收与停止条件 |
+| --- | --- | --- | --- |
+| P2.1 ROGMap 显示对齐 | 导航仓 `ats_rog_map/src/ats_rog_map_node.cpp`、`rog_map/prob_map.*`、两份正式参数；根仓/仿真仓 RViz 配置 | 橙色是滑窗存储边界、紫色是机器人中心可视范围、绿色是量化后的 raycast 更新范围；occupancy、unknown、signed distance、gradient 和 adapter 数值服务绝不从 Marker/PointCloud2 反解析 | 代码/engine 单测、launch 参数、MuJoCo `/rog_map/bounds` 三 namespace 和一张同帧截图；若 frame、时间戳或数值 projection 变更，停止并先补接口测试 |
+| P2.2 JPS/MINCO/MPC RViz 语义 | 根仓 `sentry_default_view.rviz`、MuJoCo 仓 `mujoco_navigation.rviz`；producer 只读检查 `minco_planner_node.cpp`、`ats_swerve_mpc` | `/minco/raw_path` 是 JPS/A* 全局搜索引导线，淡蓝；`/minco/reference_path` 是局部时间 reference，绿；MPC reference horizon 黄、predicted rollout 品红；显示层不得新增控制/规划 writer | RViz 配置语法、topic/QoS 账本、MuJoCo 截图；topic 不存在、frame 不一致或 publisher 非唯一时不宣称显示验收通过 |
+| P2.3 平滑与 reference 恢复 | 导航仓 `minco_planner`、`ats_goal_manager`、`ats_swerve_mpc` 及最窄 GTest | 仅在同一 immutable map snapshot、目标 epoch、localization identity 和 heartbeat 有效时重定时并发布新 reference；急停前旧 reference 永不复活 | 先为 JPS corner、S3 continuity、reference 时间单调、旧 reference 拒绝/恢复添加确定性单测；红框前必须独立复核离散 footprint |
+| P2.4 无进展有界重规划 | 导航仓新增/扩展 `PlanProgressWatchdog`，由 Goal Manager 拥有任务级状态机，MINCO 只拥有单次规划 | steady-clock stall deadline、inside-map/free/footprint 验证、goal epoch、snapshot generation、最小重规划间隔、最大尝试次数；stale/unknown/TF failure/no-path 均 fail-closed 零速度 | 单点不可过、机器人冻结、map stale、lease stale、unreachable 分别使用新 DDS domain 和新 MuJoCo；超过最大恢复次数必须保持急停，不允许循环重规划 |
+
+### P2.1/P2.2 当前状态
+
+- [x] P2.1 核心实现已推送：ROS 2 wrapper 已按官方可视范围/滑窗裁剪语义发布三种 ROGMap bounds，并保留数值 projection 契约。
+- [x] P2.2 display 语义重命名：`/minco/raw_path` 的 producer 是 `GridJps::plan()` 返回的 `search_result.path`，因此淡蓝色 display 必须名为 `Global Planning / JPS Search Path`，不能误称 `MINCO Raw Path`。
+- [ ] P2.1/P2.2 运行期截图：尚缺当前 revision 的同帧 bounds 三色框与四层路径截图；这不是完成闭环的替代品。
 
 ## 已完成的第一步：ROGMap 分层可视化
 
@@ -47,7 +62,7 @@
 
 - 已验证：ROGMap local map、robot-centred visualization range、raycast update range 的实现与官方源码语义对照；projection 数值服务保持 occupancy、signed-distance、gradient、unknown 语义；MuJoCo CPU LiDAR 在 MuJoCo 3.x 下可正常调用。
 - 已验证：adapter 不订阅 `/rog_map/esdf` 点云，直接消费 `/rog_map/get_ground_projection`；`planning_grid_owner:=rog_map` 时规划栅格只有一个 publisher。
-- 未完成：淡蓝色 JPS 搜索框、全局/JPS 与局部 MINCO/MPC 路径的 RViz 独立 topic/display 尚未实现；MINCO 轨迹平滑、reference 恢复和 `PlanProgressWatchdog` 尚未实现。
+- 已实现未运行：淡蓝色 display 已按 `/minco/raw_path` 的真实 JPS producer 重新命名；根仓与 MuJoCo RViz 配置分别保持同一语义。截图回归、MINCO 轨迹平滑、reference 恢复和 `PlanProgressWatchdog` 仍未完成。
 
 ## 第二步：MINCO 轨迹平滑与有界重规划
 
@@ -68,10 +83,10 @@
 
 ## 第三步：RViz 全局/局部/MPC 路径分层
 
-- [ ] 全局控制路径：保留 JPS/MINCO raw path，标记为 `Global Planning / JPS`，淡蓝色；只表达任务级拓扑搜索结果。
-- [ ] 局部控制路径：`/minco/reference_path` 使用绿色或黄色，标记为 `Local Control / MINCO Reference`；不与全局路径共用 display 名称。
-- [ ] MPC：`/mpc/reference` 与 `/mpc/predicted_path` 分别标为 `MPC Follow Reference`、`MPC Predicted`，使用高对比颜色/线宽和独立 group；显示 timestamp/TF frame 一致性。
-- [ ] MuJoCo 与实机 RViz 配置保持同一 topic、QoS、fixed frame；只在 RViz 配置层调整颜色/名称，禁止改 planner/control topic ownership。
+- [x] 全局控制路径：`/minco/raw_path` 已标记为 `Global Planning / JPS Search Path`，淡蓝色；只表达 JPS/A* 的任务级拓扑搜索结果。
+- [x] 局部控制路径：`/minco/reference_path` 已标记为 `Local Control / MINCO Timed Reference`，绿色；不与全局路径共用 display 名称。
+- [x] MPC：`/ats_swerve_mpc/reference_horizon` 已标记为 `MPC Follow / Reference Horizon`（黄），`/ats_swerve_mpc/predicted_path` 为 `MPC Follow / Predicted Rollout`（品红）；使用独立 display。
+- [x] MuJoCo 与实机 RViz 配置使用同一 topic、QoS、fixed frame 语义；本轮只调整显示名称，未改变 planner/control topic ownership。
 - [ ] 增加截图回归和 `ros2 topic info --verbose` 唯一 publisher/subscriber 记录；截图非黑不等价于路径跟随通过。
 
 ## P2/P3/P4 边界
@@ -85,4 +100,14 @@
 - 每一项功能提交正文写明“为什么改、frame/time/map/ESDF/generation/ownership 契约、验证结果、未覆盖范围”。
 - 根仓只提交 `docs/`、`scripts/`、`src/ats_sentry_bringup`；导航仓只提交 `src/ats_sentry_nav` 归属文件；MuJoCo 仓只提交 `src/sim/ats_mujoco_sim` 归属文件。
 - 禁止 `git add .`、`git add -A`、历史重写和 force push；只允许 `develop`，提交作者固定为 `liukong1220 <1625038134@qq.com>`。
-- 当前本机 GitHub HTTPS push 因缺少用户名/凭据失败；本地提交保留，凭据恢复后逐仓执行 `git push origin develop`，并记录本地 HEAD 与 `origin/develop` 一致性。
+- 每次改动后先以 SSH `git push origin develop` 推送有改动仓库，再记录本地 HEAD 与 `origin/develop` 一致性；无改动仓库不得制造空提交。全历史 `git shortlog -sne --all` 必须只显示 `liukong1220 <1625038134@qq.com>`。
+
+## 下一方执行提示词
+
+```text
+继续 ATS Sentry P2.3/P2.4，先读取 AGENTS.md 和 docs/项目优化文档/ATS导航优化TODO.md。
+目标：修复“JPS/MINCO candidate 已生成、急停后旧 reference 被 MPC 拒绝、机器人长期零速且不重规划”。
+只修改拥有行为的 minco_planner、ats_goal_manager、ats_swerve_mpc 与最窄测试；不要改 Point-LIO、ROGMap 数值 projection、RC-ESDF signed-distance/unknown 语义，也不要把 /rog_map/esdf PointCloud2 当数值输入。
+实现 PlanProgressWatchdog：以 steady clock、同一 goal epoch、immutable snapshot generation、localization identity、inside-map/free/footprint、最小重规划间隔、最大连续尝试次数为条件。地图 stale/unknown、TF 失败、无路、unsafe trajectory 或次数耗尽必须保持 emergency_stop=true、/cmd_vel_mpc=0、/motion_control=0；恢复时只能发布急停之后重新定时且经提交点复核的新 reference。
+先补 deterministic 单测（reference 时间单调、旧轨迹不得复活、冻结无进展触发一次有界重规划、次数耗尽停机），再构建、运行 MuJoCo 新 DDS domain 的 nominal/red_box/单点不可过/冻结/stale/unreachable。每个有改动仓库显式 stage、中文详细提交、SSH push；最终报告实际 terminal 坐标、位置误差、replan 次数、最小 clearance、离散 footprint 冲突、MPC reference/predicted、两级速度、contact evaluator 与未运行实车 Gate。
+```

@@ -131,7 +131,7 @@ Visualization Manager:
     - Alpha: 1.0
       Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: ROGMap Local Bounds
+      Name: "ROGMap Bounds: Orange Local / Purple Visualization / Green Update"
       Topic:
         Depth: 1
         Durability Policy: Volatile
@@ -160,7 +160,7 @@ Visualization Manager:
       Enabled: true
       Line Style: Lines
       Line Width: 0.04
-      Name: MINCO Raw Path
+      Name: Global Planning / JPS Search Path
       Offset:
         X: 0
         Y: 0
@@ -181,7 +181,7 @@ Visualization Manager:
       Enabled: true
       Line Style: Lines
       Line Width: 0.05
-      Name: MINCO Reference
+      Name: Local Control / MINCO Timed Reference
       Offset:
         X: 0
         Y: 0
@@ -202,7 +202,7 @@ Visualization Manager:
       Enabled: true
       Line Style: Lines
       Line Width: 0.03
-      Name: MPC Reference Horizon
+      Name: MPC Follow / Reference Horizon
       Offset:
         X: 0
         Y: 0
@@ -223,7 +223,7 @@ Visualization Manager:
       Enabled: true
       Line Style: Lines
       Line Width: 0.03
-      Name: MPC Predicted Path
+      Name: MPC Follow / Predicted Rollout
       Offset:
         X: 0
         Y: 0

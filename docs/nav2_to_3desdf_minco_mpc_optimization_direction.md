@@ -1,6 +1,6 @@
 # ATS 自研导航 V1 状态
 
-更新时间：2026-08-03。本页只记录当前活动源码和已保存的本轮运行证据。
+更新时间：2026-08-04。本页只记录当前活动源码和已保存的本轮运行证据。
 
 ## P2
 
@@ -15,6 +15,13 @@
   视觉效果仍待截图回归。[Confidence: High，三色几何视觉为实现证据，截图为未验证项]
 - 淡蓝色 JPS 搜索框不属于 ROGMap owner；官方 A* 每次 start/goal 生成临时搜索框，ATS
   后续应由 `minco_planner` 发布同一 frame 的 JPS debug marker，不能混入 ROGMap 数值服务。
+- [已实现未运行] 两份正式 RViz 配置已把 `/minco/raw_path` 标记为淡蓝色
+  `Global Planning / JPS Search Path`，把 `/minco/reference_path` 标记为绿色
+  `Local Control / MINCO Timed Reference`，并独立显示 MPC 的黄色 reference horizon 与
+  品红 predicted rollout。`minco_planner_node.cpp` 直接发布 `GridJps::plan()` 的
+  `search_result.path` 到 `/minco/raw_path`，因此该命名反映实际 producer，而非只按 topic
+  名称推断。当前 revision 尚未保存同帧截图或做实车 RViz 验收。[Confidence: High，源码与
+  RViz 配置交叉证据；运行截图未验证]
 
 - `planning_grid_owner:=rog_map` 时，`ats_rog_map_adapter` 是
   `/rc_esdf/planning_grid` 的唯一发布者；adapter 直接调用
