@@ -67,6 +67,16 @@
   fresh 而阻断底盘执行；脚本验收 watchdog 的 1--2 次 bounded replan、耗尽后两级零速度和旧
   reference 不复活。原启动期冻结用例已修正为运行时切换，但最终闭环受已有用户 `rviz2` 的资源
   占用阻断，仍需无 viewer/低负载重跑。
+- **已验证（静态）**：`scripts/validate_navigation_config.py` 已从过时的
+  `ROGMap Local Bounds` 显示名迁移到三色语义名
+  `ROGMap Bounds: Orange Local / Purple Visualization / Green Update`。它对两份 RViz
+  配置验证 `/rog_map/bounds`、`/minco/raw_path`、`/minco/reference_path`、MPC
+  reference/predicted topic 的唯一 display、class、QoS 和 `odom` fixed frame，并以正式参数及
+  producer 源码锚点核对 ROGMap、MINCO、Goal Manager、MPC 的发布/订阅归属。
+  `python3 scripts/test_validate_navigation_config.py`（3/3）和
+  `python3 scripts/validate_navigation_config.py` 已通过。该检查不替代运行期 ROS graph
+  ownership 或任何 P2/P3 闭环验收；本轮因用户 `rviz2` 占用而未重跑 freeze、red-box 或故障矩阵。
+  [Confidence: High，受版本控制的配置、源码锚点与确定性测试交叉证据；运行期证据未新增]
 
 ## P3
 

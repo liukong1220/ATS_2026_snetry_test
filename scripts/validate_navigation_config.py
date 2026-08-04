@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the formal Nav2-free parameter and visualization contract."""
+"""Validate the formal navigation parameter and visualization contract."""
 
 import argparse
 import ast
@@ -7,6 +7,23 @@ import sys
 from pathlib import Path
 
 import yaml
+
+
+ROG_MAP_BOUNDS_DISPLAY_NAME = (
+    "ROGMap Bounds: Orange Local / Purple Visualization / Green Update"
+)
+ROG_MAP_DEBUG_TOPICS = (
+    "/rog_map/occ",
+    "/rog_map/inf_occ",
+    "/rog_map/unk",
+    "/rog_map/esdf",
+)
+NAVIGATION_PATH_DISPLAYS = {
+    "/minco/raw_path": "Global Planning / JPS Search Path",
+    "/minco/reference_path": "Local Control / MINCO Timed Reference",
+    "/ats_swerve_mpc/reference_horizon": "MPC Follow / Reference Horizon",
+    "/ats_swerve_mpc/predicted_path": "MPC Follow / Predicted Rollout",
+}
 
 
 class DuplicateKeyLoader(yaml.SafeLoader):
@@ -128,6 +145,48 @@ def displays_for_topic(value, topic: str):
     return displays
 
 
+def single_display_for_topic(document, topic: str, context: str):
+    displays = displays_for_topic(document, topic)
+    assert len(displays) == 1, f"{context} must have one {topic} display"
+    return displays[0]
+
+
+def assert_navigation_rviz_contract(document, fixed_frame: str, context: str):
+    manager = document["Visualization Manager"]
+    assert manager["Global Options"]["Fixed Frame"] == fixed_frame, (
+        f"{context} fixed frame must match ROGMap frame {fixed_frame!r}"
+    )
+
+    for topic in ROG_MAP_DEBUG_TOPICS:
+        display = single_display_for_topic(document, topic, context)
+        assert display["Topic"]["Reliability Policy"] == "Best Effort", (
+            f"{context} {topic} must use Best Effort"
+        )
+
+    bounds = single_display_for_topic(document, "/rog_map/bounds", context)
+    assert bounds["Class"] == "rviz_default_plugins/MarkerArray", (
+        f"{context} /rog_map/bounds must be a MarkerArray display"
+    )
+    assert bounds["Name"] == ROG_MAP_BOUNDS_DISPLAY_NAME, (
+        f"{context} /rog_map/bounds must describe the three ROGMap bounds"
+    )
+    assert bounds["Topic"]["Reliability Policy"] == "Best Effort", (
+        f"{context} /rog_map/bounds must use Best Effort"
+    )
+
+    for topic, display_name in NAVIGATION_PATH_DISPLAYS.items():
+        display = single_display_for_topic(document, topic, context)
+        assert display["Class"] == "rviz_default_plugins/Path", (
+            f"{context} {topic} must be a Path display"
+        )
+        assert display["Name"] == display_name, (
+            f"{context} {topic} display name must be {display_name!r}"
+        )
+        assert display["Topic"]["Reliability Policy"] == "Reliable", (
+            f"{context} {topic} must use Reliable"
+        )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -186,8 +245,16 @@ def main():
     assert minco["map_ready_topic"] == "/rog_map_adapter/ready"
     assert minco["unknown_is_obstacle"] is True
     assert minco["publish_unsafe_trajectory"] is False
+    assert minco["raw_path_topic"] == "minco/raw_path"
+    assert minco["reference_path_topic"] == "minco/reference_path"
+    assert minco["candidate_reference_path_topic"] == "/minco/reference_path_candidate"
+    assert minco["planner_manages_emergency_stop"] is False
     assert goal_manager["action_name"] == "/ats_navigate_to_pose"
     assert goal_manager["planner_goal_topic"] == minco["goal_request_topic"]
+    assert goal_manager["candidate_reference_topic"] == minco["candidate_reference_path_topic"]
+    assert goal_manager["reference_path_topic"] == "/minco/reference_path"
+    assert mpc["trajectory_topic"] == goal_manager["reference_path_topic"]
+    assert mpc["frame_id"] == rog_map["map_frame"]
     fake_transform = parameters(document, "fake_vel_transform")
     chassis_transform = parameters(document, "chassis_vel_transform")
     assert mpc["command_topic"] == "/cmd_vel_mpc"
@@ -343,46 +410,56 @@ def main():
         '"rog_map/inf_occ"',
         '"rog_map/unk"',
         '"rog_map/esdf"',
-        "publishBoundsMarker",
         "debug_bounds_topic_",
+        "create_publisher<visualization_msgs::msg::MarkerArray>",
+        "publishBoundsMarkers",
     ):
         assert required in rog_text, f"ROGMap visualization producer missing {required}"
 
+    minco_source = (
+        workspace / "src/ats_sentry_nav/minco_planner/src/nodes/minco_planner_node.cpp"
+    ).read_text(encoding="utf-8")
+    assert "raw_path_pub_ = create_publisher<nav_msgs::msg::Path>(raw_path_topic_" in minco_source
+    assert "candidate_reference_path_pub_ = create_publisher<nav_msgs::msg::Path>(" in minco_source
+    assert "if (planner_manages_emergency_stop_)" in minco_source
+
+    goal_manager_source = (
+        workspace / "src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp"
+    ).read_text(encoding="utf-8")
+    assert "reference_path_pub_ = create_publisher<nav_msgs::msg::Path>(" in goal_manager_source
+    assert "reference_path_pub_->publish(committed);" in goal_manager_source
+
+    mpc_source = (
+        workspace / "src/ats_sentry_nav/ats_swerve_mpc/src/ats_swerve_mpc_node.cpp"
+    ).read_text(encoding="utf-8")
+    for required in (
+        'create_publisher<nav_msgs::msg::Path>("~/predicted_path", rclcpp::QoS(1))',
+        '"~/reference_horizon", rclcpp::QoS(1)',
+    ):
+        assert required in mpc_source, f"MPC visualization producer missing {required}"
+
     rviz = load_yaml(workspace / "src/ats_sentry_bringup/rviz/sentry_default_view.rviz")
     rviz_topics = set(collect_topic_values(rviz))
-    for topic in (
-        "/rog_map/occ",
-        "/rog_map/inf_occ",
-        "/rog_map/unk",
-        "/rog_map/esdf",
-        "/rog_map/bounds",
-    ):
+    for topic in (*ROG_MAP_DEBUG_TOPICS, "/rog_map/bounds", *NAVIGATION_PATH_DISPLAYS):
         assert topic in rviz_topics, f"RViz config missing {topic}"
-    manager = rviz["Visualization Manager"]
-    assert manager["Global Options"]["Fixed Frame"] in ("map", "odom")
+    assert_navigation_rviz_contract(rviz, rog_map["map_frame"], "default RViz")
     rviz_text = (
         workspace / "src/ats_sentry_bringup/rviz/sentry_default_view.rviz"
     ).read_text(encoding="utf-8")
     assert "nav2_rviz_plugins" not in rviz_text
     assert "rviz_default_plugins/SetGoal" in rviz_text
     assert "Value: /goal_pose" in rviz_text
-    bounds_display = named_display(rviz, "ROGMap Local Bounds")
-    assert bounds_display is not None
-    assert bounds_display["Topic"]["Reliability Policy"] == "Best Effort"
     for required in (
         "Name: ROGMap Occupied",
         "Name: ROGMap Inflated",
         "Name: ROGMap Unknown",
         "Name: ROGMap ESDF Debug",
-        "Name: ROGMap Local Bounds",
+        ROG_MAP_BOUNDS_DISPLAY_NAME,
         "Reliability Policy: Best Effort",
         "Style: Boxes",
         "Color Transformer: Intensity",
         "Name: Planning Grid",
-        "Name: MINCO Raw Path",
-        "Name: MINCO Reference",
-        "Name: MPC Reference Horizon",
-        "Name: MPC Predicted Path",
+        *NAVIGATION_PATH_DISPLAYS.values(),
     ):
         assert required in rviz_text, f"RViz ROGMap display contract missing {required}"
     for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool"):
@@ -392,25 +469,14 @@ def main():
     mujoco_rviz = load_yaml(mujoco_rviz_path)
     mujoco_rviz_topics = set(collect_topic_values(mujoco_rviz))
     for topic in (
-        "/rog_map/occ",
-        "/rog_map/inf_occ",
-        "/rog_map/unk",
-        "/rog_map/esdf",
+        *ROG_MAP_DEBUG_TOPICS,
         "/rog_map/bounds",
         "/rc_esdf/planning_grid",
-        "/minco/raw_path",
-        "/minco/reference_path",
-        "/ats_swerve_mpc/predicted_path",
+        *NAVIGATION_PATH_DISPLAYS,
     ):
         assert topic in mujoco_rviz_topics, f"MuJoCo RViz config missing {topic}"
+    assert_navigation_rviz_contract(mujoco_rviz, rog_map["map_frame"], "MuJoCo RViz")
     mujoco_rviz_text = mujoco_rviz_path.read_text(encoding="utf-8")
-    mujoco_bounds_display = named_display(mujoco_rviz, "ROGMap Local Bounds")
-    assert mujoco_bounds_display is not None
-    assert mujoco_bounds_display["Topic"]["Reliability Policy"] == "Best Effort"
-    for topic in ("/rog_map/occ", "/rog_map/inf_occ", "/rog_map/unk", "/rog_map/esdf", "/rog_map/bounds"):
-        displays = displays_for_topic(mujoco_rviz, topic)
-        assert len(displays) == 1, f"MuJoCo RViz must have one {topic} display"
-        assert displays[0]["Topic"]["Reliability Policy"] == "Best Effort"
     localization_displays = displays_for_topic(mujoco_rviz, "/localization")
     assert len(localization_displays) == 2, "MuJoCo RViz must have two localization displays"
     assert all(
@@ -423,17 +489,15 @@ def main():
         "Name: ROGMap Inflated",
         "Name: ROGMap Unknown",
         "Name: ROGMap ESDF Debug",
-        "Name: ROGMap Local Bounds",
-        "Name: MINCO Raw Path",
-        "Name: MINCO Reference",
-        "Name: MPC Predicted Path",
+        ROG_MAP_BOUNDS_DISPLAY_NAME,
+        *NAVIGATION_PATH_DISPLAYS.values(),
         "Value: /goal_pose",
     ):
         assert required in mujoco_rviz_text, f"MuJoCo RViz display contract missing {required}"
     for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool", "nav2_rviz_plugins"):
         assert forbidden not in mujoco_rviz_text, f"MuJoCo RViz retains Nav2 display/tool: {forbidden}"
 
-    print("PASS: formal single-source behavior, Nav2-free configuration, and ROGMap visualization contract")
+    print("PASS: formal single-source behavior, navigation configuration, and ROGMap visualization contract")
 
 
 if __name__ == "__main__":
