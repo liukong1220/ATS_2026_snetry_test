@@ -72,11 +72,68 @@
 2. **已知风险**：footprint gate/Local Collision Repair 失败后当前路径可能进入 fail-closed 停止，但没有“地图内长期无进展”的任务级重规划触发器。
 3. **待区分假设**：停止来自地图 stale、控制 reference 被拒绝、MPC solver failure、真实碰撞还是机器人位姿没有推进；不能只提高 planner frequency 或 MPC gain。
 
+### P2.3/P2.4 本轮实现与运行证据（2026-08-04）
+
+- [x] 已实现：`PlannerGoal` 与 `PlannerStatus` 增加单调
+  `plan_request_sequence`；Goal Manager 只接受相同 `goal_id`、
+  `localization_epoch`、request sequence 的 candidate/status。急停或恢复后必须重新发起
+  request，不能让迟到的 candidate、旧 generation 或急停前 reference 恢复执行。
+- [x] 已实现：adapter 发布可靠、transient-local 的数值 `PlanningMapSnapshot`；其中包含
+  fused OccupancyGrid、signed distance、世界系 gradient、source generation、localization
+  epoch、publication sequence 与 origin/yaw。Goal Manager 提交 reference 前用当前 snapshot
+  再复核 freshness、frame、inside-map、free cell 与 `0.70 x 0.55 m + margin` 定向 footprint；
+  unknown/outside/occupied 均 fail-closed。
+- [x] 参数证据：ROGMap 输入 `input_sync_tolerance_sec` 从 `1.8` 调整到 `2.0`，对齐 181
+  域日志实测 projection 与 terrain/slope stamp delta `1.83--1.94 s`；没有放宽
+  `input_timeout_sec`、projection deadline、unknown/occupied 语义或 MPC 旧 reference 拒绝。
+- [x] 已实现并通过确定性单测：`PlanProgressWatchdog` 使用 steady clock、
+  `progress_min_delta_m=0.10`、`replan_stall_timeout_sec=4.0`、
+  `replan_min_interval_sec=2.0`、`max_consecutive_replans=2`。只有 health、TF、inside-map、
+  free cell、footprint 与有效 reference 全部成立时才统计无进展；超限返回
+  `RESULT_PLANNING_FAILED` 并保持急停。health/TF 暂态进入 map-wait/recovery，不把跨 DDS
+  topic 乱序错误归类为 task failure。
+- [x] 最窄验证：构建
+  `ats_navigation_interfaces ats_rog_map_adapter ats_goal_manager minco_planner ats_sentry_bringup ats_mujoco_sim`
+  成功；Goal Manager 的 lifecycle/watchdog/snapshot/epoch 共 4 项、adapter 的 fusion/snapshot
+  共 2 项、MINCO 的 JPS/optimizer/reference/atomic/footprint 共 5 项通过。完整
+  `colcon test` 中 `minco_planner` 的 8 项 GTest 通过；包级 lint 对既有 28 个文件报告
+  `copyright`、`cpplint`、`clang_format` 共 635 处风格偏差，不能写成全包通过。
+- [x] MuJoCo domain `185` headless nominal：ROGMap owner、JPS/MINCO、Goal Manager、SE2
+  MPC、twist bridge 与 MuJoCo 形成一条成功闭环。终点采样为
+  `(-8.999925, 1.490465)`，到 `(-9.0, 1.47)` 的脚本误差 `0.020465 m`；
+  `/minco/raw_path` 18 poses、`/minco/reference_path` 312 poses，末次 MINCO record 为
+  `generation=52 raw_points=2 reference_points=5 minimum_clearance=0.397
+  footprint_collisions=0`；MPC reference/predicted 各 3782 poses，adapter generation 从
+  `35` 增至 `76`，`/cmd_vel_mpc` 与 `/motion_control` 均观察到非零流且最终为零。
+  MuJoCo telemetry 的 `contact_violation_count=0` 与四轮 RPM 为零，只是该仿真 evaluator
+  的结果，实车/HIL 物理接触仍未验证。[Confidence: High，脚本、topic ownership 与日志交叉证据]
+- [ ] red-box domain `186` 未通过：`stage_red_box` 成功到
+  `(-8.881671, 1.453885)`，误差 `0.016202 m`；第二段在约 `74.2 s` 以
+  `RESULT_MAP_UNREADY=4` 中止，最终 pose `(-9.215931, -0.076150)`、
+  `final_distance=10.011419 m`。日志有 projection `2--3 s`、输入 stale、MPC odometry
+  timeout 与多次 health-induced recovery；长路线 MINCO candidate 的
+  `minimum_clearance` 约 `0.067--0.102`，均为离散 `footprint_collisions=0`，但没有完整
+  到达或最终 contact telemetry，红框不得判为通过。
+- [ ] 冻结 fault：MuJoCo 已新增运行时 `freeze_motion`，它只拒绝底盘执行并保持仿真、LiDAR、
+  odometry、localization 与 ROGMap 发布；脚本在 nominal 后设置该参数，要求健康状态、
+  1--2 次 watchdog replan、`RESULT_PLANNING_FAILED=5`、两级零速度和 generation 继续增长。
+  domain `188` 暴露了“启动即冻结”的脚本设计错误，已改为运行时切换；domain `189` 因已有用户
+  `rviz2` 占用单核、load/swap 升高而在 `/localization` 首次发现前超时。最终冻结闭环尚未运行，
+  不能将接口实现写为 fault 通过。
+- [ ] adapter lease、projection service timeout、Point-LIO input stale、unknown、unreachable
+  与中间点不可过仍需在无 viewer、低负载环境中各用独立新 DDS domain 重跑；每例必须记录
+  `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`，恢复时还须确认无
+  新目标不会复活旧 response/reference。
+
 ### 实施顺序
 
-- [ ] 在 `minco_planner` 建立 `PlanProgressWatchdog`：用 `map_snapshot` frame/时间、机器人当前位姿、目标 epoch、reference generation、最后有效命令和进展距离建立状态；机器人在规划地图内且距离目标下降小于阈值持续 `replan_stall_timeout_sec` 才触发重规划。
-- [ ] 触发器使用 steady clock deadline，带最小重规划间隔、最大连续重规划次数和 goal epoch；旧 goal、旧 generation、急停前 reference 不得复活。
-- [ ] 重规划入口先读取机器人在当前 `PlanningMapSnapshot` 的位置并验证 inside-map/free/footprint；地图 stale、unknown、TF 失败或目标不可达直接零速度。
+- [x] `PlanProgressWatchdog` 由 Goal Manager 拥有；它记录 goal/localization/request identity、
+  snapshot publication/source generation、距离、steady-clock 进展时间、重规划间隔与连续次数。
+- [x] 重规划提交遵守新 request、新 snapshot 复核、同一互斥区内重定时后
+  `emergency_stop=false` 再发布 reference 的顺序；旧 goal、旧 generation、急停前 reference
+  不得复活。
+- [x] 重规划入口在当前 `PlanningMapSnapshot` 上验证 inside-map/free/footprint；地图 stale、
+  unknown、TF 失败或目标不可达保持确定性零速度。故障运行闭环仍按上文待补。
 - [ ] MINCO 优化先锁定端点和 yaw，再用尺度一致的 segment duration、位置/速度/加速度连续性和 clearance；对最终轨迹做独立离散 footprint 复核，不能用 solver success 代替安全。
 - [ ] 以简单 JPS polyline + 固定速度 baseline 做消融：记录 path length、最小 clearance、曲率/加加速度 proxy、tracking error、replan count、solver wall time p50/p95/p99。
 - [ ] 分别注入“一个中间点不可过”“机器人不动但地图新鲜”“Point-LIO stale”“adapter lease stale”，每个故障使用新 DDS domain 和新 MuJoCo launch，验证 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`。
