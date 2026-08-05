@@ -15,21 +15,45 @@
 - **已验证（静态 + 组件）**：`ats_rog_map` 最终源码后的 CTest 为 `4/4` CTest、`7/7`
   测试通过；根 RViz validator 为 `4/4`，`ats_sentry_bringup` 与 `ats_mujoco_sim`
   构建、YAML、launch Python、Bash 语法和三仓 `git diff --check` 通过。
-- **已验证（MuJoCo/RViz 观察链，非 P2 闭环）**：新隔离 domain `195` 使用
-  `use_rviz=true`、`launch_mujoco_rviz=false`、`use_viewer=false` 启动
-  `/mujoco_navigation_rviz2`。`/rog_map/viz` 的实际消息为 `sensor_msgs/msg/PointCloud2`，
-  `frame_id=odom`、`width=5814`、字段含 `rgb`，RViz subscriber QoS 为 `BEST_EFFORT`；
-  payload 中观察到 occupied 与 known-free 的 RGB 字节。该运行未发送目标，不证明 nominal、
-  freeze、red-box、watchdog 或 P2 通过。
-- **性能边界**：domain `195` 日志记录 `viz_build_ms=416.7--554.0 ms`，projection
-  `compute_ms=1663.9--2252.9 ms` 且 `esdf_refresh_ms=0`。这证明同一快照 ESDF 去重仍生效，
-  但显示层构建开销尚未达到可接受实时预算，不能写成 projection deadline 已恢复；下一步应
-  对局部体素导出做单独 profile/降采样或异步快照实验，保持 timeout、lease 和 fail-closed
-  语义不变。[Confidence: High，源码、CTest、ROS payload/QoS 与 launch 日志交叉证据]
-- **未通过/限制**：domain `194` 的完整 runner 在检查 `/rog_map/viz` 前因已有脚本的
-  `localization_fusion` 参数 discovery 窗口超时退出；domain `195` 的直接观察没有截图文件，
-  因环境缺少 `ffmpeg`，且 `/rog_map/bounds` 在该次 ROS graph 查询窗口未收敛。上述限制不改变
-  `/rog_map/viz` payload 已观察到的事实，也不构成 P2 或 P3 通过证据。
+- **已验证（MuJoCo/RViz 观察链，非 P2 闭环）**：历史 domain `195` 首次确认了
+  `/rog_map/viz` 的 `PointCloud2`/`odom`/`rgb` 契约，但该 revision 的
+  `viz_build_ms=416.7--554.0 ms`、projection `compute_ms=1663.9--2252.9 ms` 只能作为
+  优化前基线，不能与下述实现后的分项测量混用。
+- **已验证（RViz-only 性能优化，2026-08-06）**：`publishDebug()` 现在只在
+  `map_mutex_` 内收集有界的不可变 `DebugSnapshot`，锁外完成 RGB `PointCloud2` 序列化和
+  DDS publish。`collectVoxelDebugInBox()` 只扫描 `Visualization Range` 与 local-map 的交集，
+  按采样上界 reserve，绝不复制整张地图；无 `/rog_map/viz` 订阅者时不采集或构建 RGB cloud。
+  snapshot 捕获 source generation、stamp、bounds 和已分类 voxel，不会再在锁外访问 `map_`。
+  projection service、`PlanningMapSnapshot`、JPS、MINCO、MPC 与 emergency-stop 的输入/输出
+  均未改动。[Confidence: High，源码与 7 项 CTest]
+- **三场景性能基线**：以下分位数使用 nearest-rank，单位均为 ms。`map_lock_wait_ms` 指
+  projection 的锁等待；`debug hold` 是 `publishDebug()` 在锁内的采集时间。`esdf_refresh_ms`
+  三个场景均为 `0`，表示当前 immutable snapshot 未重复刷新 ESDF，而不代表 ESDF 链路被移除。
+
+  | domain / 场景 | projection（n）compute P50/P95/P99 | sample P50/P95/P99 | map lock wait / ESDF / gradient P50/P95/P99 | RGB debug |
+  | --- | --- | --- | --- | --- |
+  | `203`，RViz disabled | `29`: `1.2/2.1/2.2` | `1.2/2.0/2.1` | `0/0/0`, `0/0/0`, `0/0/0` | 无 subscriber，无 debug build record |
+  | `206`，RViz 启动但不显示 `/rog_map/viz` | `32`: `1.5/2.8/3.0` | `1.5/2.7/2.9` | `0/0/0`, `0/0/0`, `0/0/0` | 常态无构建；仅为 payload 核验临时 `echo` 产生 1 次 `build=1.0` |
+  | `207`，RViz 订阅 `/rog_map/viz` | `380`: `1.8/2.8/5.0` | `1.7/2.7/4.8` | `0/0/0`, `0/0/0`, `0/0/0`（gradient max=`0.1`） | `334`: build `1.1/1.7/4.6`，collect `0.9/1.3/3.5`，serialize `0.1/0.1/0.2`，publish `0.1/0.2/0.3`，debug hold `2.0/2.7/5.7` |
+
+  domain `207` 的 debug `build` 最大值为 `23.8`，其中 publish 最大值为 `23.1`，但
+  `debug hold` 最大值仅为 `6.4`、projection lock wait 全部为 `0.0`。因此当前尾峰位于锁外
+  publish，而不是 `map_mutex_` 内；没有 scheduler trace，不能把它断言为唯一系统级延迟根因。
+  优化前没有这五段计时，不能反推旧 `416.7--554.0 ms` 的精确比例。[Confidence: High，源码
+  临界区与固定运行日志；唯一根因结论为 Medium]
+- **generation 与 RViz 契约**：domain `207` 中 380 个 projection 均为
+  `ready=1, stale=0`，ROGMap source generation `19 -> 7599`；adapter 记录 246 个数值
+  snapshot，generation `19 -> 7579`。这是 source/adapter 新鲜度的独立证据，不意味着其编号与
+  MINCO local snapshot generation 端到端相等。运行期 `/rog_map/viz` 只有
+  `/ats_rog_map` publisher 和 `/mujoco_navigation_rviz2` subscriber，双方为 `BEST_EFFORT`；
+  抓取包为 `frame_id=odom`、`width=8710`，fields 含 `x/y/z/rgb`。adapter 不订阅
+  `/rog_map/viz` 或 `/rog_map/esdf`，数值输入仍是 `/rog_map/get_ground_projection`。
+- **本轮未完成**：domain `208` 与 `210` 的 headless runner 分别在完整 action 前被外层执行
+  会话回收；其日志只证明启动后 `/localization`、planning-grid owner、`/rog_map/occ`（以及
+  domain `210` 的 `/rog_map/inf_occ`）和连续 `ready=1/stale=0` 的 source/adapter 已建立，
+  不构成 nominal 通过。freeze 与 red-box 本轮未能完整运行，沿用此前 red-box 未通过状态。没有
+  生成当前 revision 的 RViz 截图；本机有 `ffmpeg`，但没有运行中的 RViz 窗口可捕获，故不能写成
+  截图验收通过。P2/P3 状态均不变。
 - 淡蓝色 JPS 搜索框不属于 ROGMap owner；官方 A* 每次 start/goal 生成临时搜索框，ATS
   后续应由 `minco_planner` 发布同一 frame 的 JPS debug marker，不能混入 ROGMap 数值服务。
 - [已实现未运行] 两份正式 RViz 配置已把 `/minco/raw_path` 标记为淡蓝色
