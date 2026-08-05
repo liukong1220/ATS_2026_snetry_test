@@ -434,7 +434,10 @@ def main():
         "collectVoxelDebugInBox",
         "debug_bounds_topic_",
         "create_publisher<visualization_msgs::msg::MarkerArray>",
-        "publishBoundsMarkers",
+        "makeBoundsMarkers",
+        "DebugSnapshot",
+        "viz_serialize_ms",
+        "map_lock_hold_ms",
     ):
         assert required in rog_text, f"ROGMap visualization producer missing {required}"
 

@@ -145,9 +145,35 @@
 - [x] MPC：`/ats_swerve_mpc/reference_horizon` 已标记为 `MPC Follow / Reference Horizon`（黄），`/ats_swerve_mpc/predicted_path` 为 `MPC Follow / Predicted Rollout`（品红）；使用独立 display。
 - [x] MuJoCo 与实机 RViz 配置使用同一 topic、QoS、fixed frame 语义；本轮只调整显示名称，未改变 planner/control topic ownership。
 - [x] 增加 `/rog_map/viz` 的 RViz-only RGB 体素诊断层：全局 `/map`/planning grid 保持底图，局部层按 `Visualization Range` 裁剪，`/rog_map/bounds` 保持三色范围框；`/minco/raw_path` 淡蓝 JPS、`/minco/reference_path` 绿色 MINCO、MPC reference/predicted 分别为黄/品红。
-- [x] 以静态配置校验和 domain `195` ROS payload/QoS 观察验证 `/rog_map/viz` 的 `frame_id=odom`、`PointCloud2.rgb` 与 RViz Best Effort subscriber；截图转换因环境缺少 `ffmpeg` 未完成，不能将其写成截图回归通过。
-- [ ] 继续对 `viz_build_ms=416.7--554.0 ms` 做独立 profile，在不放宽 projection timeout/lease 的前提下降低显示锁占用；完成后必须重跑 nominal、freeze 和红框对比。
-a
+- [x] 以静态配置校验和 domain `195` ROS payload/QoS 观察验证 `/rog_map/viz` 的 `frame_id=odom`、`PointCloud2.rgb` 与 RViz Best Effort subscriber；该次未保留可复查截图，不能将其写成截图回归通过。
+- [x] 已完成 RViz-only 独立 profile 与最小实现：`publishDebug()` 在锁内只收集有界、不可变的
+  debug snapshot，锁外进行 RGB 序列化与 DDS publish；无 `/rog_map/viz` subscriber 时不构建
+  cloud。`collectVoxelDebugInBox()` 仅 reserve 当前范围的采样上界，不复制整张地图。新增
+  `viz_collect_ms`、`viz_serialize_ms`、`viz_publish_ms`、`map_lock_wait_ms`、
+  `map_lock_hold_ms`，保留汇总 `viz_build_ms`。
+- [x] 已完成三场景基线（nearest-rank，ms）：domain `203`（RViz disabled）29 个 projection 的
+  compute `P50/P95/P99=1.2/2.1/2.2`、sample `1.2/2.0/2.1`，lock wait/ESDF refresh/gradient
+  均为 `0/0/0`；domain `206`（RViz 不显示 `/rog_map/viz`）32 个 projection 的 compute
+  `1.5/2.8/3.0`、sample `1.5/2.7/2.9`，常态无 debug build（临时 CLI payload 核验只产生一次
+  `1.0 ms`）；domain `207`（RViz 真正订阅）380 个 projection 的 compute
+  `1.8/2.8/5.0`、sample `1.7/2.7/4.8`、lock wait/ESDF refresh `0/0/0`，334 个 RGB debug 的
+  build `1.1/1.7/4.6`、collect `0.9/1.3/3.5`、serialize `0.1/0.1/0.2`、publish
+  `0.1/0.2/0.3`、lock hold `2.0/2.7/5.7`。domain `207` 的 build 最大 `23.8` 来自锁外 publish
+  最大 `23.1`；debug lock hold 最大仅 `6.4`。无 scheduler trace 时，不把该尾峰断言为唯一系统
+  级根因。
+- [x] 组件与接口验证：`ats_rog_map` 增量构建通过，`colcon test-result` 为 `7 tests, 0 errors,
+  0 failures, 0 skipped`；debug 测试锁定 visualization/local-map 边界、非整除范围、stride、
+  unknown 不导出但保留统计、RGB 分类、只读 update generation 与零 subscriber gate。配置校验
+  `4/4`、受影响 launch 的 Python 语法和 `ROS_LOG_DIR=/tmp/ats_roslogs ros2 launch ... --show-args`
+  通过；MuJoCo CPU LiDAR Python binding 窄回归 `1 passed`。
+- [x] RViz 运行期观察：domain `207` 的 `/rog_map/viz` publisher 仅为 `/ats_rog_map`，subscriber
+  为 `/mujoco_navigation_rviz2`，QoS 为 `BEST_EFFORT`；抓包 `frame_id=odom`、`width=8710`、fields
+  含 `rgb`。ROGMap source generation `19 -> 7599`（380 samples），adapter numeric snapshot
+  generation `19 -> 7579`（246 records），所有 projection 均 `ready=1, stale=0`。这不证明
+  MINCO local snapshot 与前两者编号端到端一致，也不是 P2 闭环通过。
+- [ ] 必须在不受外层会话时限影响的环境中完整重跑 headless nominal、freeze 和 red-box。domain
+  `208`/`210` 在 action 前被执行会话回收，只有基础 graph/ROGMap fresh 证据；没有当前 revision
+  的 RViz 截图，且本机虽具备 `ffmpeg`，本轮没有运行中的窗口可捕获。不得将它们记为通过。
 ## P2/P3/P4 边界
 
 - P2 当前目标是 ROGMap ground projection、terrain/static wall/unknown 融合、唯一 planning-grid owner、单次 MINCO immutable snapshot 和安全停机；ROS 2 可视化框不改变这些数值语义。
