@@ -147,7 +147,7 @@
 - [x] 增加 `/rog_map/viz` 的 RViz-only RGB 体素诊断层：全局 `/map`/planning grid 保持底图，局部层按 `Visualization Range` 裁剪，`/rog_map/bounds` 保持三色范围框；`/minco/raw_path` 淡蓝 JPS、`/minco/reference_path` 绿色 MINCO、MPC reference/predicted 分别为黄/品红。
 - [x] 以静态配置校验和 domain `195` ROS payload/QoS 观察验证 `/rog_map/viz` 的 `frame_id=odom`、`PointCloud2.rgb` 与 RViz Best Effort subscriber；截图转换因环境缺少 `ffmpeg` 未完成，不能将其写成截图回归通过。
 - [ ] 继续对 `viz_build_ms=416.7--554.0 ms` 做独立 profile，在不放宽 projection timeout/lease 的前提下降低显示锁占用；完成后必须重跑 nominal、freeze 和红框对比。
-
+a
 ## P2/P3/P4 边界
 
 - P2 当前目标是 ROGMap ground projection、terrain/static wall/unknown 融合、唯一 planning-grid owner、单次 MINCO immutable snapshot 和安全停机；ROS 2 可视化框不改变这些数值语义。
