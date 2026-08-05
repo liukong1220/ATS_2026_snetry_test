@@ -1,6 +1,6 @@
 # ATS 自研导航 V1 状态
 
-更新时间：2026-08-04。本页只记录当前活动源码和已保存的本轮运行证据。
+更新时间：2026-08-05。本页只记录当前活动源码和已保存的本轮运行证据。
 
 ## P2
 
@@ -37,7 +37,7 @@
   没有新的 reference 恢复，action 在 `180 s` 超时，最终距离约 `1.52 m`。因此 P2 红框闭环
   尚未通过；MuJoCo 独立 contact evaluator 未接入，物理接触为“未验证”。
 
-### P2.3/P2.4 当前事实（2026-08-04）
+### P2.3/P2.4 当前事实（2026-08-05）
 
 - **已实现且已做最窄验证**：规划请求使用
   `goal_id + localization_epoch + plan_request_sequence` 身份；adapter 的
@@ -65,8 +65,31 @@
   不得将单段 nominal、MINCO candidate 或 topic 存在写成 red-box 通过。
 - **已实现未运行**：MuJoCo `freeze_motion` 运行时故障入口保持 sensors/localization/map
   fresh 而阻断底盘执行；脚本验收 watchdog 的 1--2 次 bounded replan、耗尽后两级零速度和旧
-  reference 不复活。原启动期冻结用例已修正为运行时切换，但最终闭环受已有用户 `rviz2` 的资源
-  占用阻断，仍需无 viewer/低负载重跑。
+  reference 不复活。原启动期冻结用例已修正为运行时切换，但最终闭环仍需无 viewer/低负载重跑。
+- **已验证（诊断，不是 freeze 门禁）**：domain `190` 首次运行暴露动态参数回调的
+  `RcutilsLogger.warn()` printf 风格调用崩溃；MuJoCo 仓已修正为单条格式化日志，并以直接执行的
+  确定性回归覆盖 `freeze_motion=true/false` 两次切换。该 `ament_python` 包未把该文件注册给
+  standalone pytest，`colcon test --pytest-args` 会显示 `Ran 0 tests`，故不得写成包级 pytest
+  通过。domain `191` 修复后没有此崩溃，但 nominal action 先以
+  `RESULT_MAP_UNREADY=4: map ready heartbeat lease expired` 终止，冻结注入未执行。
+- **已验证（带 RViz 诊断，不是低负载门禁）**：domain `192` 使用
+  `use_rviz:=true`、`launch_mujoco_rviz:=false`、`use_viewer:=false`，只启动
+  `mujoco_navigation_rviz2`，由用户可见地观察 ROGMap、planning grid 与导航显示；这不能替代
+  无 viewer/RViz 的 freeze 验收。自研 action 已接受 `goal_id=1`，但在任何
+  `/cmd_vel_mpc`/`/motion_control` 输出前返回 `RESULT_MAP_UNREADY=4`，原因仍为
+  `map ready heartbeat lease expired`；最终 pose `(-10.594281, 1.541168)`，距
+  `(-9.0, 1.47)` 的距离 `1.595869 m`。因此没有 runtime freeze、watchdog bounded replan、
+  `RESULT_PLANNING_FAILED`、两级零速度或旧 reference 拒绝的新增运行证据。
+- **已验证（首次违反点观测）**：domain `192` 的 72 个 ROGMap projection 样本为
+  `p50=2386.1 ms`、`p95=3304.5 ms`、`p99=3595.8 ms`、max `3595.8 ms`；当前
+  `cloud_timeout_sec=2.0 s`。同一请求中 `odom_age` 约 `0.04--0.10 s`，而
+  `map_age/cloud_age` 可在 projection 前后从不足 `1 s` 增至超过 `2 s`，随即出现
+  `map_update=true, odom=false, raw_cloud=true`、adapter `ready=false` 与 Goal Manager
+  fail-closed。新增结构化日志保存 projection 起止/计算与 round-trip、terrain/slope stamp/age/delta、
+  heartbeat sequence/source generation/localization epoch、reference identity、map lease 与
+  emergency-stop 边沿。当前没有 profiler 或 scheduler trace，不能断言 map mutex 是唯一根因；
+  不得据此放宽 sync tolerance、projection deadline、lease、unknown/occupied 或 MPC 旧 reference
+  拒绝规则。[Confidence: High，运行日志和源码观测点；唯一根因仍为 Medium]
 - **已验证（静态）**：`scripts/validate_navigation_config.py` 已从过时的
   `ROGMap Local Bounds` 显示名迁移到三色语义名
   `ROGMap Bounds: Orange Local / Purple Visualization / Green Update`。它对两份 RViz
