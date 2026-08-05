@@ -704,6 +704,11 @@ ats_rog_map:
     tf_timeout_sec: 0.1
     debug_rate_hz: 2.0
     esdf_visualization_height: 0.15
+    # RViz-only local voxel diagnostics. This publisher is inactive without a subscriber and
+    # never feeds the numerical ROGMap projection service or planning snapshot.
+    debug_viz_topic: /rog_map/viz
+    debug_viz_stride: 1
+    debug_viz_include_unknown: false
     self_filter_radius: 0.45
     debug_qos_depth: 1
     input_qos_reliable: false

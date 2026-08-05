@@ -545,9 +545,13 @@ assert_rviz_runtime_contract() {
   : >"${RVIZ_QOS_LOG}"
   wait_for_command "MuJoCo navigation RViz node" 30 \
     node_is_present /mujoco_navigation_rviz2
-  for topic in /rog_map/occ /rog_map/inf_occ /rog_map/bounds /localization; do
+  for topic in /rog_map/occ /rog_map/inf_occ /rog_map/viz /rog_map/bounds /localization; do
     assert_rviz_best_effort_observer "${topic}"
   done
+  wait_for_command "non-empty ROGMap local voxel visualization" 30 \
+    topic_field_positive /rog_map/viz width best_effort
+  wait_for_command "ROGMap local voxel visualization frame" 30 \
+    topic_field_equals /rog_map/viz header.frame_id odom best_effort
   echo "OK: RViz runtime QoS contract saved to ${RVIZ_QOS_LOG}"
 }
 

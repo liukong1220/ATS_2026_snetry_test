@@ -4,15 +4,32 @@
 
 ## P2
 
-- `ROGMap` 可视化第一步已实现并完成构建、单测和 MuJoCo 运行期复验：活动 ROS 2
-  wrapper 按官方 `robot_state +/- visualization_range / 2` 语义裁剪 debug cloud，并在
-  `/rog_map/bounds` 以稳定 namespace 发布橙色 `Local Map Range`、紫色
-  `Visualization Range` 和绿色 `Raycast Update Range`。绿色框来自核心量化并裁剪后的
-  raycast update box；数值 projection service、occupancy、signed-distance、unknown 和
-  adapter owner 未改变。运行期 domain `156` 观察到四类 ROGMap topic 非空、adapter
-  `ready=true`、generation 递增，以及 `cells=10000/stale=false` 的连续 projection。
-  `/rog_map/bounds` 三色框尚未保存独立截图，故只对消息实现与运行链路给出高置信结论，RViz
-  视觉效果仍待截图回归。[Confidence: High，三色几何视觉为实现证据，截图为未验证项]
+- `ROGMap` 可视化层现已拆成两个互不替代的产品：全局 `/map`/planning grid 继续表达
+  静态导航底图；`/rog_map/viz` 只在有 RViz 订阅者时生成机器人中心
+  `Visualization Range` 内的 RGB 体素诊断。`/rog_map/bounds` 继续发布橙色
+  `Local Map Range`、紫色 `Visualization Range` 和绿色 `Raycast Update Range`，数值
+  projection service、occupancy、signed-distance、unknown 和 adapter owner 未改变。
+  诊断颜色为 raw occupied=`(245,70,70)`、known free=`(92,220,235)`，unknown 只有
+  `debug_viz_include_unknown=true` 才导出；淡蓝色 JPS 仍由独立的 `/minco/raw_path`
+  display 表达，不能把局部 free 体素误认成 JPS 路径。
+- **已验证（静态 + 组件）**：`ats_rog_map` 最终源码后的 CTest 为 `4/4` CTest、`7/7`
+  测试通过；根 RViz validator 为 `4/4`，`ats_sentry_bringup` 与 `ats_mujoco_sim`
+  构建、YAML、launch Python、Bash 语法和三仓 `git diff --check` 通过。
+- **已验证（MuJoCo/RViz 观察链，非 P2 闭环）**：新隔离 domain `195` 使用
+  `use_rviz=true`、`launch_mujoco_rviz=false`、`use_viewer=false` 启动
+  `/mujoco_navigation_rviz2`。`/rog_map/viz` 的实际消息为 `sensor_msgs/msg/PointCloud2`，
+  `frame_id=odom`、`width=5814`、字段含 `rgb`，RViz subscriber QoS 为 `BEST_EFFORT`；
+  payload 中观察到 occupied 与 known-free 的 RGB 字节。该运行未发送目标，不证明 nominal、
+  freeze、red-box、watchdog 或 P2 通过。
+- **性能边界**：domain `195` 日志记录 `viz_build_ms=416.7--554.0 ms`，projection
+  `compute_ms=1663.9--2252.9 ms` 且 `esdf_refresh_ms=0`。这证明同一快照 ESDF 去重仍生效，
+  但显示层构建开销尚未达到可接受实时预算，不能写成 projection deadline 已恢复；下一步应
+  对局部体素导出做单独 profile/降采样或异步快照实验，保持 timeout、lease 和 fail-closed
+  语义不变。[Confidence: High，源码、CTest、ROS payload/QoS 与 launch 日志交叉证据]
+- **未通过/限制**：domain `194` 的完整 runner 在检查 `/rog_map/viz` 前因已有脚本的
+  `localization_fusion` 参数 discovery 窗口超时退出；domain `195` 的直接观察没有截图文件，
+  因环境缺少 `ffmpeg`，且 `/rog_map/bounds` 在该次 ROS graph 查询窗口未收敛。上述限制不改变
+  `/rog_map/viz` payload 已观察到的事实，也不构成 P2 或 P3 通过证据。
 - 淡蓝色 JPS 搜索框不属于 ROGMap owner；官方 A* 每次 start/goal 生成临时搜索框，ATS
   后续应由 `minco_planner` 发布同一 frame 的 JPS debug marker，不能混入 ROGMap 数值服务。
 - [已实现未运行] 两份正式 RViz 配置已把 `/minco/raw_path` 标记为淡蓝色
@@ -103,10 +120,10 @@
   配置验证 `/rog_map/bounds`、`/minco/raw_path`、`/minco/reference_path`、MPC
   reference/predicted topic 的唯一 display、class、QoS 和 `odom` fixed frame，并以正式参数及
   producer 源码锚点核对 ROGMap、MINCO、Goal Manager、MPC 的发布/订阅归属。
-  `python3 scripts/test_validate_navigation_config.py`（3/3）和
+  `python3 scripts/test_validate_navigation_config.py`（4/4）和
   `python3 scripts/validate_navigation_config.py` 已通过。该检查不替代运行期 ROS graph
-  ownership 或任何 P2/P3 闭环验收；本轮因用户 `rviz2` 占用而未重跑 freeze、red-box 或故障矩阵。
-  [Confidence: High，受版本控制的配置、源码锚点与确定性测试交叉证据；运行期证据未新增]
+  ownership 或任何 P2/P3 闭环验收；本轮只做显示观察，未重跑 freeze、red-box 或故障矩阵。
+  [Confidence: High，受版本控制的配置、源码锚点、确定性测试与运行期 payload/QoS 交叉证据]
 
 ## P3
 
