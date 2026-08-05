@@ -90,6 +90,13 @@
   emergency-stop 边沿。当前没有 profiler 或 scheduler trace，不能断言 map mutex 是唯一根因；
   不得据此放宽 sync tolerance、projection deadline、lease、unknown/occupied 或 MPC 旧 reference
   拒绝规则。[Confidence: High，运行日志和源码观测点；唯一根因仍为 Medium]
+- **已实现且已做最窄验证（待 MuJoCo 对比）**：源码确认 core 在
+  `esdf_update_interval_updates=1` 的 map update 内已构建 ESDF，而 engine 原先仍令同一
+  immutable snapshot 的 `ensureCurrentEsdf()` 再建一次。现将 `esdf_generation_` 仅在
+  `map_update_index_` 实际递增且命中 core interval 时对齐到 snapshot generation；滑动窗口但
+  未更新概率地图时继续使旧 ESDF 失效。`RogMapEngineSnapshot.ReusesEsdfRebuiltByEveryMapUpdate`
+  已通过，并锁定“update 后可直接读取当前 ESDF、sliding 后必须重建”两条分支。尚未在该修正后
+  重跑 MuJoCo nominal、freeze 或 red-box，不得声称 projection deadline 或 P2 门禁已恢复。
 - **已验证（静态）**：`scripts/validate_navigation_config.py` 已从过时的
   `ROGMap Local Bounds` 显示名迁移到三色语义名
   `ROGMap Bounds: Orange Local / Purple Visualization / Green Update`。它对两份 RViz
