@@ -144,7 +144,9 @@
 - [x] 局部控制路径：`/minco/reference_path` 已标记为 `Local Control / MINCO Timed Reference`，绿色；不与全局路径共用 display 名称。
 - [x] MPC：`/ats_swerve_mpc/reference_horizon` 已标记为 `MPC Follow / Reference Horizon`（黄），`/ats_swerve_mpc/predicted_path` 为 `MPC Follow / Predicted Rollout`（品红）；使用独立 display。
 - [x] MuJoCo 与实机 RViz 配置使用同一 topic、QoS、fixed frame 语义；本轮只调整显示名称，未改变 planner/control topic ownership。
-- [ ] 增加截图回归和 `ros2 topic info --verbose` 唯一 publisher/subscriber 记录；截图非黑不等价于路径跟随通过。
+- [x] 增加 `/rog_map/viz` 的 RViz-only RGB 体素诊断层：全局 `/map`/planning grid 保持底图，局部层按 `Visualization Range` 裁剪，`/rog_map/bounds` 保持三色范围框；`/minco/raw_path` 淡蓝 JPS、`/minco/reference_path` 绿色 MINCO、MPC reference/predicted 分别为黄/品红。
+- [x] 以静态配置校验和 domain `195` ROS payload/QoS 观察验证 `/rog_map/viz` 的 `frame_id=odom`、`PointCloud2.rgb` 与 RViz Best Effort subscriber；截图转换因环境缺少 `ffmpeg` 未完成，不能将其写成截图回归通过。
+- [ ] 继续对 `viz_build_ms=416.7--554.0 ms` 做独立 profile，在不放宽 projection timeout/lease 的前提下降低显示锁占用；完成后必须重跑 nominal、freeze 和红框对比。
 
 ## P2/P3/P4 边界
 

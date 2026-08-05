@@ -55,7 +55,7 @@ Visualization Manager:
       Color: 255; 0; 0
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Name: ROGMap Occupied
       Position Transformer: XYZ
       Size (Pixels): 3
@@ -68,14 +68,14 @@ Visualization Manager:
         Reliability Policy: Best Effort
         Value: /rog_map/occ
       Use Fixed Frame: true
-      Value: true
+      Value: false
     - Alpha: 0.45
       Autocompute Intensity Bounds: true
       Class: rviz_default_plugins/PointCloud2
       Color: 255; 145; 0
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Name: ROGMap Inflated
       Position Transformer: XYZ
       Size (Pixels): 3
@@ -88,7 +88,7 @@ Visualization Manager:
         Reliability Policy: Best Effort
         Value: /rog_map/inf_occ
       Use Fixed Frame: true
-      Value: true
+      Value: false
     - Alpha: 0.35
       Autocompute Intensity Bounds: true
       Class: rviz_default_plugins/PointCloud2
@@ -152,6 +152,25 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /rc_esdf/planning_grid
       Use Timestamp: false
+      Value: true
+    - Alpha: 0.78
+      Autocompute Intensity Bounds: true
+      Class: rviz_default_plugins/PointCloud2
+      Color Transformer: RGB8
+      Decay Time: 0
+      Enabled: true
+      Name: ROGMap Local Voxel State (debug only)
+      Position Transformer: XYZ
+      Size (Pixels): 3
+      Size (m): 0.09
+      Style: Boxes
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /rog_map/viz
+      Use Fixed Frame: true
       Value: true
     - Alpha: 1.0
       Buffer Length: 1

@@ -46,6 +46,16 @@ class NavigationRvizContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "must use Reliable"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
+    def test_local_voxel_display_requires_producer_rgb(self):
+        rviz = copy.deepcopy(self.load_default_rviz())
+        local_voxel = VALIDATOR.single_display_for_topic(
+            rviz, "/rog_map/viz", "test RViz"
+        )
+        local_voxel["Color Transformer"] = "FlatColor"
+
+        with self.assertRaisesRegex(AssertionError, "preserve producer voxel-state colors"):
+            VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
+
 
 if __name__ == "__main__":
     unittest.main()

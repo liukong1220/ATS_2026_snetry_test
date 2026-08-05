@@ -12,11 +12,13 @@ import yaml
 ROG_MAP_BOUNDS_DISPLAY_NAME = (
     "ROGMap Bounds: Orange Local / Purple Visualization / Green Update"
 )
+ROG_MAP_LOCAL_VOXEL_DISPLAY_NAME = "ROGMap Local Voxel State (debug only)"
 ROG_MAP_DEBUG_TOPICS = (
     "/rog_map/occ",
     "/rog_map/inf_occ",
     "/rog_map/unk",
     "/rog_map/esdf",
+    "/rog_map/viz",
 )
 NAVIGATION_PATH_DISPLAYS = {
     "/minco/raw_path": "Global Planning / JPS Search Path",
@@ -163,6 +165,20 @@ def assert_navigation_rviz_contract(document, fixed_frame: str, context: str):
             f"{context} {topic} must use Best Effort"
         )
 
+    local_voxel = single_display_for_topic(document, "/rog_map/viz", context)
+    assert local_voxel["Class"] == "rviz_default_plugins/PointCloud2", (
+        f"{context} /rog_map/viz must be a PointCloud2 display"
+    )
+    assert local_voxel["Name"] == ROG_MAP_LOCAL_VOXEL_DISPLAY_NAME, (
+        f"{context} /rog_map/viz must be explicitly marked diagnostic-only"
+    )
+    assert local_voxel["Color Transformer"] == "RGB8", (
+        f"{context} /rog_map/viz must preserve producer voxel-state colors"
+    )
+    assert local_voxel["Style"] == "Boxes", (
+        f"{context} /rog_map/viz must show voxel cells as boxes"
+    )
+
     bounds = single_display_for_topic(document, "/rog_map/bounds", context)
     assert bounds["Class"] == "rviz_default_plugins/MarkerArray", (
         f"{context} /rog_map/bounds must be a MarkerArray display"
@@ -229,6 +245,9 @@ def main():
 
     assert rog_map["map_frame"] == "odom"
     assert rog_map["debug_bounds_topic"] == "/rog_map/bounds"
+    assert rog_map["debug_viz_topic"] == "/rog_map/viz"
+    assert rog_map["debug_viz_stride"] == 1
+    assert rog_map["debug_viz_include_unknown"] is False
     assert rog_map["core.esdf.enable"] is True
     assert rog_map["core.esdf.update_interval_updates"] == 1
     assert rog_map["core.raycasting.p_occupied"] == 0.80
@@ -410,6 +429,9 @@ def main():
         '"rog_map/inf_occ"',
         '"rog_map/unk"',
         '"rog_map/esdf"',
+        '"debug_viz_topic"',
+        "makeVoxelDebugCloud",
+        "collectVoxelDebugInBox",
         "debug_bounds_topic_",
         "create_publisher<visualization_msgs::msg::MarkerArray>",
         "publishBoundsMarkers",
@@ -454,6 +476,7 @@ def main():
         "Name: ROGMap Inflated",
         "Name: ROGMap Unknown",
         "Name: ROGMap ESDF Debug",
+        ROG_MAP_LOCAL_VOXEL_DISPLAY_NAME,
         ROG_MAP_BOUNDS_DISPLAY_NAME,
         "Reliability Policy: Best Effort",
         "Style: Boxes",
@@ -489,6 +512,7 @@ def main():
         "Name: ROGMap Inflated",
         "Name: ROGMap Unknown",
         "Name: ROGMap ESDF Debug",
+        ROG_MAP_LOCAL_VOXEL_DISPLAY_NAME,
         ROG_MAP_BOUNDS_DISPLAY_NAME,
         *NAVIGATION_PATH_DISPLAYS.values(),
         "Value: /goal_pose",
