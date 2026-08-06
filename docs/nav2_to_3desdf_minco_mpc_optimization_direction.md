@@ -224,26 +224,25 @@ infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出�
 
 ### LTV-QP 后端准入与第二阶段边界（2026-08-06）
 
-- **已验证（组件，backend-neutral）**：`LtvQpSolver` 已冻结 fixed CSC pattern、primal/dual
-  warm-start、status/iteration/solve time/primal-dual residual/slack maximum/hard-constraint maximum
-  violation 的结果契约。`LtvQpCandidateValidator` 以独立四轮真实速度向量复核 body
-  velocity/acceleration、轮速、轮速度向量增量和仅在 `ZeroSpeedGuard` 有效时的舵角速率；输入健康、
-  collision 和急停始终是 hard gate。现有 builder 尚未定义 slack 决策列，任何非空 slack payload
-  当前均拒绝，不能暗中软化硬约束。
-  `ats_swerve_mpc` 窄构建、source 工作区后的 8/8 CTest（新增 `test_ltv_qp_solver`）、
-  `colcon test-result` 的 `49 tests, 0 errors, 0 failures, 0 skipped`、launch Python syntax 和
-  `ros2 launch ats_swerve_mpc ats_swerve_mpc.launch.py --show-args` 均通过。
-- **阻塞（已验证）**：活动 CMake、`dpkg`、`pkg-config` 和 ROS package index 均未发现已批准且
-  可复现的 OSQP、qpOASES、ProxSuite、HPIPM、Clarabel 或等效 C++ backend。因此当前
-  backend/version/license/dependency source 均为“不适用（未选择）”；没有执行 `apt`、下载或 vendor
-  导入，也没有手写生产 solver。[Confidence: High，构建声明和三类本机包索引；没有外部 benchmark]
-- **未实现**：`solver_mode`、`qp_shadow`、QP/iLQR 同周期比较、QP p50/p95/p99、headless MuJoCo
-  shadow、HIL 与实车。本轮不能以现有 iLQR 运行替代 QP shadow 证据。iLQR 默认控制链、
-  `/cmd_vel_mpc` 唯一 publisher、ExecutionCommand/emergency-stop/localization/gimbal/map/reference
-  freshness、topic/frame 与底盘所有权均未改动。
-- 后端准入清单、固定结构/warm-start ABI 和停止条件见
-  `docs/ats_swerve_mpc_ltv_qp_backend_admission.md`。P2 红框仍未通过，P3 仍不得标记
-  Nav2-free；本项控制器接口工作不改变这些门禁。
+- **已验证（OSQP 组件）**：OSQP `v1.0.0` 官方 tag `236713ce9a56c182ac3230d52108f952afce1523`、
+  archive SHA-256 `dd6a1c2e7e921485697d5e7cdeeb043c712526c395b3700601f51d472a7d8e48`、Apache-2.0
+  `LICENSE`/`NOTICE` 及 QDLDL/AMD 等第三方声明已核验；源码快照位于导航仓 `third_party/osqp`，
+  CMake 静态目标为 `osqp::osqpstatic`，不使用 apt/未知系统库/运行时下载。
+- **已验证（固定结构/结果）**：`LtvQpOsqpSolver` 构造期 setup 一次，timer 路径只更新固定 LTV
+  CSC 数值、`q/l/u` 和 primal/dual warm-start；映射 `solved`、`solved_inaccurate`、max-iteration/
+  time-limit、primal/dual infeasible 和 numerical 状态，并记录 iteration、solve time、residual、
+  slack、hard violation。GTest 覆盖真解、warm-start、pattern 漂移拒绝、ZeroSpeedGuard 和候选
+  hard-check；窄构建和包级测试通过。
+- **已验证（ROS gate）**：`solver_mode` 支持 `ilqr|qp_shadow|qp`，默认 `ilqr`；`qp_shadow` 使用
+  同周期 `current/reference/solve 前 last_control`，只记录 OSQP 诊断，命令仍由 iLQR 唯一发布；
+  gate 测试确认 command publisher 数为 1。`qp` 本轮显式拒绝启动。
+- **安全边界**：当前节点没有碰撞/footprint 健康 producer，shadow candidate 的 collision gate 保守
+  hard reject；timeout、max-iteration、infeasible、solved-inaccurate、residual/slack/hard-check
+  失败均不得标记 feasible，不能切换主链或无条件复用 `last_control`。当前 QP layout 不含 slack 列。
+- **未验证**：长期 QP/iLQR 同周期 identity 日志、p50/p95/p99、CPU/allocation、headless MuJoCo
+  shadow、故障注入、HIL、实车和物理接触。P2 红框仍未通过，P3 仍不得标记 Nav2-free；本轮不能
+  把组件通过写成 QP 实时性或实车收益。后端准入清单、复现方法和停止条件见
+  `docs/ats_swerve_mpc_ltv_qp_backend_admission.md`。
 
 QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬软约束测试 -> `qp_shadow` 同输入
 诊断 -> 受控 `qp` 发布和有界 fallback -> 新 DDS domain 的 MuJoCo 故障验收 -> 抬轮 HIL/实车。

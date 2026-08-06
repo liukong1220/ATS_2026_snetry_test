@@ -5,18 +5,27 @@
 
 ## 当前结论
 
-当前活动后端为**无**。因此不存在可填写的已准入后端版本、许可证、依赖来源、CMake target
-或 ROS package；这些字段当前均为“不适用（未选择）”。在后端完成准入前，
-`solver_mode=qp_shadow` 不实现，`solver_mode=qp` 更不得实现；iLQR 仍是唯一控制器和
+已批准并纳入导航仓 vendor 的活动后端为 **OSQP v1.0.0**。本记录批准的是可审计的
+`qp_shadow` 组件接入，不是 QP 主链、实车实时性或 P2/P3 验收声明。`solver_mode` 默认仍为
+`ilqr`；`qp_shadow` 只记录诊断，`qp` 在本阶段显式拒绝启动；iLQR 仍是唯一控制器和
 `/cmd_vel_mpc` 唯一发布者。
 
 | 准入字段 | 当前值 | 证据与边界 |
 | --- | --- | --- |
-| C++ QP backend | 无 | 活动导航仓没有 QP `find_package`、link target 或 vendor source |
-| backend version | 不适用 | 未选择软件包，不能虚构 version pin |
-| license | 不适用 | 未选择上游或二进制，不能声明许可证已审核 |
-| dependency source | 不适用 | 当前工作区没有锁定源码、系统包或 ROS vendor package |
-| CMake/package.xml dependency | 无 | `ats_swerve_mpc` 仅声明现有 ROS/Eigen 依赖 |
+| C++ QP backend | OSQP | 导航仓 `third_party/osqp` 原始源码快照，CMake 静态目标 `osqp::osqpstatic` |
+| backend version | `v1.0.0`, tag `236713ce9a56c182ac3230d52108f952afce1523` | 官方 tag 核验 |
+| official source | `git@github.com:osqp/osqp.git`; `https://codeload.github.com/osqp/osqp/tar.gz/refs/tags/v1.0.0` | 上游源码与 archive |
+| source archive SHA-256 | `dd6a1c2e7e921485697d5e7cdeeb043c712526c395b3700601f51d472a7d8e48` | `sha256sum` 与批准记录一致 |
+| license | Apache License 2.0 | `third_party/osqp/LICENSE`；必须随源码保留 `NOTICE` |
+| third-party notice | QDLDL、AMD、Stanford University、University of Oxford | `third_party/osqp/NOTICE` |
+| ATS compatibility | 技术判断为 Apache-2.0 兼容，不替代组织法务意见 | 保留 LICENSE/NOTICE/版权声明 |
+| dependency source | 受版本控制第三方源码快照，不使用 apt、未知系统 `libosqp` 或运行时下载 | 导航仓 `third_party/osqp` |
+| CMake/package.xml | CMake `add_subdirectory(.../third_party/osqp)`，关闭 shared/demo/unit/codegen，link `osqp::osqpstatic`；无独立 ROS binary package 依赖 | `ats_swerve_mpc/CMakeLists.txt`、`package.xml` |
+| target environment | Ubuntu 22.04.5、ROS 2 Humble、GCC 11.4.0、CMake 3.22.1、x86_64 | 当前目标环境 |
+
+导航仓 `.gitattributes` 仅对 `third_party/osqp/**` 关闭 whitespace check 并提高 conflict marker
+识别长度：OSQP 上游文档中保存有历史尾随空白和七字符冲突示例，vendor 内容保持原样，ATS 自有
+源码仍使用默认 `git diff --check` 规则。这一 Git 属性不影响 CMake 构建、OSQP 源码或运行时行为。
 
 本轮只读准入审计使用以下可复现命令，均未发现 OSQP、qpOASES、ProxSuite、HPIPM 或 Clarabel：
 
@@ -27,9 +36,9 @@ pkg-config --modversion osqp
 ros2 pkg list | rg '^(osqp|osqp_vendor|qpoases|qpoases_vendor|proxsuite|hpipm|clarabel)'
 ```
 
-这四类结果只证明本工作区和构建环境当前无可复现后端；它们不证明任何候选后端不适合 ATS。
-[Confidence: High，受版本控制构建文件、本机系统包、pkg-config 与 ROS package index 一致；
-未对外部候选进行 benchmark]
+这些查询仍可用于发现意外系统依赖；本轮实际构建使用仓内固定源码。OSQP archive、tag、LICENSE、
+NOTICE 和 CMake target 已独立核验。[Confidence: High；来源、哈希、构建输入和 GTest 一致，
+尚无目标机实时 benchmark]
 
 ## 冻结接口
 
@@ -52,9 +61,10 @@ ros2 pkg list | rg '^(osqp|osqp_vendor|qpoases|qpoases_vendor|proxsuite|hpipm|cl
 该接口和单测仅固定 future backend 的输入、诊断和拒绝语义；它不构造完整 wheel/collision QP
 约束，也不产生实际求解结果，不能称为 QP backend 或 `qp_shadow` 已实现。
 
-## 准入门槛
+## 准入门槛与本轮核对
 
-在任何依赖安装、下载、vendor 导入或 CMake/package.xml 改动前，必须有单独的审批记录，至少包含：
+准入记录要求至少包含以下项目；本轮已完成来源、哈希、许可证和 API 能力核对，性能与全链
+benchmark 仍是后续门禁：
 
 1. 上游项目、精确 version/tag、官方发布来源、SHA-256、许可证原文与兼容性审查。
 2. 目标 Ubuntu/ROS、CPU 架构、编译器和 CMake target；离线或 clean workspace 重建命令。
@@ -66,13 +76,44 @@ ros2 pkg list | rg '^(osqp|osqp_vendor|qpoases|qpoases_vendor|proxsuite|hpipm|cl
    `current_state/reference/last_control` snapshot，iLQR 保持 `/cmd_vel_mpc` 唯一 owner；再后才可
    讨论受控 `solver_mode=qp`。
 
-## 停止条件与未验证项
+本轮 GTest 已覆盖同 pattern 二次求解、结构漂移拒绝、warm-start、状态/残差字段和
+`qp_shadow` non-publish；infeasible、真实碰撞输入、长期 deadline 分布和 MuJoCo runtime
+benchmark 尚未完成，不能升级为 QP 主链准入。
 
-本轮命中停止条件：“无已批准且可复现的 C++ QP backend”。未使用 `apt`、网络下载或未知 vendor
-源码改变构建环境，也没有手写生产 QP solver。**已验证（组件）**：
-`MAKEFLAGS=-j1 colcon build --base-paths src --packages-select ats_swerve_mpc --parallel-workers 1`、
-source 工作区后的 8/8 CTest（含新增 `test_ltv_qp_solver`）和
-`colcon test-result --test-result-base build/ats_swerve_mpc --verbose` 的 `49 tests, 0 errors,
-0 failures, 0 skipped` 通过；launch Python syntax 与 `ros2 launch ats_swerve_mpc
-ats_swerve_mpc.launch.py --show-args` 通过。`qp_shadow`、QP/iLQR 同周期诊断、p50/p95/p99、
-headless MuJoCo、HIL、实车以及 P2/P3 门禁均未执行。P2 仍未通过，P3 不得标记 Nav2-free。
+## 复现命令与证据边界
+
+从干净目标环境复现 vendor 快照和构建：
+
+```bash
+curl --fail --location --http1.1 \
+  https://codeload.github.com/osqp/osqp/tar.gz/refs/tags/v1.0.0 \
+  -o osqp-v1.0.0.tar.gz
+sha256sum osqp-v1.0.0.tar.gz
+tar -xf osqp-v1.0.0.tar.gz
+cp -a osqp-1.0.0/. src/ats_sentry_nav/third_party/osqp/
+MAKEFLAGS=-j1 colcon build --base-paths src \
+  --packages-select ats_swerve_mpc --parallel-workers 1
+```
+
+仓内 CMake 不联网、不查找系统 `libosqp`；`osqp_setup()` 只在 `LtvQpOsqpSolver` 构造期调用一次，
+控制 timer 只更新固定 CSC 数值、`q/l/u` 和 primal/dual warm-start。LTV conversion 的 rows/columns
+为固定动力学块、控制增量块和 bounds identity，不引入 slack 列；当前 `qp_max_tracking_slack=0`，
+所有非空 slack payload 拒绝。
+
+**已验证（组件）**：
+
+- `MAKEFLAGS=-j1 colcon build --base-paths src --packages-select ats_swerve_mpc --parallel-workers 1`；
+- OSQP adapter、固定 CSC、warm-start、状态/残差/截止时间字段、ZeroSpeedGuard、hard-check 和
+  `qp_shadow` 单 publisher GTest；
+- `source install/setup.bash && colcon test --base-paths src --packages-select ats_swerve_mpc`；
+- 结果文件由 `colcon test-result` 汇总为 9 个测试目标全部通过（测试总数以本机构建输出为准）；
+- launch Python syntax、`ros2 launch ... --show-args` 和三仓 `git diff --check`。
+
+**已验证（ROS node gate）**：`qp_shadow` 日志报告真实 OSQP status/iteration/solve time/
+primal-dual residual/slack/hard violation；发生 `time_limit`/`max_iterations` 时 candidate 为
+不可行，iLQR 仍发布非零控制，`/cmd_vel` 测试 topic publisher 数保持 1。当前节点没有碰撞/footprint
+健康 producer，因此 shadow safety 的 collision gate 保守为 hard reject，不能宣称 QP candidate feasible。
+
+**未验证**：稳定运行时 QP/iLQR 同周期 p50/p95/p99、分配/CPU、headless MuJoCo 全链、故障注入、
+HIL、实车和物理接触。P2 仍未通过，P3 不得标记 Nav2-free；不得引用本轮单测日志宣称 50 Hz、
+6 ms 或 p99 实时性。

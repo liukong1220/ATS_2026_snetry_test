@@ -48,6 +48,16 @@ BODY_YAW_FOLLOW_CLEARANCE="${BODY_YAW_FOLLOW_CLEARANCE:-0.55}"
 # auto records the selected immutable policy; gimbal/body assert the complete
 # execute lease and simulated gimbal acknowledgement contract.
 YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
+# MPC solver mode; default preserves the production iLQR chain. qp_shadow only
+# records OSQP diagnostics and never becomes the command publisher.
+SOLVER_MODE="${SOLVER_MODE:-ilqr}"
+case "${SOLVER_MODE}" in
+  ilqr|qp_shadow) ;;
+  *)
+    echo "Unsupported SOLVER_MODE='${SOLVER_MODE}'; use 'ilqr' or 'qp_shadow'."
+    exit 2
+    ;;
+esac
 
 case "${P2_FAULT_CASE}" in
   none|adapter_lease|service_timeout|input_stale|unknown|unreachable|freeze) ;;
@@ -1387,6 +1397,7 @@ LAUNCH_ARGS=(
   map_start_delay_sec:=2.0
   rviz_delay_sec:="${RVIZ_DELAY_SEC}"
   planning_grid_owner:="${PLANNING_GRID_OWNER}"
+  solver_mode:="${SOLVER_MODE}"
   log_level:=warn
 )
 
