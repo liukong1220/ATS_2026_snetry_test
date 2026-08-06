@@ -138,6 +138,16 @@
 - [ ] 以简单 JPS polyline + 固定速度 baseline 做消融：记录 path length、最小 clearance、曲率/加加速度 proxy、tracking error、replan count、solver wall time p50/p95/p99。
 - [ ] 分别注入“一个中间点不可过”“机器人不动但地图新鲜”“Point-LIO stale”“adapter lease stale”，每个故障使用新 DDS domain 和新 MuJoCo launch，验证 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`。
 
+### MPC LTV-QP 迁移（第一阶段已开始）
+
+- [x] 提取共享 `Se2Model`：iLQR 与未来 QP 共用同一 SE(2) dynamics、Jacobian 和 rollout，避免 A/B 对比时混入两套运动学。
+- [x] 增加带滞回的 `ZeroSpeedGuard`：轮速向量接近零时不使用舵角方向线性化；当前 Twist-only 链路不实现原地独立舵角控制。
+- [x] 增加 solver-independent `LtvQpBuilder`：生成线性化动力学、状态/控制/控制增量二次代价、车体速度和增量边界，并拒绝 malformed/non-finite horizon。
+- [x] 新增 8 个窄回归测试，导航包构建通过，40 个测试用例全部通过；QP 描述仍为 shadow-only。
+- [ ] 接入经 benchmark 的固定稀疏 QP 后端，配置 warm-start、最大迭代/时间预算、primal/dual residual 和硬约束复核；未完成前不得切换生产控制器。
+- [ ] 只对跟踪误差使用有界 slack；轮速、舵角速率、碰撞、急停和输入健康约束保持 hard constraint；QP timeout/infeasible/slack 超限必须进入现有零速度 fail-stop。
+- [ ] 在 MuJoCo 中加入 yaw ±π、速度阶跃、轮速过零、QP timeout/infeasible 和舵角限位 telemetry 回归，再进行 iLQR/QP A/B；未完成这些证据前不得宣称 QP 实时性或实车收益。
+
 ## 第三步：RViz 全局/局部/MPC 路径分层
 
 - [x] 全局控制路径：`/minco/raw_path` 已标记为 `Global Planning / JPS Search Path`，淡蓝色；只表达 JPS/A* 的任务级拓扑搜索结果。

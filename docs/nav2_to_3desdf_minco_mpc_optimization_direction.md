@@ -198,6 +198,30 @@
 
 ## P4 准备
 
+## LTV-QP 迁移第一阶段（2026-08-06）
+
+本轮按“共享模型、低速保护、求解器后端隔离”的顺序开始 MPC QP 化，源码范围限定在
+`src/ats_sentry_nav/ats_swerve_mpc`。已完成：
+
+- `Se2Model` 提取当前 SE(2) dynamics、Jacobian 和 rollout，现有 iLQR 通过同一模型调用；
+  状态仍为世界系 `[x,y,yaw]`，控制仍为车体系 `[vx,vy,wz]`。
+- `ZeroSpeedGuard` 增加 `0.01/0.02 m/s` 默认滞回阈值。轮速向量接近零时不宣称舵角方向
+  可线性化，避免用未定义的角度梯度制造零速转向抖动。当前 Twist-only 链路没有独立舵角
+  命令，因此该保护只提供约束契约，不实现原地舵角动作。
+- `LtvQpBuilder` 生成 solver-independent 的凸 LTV-QP 描述：状态偏差/控制偏差/控制增量
+  二次代价、线性化 SE(2) 等式动力学、车体速度边界和车体增量不等式；问题包含有限性、
+  horizon 和输入尺寸校验。
+- QP 矩阵暴露每个模块的低速角度约束有效性，尚未把轮速圆、轮速增量和舵角速率近似偷偷
+  写成未经验证的硬约束，也尚未接入 ROS 控制计时器。
+
+验证结果：`ats_swerve_mpc` 窄构建通过；7 个测试目标、40 个测试用例全部通过，其中新增
+`Se2Model` 3 个、`ZeroSpeedGuard` 2 个、`LtvQpBuilder` 3 个。当前没有 OSQP、HPIPM、qpOASES
+或其他 QP 后端依赖，因此不能把本轮写成 QP 闭环、实时性或实车通过证据。
+
+下一阶段门禁：先接入一个固定稀疏结构、warm-start、最大迭代/时间预算和求解后硬约束复核的
+QP 后端；只对跟踪类约束使用有界 slack，轮速/舵角/碰撞/急停保持硬约束。QP timeout、
+infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出零速度，不能盲目保持上一拍速度。
+
 - [已实现未端到端迁移] `PlanningMapSnapshot` 将 adapter 的 `ready`、source/publication
   generation、localization epoch、frame、origin/yaw、occupancy、signed distance 和梯度
   收进一个不可变消息。`ready=false` 时 payload 必须为空；`ready=true` 时所有数组长度均为
