@@ -144,9 +144,11 @@
 - [x] 增加带滞回的 `ZeroSpeedGuard`：轮速向量接近零时不使用舵角方向线性化；当前 Twist-only 链路不实现原地独立舵角控制。
 - [x] 增加 solver-independent `LtvQpBuilder`：生成线性化动力学、状态/控制/控制增量二次代价、车体速度和增量边界，并拒绝 malformed/non-finite horizon。
 - [x] 新增 8 个窄回归测试，导航包构建通过，40 个测试用例全部通过；QP 描述仍为 shadow-only。
-- [ ] 接入经 benchmark 的固定稀疏 QP 后端，配置 warm-start、最大迭代/时间预算、primal/dual residual 和硬约束复核；未完成前不得切换生产控制器。
+- [x] 接入已批准的 OSQP v1.0.0 源码快照（固定 tag/commit/archive SHA-256、LICENSE/NOTICE），
+  构造固定 LTV CSC pattern，首次 setup 后只更新数值并支持 primal/dual warm-start；当前仅 `ilqr`
+  和 `qp_shadow`，未切换生产控制器。
 - [ ] 只对跟踪误差使用有界 slack；轮速、舵角速率、碰撞、急停和输入健康约束保持 hard constraint；QP timeout/infeasible/slack 超限必须进入现有零速度 fail-stop。
-- [ ] 在 MuJoCo 中加入 yaw ±π、速度阶跃、轮速过零、QP timeout/infeasible 和舵角限位 telemetry 回归，再进行 iLQR/QP A/B；未完成这些证据前不得宣称 QP 实时性或实车收益。
+- [ ] 在 MuJoCo 中加入 yaw ±π、速度阶跃、轮速过零、QP timeout/infeasible 和舵角限位 telemetry 回归，再进行 iLQR/QP A/B；OSQP 组件测试已通过，但未完成这些证据前不得宣称 QP 实时性或实车收益。
 
 #### QP-0：后端准入与接口冻结
 
@@ -159,15 +161,19 @@
   窄构建、source 工作区后的 8/8 CTest（`test_ltv_qp_problem` 与 `test_ltv_qp_solver` 已单独
   CTest）、`colcon test-result` 的 `49 tests, 0 errors, 0 failures, 0 skipped`、launch Python
   syntax 和 `ros2 launch ... --show-args` 均通过；这不是 QP/MuJoCo/HIL/实车验收。
-- [ ] **后端准入仍阻塞**：活动 CMake、`dpkg`、`pkg-config` 和 ROS package index 未发现
-  OSQP、qpOASES、ProxSuite、HPIPM、Clarabel 或等效已锁定后端。当前 backend/version/license/
-  dependency source 均为“不适用（未选择）”；禁止以未锁定下载、`apt` 或手写生产 solver 绕过。
-  详见 `docs/ats_swerve_mpc_ltv_qp_backend_admission.md`。
+- [x] **OSQP v1.0.0 后端准入（2026-08-06）**：官方 tag `236713ce9a56c182ac3230d52108f952afce1523`、
+  archive SHA-256 `dd6a1c2e7e921485697d5e7cdeeb043c712526c395b3700601f51d472a7d8e48`、Apache-2.0
+  `LICENSE`/`NOTICE`、QDLDL/AMD 等第三方声明已核验；导航仓使用版本控制源码快照和
+  `osqp::osqpstatic`，不使用 apt/未知系统库/运行时下载。详见
+  `docs/ats_swerve_mpc_ltv_qp_backend_admission.md`。
 
-- [ ] 选择一个可审计的 C++ QP 后端，记录版本、许可证、CMake/package.xml 依赖、CPU 架构、稀疏矩阵格式和 warm-start 能力。当前工作区未发现 OSQP、HPIPM、qpOASES 或等效库；不得悄悄以 `apt`、未锁定下载或复制未知源码改变构建环境。
-- [ ] 定义 `LtvQpSolver` 的最小结果契约：`solved`、`solved_inaccurate`、`max_iterations`、`time_limit`、`primal_infeasible`、`dual_infeasible`、`numerical_failure`、primal/dual residual、iteration、solve time、slack 最大值及硬约束最大违反量。
-- [ ] 固定决策变量顺序为 `z=[delta_x_0...delta_x_N, delta_u_0...delta_u_N-1, slack]`。矩阵尺寸、row/column offset、ROS 参数名和输出诊断必须由测试锁定，禁止在 timer 内动态改变稀疏结构。
-- [ ] DoD：能在独立单测中构造同一固定结构的问题、warm-start 二次求解，并按结果状态拒绝无效或非有限解；此阶段仍不允许控制主链选择 QP。
+- [x] OSQP 版本、许可证、来源、CMake 依赖、目标环境、CSC 格式和 warm-start 能力已记录；固定
+  `z=[delta_x_0...delta_x_N, delta_u_0...delta_u_N-1]`，当前不含 slack 列。
+- [x] `LtvQpSolver` 结果契约包含 `solved`、`solved_inaccurate`、`max_iterations`、`time_limit`、
+  infeasible/numerical 状态、primal/dual residual、iteration、solve time、slack 和 hard violation；
+  deterministic GTest 覆盖固定模式/warm-start/状态拒绝。
+- [x] DoD（组件范围）：固定结构二次求解、pattern 漂移拒绝、warm-start 和真实 OSQP status 已通过；
+  `qp` 主链仍禁止启用。
 - [ ] 停止条件：后端不能在目标 Ubuntu/ROS 构建链以可复现方式链接，或许可证/依赖来源无法审计，则保持 `iLQR` 主链，不以自写未验证 QP 求解器替代。
 
 #### QP-1：约束层级与低速语义
@@ -181,14 +187,18 @@
 
 #### QP-2：Shadow 后端与结果复核
 
-- [ ] `qp_shadow` 仍未实现：没有 QP backend 时不得制造“仅记录 solved”的假 shadow。当前
-  solver-independent candidate audit 已覆盖未来 shadow 的所有结果准入字段，但没有 result 的
-  producer，不能生成 QP/iLQR 同周期诊断、p50/p95/p99 或 MuJoCo 观察证据。
+- [x] `qp_shadow` 已接入真实 OSQP v1.0.0 producer：使用同一 control timer 的
+  `current/reference/solve 前 last_control`，固定 buffer/CSC、warm-start 和真实 status/残差/计时；
+  只记录诊断，不发布 QP command。当前碰撞健康 producer 缺失，candidate 保守 hard reject。
 
-- [ ] 在 `ats_swerve_mpc` 新增 `solver_mode:=ilqr|qp_shadow|qp`，默认固定为 `ilqr`。`qp_shadow` 只能在相同 state/reference/last_control 下构造和求解，不得发布 QP command，也不得改变 tracker、warm start、急停或 topic ownership。
-- [ ] 每次 QP 返回后先验证：维度、finite、状态码、primal/dual residual、输入 hard bounds、真实四轮速度、轮速增量、有效舵角速率、slack 上界和 solve deadline。只有全部通过才能形成“候选可行”诊断。
+- [x] 新增 `solver_mode:=ilqr|qp_shadow|qp`，默认 `ilqr`；`qp_shadow` 不发布 QP command、不改变
+  tracker/iLQR warm-start/急停/topic ownership；`qp` 参数显式拒绝启动。
+- [x] 每次 QP 返回由 `LtvQpCandidateValidator` 复核维度、finite、状态码、deadline、residual、
+  body/真实四轮速度、轮速度增量、ZeroSpeedGuard 有效舵角速率、slack/hard bounds 及输入 gate；
+  非 `solved`、超时、残差、slack 或 hard gate 失败均不可行。
 - [ ] 记录 iLQR 与 QP 的同周期比较：cost、first control、预测状态、控制 delta、hard-constraint margin、slack、iteration、solve time、QP status；日志不能包含完整路径数组或无限增长数据。
-- [ ] DoD：在 `qp_shadow` 下 ROS 输出仍由 iLQR 唯一发布，`/cmd_vel_mpc` publisher 数不增加，两个 solver 的输入 identity 完全相同。
+- [x] DoD（组件/ROS gate）：`qp_shadow` 下输出仍由 iLQR 唯一发布，测试确认命令 publisher 数为 1；
+  shadow 从同一 current/reference/last_control 快照构造。长期同周期 identity/p50/p95/p99 尚未完成。
 - [ ] 停止条件：shadow 产生非有限矩阵、结构尺寸变化、超过采样/内存预算、修改现有 iLQR 输出或破坏 emergency stop，立即退回仅构造问题层。
 
 #### QP-3：受控主链切换与回退
