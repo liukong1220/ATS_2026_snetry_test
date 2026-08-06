@@ -222,6 +222,12 @@
 QP 后端；只对跟踪类约束使用有界 slack，轮速/舵角/碰撞/急停保持硬约束。QP timeout、
 infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出零速度，不能盲目保持上一拍速度。
 
+QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬软约束测试 -> `qp_shadow` 同输入
+诊断 -> 受控 `qp` 发布和有界 fallback -> 新 DDS domain 的 MuJoCo 故障验收 -> 抬轮 HIL/实车。
+不能将“构造矩阵”“QP 返回 solved”或“topic 存在”替代硬约束复核、两级零速度、红框、物理接触
+或实车门禁。详细 task、DoD、停止条件和下一方提示词以
+`docs/项目优化文档/ATS导航优化TODO.md` 的 `MPC LTV-QP 迁移` 为准。
+
 - [已实现未端到端迁移] `PlanningMapSnapshot` 将 adapter 的 `ready`、source/publication
   generation、localization epoch、frame、origin/yaw、occupancy、signed distance 和梯度
   收进一个不可变消息。`ready=false` 时 payload 必须为空；`ready=true` 时所有数组长度均为

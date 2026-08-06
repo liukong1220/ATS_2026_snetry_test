@@ -148,6 +148,83 @@
 - [ ] 只对跟踪误差使用有界 slack；轮速、舵角速率、碰撞、急停和输入健康约束保持 hard constraint；QP timeout/infeasible/slack 超限必须进入现有零速度 fail-stop。
 - [ ] 在 MuJoCo 中加入 yaw ±π、速度阶跃、轮速过零、QP timeout/infeasible 和舵角限位 telemetry 回归，再进行 iLQR/QP A/B；未完成这些证据前不得宣称 QP 实时性或实车收益。
 
+#### QP-0：后端准入与接口冻结
+
+- [ ] 选择一个可审计的 C++ QP 后端，记录版本、许可证、CMake/package.xml 依赖、CPU 架构、稀疏矩阵格式和 warm-start 能力。当前工作区未发现 OSQP、HPIPM、qpOASES 或等效库；不得悄悄以 `apt`、未锁定下载或复制未知源码改变构建环境。
+- [ ] 定义 `LtvQpSolver` 的最小结果契约：`solved`、`solved_inaccurate`、`max_iterations`、`time_limit`、`primal_infeasible`、`dual_infeasible`、`numerical_failure`、primal/dual residual、iteration、solve time、slack 最大值及硬约束最大违反量。
+- [ ] 固定决策变量顺序为 `z=[delta_x_0...delta_x_N, delta_u_0...delta_u_N-1, slack]`。矩阵尺寸、row/column offset、ROS 参数名和输出诊断必须由测试锁定，禁止在 timer 内动态改变稀疏结构。
+- [ ] DoD：能在独立单测中构造同一固定结构的问题、warm-start 二次求解，并按结果状态拒绝无效或非有限解；此阶段仍不允许控制主链选择 QP。
+- [ ] 停止条件：后端不能在目标 Ubuntu/ROS 构建链以可复现方式链接，或许可证/依赖来源无法审计，则保持 `iLQR` 主链，不以自写未验证 QP 求解器替代。
+
+#### QP-1：约束层级与低速语义
+
+- [ ] 继续保持硬约束：`vx/vy/wz`、车体加速度、单轮最大速度、单轮速度增量、有效舵角速率、emergency stop、ExecutionCommand lease、localization/map/reference freshness 和已验证 footprint/collision gate。硬约束不得通过 slack 放松。
+- [ ] 只为 tracking state/reference speed/terminal error 设置有界 slack；记录每个 slack 的上界、二次/一范数惩罚和触发次数。任何 slack 超过门限均不得下发控制，应进入现有零速度 fail-stop 或上层 recovery。
+- [ ] 将四轮轮速圆以保守多边形或可信线性化写入 QP，并由独立真实轮速检查复核；不得用外接矩形放宽 `max_wheel_speed`。
+- [ ] 将轮速增量作为线性约束加入 QP；舵角速率只在 previous/candidate wheel-vector 都高于 `ZeroSpeedGuard` 退出阈值时线性化。任一向量低速时只允许向量增量约束，不能创建伪方向角约束。
+- [ ] 当前 Twist-only 接口无独立舵角命令。若需要静止预转向，必须另行定义下层 steer authority、反馈、限位与急停契约；在该接口完成前，不把“零速舵角优化”列为 MPC 已实现能力。
+- [ ] DoD：含 yaw 跨 ±pi、前后反向、横纵切换和四轮过零的 GTest/property test 证明所有 QP hard constraints 与独立真实检查一致。
+
+#### QP-2：Shadow 后端与结果复核
+
+- [ ] 在 `ats_swerve_mpc` 新增 `solver_mode:=ilqr|qp_shadow|qp`，默认固定为 `ilqr`。`qp_shadow` 只能在相同 state/reference/last_control 下构造和求解，不得发布 QP command，也不得改变 tracker、warm start、急停或 topic ownership。
+- [ ] 每次 QP 返回后先验证：维度、finite、状态码、primal/dual residual、输入 hard bounds、真实四轮速度、轮速增量、有效舵角速率、slack 上界和 solve deadline。只有全部通过才能形成“候选可行”诊断。
+- [ ] 记录 iLQR 与 QP 的同周期比较：cost、first control、预测状态、控制 delta、hard-constraint margin、slack、iteration、solve time、QP status；日志不能包含完整路径数组或无限增长数据。
+- [ ] DoD：在 `qp_shadow` 下 ROS 输出仍由 iLQR 唯一发布，`/cmd_vel_mpc` publisher 数不增加，两个 solver 的输入 identity 完全相同。
+- [ ] 停止条件：shadow 产生非有限矩阵、结构尺寸变化、超过采样/内存预算、修改现有 iLQR 输出或破坏 emergency stop，立即退回仅构造问题层。
+
+#### QP-3：受控主链切换与回退
+
+- [ ] `solver_mode=qp` 只能在 QP candidate 已通过全部 hard check 后发布 `controls.front()`；任何 `timeout`、`infeasible`、`numerical_failure`、residual 不合格、slack 超限或输入不健康都必须调用现有 `publishZeroCommandForFailure()`/`engageFailStop()` 语义。
+- [ ] 不得无条件沿用 `last_control_`。只有 command/localization/map/reference 全部新鲜、前一可行序列仍被真实约束复核、且处于一个明确且极短的 fallback window 时，才可执行受限减速；其余情形一律零速度。
+- [ ] 第一版不要求双求解器每周期同时运行。iLQR 保留为 runtime 可选 baseline 和受限 fallback，不能因 QP 接入删除；若启用 fallback，必须记录原因、次数、持续时间和最终零速结果。
+- [ ] DoD：QP 成功、QP infeasible、QP deadline、QP solved-inaccurate、QP residual reject 都有 deterministic 单测和 ROS 节点级零速度证据。
+
+#### QP-4：性能、MuJoCo 与故障验收
+
+- [ ] 建立固定硬件/编译选项/参数基线，记录 iLQR 与 QP build+solve 的 p50/p95/p99、allocation/CPU、deadline miss、iterations、residual、slack、saturation 与 fallback count。未在目标机测量前，不得写成 50 Hz、6 ms 或内存性能结论。
+- [ ] 每个 case 使用新的 `ROS_DOMAIN_ID` 和新的 MuJoCo launch，禁止串行污染机器人状态：nominal、rectangle、red-box、yaw `+pi/-pi` 跳变、reference 速度阶跃、正反向切换、横纵切换、轮速过零、QP time limit、QP infeasible、localization stale、adapter lease stale、unknown、unreachable、runtime freeze。
+- [ ] 每例记录 terminal pose/error、MPC reference/predicted、`/cmd_vel_mpc` 与 `/motion_control` 唯一 ownership、minimum clearance、离散 footprint collision sample、QP status/残差/solve time、replan/fallback 次数及 MuJoCo contact telemetry。`contact_violation_count=0` 不得推导实车物理无碰撞。
+- [ ] 完成 MuJoCo 后才进入抬轮 HIL：先验证四模块 drive/steer 符号、零速过渡、速率/限位、物理急停和 watchdog，再受限低速实车。P2/P3 门禁与 Nav2-free 结论不因 QP 工作改变。
+
+#### 下一阶段新对话提示词：QP-0/QP-2 后端接入与 Shadow 验证
+
+```text
+继续 ATS Sentry `ats_swerve_mpc` 的 LTV-QP 迁移第二阶段。先完整阅读 AGENTS.md、
+docs/项目优化文档/ATS导航优化TODO.md、
+docs/nav2_to_3desdf_minco_mpc_optimization_direction.md，以及现有
+ats_swerve_mpc 的 Se2Model、ZeroSpeedGuard、LtvQpBuilder、Se2MpcController 和 ROS node。
+
+目标：在不改变现有 iLQR 默认控制链的前提下，接入一个可审计、固定稀疏结构、支持 warm-start 的
+C++ QP 后端，并实现 `solver_mode=qp_shadow`。Shadow 模式只能基于与 iLQR 完全相同的
+current_state/reference/last_control 构造和求解 QP，发布 `/cmd_vel_mpc` 的唯一 owner 仍必须是
+现有 iLQR；不得改变 emergency stop、ExecutionCommand、localization、gimbal、map/reference
+freshness、topic、frame 或底盘所有权。
+
+先给出 DoD、精确文件范围、后端版本/许可证/依赖来源、测试命令、假设和停止条件。先执行三个仓库
+的 `git pull --ff-only origin develop` 与 status。发现用户未跟踪文件必须保留，禁止 git add .、
+git add -A、reset --hard、checkout -- 和 force push。
+
+QP 结果必须有明确 status、iteration、solve time、primal/dual residual、slack maximum、hard
+constraint maximum violation。QP candidate 只有同时通过 finite、矩阵尺寸、deadline、residual、
+body velocity、body acceleration、真实四轮速度、轮速增量、有效舵角速率和 slack upper-bound
+复核后才能标为 feasible。低速向量方向未定义时必须使用 ZeroSpeedGuard；禁止线性化伪舵角方向。
+轮速、舵角、碰撞、急停和输入健康约束保持 hard，只有 tracking/terminal 类约束可用有界 slack。
+
+没有已批准且可复现的 QP 后端时，不得手写未经验证的生产求解器，也不得切换主链；完成共享接口、
+后端准入文档和测试后停止并报告阻塞。不得无条件沿用 last_control；timeout/infeasible/residual
+reject/slack 超限或输入不健康必须保持现有确定性零速度语义。
+
+实现后按顺序运行：窄构建、相关 GTest、colcon test-result、launch Python syntax、
+ros2 launch --show-args、git diff --check；随后在新的 ROS_DOMAIN_ID 运行 headless MuJoCo
+shadow 观察。记录 QP/iLQR 同周期诊断、p50/p95/p99、status、residual、非零控制和唯一 ownership。
+MuJoCo、HIL、实车未实际执行时必须明确列为未验证，P2 不得标记通过，P3 不得标记 Nav2-free。
+
+只显式 stage 本轮文件；提交信息使用详细中文，导航代码提交到 ats_sentry_nav，文档/脚本提交到
+根仓，MuJoCo 仅在实际修改时提交。提交前检查 cached stat/check，SSH push 各改动仓的
+develop，并报告本地 HEAD 与 origin/develop 是否一致及 shortlog 作者约束。
+```
+
 ## 第三步：RViz 全局/局部/MPC 路径分层
 
 - [x] 全局控制路径：`/minco/raw_path` 已标记为 `Global Planning / JPS Search Path`，淡蓝色；只表达 JPS/A* 的任务级拓扑搜索结果。
