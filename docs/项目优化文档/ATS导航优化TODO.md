@@ -150,6 +150,20 @@
 
 #### QP-0：后端准入与接口冻结
 
+- [x] **接口冻结，不等于后端准入（2026-08-06）**：新增 backend-neutral `LtvQpSolver`、固定
+  CSC pattern、primal/dual warm-start payload、完整 result 状态字段及
+  `LtvQpCandidateValidator`。独立复核会拒绝 non-finite/维度、deadline、residual、非 `solved`
+  status、输入健康/急停/collision、body 速度/加速度、真实轮速、轮速度向量增量、有效舵角速率和
+  slack/hard-bound 违规；方向未定义时走 `ZeroSpeedGuard`，不生成伪舵角。该代码未接入 ROS
+  node、未添加 `solver_mode`，因此 iLQR、`/cmd_vel_mpc` 和全部紧急停机所有权不变。
+  窄构建、source 工作区后的 8/8 CTest（`test_ltv_qp_problem` 与 `test_ltv_qp_solver` 已单独
+  CTest）、`colcon test-result` 的 `49 tests, 0 errors, 0 failures, 0 skipped`、launch Python
+  syntax 和 `ros2 launch ... --show-args` 均通过；这不是 QP/MuJoCo/HIL/实车验收。
+- [ ] **后端准入仍阻塞**：活动 CMake、`dpkg`、`pkg-config` 和 ROS package index 未发现
+  OSQP、qpOASES、ProxSuite、HPIPM、Clarabel 或等效已锁定后端。当前 backend/version/license/
+  dependency source 均为“不适用（未选择）”；禁止以未锁定下载、`apt` 或手写生产 solver 绕过。
+  详见 `docs/ats_swerve_mpc_ltv_qp_backend_admission.md`。
+
 - [ ] 选择一个可审计的 C++ QP 后端，记录版本、许可证、CMake/package.xml 依赖、CPU 架构、稀疏矩阵格式和 warm-start 能力。当前工作区未发现 OSQP、HPIPM、qpOASES 或等效库；不得悄悄以 `apt`、未锁定下载或复制未知源码改变构建环境。
 - [ ] 定义 `LtvQpSolver` 的最小结果契约：`solved`、`solved_inaccurate`、`max_iterations`、`time_limit`、`primal_infeasible`、`dual_infeasible`、`numerical_failure`、primal/dual residual、iteration、solve time、slack 最大值及硬约束最大违反量。
 - [ ] 固定决策变量顺序为 `z=[delta_x_0...delta_x_N, delta_u_0...delta_u_N-1, slack]`。矩阵尺寸、row/column offset、ROS 参数名和输出诊断必须由测试锁定，禁止在 timer 内动态改变稀疏结构。
@@ -166,6 +180,10 @@
 - [ ] DoD：含 yaw 跨 ±pi、前后反向、横纵切换和四轮过零的 GTest/property test 证明所有 QP hard constraints 与独立真实检查一致。
 
 #### QP-2：Shadow 后端与结果复核
+
+- [ ] `qp_shadow` 仍未实现：没有 QP backend 时不得制造“仅记录 solved”的假 shadow。当前
+  solver-independent candidate audit 已覆盖未来 shadow 的所有结果准入字段，但没有 result 的
+  producer，不能生成 QP/iLQR 同周期诊断、p50/p95/p99 或 MuJoCo 观察证据。
 
 - [ ] 在 `ats_swerve_mpc` 新增 `solver_mode:=ilqr|qp_shadow|qp`，默认固定为 `ilqr`。`qp_shadow` 只能在相同 state/reference/last_control 下构造和求解，不得发布 QP command，也不得改变 tracker、warm start、急停或 topic ownership。
 - [ ] 每次 QP 返回后先验证：维度、finite、状态码、primal/dual residual、输入 hard bounds、真实四轮速度、轮速增量、有效舵角速率、slack 上界和 solve deadline。只有全部通过才能形成“候选可行”诊断。
