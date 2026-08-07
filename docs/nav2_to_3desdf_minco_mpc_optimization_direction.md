@@ -198,6 +198,25 @@
 
 ## P4 准备
 
+### MuJoCo 底盘复位接口（2026-08-07）
+
+- **已实现且已验证（sim-core）**：`ats_mujoco_sim` 新增可禁用的
+  `/simulation/reset_pose`（`std_srvs/srv/Trigger`）。它在 MuJoCo 锁内恢复本次启动的
+  `start_x/y/z/yaw`，清空 freejoint 和四轮转向/驱动关节速度、旧底盘命令、执行 target 与
+  actuator control，然后执行 `mj_forward`。仿真时间、动态障碍物、地图/定位/规划状态和累计
+  `contact_violation_count`/`max_contact_force` 均保留，不会通过复位隐藏已发生的接触诊断。
+- **已验证（domain `215`，headless、无 LiDAR/ToF/RViz）**：服务返回
+  `success=True`；复位后 `/swerve/telemetry` 的 `command_vx/vy/wz=[0,0,0]`、四轮最大
+  `drive_rpm=0.000000`，`/localization=(1.250000,-0.750000,0.181922)`。该用例配置
+  `start_x/y/z/yaw=(1.25,-0.75,0.18,0.6)`；`z` 为 MuJoCo 在地面接触后的稳定高度，平面坐标在
+  测量精度内恢复。`test_pose_reset.py` 同时以真实 freejoint 模型锁定位置/航向、速度/control
+  清零、旧命令清除及接触历史保留，2 项通过；连同既有 focused 物理/参数测试为 9 项通过。
+- **边界**：该接口用于单个 sim-core 实例的可重复初态恢复，不能在运行中的任务里替代 cancel、
+  emergency-stop、新 goal、新 domain 或新的 MuJoCo launch；它不重置导航侧状态，未运行 P2
+  nominal、红框、stale/unknown/unreachable、安全停机或 P3 action 验收，也不能证明连续 swept
+  footprint、物理零碰撞、HIL 或实车动力学。[Confidence: High，源码、focused test、独立 domain
+  runtime service/telemetry/odometry；导航闭环结论未覆盖]
+
 ## LTV-QP 迁移第一阶段（2026-08-06，历史基线）
 
 本轮按“共享模型、低速保护、求解器后端隔离”的顺序开始 MPC QP 化，源码范围限定在
