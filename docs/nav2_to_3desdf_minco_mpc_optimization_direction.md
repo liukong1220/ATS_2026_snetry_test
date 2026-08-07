@@ -268,8 +268,9 @@ infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出�
   ROGMap `cloud_age` 有限、adapter generation `55 -> 138`、iLQR 保持两级速度链唯一 owner，
   single action 终点误差 `0.011173 m`。这只是 iLQR nominal。8 条节流后的 QP record 均
   `max_iterations/400` 和 `solver_status_not_solved`；最后 telemetry 为 OSQP solve
-  `p50/p95/p99=3.829/5.424/5.874 ms`、完整 callback `57.611/131.704/160.563 ms`，相对
-  50 Hz 20 ms deadline 累计 `61` 次 miss、`86` 次 candidate reject。因此停止 QP 主链迁移，
+  `p50/p95/p99=3.829/5.424/5.874 ms`、完整 callback `57.611/131.704/160.563 ms`。实际
+  `control_rate_hz=20.0`，deadline 为 `50 ms`，此前 `50 Hz/20 ms` 是错误口径；旧 `61` 次
+  merged miss 不能区分 status、OSQP budget 与 callback。因此停止 QP 主链迁移，
   默认保持 `solver_mode=ilqr`，不得启用 `qp`、放宽 iteration/deadline/residual 或复用未 solved
   warm-start。
 - **已验证（输入同一性审计，非可行性）**：`ControlCycleSnapshot` 现在以固定小端字节序、字符串
@@ -281,6 +282,18 @@ infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出�
   输入、P2 red-box、HIL、实车和物理接触。P2 红框仍未通过，P3 仍不得标记 Nav2-free；本轮不能
   把组件通过或 iLQR nominal 写成 QP 实时性或实车收益。后端准入清单、复现方法和停止条件见
   `docs/ats_swerve_mpc_ltv_qp_backend_admission.md`。
+
+- **QP-2.5 已实现并运行（domain 200/201/202，非主链准入）**：控制 timer 以固定 128 槽记录
+  iLQR baseline 与 qp_shadow 的 13 个 steady-clock 阶段，OSQP reported 与 C API wall-time 分离，
+  同时累计十类 deadline root cause；JSON 由 timer 外的只读 service 导出，A/B/C raw telemetry 再由
+  `scripts/analyze_qp_shadow_telemetry.py` 离线汇总。B `qp_shadow,warn` 的最后 128 槽为 full callback
+  `52.044/78.478/92.001 ms`、iLQR `31.350/58.473/71.815 ms`、QP build `12.084/17.378/18.144 ms`、
+  OSQP wall solve `3.727/4.790/5.322 ms`、hard-check `4.100/5.620/6.445 ms`，128 条均
+  `max_iterations`。C `qp_shadow,info` 为 full callback `114.200/258.097/283.488 ms`，126 条
+  `max_iterations`、2 条 `time_limit`。所有 candidate 均因 non-solved 拒绝，zero feasible/warm-start；
+  map/collision gate 仍 fail-closed。A/B/C source/scenario/params 相同，但实际运行时长和逐周期
+  snapshot digest 不同，离线 verdict 为 `not_comparable`，不得把任何差值解释为 Shadow 或 INFO 的
+  因果成本。CPU、allocation、P2 red-box、HIL、实车与物理接触仍未验证。
 
 QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬软约束测试 -> `qp_shadow` 同输入
 诊断 -> 受控 `qp` 发布和有界 fallback -> 新 DDS domain 的 MuJoCo 故障验收 -> 抬轮 HIL/实车。

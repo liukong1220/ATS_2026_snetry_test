@@ -116,8 +116,10 @@ Shadow 运行**未通过 QP 准入停止条件**，不得启用 `solver_mode=qp`
   primal/dual residual 已低于配置阈值，非 `solved` status 仍按契约拒绝，不能保存 warm-start
   或构造可下发 candidate。
 - 固定 telemetry 窗口最后一次报告 OSQP solve `p50/p95/p99=3.829/5.424/5.874 ms`，但完整 control
-  callback 为 `57.611/131.704/160.563 ms`，超过 `50 Hz` 的 `20 ms` 周期；累计
-  `candidate_reject_count=86`、`deadline_miss_count=61`。因此这不是实时 QP shadow 通过证据。
+  callback 为 `57.611/131.704/160.563 ms`。该次 launch 的有效参数是 `control_rate_hz=20.0`，即
+  `50 ms` 周期，而非此前误写的 `50 Hz/20 ms`；即使按正确周期，callback p50 仍超期。旧的合并
+  `deadline_miss_count=61` 混合了 OSQP status、OSQP time budget 和完整 callback，不能用来归因。
+  因此这不是实时 QP shadow 通过证据。
 - 8 条观测都显示 `same_snapshot=true`，并记录固定字节序 digest；摘要覆盖 current state、reference
   stamp/deadline/frame/state/control、solve 前 last control 及 ExecutionCommand identity。该 digest
   只证明 iLQR/QP 的输入同一性，不证明求解结果可行或实时。
@@ -132,6 +134,45 @@ Shadow 运行**未通过 QP 准入停止条件**，不得启用 `solver_mode=qp`
 最终摘要有效位源码修正后还在新 domain `228` 启动了一次同配置观察：上游、adapter 和两级 owner
 检查均完成，但外层 `180 s` 时限在 action/QP telemetry 前中止；该进程组已用 `SIGINT` 后的
 `SIGTERM` 正常清理，domain `228` 不计入上述 action、status 或分位数证据。
+
+## 2026-08-07 QP-2.5 分阶段归因：已实现并运行，主链仍停止
+
+`ControlCycleTelemetryRing` 现在同时记录 `ilqr` 与 `qp_shadow` 的最后 128 个正常控制周期：使用
+`steady_clock` 区分 snapshot、iLQR solve/发布、LTV build、OSQP C API numeric update/solve 墙钟、
+primal reconstruction、hard-check、telemetry、aggregation、logging、完整 callback 和 timer
+interarrival。OSQP `OSQPInfo` reported update/solve time 与 C API 墙钟值分开保存。十类饱和根因计数
+分别为 OSQP time-limit status、OSQP solve budget、完整 callback、iLQR solve、QP build、QP update、
+candidate audit、aggregation、logging 和 timer interarrival；不再用单个 merged miss 代替根因分布。
+`/ats_swerve_mpc/dump_control_telemetry` 是只读 `std_srvs/Trigger` service，JSON/文件 I/O 在 timer 外；
+它不创建 QP Twist publisher，也不访问 tracker、warm-start、急停或安全 gate。
+
+本轮运行 `scripts/test_mujoco_qp_shadow_profiles.sh` 的 A/B/C profile，域 `200/201/202`，均为
+`planning_grid_owner=rog_map`、single 起点/目标、`20 Hz/50 ms`、`qp_time_limit_ms=10`、
+`use_sim_time=false`。每个 raw artifact 在 action、两级速度唯一 owner、非零 `/cmd_vel_mpc` 和
+`/motion_control` 检查后导出至 `/tmp/ats_qp25_profiles_20260807/{A_ilqr_warn,B_qp_shadow_warn,C_qp_shadow_info}`；
+launcher 总进程受外层 600 s 限制在 C 导出后的收尾阶段终止，故不能把 runner 的最终 PASS 写为通过。
+三份 JSON 和 manifest 均通过 `python3 -m json.tool`，随后由版本控制的离线分析器重建摘要。
+
+| profile | full callback p50/p95/p99 (ms) | iLQR solve p50/p95/p99 (ms) | QP build / OSQP wall solve / hard-check p50 (ms) | status / candidate |
+| --- | --- | --- | --- | --- |
+| A `ilqr,warn` | 29.209 / 89.615 / 136.142 | 28.822 / 88.960 / 135.487 | not run | iLQR baseline，QP 未尝试 |
+| B `qp_shadow,warn` | 52.044 / 78.478 / 92.001 | 31.350 / 58.473 / 71.815 | 12.084 / 3.727 / 4.100 | 128 `max_iterations`；0 feasible；0 warm-start |
+| C `qp_shadow,info` | 114.200 / 258.097 / 283.488 | 87.984 / 221.718 / 249.684 | 17.269 / 5.067 / 5.740 | 126 `max_iterations` + 2 `time_limit`；0 feasible；0 warm-start |
+
+B 的 Hessian diagonal 范围为 `0.66..56.0`、constraint row L2 范围约 `1.0..1.41510`，zero-delta
+dynamic equality residual 为 `0`；C 同项为 `0.66..56.0`、`1.0..1.41594`、`0`。这描述实际矩阵的
+尺度，不证明病态或构成参数放宽理由。B 的累计 root-cause events 为 callback `298`、iLQR `136`、
+timer interarrival `307`，C 为 callback `128`、iLQR `103`、timer interarrival `114`、OSQP
+time-limit status `2`、OSQP solve budget `1`；build/update/audit/aggregation/logging 根因均为 `0`。
+根因累计覆盖 node 本次生命周期，分位数覆盖最后 128 槽，二者不可互换。
+
+离线分析器判定 A/B/C `not_comparable`：source revision、scenario 与有效参数相同，但实际
+`duration_ms_at_dump` 不同，且逐周期 `snapshot_identity_digest` 序列不同。因此**不得**从上述数值
+计算或声明 qp_shadow 的配对增量成本、INFO 日志因果成本或 OSQP 的唯一超期责任。logging 阶段本身
+的 p99 仅 `0.103/0.138 ms`，但这只是各自运行内的计时，不足以解释跨运行 iLQR 尾延迟。CPU 与
+allocation 没有可信 profile，明确为未验证。实际 status 仍非 `solved`，collision/footprint 与
+map-health producer 仍为 hard false；`solver_mode=qp`、iteration/deadline/residual 放宽和非 solved
+warm-start 继续禁止。P2 未通过，P3 不得标记 Nav2-free，HIL、实车与物理接触未验证。
 
 ## 复现命令与证据边界
 

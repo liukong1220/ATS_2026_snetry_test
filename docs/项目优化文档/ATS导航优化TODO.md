@@ -1,6 +1,6 @@
 # ATS Sentry 导航优化 TODO
 
-更新时间：2026-08-04
+更新时间：2026-08-07
 
 本文是 ATS 四驱四转舵轮哨兵的执行清单，不把“源码对比”“编译通过”或“topic 存在”写成闭环通过。每一项优化必须在根仓、导航仓、MuJoCo 仓分别检查归属；只提交本轮显式列出的文件，并在 `develop` 上完成对应提交和 `origin/develop` 推送。三个仓库当前统一使用 `git@github.com:liukong1220/<repo>.git` SSH remote；禁止 force push、空提交和将未验证性能写成实测结论。
 
@@ -198,10 +198,13 @@
 - [x] 每次 QP 返回由 `LtvQpCandidateValidator` 复核维度、finite、状态码、deadline、residual、
   body/真实四轮速度、轮速度增量、ZeroSpeedGuard 有效舵角速率、slack/hard bounds 及输入 gate；
   非 `solved`、超时、残差、slack 或 hard gate 失败均不可行。
-- [x] `qp_shadow` 用固定 128 槽环形 telemetry 记录 cycle sequence、same-snapshot identity、status、
-  iteration、warm-start、solve/update/callback time、residual、hard margin、slack、两者首控及 delta、
-  candidate/reject/deadline/fallback count 与 collision/map gate；每 16 周期输出固定窗口的
-  p50/p95/p99，日志不包含完整路径数组。`ControlCycleSnapshot` digest 已按固定小端字节序、
+- [x] `qp_shadow` 用固定 128 槽环形 telemetry 记录 iLQR baseline 与 QP shadow 的 cycle sequence、
+  same-snapshot identity、status、iteration、warm-start、OSQP reported/C API wall update+solve time、
+  residual、hard margin、slack、两者首控及 delta、candidate/reject 与 collision/map gate；13 个
+  steady-clock 阶段均可导出 count/p50/p95/p99/max。十类饱和 deadline root cause 分别覆盖 OSQP
+  time-limit、OSQP solve、full callback、iLQR、QP build/update/audit、aggregation、logging 和 timer
+  interarrival，不再保留会混淆归因的 merged miss。JSON 在 timer 外经只读
+  `/ats_swerve_mpc/dump_control_telemetry` service 导出，日志不包含完整路径数组。`ControlCycleSnapshot` digest 已按固定小端字节序、
   字符串长度前缀和 FNV-1a-64 覆盖 current/reference time+frame+state/control、solve 前
   last_control 与 ExecutionCommand identity；不使用 DDS CDR。
 - [x] DoD（组件/ROS gate）：`qp_shadow` 下输出仍由 iLQR 唯一发布，测试确认命令 publisher 数为 1；
@@ -213,9 +216,22 @@
   达到 `0.011173 m` 终点误差且两级 topic owner 唯一。该 nominal 不代表 QP 通过。8 条节流后的
   OSQP record 全部为 `max_iterations/400`、`solver_status_not_solved`、`warm=false`、
   `candidate_feasible=false`，各条 `same_snapshot=true`。最后 telemetry 为 solve
-  `p50/p95/p99=3.829/5.424/5.874 ms`，但完整 callback 为 `57.611/131.704/160.563 ms`，超过
-  50 Hz/20 ms 周期；累计 `86` 次 candidate reject、`61` 次 deadline miss。保持默认
+  `p50/p95/p99=3.829/5.424/5.874 ms`，但完整 callback 为 `57.611/131.704/160.563 ms`；该次有效
+  参数为 `20 Hz/50 ms`，此前 `50 Hz/20 ms` 是错误口径，旧的 `61` 次 merged miss 无法归因。
+  保持默认
   `solver_mode=ilqr`，禁止 `qp` 发布、deadline/iteration/residual 放宽和未 solved warm-start。
+- [x] **QP-2.5 性能归因与收敛诊断（2026-08-07）**：新增 OSQP C API wall-time、矩阵尺度
+  telemetry、128 槽固定阶段环、root-cause counter、只读 dump service、A/B/C 运行器和离线分析器。
+  `ats_swerve_mpc` 的 `70 tests`、窄构建、affected launch `py_compile`、`--show-args` 和三仓
+  `git diff --check` 通过。MuJoCo raw artifact 位于
+  `/tmp/ats_qp25_profiles_20260807`：A `ilqr,warn`、B `qp_shadow,warn`、C `qp_shadow,info` 都在
+  action/两级 owner/非零速度检查后成功导出 128 槽 JSON；外层 600 s 会话在 C 收尾时终止，因此
+  runner 最终 PASS 未取得。B status 为 `128 max_iterations`，C 为 `126 max_iterations + 2 time_limit`；
+  全部 candidate `solver_status_not_solved`、zero feasible、zero warm-start。B p50 为 callback
+  `52.044 ms`、iLQR `31.350 ms`、QP build `12.084 ms`、OSQP wall solve `3.727 ms`、hard-check
+  `4.100 ms`；C p50 分别 `114.200/87.984/17.269/5.067/5.740 ms`。A/B/C 的 scenario/revision/params
+  一致，但实际 duration 与逐周期 digest 不同，分析 verdict `not_comparable`，所有 cross-run
+  Shadow/INFO 增量成本结论保持 withheld。CPU/allocation 未验证；P2 未通过，P3 不得标记 Nav2-free。
 - [x] 停止条件已执行：shadow 出现非有限矩阵、结构尺寸变化、超过采样/内存预算、修改现有 iLQR
   输出或破坏 emergency stop 时，必须保持 iLQR 主链并停止 QP 主链迁移。本轮符合“超过采样预算”和
   “non-solved status”两项，已停止在 shadow 证据边界；collision/footprint/map-health producer、
@@ -230,12 +246,53 @@
 
 #### QP-4：性能、MuJoCo 与故障验收
 
-- [ ] 建立固定硬件/编译选项/参数基线，记录 iLQR 与 QP build+solve 的 p50/p95/p99、allocation/CPU、deadline miss、iterations、residual、slack、saturation 与 fallback count。未在目标机测量前，不得写成 50 Hz、6 ms 或内存性能结论。
+- [ ] 建立**可配对**的固定硬件/编译选项/参数基线：每组都要保持同一受控窗口长度和逐周期
+  `snapshot_identity_digest`，否则离线脚本必须输出 `not_comparable` 并禁止计算 Shadow 增量。记录
+  iLQR 与 QP build+solve 的 p50/p95/p99、allocation/CPU、deadline root-cause、iterations、residual、
+  slack、saturation 与 fallback count。有效配置是 `20 Hz/50 ms`；未在目标机测量前，不得写成 50 Hz、
+  6 ms 或内存性能结论。
 - [ ] 每个 case 使用新的 `ROS_DOMAIN_ID` 和新的 MuJoCo launch，禁止串行污染机器人状态：nominal、rectangle、red-box、yaw `+pi/-pi` 跳变、reference 速度阶跃、正反向切换、横纵切换、轮速过零、QP time limit、QP infeasible、localization stale、adapter lease stale、unknown、unreachable、runtime freeze。
 - [ ] 每例记录 terminal pose/error、MPC reference/predicted、`/cmd_vel_mpc` 与 `/motion_control` 唯一 ownership、minimum clearance、离散 footprint collision sample、QP status/残差/solve time、replan/fallback 次数及 MuJoCo contact telemetry。`contact_violation_count=0` 不得推导实车物理无碰撞。
 - [ ] 完成 MuJoCo 后才进入抬轮 HIL：先验证四模块 drive/steer 符号、零速过渡、速率/限位、物理急停和 watchdog，再受限低速实车。P2/P3 门禁与 Nav2-free 结论不因 QP 工作改变。
 
-#### 下一阶段新对话提示词：QP-0/QP-2 后端接入与 Shadow 验证
+#### 下一阶段新对话提示词：QP-2.6 可配对采样与数值归因
+
+```text
+继续 ATS Sentry `ats_swerve_mpc` 的 QP-2.6 可配对性能采样与数值归因。先完整阅读 `AGENTS.md`、
+QP TODO、backend admission、导航方向文档，以及当前 `ControlCycleTelemetryRing`、
+`LtvQpOsqpSolver`、`ats_swerve_mpc_node`、MuJoCo chain 脚本和相关 GTest。先对根仓、导航仓、
+MuJoCo 仓执行 `git status --short --branch`、`git pull --ff-only origin develop`、HEAD/origin HEAD
+和 remote 核对；保留导航仓未跟踪 `ats_swerve_mpc/求解器.md`，禁止 `git add .`、`git add -A`、
+`reset --hard`、`checkout --`、force push 或改动无关模块。
+
+当前事实：OSQP v1.0.0、固定 CSC、primal/dual warm-start 接口、same-snapshot shadow、C API wall-time、
+十类 root cause、只读 dump service 和离线分析器已经存在；默认 `solver_mode=ilqr`，`qp` 继续显式拒绝。
+最近 A/B/C raw telemetry 的有效配置为 `20 Hz/50 ms`、`qp_time_limit_ms=10`，B 是 128
+`max_iterations`，C 是 126 `max_iterations` 加 2 `time_limit`，零 feasible/warm-start；map/collision
+gate 仍 hard false。A/B/C 的 source/scenario/params 一致但 duration 和逐周期 digest 不同，故成本结论
+已被正确 withheld，**不得**拿 iLQR nominal、非配对差值或旧 merged deadline 充当 QP 通过证据。
+
+目标仅限于建立可配对的采样窗口和复现 max-iterations 的离线诊断，不调 OSQP 准入参数：不得增加
+`qp_max_iterations`、放宽 `qp_time_limit_ms` 或 residual、保存 non-solved warm-start、启用 `qp`、
+放开 collision/map/emergency/ExecutionCommand/localization/gimbal/reference gate，或改变 iLQR 的
+`/cmd_vel_mpc` 唯一 owner。先给 DoD、精确文件范围、采样 identity 契约、测试命令、假设和停止条件。
+
+优先修改 telemetry collection 的实际 owner，使每个 profile 在相同的 execute lease、reference epoch、
+map generation、固定采样 cycle count/window 内导出可比 raw records；若跨独立 MuJoCo launch 无法证明
+逐周期 identity，相应脚本必须稳定输出 `not_comparable`，不得计算 delta。保留 raw artifact/manifest，
+记录 20 Hz/50 ms、effective params、domain、revisions、scenario、status/residual、root causes、
+matrix scale、CPU/allocation 的可信或未验证来源。再用当前 QP builder fixture 检查 Hessian/row/bound/dynamic
+residual 的尺度；只在可复现证据支持时提出矩阵 scaling/preconditioning 建议，不实施放宽或主链切换。
+
+按顺序运行窄构建、相关 GTest、`colcon test-result`、受影响 launch `py_compile`、`--show-args`、
+三仓 `git diff --check`；随后每组新且空的 `ROS_DOMAIN_ID` headless MuJoCo，保存 raw telemetry，确认
+`/cmd_vel_mpc` 仍仅 `ats_swerve_mpc -> twist_to_motion_ctrl`、`/motion_control` 仍仅
+`twist_to_motion_ctrl -> ats_mujoco_sim`。P2 不得标记通过，P3 不得标记 Nav2-free；HIL、实车和物理接触
+必须保留为未验证。完成后更新三份 QP 文档，只显式 stage 本轮文件，分仓中文详细提交，SSH push，并报告
+HEAD/origin 一致性、shortlog 作者约束与未验证边界。
+```
+
+#### 历史提示词：QP-0/QP-2 后端接入与 Shadow 验证
 
 ```text
 继续 ATS Sentry `ats_swerve_mpc` 的 LTV-QP 迁移第二阶段。先完整阅读 AGENTS.md、

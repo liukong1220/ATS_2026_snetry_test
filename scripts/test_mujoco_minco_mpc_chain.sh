@@ -53,6 +53,11 @@ YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
 SOLVER_MODE="${SOLVER_MODE:-ilqr}"
 # 默认仍为 warn；qp_shadow 观察可显式传 LOG_LEVEL=info 以保存有界 telemetry。
 LOG_LEVEL="${LOG_LEVEL:-warn}"
+# 仅在回归调用方显式给出路径时导出控制遥测。文件 I/O 由独立 Python 客户端执行，绝不进入
+# MPC control timer；空值保持既有回归行为不变。
+QP_TELEMETRY_OUTPUT="${QP_TELEMETRY_OUTPUT:-}"
+QP_TELEMETRY_MANIFEST="${QP_TELEMETRY_MANIFEST:-}"
+QP_TELEMETRY_RUN_START_EPOCH_NS="$(date +%s%N)"
 case "${SOLVER_MODE}" in
   ilqr|qp_shadow) ;;
   *)
@@ -1524,6 +1529,32 @@ assert_final_swerve_telemetry \
   "${LAST_GOAL_TELEMETRY_SEQUENCE}" \
   "${LAST_GOAL_SEND_EPOCH_SEC}" \
   "${LAST_GOAL_SEND_EPOCH_NANOSEC}"
+
+if [[ -n "${QP_TELEMETRY_OUTPUT}" ]]; then
+  [[ -n "${QP_TELEMETRY_MANIFEST}" ]] || \
+    fail "QP_TELEMETRY_OUTPUT requires QP_TELEMETRY_MANIFEST"
+  python3 "${WORKSPACE_DIR}/scripts/dump_ats_swerve_mpc_telemetry.py" \
+    --output "${QP_TELEMETRY_OUTPUT}" \
+    --manifest "${QP_TELEMETRY_MANIFEST}" \
+    --workspace "${WORKSPACE_DIR}" \
+    --solver-mode "${SOLVER_MODE}" \
+    --log-level "${LOG_LEVEL}" \
+    --test-profile "${TEST_PROFILE}" \
+    --planning-grid-owner "${PLANNING_GRID_OWNER}" \
+    --p2-fault-case "${P2_FAULT_CASE}" \
+    --p3-fault-case "${P3_FAULT_CASE}" \
+    --ros-domain-id "${ROS_DOMAIN_ID}" \
+    --params-file "${WORKSPACE_DIR}/src/ats_sentry_bringup/params/node_params.yaml" \
+    --start-x "${START_X}" --start-y "${START_Y}" \
+    --start-z "${START_Z}" --start-yaw "${START_YAW}" \
+    --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" \
+    --goal-yaw-w "${GOAL_YAW_W}" \
+    --run-start-epoch-ns "${QP_TELEMETRY_RUN_START_EPOCH_NS}" || \
+    fail "cannot export /ats_swerve_mpc/dump_control_telemetry"
+  [[ -s "${QP_TELEMETRY_OUTPUT}" ]] || fail "control telemetry output is empty"
+  [[ -s "${QP_TELEMETRY_MANIFEST}" ]] || fail "control telemetry manifest is empty"
+  echo "OK: exported control telemetry to ${QP_TELEMETRY_OUTPUT}"
+fi
 
 wait_for_generation_advance "${P2_LAST_GENERATION}" 30
 if [[ "${P2_FAULT_CASE}" != "none" ]]; then
