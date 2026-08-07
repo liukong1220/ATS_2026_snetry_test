@@ -198,7 +198,7 @@
 
 ## P4 准备
 
-## LTV-QP 迁移第一阶段（2026-08-06）
+## LTV-QP 迁移第一阶段（2026-08-06，历史基线）
 
 本轮按“共享模型、低速保护、求解器后端隔离”的顺序开始 MPC QP 化，源码范围限定在
 `src/ats_sentry_nav/ats_swerve_mpc`。已完成：
@@ -212,11 +212,12 @@
   二次代价、线性化 SE(2) 等式动力学、车体速度边界和车体增量不等式；问题包含有限性、
   horizon 和输入尺寸校验。
 - QP 矩阵暴露每个模块的低速角度约束有效性，尚未把轮速圆、轮速增量和舵角速率近似偷偷
-  写成未经验证的硬约束，也尚未接入 ROS 控制计时器。
+  写成未经验证的硬约束；此处“尚未接入 ROS 控制计时器”是第一阶段历史状态，已由下文
+  OSQP `qp_shadow` 接线替代。
 
-验证结果：`ats_swerve_mpc` 窄构建通过；7 个测试目标、40 个测试用例全部通过，其中新增
-`Se2Model` 3 个、`ZeroSpeedGuard` 2 个、`LtvQpBuilder` 3 个。当前没有 OSQP、HPIPM、qpOASES
-或其他 QP 后端依赖，因此不能把本轮写成 QP 闭环、实时性或实车通过证据。
+验证结果：该历史基线中 `ats_swerve_mpc` 窄构建通过；当时没有 OSQP、HPIPM、qpOASES
+或其他 QP 后端依赖。该限制已被下文锁定版本的 OSQP v1.0.0 vendor 接入替代，但不构成
+QP 闭环、实时性或实车通过证据。
 
 下一阶段门禁：先接入一个固定稀疏结构、warm-start、最大迭代/时间预算和求解后硬约束复核的
 QP 后端；只对跟踪类约束使用有界 slack，轮速/舵角/碰撞/急停保持硬约束。QP timeout、
@@ -231,12 +232,16 @@ infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出�
 - **已验证（固定结构/结果）**：`LtvQpOsqpSolver` 构造期 setup 一次，timer 路径只更新固定 LTV
   CSC 数值、`q/l/u` 和 primal/dual warm-start；映射 `solved`、`solved_inaccurate`、max-iteration/
   time-limit、primal/dual infeasible 和 numerical 状态，并记录 iteration、solve time、residual、
-  slack、hard violation。GTest 覆盖真解、warm-start、pattern 漂移拒绝、ZeroSpeedGuard 和候选
-  hard-check；窄构建和包级测试通过。
-- **已验证（ROS gate）**：`solver_mode` 支持 `ilqr|qp_shadow|qp`，默认 `ilqr`；`qp_shadow` 使用
-  同周期 `current/reference/solve 前 last_control`，只记录 OSQP 诊断，命令仍由 iLQR 唯一发布；
-  gate 测试确认 command publisher 数为 1。`qp` 本轮显式拒绝启动。
-- **安全边界**：当前节点没有碰撞/footprint 健康 producer，shadow candidate 的 collision gate 保守
+  slack、hard violation 与 update time。QP primal 先从 `delta_u` 重建完整控制，再用共享
+  `Se2Model` 做非线性 rollout 并由真实四轮 hard-check 复核。GTest 覆盖真解、primal/dual
+  warm-start、pattern 漂移拒绝、全部非 `solved` 状态、ZeroSpeedGuard 和候选 hard-check；窄构建
+  和包级测试通过。
+- **已验证（ROS gate）**：`solver_mode` 支持 `ilqr|qp_shadow|qp`，默认 `ilqr`；控制周期建立
+  immutable `ControlCycleSnapshot`，`qp_shadow` 只使用其中同一 `current/reference/solve 前
+  last_control`、ExecutionCommand identity、localization epoch 与 reference 时间。它记录固定容量
+  status/residual/首控差/p50-p95-p99 telemetry，命令仍由 iLQR 唯一发布；gate 测试确认 command
+  publisher 数为 1。`qp` 本轮显式拒绝启动。
+- **安全边界**：当前节点没有碰撞/footprint 和 map freshness 健康 producer，两项 shadow gate 保守
   hard reject；timeout、max-iteration、infeasible、solved-inaccurate、residual/slack/hard-check
   失败均不得标记 feasible，不能切换主链或无条件复用 `last_control`。当前 QP layout 不含 slack 列。
 - **未验证**：长期 QP/iLQR 同周期 identity 日志、p50/p95/p99、CPU/allocation、headless MuJoCo

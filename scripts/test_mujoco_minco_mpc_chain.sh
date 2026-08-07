@@ -51,10 +51,19 @@ YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
 # MPC solver mode; default preserves the production iLQR chain. qp_shadow only
 # records OSQP diagnostics and never becomes the command publisher.
 SOLVER_MODE="${SOLVER_MODE:-ilqr}"
+# 默认仍为 warn；qp_shadow 观察可显式传 LOG_LEVEL=info 以保存有界 telemetry。
+LOG_LEVEL="${LOG_LEVEL:-warn}"
 case "${SOLVER_MODE}" in
   ilqr|qp_shadow) ;;
   *)
     echo "Unsupported SOLVER_MODE='${SOLVER_MODE}'; use 'ilqr' or 'qp_shadow'."
+    exit 2
+    ;;
+esac
+case "${LOG_LEVEL}" in
+  debug|info|warn|error|fatal) ;;
+  *)
+    echo "Unsupported LOG_LEVEL='${LOG_LEVEL}'; use debug, info, warn, error, or fatal."
     exit 2
     ;;
 esac
@@ -1398,7 +1407,7 @@ LAUNCH_ARGS=(
   rviz_delay_sec:="${RVIZ_DELAY_SEC}"
   planning_grid_owner:="${PLANNING_GRID_OWNER}"
   solver_mode:="${SOLVER_MODE}"
-  log_level:=warn
+  log_level:="${LOG_LEVEL}"
 )
 
 setsid ros2 launch "${LAUNCH_ARGS[@]}" >"${LAUNCH_LOG}" 2>&1 &

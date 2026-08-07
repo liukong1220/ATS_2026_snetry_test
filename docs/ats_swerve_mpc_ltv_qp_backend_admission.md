@@ -1,6 +1,6 @@
 # ATS Swerve MPC LTV-QP Backend Admission
 
-更新时间：2026-08-06。本文是 `ats_swerve_mpc` LTV-QP 后端的准入记录，不是 QP 控制链、
+更新时间：2026-08-07。本文是 `ats_swerve_mpc` LTV-QP 后端的准入记录，不是 QP 控制链、
 `qp_shadow`、P2 或 P3 的验收声明。
 
 ## 当前结论
@@ -42,24 +42,28 @@ NOTICE 和 CMake target 已独立核验。[Confidence: High；来源、哈希、
 
 ## 冻结接口
 
-导航仓新增的 `LtvQpSolver` 是纯 C++ 抽象，未被 ROS node 或 iLQR 调用。它要求未来已批准
-后端逐项实现以下契约：
+`LtvQpSolver` 已由 `LtvQpOsqpSolver`（OSQP v1.0.0）实现并由 ROS node 的 `qp_shadow` 调用；
+它不改变 iLQR 的求解、tracker、急停或唯一速度发布者。当前公开 QP 头位于
+`ats_swerve_mpc/include/ats_swerve_mpc/qp/`，与 MPC 算法头隔离。实现必须持续满足以下契约：
 
 - QP 输入使用不可变 CSC pattern；`column_offsets` 和 `row_indices` 是 setup contract，timer
   周期只能更新 value，模式变化必须显式重建，不得隐式分配。
 - warm-start 必须同时按决策变量和约束 dual 的精确维度检查 finite；后端必须显式报告是否使用。
-- 每个 result 必须返回 status、iteration、solve time、primal/dual residual、slack maximum、
+- 每个 result 必须返回 status、iteration、solve/update time、primal/dual residual、slack maximum、
   hard-constraint maximum violation、primal 和 dual payload。仅 `solved` 能进入候选复核；
   `solved_inaccurate` 只作诊断，不能下发控制。
-- `LtvQpCandidateValidator` 独立重建每步 body `[vx,vy,wz]` 与四轮真实速度向量，核查 body
+- QP primal 必须先恢复 `u_qp[k]=u_nominal[k]+delta_u[k]`，并用同一个 `Se2Model` 做非线性
+  rollout；`LtvQpCandidateValidator` 再独立复核每步 body `[vx,vy,wz]` 与四轮真实速度向量，核查 body
   velocity/acceleration、轮速、轮速度向量增量、有效舵角速率和 slack/hard-bound。方向未定义
   时使用 `ZeroSpeedGuard` 跳过方向角差，而非捏造舵角；轮速度向量增量仍为 hard check。
-- `inputs_healthy`、`emergency_stop_active` 和 `collision_free` 是不可 slack 的外部硬 gate。当前
+- `inputs_healthy`、`emergency_stop_active`、`collision_free`、localization/reference freshness、
+  ExecutionCommand lease、gimbal 和 map freshness 是不可 slack 的外部硬 gate。当前
   `LtvQpBuilder` 的决策布局没有 tracking/terminal slack 列，因此非空 slack payload 一律拒绝，
   直到 slack variable、上下界和 penalty 经单独评审加入固定结构。
 
-该接口和单测仅固定 future backend 的输入、诊断和拒绝语义；它不构造完整 wheel/collision QP
-约束，也不产生实际求解结果，不能称为 QP backend 或 `qp_shadow` 已实现。
+该接口、OSQP adapter 和单测已产生实际 QP 求解结果，`qp_shadow` 已实现但仅用于审计：运行期 node
+尚无 collision/footprint 与 map freshness producer，故两项 gate 明确为 false，candidate 必须拒绝。
+它不构造完整 wheel/collision QP 约束，也不能称为 `qp` 主链、MuJoCo/HIL/实车或实时性通过。
 
 ## 准入门槛与本轮核对
 
@@ -72,13 +76,14 @@ benchmark 仍是后续门禁：
    residual、infeasible/numerical status 的一一映射。
 4. 独立 benchmark 和 deterministic GTest：同 pattern 二次求解、结构漂移拒绝、time limit、
    infeasible、non-finite、residual/slack reject，以及四轮低速/反向/横纵切换约束复核。
-5. 完成上项后，才可实现 `solver_mode=qp_shadow`。该模式必须与 iLQR 共享同一
-   `current_state/reference/last_control` snapshot，iLQR 保持 `/cmd_vel_mpc` 唯一 owner；再后才可
-   讨论受控 `solver_mode=qp`。
+5. `qp_shadow` 已使用单一 `ControlCycleSnapshot` 冻结同周期的
+   `current_state/reference/last_control`、ExecutionCommand identity、定位 epoch 与 reference 时间；
+   iLQR 保持 `/cmd_vel_mpc` 唯一 owner。受控 `solver_mode=qp` 仍被显式拒绝。
 
-本轮 GTest 已覆盖同 pattern 二次求解、结构漂移拒绝、warm-start、状态/残差字段和
-`qp_shadow` non-publish；infeasible、真实碰撞输入、长期 deadline 分布和 MuJoCo runtime
-benchmark 尚未完成，不能升级为 QP 主链准入。
+本轮 GTest 已覆盖同 pattern 二次求解、结构漂移拒绝、primal/dual warm-start、全部非 `solved`
+状态拒绝、solve/update time 字段、nonzero `delta_u` 重建、非线性 rollout、ZeroSpeedGuard、
+外部硬 gate 和 `qp_shadow` 单 publisher；真实 collision/footprint 输入、长期 deadline 分布和
+MuJoCo runtime benchmark 尚未完成，不能升级为 QP 主链准入。
 
 ## 复现命令与证据边界
 
@@ -96,23 +101,25 @@ MAKEFLAGS=-j1 colcon build --base-paths src \
 ```
 
 仓内 CMake 不联网、不查找系统 `libosqp`；`osqp_setup()` 只在 `LtvQpOsqpSolver` 构造期调用一次，
-控制 timer 只更新固定 CSC 数值、`q/l/u` 和 primal/dual warm-start。LTV conversion 的 rows/columns
+控制 timer 只更新固定 CSC 数值、`q/l/u` 和 primal/dual warm-start；结果再由 snapshot 驱动的
+nonlinear reconstruction/hard-check 与固定 128 槽 telemetry 审计。LTV conversion 的 rows/columns
 为固定动力学块、控制增量块和 bounds identity，不引入 slack 列；当前 `qp_max_tracking_slack=0`，
 所有非空 slack payload 拒绝。
 
 **已验证（组件）**：
 
 - `MAKEFLAGS=-j1 colcon build --base-paths src --packages-select ats_swerve_mpc --parallel-workers 1`；
-- OSQP adapter、固定 CSC、warm-start、状态/残差/截止时间字段、ZeroSpeedGuard、hard-check 和
-  `qp_shadow` 单 publisher GTest；
+- OSQP adapter、固定 CSC、primal/dual warm-start、状态/残差/solve-update time、非线性重建、
+  ZeroSpeedGuard、hard-check 和 `qp_shadow` 单 publisher GTest；
 - `source install/setup.bash && colcon test --base-paths src --packages-select ats_swerve_mpc`；
 - 结果文件由 `colcon test-result` 汇总为 9 个测试目标全部通过（测试总数以本机构建输出为准）；
 - launch Python syntax、`ros2 launch ... --show-args` 和三仓 `git diff --check`。
 
-**已验证（ROS node gate）**：`qp_shadow` 日志报告真实 OSQP status/iteration/solve time/
-primal-dual residual/slack/hard violation；发生 `time_limit`/`max_iterations` 时 candidate 为
-不可行，iLQR 仍发布非零控制，`/cmd_vel` 测试 topic publisher 数保持 1。当前节点没有碰撞/footprint
-健康 producer，因此 shadow safety 的 collision gate 保守为 hard reject，不能宣称 QP candidate feasible。
+**已验证（ROS node gate）**：`qp_shadow` 的 node gate 在 iLQR 可发布非零控制时确认 command topic
+publisher 数保持 1；该路径只读同周期 snapshot，OSQP 不创建 QP Twist publisher。代码记录
+status/iteration/solve-update time/primal-dual residual/slack/hard margin、首控 delta 与固定窗口
+p50/p95/p99。当前节点没有 collision/footprint 或 map freshness 健康 producer，因此两项 gate
+保守 hard reject，不能宣称 runtime QP candidate feasible。
 
 **未验证**：稳定运行时 QP/iLQR 同周期 p50/p95/p99、分配/CPU、headless MuJoCo 全链、故障注入、
 HIL、实车和物理接触。P2 仍未通过，P3 不得标记 Nav2-free；不得引用本轮单测日志宣称 50 Hz、

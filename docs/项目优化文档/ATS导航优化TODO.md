@@ -143,7 +143,8 @@
 - [x] 提取共享 `Se2Model`：iLQR 与未来 QP 共用同一 SE(2) dynamics、Jacobian 和 rollout，避免 A/B 对比时混入两套运动学。
 - [x] 增加带滞回的 `ZeroSpeedGuard`：轮速向量接近零时不使用舵角方向线性化；当前 Twist-only 链路不实现原地独立舵角控制。
 - [x] 增加 solver-independent `LtvQpBuilder`：生成线性化动力学、状态/控制/控制增量二次代价、车体速度和增量边界，并拒绝 malformed/non-finite horizon。
-- [x] 新增 8 个窄回归测试，导航包构建通过，40 个测试用例全部通过；QP 描述仍为 shadow-only。
+- [x] 已将 QP 公开头隔离到 `ats_swerve_mpc/include/ats_swerve_mpc/qp/`；共享 `Se2Model`、
+  iLQR controller、tracker 和 ROS node 保持在 MPC 层，避免 solver API 与主控制算法混放。
 - [x] 接入已批准的 OSQP v1.0.0 源码快照（固定 tag/commit/archive SHA-256、LICENSE/NOTICE），
   构造固定 LTV CSC pattern，首次 setup 后只更新数值并支持 primal/dual warm-start；当前仅 `ilqr`
   和 `qp_shadow`，未切换生产控制器。
@@ -152,15 +153,12 @@
 
 #### QP-0：后端准入与接口冻结
 
-- [x] **接口冻结，不等于后端准入（2026-08-06）**：新增 backend-neutral `LtvQpSolver`、固定
+- [x] **历史接口冻结（2026-08-06，已由后续 OSQP/Shadow 实现替代）**：当时新增 backend-neutral `LtvQpSolver`、固定
   CSC pattern、primal/dual warm-start payload、完整 result 状态字段及
   `LtvQpCandidateValidator`。独立复核会拒绝 non-finite/维度、deadline、residual、非 `solved`
   status、输入健康/急停/collision、body 速度/加速度、真实轮速、轮速度向量增量、有效舵角速率和
-  slack/hard-bound 违规；方向未定义时走 `ZeroSpeedGuard`，不生成伪舵角。该代码未接入 ROS
-  node、未添加 `solver_mode`，因此 iLQR、`/cmd_vel_mpc` 和全部紧急停机所有权不变。
-  窄构建、source 工作区后的 8/8 CTest（`test_ltv_qp_problem` 与 `test_ltv_qp_solver` 已单独
-  CTest）、`colcon test-result` 的 `49 tests, 0 errors, 0 failures, 0 skipped`、launch Python
-  syntax 和 `ros2 launch ... --show-args` 均通过；这不是 QP/MuJoCo/HIL/实车验收。
+  slack/hard-bound 违规；方向未定义时走 `ZeroSpeedGuard`，不生成伪舵角。该历史状态中尚未接入
+  ROS node/`solver_mode`；后续条目已完成 OSQP 与 `qp_shadow` 接线，不能再将本段作为当前事实。
 - [x] **OSQP v1.0.0 后端准入（2026-08-06）**：官方 tag `236713ce9a56c182ac3230d52108f952afce1523`、
   archive SHA-256 `dd6a1c2e7e921485697d5e7cdeeb043c712526c395b3700601f51d472a7d8e48`、Apache-2.0
   `LICENSE`/`NOTICE`、QDLDL/AMD 等第三方声明已核验；导航仓使用版本控制源码快照和
@@ -170,8 +168,9 @@
 - [x] OSQP 版本、许可证、来源、CMake 依赖、目标环境、CSC 格式和 warm-start 能力已记录；固定
   `z=[delta_x_0...delta_x_N, delta_u_0...delta_u_N-1]`，当前不含 slack 列。
 - [x] `LtvQpSolver` 结果契约包含 `solved`、`solved_inaccurate`、`max_iterations`、`time_limit`、
-  infeasible/numerical 状态、primal/dual residual、iteration、solve time、slack 和 hard violation；
-  deterministic GTest 覆盖固定模式/warm-start/状态拒绝。
+  infeasible/numerical 状态、primal/dual residual、iteration、solve/update time、slack 和 hard
+  violation；deterministic GTest 覆盖固定模式、primal/dual warm-start、全部非 `solved` 状态拒绝、
+  nonzero `delta_u` 重建、非线性 rollout、`ZeroSpeedGuard` 和外部健康 gate。
 - [x] DoD（组件范围）：固定结构二次求解、pattern 漂移拒绝、warm-start 和真实 OSQP status 已通过；
   `qp` 主链仍禁止启用。
 - [ ] 停止条件：后端不能在目标 Ubuntu/ROS 构建链以可复现方式链接，或许可证/依赖来源无法审计，则保持 `iLQR` 主链，不以自写未验证 QP 求解器替代。
@@ -187,18 +186,25 @@
 
 #### QP-2：Shadow 后端与结果复核
 
-- [x] `qp_shadow` 已接入真实 OSQP v1.0.0 producer：使用同一 control timer 的
-  `current/reference/solve 前 last_control`，固定 buffer/CSC、warm-start 和真实 status/残差/计时；
-  只记录诊断，不发布 QP command。当前碰撞健康 producer 缺失，candidate 保守 hard reject。
+- [x] `qp_shadow` 已接入真实 OSQP v1.0.0 producer：控制周期先冻结 bounded
+  `ControlCycleSnapshot`，iLQR 与 QP 只使用其中相同的 `current/reference/solve 前 last_control`、
+  ExecutionCommand identity、localization epoch、reference frame/time；QP 使用 iLQR 名义 rollout
+  构造固定 buffer/CSC、primal/dual warm-start 和真实 status/残差/solve/update 计时。QP primal 的
+  `delta_u` 会重建完整控制并经共享 `Se2Model` 非线性 rollout 后再复核；只记录诊断，不发布 QP
+  command。当前 collision/footprint 与 map freshness producer 缺失，candidate 保守 hard reject。
 
 - [x] 新增 `solver_mode:=ilqr|qp_shadow|qp`，默认 `ilqr`；`qp_shadow` 不发布 QP command、不改变
   tracker/iLQR warm-start/急停/topic ownership；`qp` 参数显式拒绝启动。
 - [x] 每次 QP 返回由 `LtvQpCandidateValidator` 复核维度、finite、状态码、deadline、residual、
   body/真实四轮速度、轮速度增量、ZeroSpeedGuard 有效舵角速率、slack/hard bounds 及输入 gate；
   非 `solved`、超时、残差、slack 或 hard gate 失败均不可行。
-- [ ] 记录 iLQR 与 QP 的同周期比较：cost、first control、预测状态、控制 delta、hard-constraint margin、slack、iteration、solve time、QP status；日志不能包含完整路径数组或无限增长数据。
+- [x] `qp_shadow` 用固定 128 槽环形 telemetry 记录 cycle sequence、same-snapshot identity、status、
+  iteration、warm-start、solve/update/callback time、residual、hard margin、slack、两者首控及 delta、
+  candidate/reject/deadline/fallback count 与 collision/map gate；每 16 周期输出固定窗口的
+  p50/p95/p99，日志不包含完整路径数组。该能力已实现，尚无有效 MuJoCo 长时运行测量。
 - [x] DoD（组件/ROS gate）：`qp_shadow` 下输出仍由 iLQR 唯一发布，测试确认命令 publisher 数为 1；
-  shadow 从同一 current/reference/last_control 快照构造。长期同周期 identity/p50/p95/p99 尚未完成。
+  shadow 从单一 `ControlCycleSnapshot` 构造并且无 backend、reconstruction、residual 或硬门拒绝时
+  不改写 iLQR command。长期同周期 identity/p50/p95/p99 的 MuJoCo 证据尚未完成。
 - [ ] 停止条件：shadow 产生非有限矩阵、结构尺寸变化、超过采样/内存预算、修改现有 iLQR 输出或破坏 emergency stop，立即退回仅构造问题层。
 
 #### QP-3：受控主链切换与回退
