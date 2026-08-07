@@ -244,9 +244,23 @@ infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出�
 - **安全边界**：当前节点没有碰撞/footprint 和 map freshness 健康 producer，两项 shadow gate 保守
   hard reject；timeout、max-iteration、infeasible、solved-inaccurate、residual/slack/hard-check
   失败均不得标记 feasible，不能切换主链或无条件复用 `last_control`。当前 QP layout 不含 slack 列。
-- **未验证**：长期 QP/iLQR 同周期 identity 日志、p50/p95/p99、CPU/allocation、headless MuJoCo
-  shadow、故障注入、HIL、实车和物理接触。P2 红框仍未通过，P3 仍不得标记 Nav2-free；本轮不能
-  把组件通过写成 QP 实时性或实车收益。后端准入清单、复现方法和停止条件见
+- **已运行但未通过 QP 准入（domain 229）**：MuJoCo 3.10 CPU LiDAR 的 `mj_multiRay` 补齐
+  `normal=None` 槽位后，raw cloud/`/registered_scan -> ROGMap -> /traversability_grid` 恢复；
+  ROGMap `cloud_age` 有限、adapter generation `55 -> 138`、iLQR 保持两级速度链唯一 owner，
+  single action 终点误差 `0.011173 m`。这只是 iLQR nominal。8 条节流后的 QP record 均
+  `max_iterations/400` 和 `solver_status_not_solved`；最后 telemetry 为 OSQP solve
+  `p50/p95/p99=3.829/5.424/5.874 ms`、完整 callback `57.611/131.704/160.563 ms`，相对
+  50 Hz 20 ms deadline 累计 `61` 次 miss、`86` 次 candidate reject。因此停止 QP 主链迁移，
+  默认保持 `solver_mode=ilqr`，不得启用 `qp`、放宽 iteration/deadline/residual 或复用未 solved
+  warm-start。
+- **已验证（输入同一性审计，非可行性）**：`ControlCycleSnapshot` 现在以固定小端字节序、字符串
+  长度前缀和 FNV-1a-64 digest 覆盖 current state、reference stamp/deadline/frame/state/control、
+  solve 前 last control 及 ExecutionCommand identity，不使用 DDS CDR。domain `229` 的所有
+  节流记录 `same_snapshot=true`；该结果不证明 OSQP 可行、candidate feasible、实时性或安全 gate。
+  collision/footprint/map-health producer 仍不存在，candidate 继续 fail-closed。
+- **未验证**：CPU/allocation profile、稳定 QP p99、完整故障矩阵、真实 collision/footprint/map-health
+  输入、P2 red-box、HIL、实车和物理接触。P2 红框仍未通过，P3 仍不得标记 Nav2-free；本轮不能
+  把组件通过或 iLQR nominal 写成 QP 实时性或实车收益。后端准入清单、复现方法和停止条件见
   `docs/ats_swerve_mpc_ltv_qp_backend_admission.md`。
 
 QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬软约束测试 -> `qp_shadow` 同输入

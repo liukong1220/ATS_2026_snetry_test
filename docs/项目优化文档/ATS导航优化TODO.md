@@ -201,11 +201,25 @@
 - [x] `qp_shadow` 用固定 128 槽环形 telemetry 记录 cycle sequence、same-snapshot identity、status、
   iteration、warm-start、solve/update/callback time、residual、hard margin、slack、两者首控及 delta、
   candidate/reject/deadline/fallback count 与 collision/map gate；每 16 周期输出固定窗口的
-  p50/p95/p99，日志不包含完整路径数组。该能力已实现，尚无有效 MuJoCo 长时运行测量。
+  p50/p95/p99，日志不包含完整路径数组。`ControlCycleSnapshot` digest 已按固定小端字节序、
+  字符串长度前缀和 FNV-1a-64 覆盖 current/reference time+frame+state/control、solve 前
+  last_control 与 ExecutionCommand identity；不使用 DDS CDR。
 - [x] DoD（组件/ROS gate）：`qp_shadow` 下输出仍由 iLQR 唯一发布，测试确认命令 publisher 数为 1；
   shadow 从单一 `ControlCycleSnapshot` 构造并且无 backend、reconstruction、residual 或硬门拒绝时
-  不改写 iLQR command。长期同周期 identity/p50/p95/p99 的 MuJoCo 证据尚未完成。
-- [ ] 停止条件：shadow 产生非有限矩阵、结构尺寸变化、超过采样/内存预算、修改现有 iLQR 输出或破坏 emergency stop，立即退回仅构造问题层。
+  不改写 iLQR command。
+- [x] **MuJoCo shadow 已运行但停止条件触发（domain 229）**：在修复 CPU LiDAR
+  `mj_multiRay(..., dist, None, nray, cutoff)` 后，raw cloud/`/registered_scan`、ROGMap、
+  `/traversability_grid`、adapter heartbeat 和 generation `55 -> 138` 恢复；默认 iLQR action
+  达到 `0.011173 m` 终点误差且两级 topic owner 唯一。该 nominal 不代表 QP 通过。8 条节流后的
+  OSQP record 全部为 `max_iterations/400`、`solver_status_not_solved`、`warm=false`、
+  `candidate_feasible=false`，各条 `same_snapshot=true`。最后 telemetry 为 solve
+  `p50/p95/p99=3.829/5.424/5.874 ms`，但完整 callback 为 `57.611/131.704/160.563 ms`，超过
+  50 Hz/20 ms 周期；累计 `86` 次 candidate reject、`61` 次 deadline miss。保持默认
+  `solver_mode=ilqr`，禁止 `qp` 发布、deadline/iteration/residual 放宽和未 solved warm-start。
+- [x] 停止条件已执行：shadow 出现非有限矩阵、结构尺寸变化、超过采样/内存预算、修改现有 iLQR
+  输出或破坏 emergency stop 时，必须保持 iLQR 主链并停止 QP 主链迁移。本轮符合“超过采样预算”和
+  “non-solved status”两项，已停止在 shadow 证据边界；collision/footprint/map-health producer、
+  P2/P3、HIL 和实车均未通过或未验证。
 
 #### QP-3：受控主链切换与回退
 

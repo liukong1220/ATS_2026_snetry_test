@@ -85,6 +85,54 @@ benchmark 仍是后续门禁：
 外部硬 gate 和 `qp_shadow` 单 publisher；真实 collision/footprint 输入、长期 deadline 分布和
 MuJoCo runtime benchmark 尚未完成，不能升级为 QP 主链准入。
 
+## 2026-08-07 MuJoCo Shadow 观察：已运行，未通过准入
+
+本轮先修复 MuJoCo CPU LiDAR 对当前 `mujoco==3.10.0` 的 ABI 调用：`mj_multiRay()` 的 Python
+绑定要求在 `dist` 与 `nray` 之间传入 `normal` 槽位，bridge 不使用命中法线时显式传 `None`。修复前
+LiDAR 子进程在首次 raycast 因参数左移抛出 `TypeError`，从而没有 `/registered_scan`，ROGMap 正确报
+`cloud_age=inf`、`source_generation=0` 和 stale；本轮没有改变 cloud timeout、projection deadline、
+unknown/occupied、adapter lease 或 MPC fail-closed 语义。
+
+在无 viewer、隔离 `ROS_DOMAIN_ID=229` 下，以下同一 single profile 命令实际完成：
+
+```bash
+PLANNING_GRID_OWNER=rog_map SOLVER_MODE=qp_shadow LOG_LEVEL=info \
+TEST_PROFILE=single P2_FAULT_CASE=none ROS_DOMAIN_ID=229 \
+scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+已验证的上游与 iLQR ownership 证据为：LiDAR 子进程启动；ROGMap 首次 projection 观察到
+`cloud_age=0.084 s` 并返回 `ready=true, stale=false`；adapter source generation 从 `55` 增至 `138`；
+`/traversability_grid` 和四个 ROGMap debug topic 非空；`/cmd_vel_mpc` 仍只有
+`ats_swerve_mpc -> twist_to_motion_ctrl`，`/motion_control` 仍只有
+`twist_to_motion_ctrl -> ats_mujoco_sim`。ATS action 到达 `(-9.011029, 1.468209)`，相对
+`(-9.0, 1.47)` 的脚本误差为 `0.011173 m`，这只是保持默认 iLQR 主链的 nominal 结果，不能作为
+QP candidate、P2 红框、P3 Nav2-free、HIL 或实车证据。
+
+Shadow 运行**未通过 QP 准入停止条件**，不得启用 `solver_mode=qp`：
+
+- 记录到的 8 条节流后 OSQP telemetry 均为 `status=max_iterations`、`iter=400`、
+  `warm=false`、`candidate_feasible=false` 和 `reject=solver_status_not_solved`；即使个别
+  primal/dual residual 已低于配置阈值，非 `solved` status 仍按契约拒绝，不能保存 warm-start
+  或构造可下发 candidate。
+- 固定 telemetry 窗口最后一次报告 OSQP solve `p50/p95/p99=3.829/5.424/5.874 ms`，但完整 control
+  callback 为 `57.611/131.704/160.563 ms`，超过 `50 Hz` 的 `20 ms` 周期；累计
+  `candidate_reject_count=86`、`deadline_miss_count=61`。因此这不是实时 QP shadow 通过证据。
+- 8 条观测都显示 `same_snapshot=true`，并记录固定字节序 digest；摘要覆盖 current state、reference
+  stamp/deadline/frame/state/control、solve 前 last control 及 ExecutionCommand identity。该 digest
+  只证明 iLQR/QP 的输入同一性，不证明求解结果可行或实时。
+- 当前 collision/footprint 与 map-health producer 仍未接入节点，两个 gate 继续 hard false；本次
+  reject 首因是 solver status，不能把它误称为 collision/map gate 已通过或已执行的可行候选审计。
+
+本轮窄验证为 `test_mujoco_lidar_cpu.py` 的 `2 passed`、`ats_mujoco_sim` 窄构建、
+`ats_swerve_mpc` 窄构建和 `colcon test-result` 的 `62 tests, 0 errors, 0 failures`；MuJoCo
+`ament_python` 的现有包级 test 注册仍显示 `0 tests`，故不将它写为包级 pytest 覆盖。启动清理阶段
+还有 terrain/Python 节点在 SIGINT 后的已知 context-shutdown traceback；它出现在 action、ROS graph
+和上游检查结束之后，不是 LiDAR 子进程运行期崩溃，但 clean shutdown 仍属独立未解决项。
+最终摘要有效位源码修正后还在新 domain `228` 启动了一次同配置观察：上游、adapter 和两级 owner
+检查均完成，但外层 `180 s` 时限在 action/QP telemetry 前中止；该进程组已用 `SIGINT` 后的
+`SIGTERM` 正常清理，domain `228` 不计入上述 action、status 或分位数证据。
+
 ## 复现命令与证据边界
 
 从干净目标环境复现 vendor 快照和构建：
@@ -121,6 +169,7 @@ status/iteration/solve-update time/primal-dual residual/slack/hard margin、首�
 p50/p95/p99。当前节点没有 collision/footprint 或 map freshness 健康 producer，因此两项 gate
 保守 hard reject，不能宣称 runtime QP candidate feasible。
 
-**未验证**：稳定运行时 QP/iLQR 同周期 p50/p95/p99、分配/CPU、headless MuJoCo 全链、故障注入、
-HIL、实车和物理接触。P2 仍未通过，P3 不得标记 Nav2-free；不得引用本轮单测日志宣称 50 Hz、
-6 ms 或 p99 实时性。
+**未验证或未通过**：MuJoCo headless nominal 的 upstream/iLQR 链和 QP input digest 已实际运行，
+但 QP status/iteration 与 callback deadline 未通过；分配/CPU profile、collision/footprint/map-health
+真实 producer、故障注入、P2 红框、HIL、实车和物理接触仍未验证。P2 仍未通过，P3 不得标记
+Nav2-free；不得引用本轮单测或该次 iLQR nominal 日志宣称 QP 50 Hz、6 ms、p99 实时性或生产准入。
