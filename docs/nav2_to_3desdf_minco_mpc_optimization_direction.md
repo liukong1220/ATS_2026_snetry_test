@@ -295,6 +295,27 @@ infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出�
   snapshot digest 不同，离线 verdict 为 `not_comparable`，不得把任何差值解释为 Shadow 或 INFO 的
   因果成本。CPU、allocation、P2 red-box、HIL、实车与物理接触仍未验证。
 
+- **QP-2.6 已实现，仿真输入链阻塞**：采样 owner 改为 `ControlCycleTelemetryRing` 的显式固定窗口，profile 通过
+  `telemetry_sampling_window_cycles` 请求固定周期数（默认 `0` 不改变滚动诊断）。首个有效周期冻结
+  Execute lease/reference/map identity：`manager_incarnation`、`goal_id`、`localization_epoch`、
+  `map_generation`、`map_publication_sequence`、reference stamp/deadline/frame，并要求每条记录
+  `execution_lease_valid=true`、`reference_fresh=true` 与非零 localization/map generation。Goal Manager 的递增 `command_sequence` 是
+  heartbeat 续租审计字段，不是恒等字段。身份变化或窗口不完整会保留 raw fragment/manifest，schema 3
+  离线 analyzer 固定输出 `not_comparable`，不计算 delta；跨独立 MuJoCo launch 还必须满足逐周期
+  `snapshot_identity_digest` 完全一致。
+- **QP-2.6 数值范围**：raw/fixture 新增 finite bound magnitude 最小/最大值，和 Hessian diagonal、
+  constraint row L2、zero-delta dynamic residual 一起导出。当前 operational fixture 锁定
+  Hessian `0.66..56.0`、bound `0.1..2.15`、row L2 `1.0..1.42`、dynamic residual `0`；这只是
+  归因 proxy，不能单凭尺度提出 preconditioning，更不能实施 scaling 或放宽准入。CPU/allocation
+  仍为未验证。
+- **QP-2.6 验证边界**：本地 QDLDL source injection 后窄构建通过；`ats_swerve_mpc` package GTest
+  12/12 通过，`colcon test-result` 为 73 tests、0 failure，Python/Bash、launch `--show-args` 均通过。
+  临时 schema-3 fixture 已验证逐周期 digest 不同会严格输出 `not_comparable`/withheld，但不是运行性能数据。
+  新空 domain `210` 的 headless A profile 在 `/traversability_grid` 前被 `mujoco==3.4.0` CPU LiDAR
+  的 `mj_multiRay()` `vec` 参数形状错误中断，`/registered_scan` 缺失导致 ROGMap stale；没有 raw artifact，
+  未到 command ownership/终点/contact 检查。故 P2 仍未通过，P3 仍不得标记 Nav2-free，HIL、实车和物理
+  接触继续未验证。
+
 QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬软约束测试 -> `qp_shadow` 同输入
 诊断 -> 受控 `qp` 发布和有界 fallback -> 新 DDS domain 的 MuJoCo 故障验收 -> 抬轮 HIL/实车。
 不能将“构造矩阵”“QP 返回 solved”或“topic 存在”替代硬约束复核、两级零速度、红框、物理接触
