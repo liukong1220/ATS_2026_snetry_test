@@ -57,6 +57,7 @@ LOG_LEVEL="${LOG_LEVEL:-warn}"
 # MPC control timer；空值保持既有回归行为不变。
 QP_TELEMETRY_OUTPUT="${QP_TELEMETRY_OUTPUT:-}"
 QP_TELEMETRY_MANIFEST="${QP_TELEMETRY_MANIFEST:-}"
+QP_TELEMETRY_WINDOW_CYCLES="${QP_TELEMETRY_WINDOW_CYCLES:-0}"
 QP_TELEMETRY_RUN_START_EPOCH_NS="$(date +%s%N)"
 case "${SOLVER_MODE}" in
   ilqr|qp_shadow) ;;
@@ -72,6 +73,15 @@ case "${LOG_LEVEL}" in
     exit 2
     ;;
 esac
+if ! [[ "${QP_TELEMETRY_WINDOW_CYCLES}" =~ ^[0-9]+$ ]] ||
+  (( QP_TELEMETRY_WINDOW_CYCLES > 128 )); then
+  echo "QP_TELEMETRY_WINDOW_CYCLES must be an integer in [0, 128]."
+  exit 2
+fi
+if [[ -n "${QP_TELEMETRY_OUTPUT}" && "${QP_TELEMETRY_WINDOW_CYCLES}" == "0" ]]; then
+  echo "QP_TELEMETRY_OUTPUT requires QP_TELEMETRY_WINDOW_CYCLES in [1, 128]."
+  exit 2
+fi
 
 case "${P2_FAULT_CASE}" in
   none|adapter_lease|service_timeout|input_stale|unknown|unreachable|freeze) ;;
@@ -1412,6 +1422,7 @@ LAUNCH_ARGS=(
   rviz_delay_sec:="${RVIZ_DELAY_SEC}"
   planning_grid_owner:="${PLANNING_GRID_OWNER}"
   solver_mode:="${SOLVER_MODE}"
+  telemetry_sampling_window_cycles:="${QP_TELEMETRY_WINDOW_CYCLES}"
   log_level:="${LOG_LEVEL}"
 )
 
@@ -1549,7 +1560,8 @@ if [[ -n "${QP_TELEMETRY_OUTPUT}" ]]; then
     --start-z "${START_Z}" --start-yaw "${START_YAW}" \
     --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" \
     --goal-yaw-w "${GOAL_YAW_W}" \
-    --run-start-epoch-ns "${QP_TELEMETRY_RUN_START_EPOCH_NS}" || \
+    --run-start-epoch-ns "${QP_TELEMETRY_RUN_START_EPOCH_NS}" \
+    --sampling-window-cycles "${QP_TELEMETRY_WINDOW_CYCLES}" || \
     fail "cannot export /ats_swerve_mpc/dump_control_telemetry"
   [[ -s "${QP_TELEMETRY_OUTPUT}" ]] || fail "control telemetry output is empty"
   [[ -s "${QP_TELEMETRY_MANIFEST}" ]] || fail "control telemetry manifest is empty"

@@ -2,6 +2,7 @@
 """Read the MPC telemetry service and atomically preserve one raw experiment artifact."""
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -13,14 +14,23 @@ from rclpy.node import Node
 from std_srvs.srv import Trigger
 
 
-def git_revision(path: Path) -> str:
-    result = subprocess.run(
+def git_revision(path: Path) -> dict[str, object]:
+    head = subprocess.run(
         ["git", "-C", str(path), "rev-parse", "HEAD"],
         check=True,
         text=True,
         capture_output=True,
     )
-    return result.stdout.strip()
+    tracked_diff = subprocess.run(
+        ["git", "-C", str(path), "diff", "--binary", "HEAD"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    return {
+        "head": head.stdout.strip(),
+        "tracked_diff_sha256": hashlib.sha256(tracked_diff).hexdigest(),
+        "tracked_diff_present": bool(tracked_diff),
+    }
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -51,6 +61,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--goal-y", required=True, type=float)
     parser.add_argument("--goal-yaw-w", required=True, type=float)
     parser.add_argument("--run-start-epoch-ns", required=True, type=int)
+    parser.add_argument("--sampling-window-cycles", required=True, type=int)
     parser.add_argument("--timeout-sec", type=float, default=10.0)
     return parser.parse_args()
 
@@ -70,8 +81,28 @@ def main() -> int:
             detail = "no response" if response is None else response.message
             raise RuntimeError(f"telemetry service rejected dump: {detail}")
         payload = json.loads(response.message)
-        if payload.get("schema_version") != 2 or not isinstance(payload.get("samples"), list):
+        if payload.get("schema_version") != 3 or not isinstance(payload.get("samples"), list):
             raise RuntimeError("telemetry service returned an unsupported schema")
+        sampling_window = payload.get("sampling_window")
+        if not isinstance(sampling_window, dict):
+            raise RuntimeError("telemetry service omitted sampling_window contract")
+        if sampling_window.get("requested_cycle_count") != args.sampling_window_cycles:
+            raise RuntimeError("telemetry sampling window differs from launch request")
+        metadata = payload.get("metadata", {})
+        effective_parameters = {
+            name: metadata.get(name)
+            for name in (
+                "control_rate_hz",
+                "control_period_ms",
+                "qp_max_iterations",
+                "qp_time_limit_ms",
+                "qp_max_primal_residual",
+                "qp_max_dual_residual",
+                "qp_max_tracking_slack",
+                "qp_max_hard_constraint_violation",
+                "use_sim_time",
+            )
+        }
         write_json(args.output, payload)
         manifest = {
             "schema_version": 1,
@@ -91,6 +122,8 @@ def main() -> int:
                 "params_file": args.params_file,
                 "duration_ms_at_dump": (time.time_ns() - args.run_start_epoch_ns) / 1_000_000.0,
             },
+            "effective_parameters": effective_parameters,
+            "sampling_window": sampling_window,
             "scenario": {
                 "test_profile": args.test_profile,
                 "planning_grid_owner": args.planning_grid_owner,
