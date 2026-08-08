@@ -176,6 +176,58 @@ warm-start 继续禁止。P2 未通过，P3 不得标记 Nav2-free，HIL、实�
 
 ## 复现命令与证据边界
 
+## QP-2.6 可配对采样与数值归因（已实现；MuJoCo 输入链阻塞）
+
+本轮把采样窗口下沉到 `AtsSwerveMpcNode::finalizeControlTelemetry()` 所拥有的
+`ControlCycleTelemetryRing`，不再由脚本从“最后 128 槽”猜测窗口。profile 通过
+`telemetry_sampling_window_cycles` 显式请求固定周期数（当前上限仍为 128，默认 `0` 保持滚动诊断）；
+首个满足 `execution_lease_valid=true`、`reference_fresh=true`，且 localization/map generation 均非零的
+周期冻结窗口。窗口恒等
+字段为 `manager_incarnation`、`goal_id`、`localization_epoch`、`map_generation`、
+`map_publication_sequence`、`reference_stamp_ns`、`reference_deadline_ns` 和 `reference_frame`。
+Goal Manager 的 `command_sequence` 是每次 Execute heartbeat 的续租序号，会逐拍记录并检查单调性，
+但不作为 lease 恒等字段。窗口身份变化、lease/reference 失效、周期数未收满或 schema 缺失都保留
+raw fragment/manifest，并由离线分析器稳定判为 `not_comparable`；不计算任何 delta。
+
+遥测 schema 已升级到 `3`，每个 sample 同时保存上述 identity、`snapshot_identity_digest`、status、
+iterations、warm-start、reported/C API wall update+solve、primal/dual residual、slack、十类 root cause、
+candidate rejection 和 collision/map gate。QP builder metrics 新增 finite nonzero bound 的最小绝对值与
+最大绝对值，和已有 Hessian 对角、constraint-row L2、zero-delta dynamic residual 一起作为只读数值证据。
+manifest 额外保存 raw `sampling_window`、关键有效 QP 参数，以及每仓 `HEAD`、tracked diff 是否存在和
+对应 SHA-256，避免未提交构建被误记成纯 `HEAD`；CPU/allocation 仍明确为
+`unverified_no_trusted_profiler`/`unverified_no_trusted_allocator_profiler`。
+
+`scripts/test_mujoco_qp_shadow_profiles.sh` 对 A/B/C 每个新 domain 请求同一 `128` 周期窗口；
+`scripts/analyze_qp_shadow_telemetry.py` 只在三份 raw 的窗口完整、内部 lease/reference/map identity 稳定、
+heartbeat 单调、snapshot digest 有效且逐周期 digest 完全一致时给出 `comparable`，否则保留
+`shadow_increment_cost_conclusion=withheld`。即使窗口身份字段相同，FNV-1a digest 仍是审计摘要而非
+密码学签名；跨独立 MuJoCo launch 的动态相等性证据不足时不能升级 QP 准入。
+
+当前 fixture 对 operational builder 锁定的诊断范围为 Hessian diagonal `0.66..56.0`、非零 finite
+bound magnitude `0.1..2.15`、constraint row L2 最小 `1.0` 且最大小于 `1.42`、zero-delta dynamic
+residual `0`；这些范围只用于复现/排查，不改变 `qp_max_iterations=400`、`qp_time_limit_ms=10`、residual
+或任何 safety gate。仅凭这组尺度 proxy 不能证明病态或支持 scaling/preconditioning；只有固定窗口中
+重复复现 `max_iterations` 且有独立条件数/缩放实验时，才可提出后续建议，本轮不实施 scaling。
+
+**本轮已验证**：以本地 `/tmp/ats_qdldl_v0_1_8` 作为 QDLDL `FetchContent` 源完成
+`ats_swerve_mpc` 窄构建；`colcon test --base-paths src --packages-select ats_swerve_mpc` 为 12/12
+通过，随后 `colcon test-result --test-result-base build/ats_swerve_mpc --verbose` 为 73 tests、0 failure。
+受影响 Python/Bash 语法和 source MuJoCo launch `--show-args` 通过，后者确认
+`telemetry_sampling_window_cycles`。临时 schema-3 fixture 的三组完整窗口只有 C 的逐周期 digest 不同，
+analyzer 确认输出 `not_comparable` 和 `shadow_increment_cost_conclusion=withheld`；这只验证 fail-closed
+分析逻辑，不是 MuJoCo 性能样本。
+
+**MuJoCo 停止条件**：新、空 domain `210` 的 A profile 在输入链就失败，未进入
+`/cmd_vel_mpc`/`/motion_control` runtime ownership 检查，也没有 raw telemetry 或 manifest。运行时
+`mujoco==3.4.0` 的 CPU LiDAR 子进程在
+`src/sim/ats_mujoco_sim/mujoco_lidar/core_cpu/mjlidar_cpu.py:56` 调用 `mj_multiRay()` 时因 `vec` 参数
+形状不兼容退出，继而 `/registered_scan` 缺失、ROGMap 以 stale fail-closed；launch log
+`/tmp/ats_minco_mpc_test_launch_210.log` 的 SHA-256 为
+`cc36ba626f83ce2018ae69060351dbe8a8d3a5669d3508d381ba8aae91772bfc`。这是 MuJoCo binding/输入链阻塞，
+本轮不改动该无关模块，也不伪造 B/C profile、window、ownership、terminal/contact 或 QP 统计。
+不得把旧构建树的 29 项结果、旧 A/B/C artifact 或本轮临时 fixture 写成 QP-2.6 通过；P2/P3、HIL、
+实车和物理接触仍未验证。
+
 从干净目标环境复现 vendor 快照和构建：
 
 ```bash

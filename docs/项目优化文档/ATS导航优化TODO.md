@@ -237,6 +237,29 @@
   “non-solved status”两项，已停止在 shadow 证据边界；collision/footprint/map-health producer、
   P2/P3、HIL 和实车均未通过或未验证。
 
+- [x] **QP-2.6 采样 owner 与离线数值归因（已实现）**：`ControlCycleTelemetryRing` 新增显式
+  `telemetry_sampling_window_cycles` 固定窗口；首个有效 Execute lease/reference/map identity 冻结后，
+  只接受同一 `manager_incarnation + goal_id + localization_epoch + map_generation +
+  map_publication_sequence + reference stamp/deadline/frame` 的精确周期数。Execute heartbeat 的
+  `command_sequence` 每拍递增，只记录并检查单调性，不错误地作为 lease 恒等字段。身份变化、lease/reference
+  失效、localization/map generation 为零或窗口未收满时保留 raw fragment/manifest，schema 3 离线分析器固定输出 `not_comparable`，禁止
+  任何 Shadow/INFO delta；旧 schema 2 artifact 仍可读取但因缺少窗口契约自动 withheld。
+- [x] QP-2.6 raw sample 继续记录 20 Hz/50 ms、有效 OSQP 参数、domain/revision/scenario、status/iteration、
+  residual/slack、十类 root cause、OSQP reported/C API wall time、candidate reject、两级 owner 所需外部
+  证据字段和 CPU/allocation 未验证标记；builder metrics 新增 Hessian/row/bound/dynamic residual 尺度。
+  当前 operational fixture 的可复现尺度断言为 Hessian `0.66..56.0`、非零 finite bound `0.1..2.15`、
+  row L2 `1.0..1.42`、zero-delta dynamic residual `0`。该 proxy 不足以提出 scaling/preconditioning，
+  不实施任何矩阵、准入参数或主链修改。manifest 另保存每仓 `HEAD`、tracked diff SHA-256 和关键有效
+  QP 参数，不能把尚未提交的运行构建误标为纯 revision。
+- [ ] QP-2.6 运行门禁：Python/Bash、source launch `--show-args`、三仓 `git diff --check` 已通过；本地
+  `/tmp/ats_qdldl_v0_1_8` 注入后，窄构建、package GTest 12/12 和 `colcon test-result` 73 tests/0 failure
+  均通过。临时 schema-3 fixture 验证逐周期 digest 不同稳定得到 `not_comparable`/withheld。新、空 domain
+  `210` 的 headless A profile 仍在 `/traversability_grid` 前失败：`mujoco==3.4.0` CPU LiDAR 的
+  `mj_multiRay()` `vec` 参数形状不兼容，`/registered_scan` 缺失使 ROGMap stale fail-closed；没有 raw
+  telemetry/manifest，也未运行到 `/cmd_vel_mpc` 或 `/motion_control` runtime ownership、终点或 contact
+  检查。本轮不修复该无关 MuJoCo binding，不能伪造 B/C。P2 不得标记通过，P3 不得标记 Nav2-free，
+  HIL/实车/物理接触继续未验证。
+
 #### QP-3：受控主链切换与回退
 
 - [ ] `solver_mode=qp` 只能在 QP candidate 已通过全部 hard check 后发布 `controls.front()`；任何 `timeout`、`infeasible`、`numerical_failure`、residual 不合格、slack 超限或输入不健康都必须调用现有 `publishZeroCommandForFailure()`/`engageFailStop()` 语义。
