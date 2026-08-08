@@ -4,11 +4,17 @@ set -euo pipefail
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_ROOT="${QP_PROFILE_OUTPUT_ROOT:-/tmp/ats_qp_shadow_profiles_$(date -u +%Y%m%dT%H%M%SZ)}"
 DOMAIN_START="${QP_PROFILE_DOMAIN_START:-200}"
+WINDOW_CYCLES="${QP_PROFILE_WINDOW_CYCLES:-128}"
 
 set +u
 source "${WORKSPACE_DIR}/install/setup.bash"
 set -u
 export ROS2CLI_DISABLE_DAEMON="${ROS2CLI_DISABLE_DAEMON:-1}"
+
+if ! [[ "${WINDOW_CYCLES}" =~ ^[1-9][0-9]*$ ]] || (( WINDOW_CYCLES > 128 )); then
+  echo "QP_PROFILE_WINDOW_CYCLES must be an integer in [1, 128]." >&2
+  exit 2
+fi
 
 domain_is_empty() {
   local candidate="$1"
@@ -45,6 +51,7 @@ run_case() {
   TEST_PROFILE=single \
   P2_FAULT_CASE=none \
   P3_FAULT_CASE=none \
+  QP_TELEMETRY_WINDOW_CYCLES="${WINDOW_CYCLES}" \
   QP_TELEMETRY_OUTPUT="${run_directory}/raw_telemetry.json" \
   QP_TELEMETRY_MANIFEST="${run_directory}/manifest.json" \
   "${WORKSPACE_DIR}/scripts/test_mujoco_minco_mpc_chain.sh"

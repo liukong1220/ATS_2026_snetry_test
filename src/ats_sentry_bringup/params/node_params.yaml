@@ -939,6 +939,8 @@ ats_swerve_mpc:
     goal_position_tolerance: 0.08
     goal_yaw_tolerance: 0.15
     publish_debug_paths: true
+    # 默认滚动诊断；QP profile 仅通过 launch 显式设为固定采样窗口。
+    telemetry_sampling_window_cycles: 0
     projection_backward_window: 0.20
     projection_forward_window: 2.00
     cross_track_slowdown_start: 0.15
