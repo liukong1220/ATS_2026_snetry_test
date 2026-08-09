@@ -41,6 +41,9 @@ def parse_args():
     value_parser = subparsers.add_parser("value")
     value_parser.add_argument("--value", type=int, required=True)
 
+    all_value_parser = subparsers.add_parser("all-value")
+    all_value_parser.add_argument("--value", type=int, required=True)
+
     unreachable_parser = subparsers.add_parser("unreachable")
     unreachable_parser.add_argument("--start-x", type=float, required=True)
     unreachable_parser.add_argument("--start-y", type=float, required=True)
@@ -228,6 +231,19 @@ def main():
                 args.period,
             )
             print(f"published {cell_count} unknown cells to {args.output_topic}")
+            return 0
+        if args.mode == "all-value":
+            expected = int(args.value)
+            if not all(int(cell) == expected for cell in grid.data):
+                print(
+                    f"grid contains a value other than {expected}", file=sys.stderr
+                )
+                return 4
+            stamp = grid.header.stamp
+            print(
+                f"all {len(grid.data)} cells are {expected} "
+                f"{grid.header.frame_id} {stamp.sec}.{stamp.nanosec:09d}"
+            )
             return 0
         if args.mode == "value":
             index = find_value(grid, args.value)

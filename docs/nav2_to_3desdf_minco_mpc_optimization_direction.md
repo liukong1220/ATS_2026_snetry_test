@@ -1,6 +1,6 @@
 # ATS 自研导航 V1 状态
 
-更新时间：2026-08-05。本页只记录当前活动源码和已保存的本轮运行证据。
+更新时间：2026-08-09。本页只记录当前活动源码和已保存的本轮运行证据。
 
 ## P2
 
@@ -148,6 +148,34 @@
   `python3 scripts/validate_navigation_config.py` 已通过。该检查不替代运行期 ROS graph
   ownership 或任何 P2/P3 闭环验收；本轮只做显示观察，未重跑 freeze、red-box 或故障矩阵。
   [Confidence: High，受版本控制的配置、源码锚点、确定性测试与运行期 payload/QoS 交叉证据]
+
+### P2.7 真实 unknown 安全闭环前置复核（2026-08-09）
+
+- **已实现且最窄验证通过**：`/rog_map/unk` 继续只是 ROGMap 的可视化/审计 `PointCloud2`，实际
+  planner 输入仍为 `/rog_map/get_ground_projection` 的数值 response；unknown 为
+  `occupancy_grid.data=-1`，对应 signed-distance/gradient 的 `NaN`。P2 fault 不订阅或反解析
+  `/rog_map/unk`、`/rog_map/esdf`。source fixture 由持续运行的 MuJoCo LiDAR worker 发布真实空回波和
+  ROGMap owner 清空现有观察构成，adapter 只在融合**前**mask secondary evidence，并只接受已由数值
+  ROGMap response 证明存在 unknown 的请求；既有融合语义仍保证 occupied 优先、明确 free 可消解其他
+  unknown、全来源无 free/occupied 才为最终 unknown、outside-map fail-closed。
+- **数值/时序契约已实现未运行**：all-unknown fusion 发布保留 occupancy audit payload 的
+  `PlanningMapSnapshot(ready=false)`，其 ESDF/gradient 为 `NaN`；adapter ready heartbeat 使用收到的
+  最新 source generation。脚本为 unknown 建立独立 timeline，审计 `odom` frame、非零 stamp、
+  `BEST_EFFORT` QoS、source generation、publication sequence、localization epoch 与 plan request
+  identity，随后要求 `ready=false -> emergency_stop=true -> /cmd_vel_mpc=0 -> /motion_control=0`；
+  恢复后不带新目标观察旧 reference 不复活。该 runtime 链尚未执行，不能作为实际 fail-closed 证据。
+- **nominal 实际失败，停止 unknown 升级（Confidence: High）**：在新的无 viewer/RViz MuJoCo domain
+  `181` 与 `182` 下，`planning_grid_owner=rog_map` 的 single nominal 已越过旧 `/rog_map/unk` gate，
+  实际观察到 ROGMap numeric service、adapter fresh heartbeat、唯一 planning-grid owner、ATS action
+  accepted 和 tracking 前的 `/cmd_vel_mpc`/`/motion_control` ownership。iLQR callback 却持续超过
+  `20 Hz/50 ms`：domain `181` p50/p95/p99=`155.387/281.713/326.962 ms`，domain `182` 为
+  `94.671/268.061/392.287 ms`，并伴随 odometry/ROGMap stale、projection/lease timeout，最终
+  `ABORTED/RESULT_MAP_UNREADY=4`。日志路径为 `/tmp/ats_minco_mpc_test_launch_181.log` 和
+  `/tmp/ats_minco_mpc_test_launch_182.log`。本轮没有冒充运行中 unknown、two-stage zero、恢复后旧轨迹
+  拒绝、终点、schema-3 固定窗口或 contact 验收。
+- **状态边界**：P2 nominal 未闭环，真实 unknown runtime、P2 红框与完整故障矩阵未通过；P3 仍未满足
+  `launch_nav2:=false` 的 Nav2-free 验收。`solver_mode=ilqr` 保持唯一控制发布链，`qp_shadow` 未在本轮
+  paired A/B/C 运行，`solver_mode=qp`、HIL 与实车自主运动均未启动。
 
 ## P3
 

@@ -506,7 +506,9 @@ assert_p3_process_graph() {
 
 verify_rog_map_planning_interface() {
   local topic node_info generation node_list
-  for topic in /rog_map/occ /rog_map/inf_occ /rog_map/unk /rog_map/esdf; do
+  # /rog_map/unk is an on-demand visualization/audit cloud.  A nominal map
+  # can correctly fuse to known free while its debug unknown payload is empty.
+  for topic in /rog_map/occ /rog_map/inf_occ /rog_map/esdf; do
     wait_for_command "non-empty ${topic}" 120 topic_field_positive "${topic}" width best_effort
   done
   wait_for_command "ROGMap input fresh" 30 topic_field_equals /rog_map/stale data false
@@ -549,6 +551,76 @@ verify_rog_map_planning_interface() {
   generation="$(read_positive_topic_field /rog_map_adapter/generation data 30)" || \
     fail "cannot read ROGMap adapter generation"
   wait_for_generation_advance "${generation}" 30
+}
+
+read_rog_numeric_projection_generation() {
+  local output_file="${1:-/tmp/ats_p2_rog_numeric_projection.out}"
+  timeout 15 ros2 service call /rog_map/get_ground_projection \
+    ats_rog_map_interfaces/srv/GetRogMapProjection \
+    "{min_height: 0.1, max_height: 0.8, resolution: 0.1}" >"${output_file}" 2>&1 || return 1
+  grep -q '^ready: true$' "${output_file}" || return 1
+  grep -q '^stale: false$' "${output_file}" || return 1
+  awk '$1 == "generation:" && $2 ~ /^[0-9]+$/ {print $2; exit}' "${output_file}"
+}
+
+read_rog_numeric_unknown_generation() {
+  local output_file="${1:-/tmp/ats_p2_rog_numeric_unknown.out}"
+  local generation
+  generation="$(read_rog_numeric_projection_generation "${output_file}")" || return 1
+  awk '
+    $1 == "data:" {in_occupancy_data = 1}
+    $1 == "generation:" {exit}
+    in_occupancy_data && /(^|[[:space:],\[])-1([[:space:],\]]|$)/ {found = 1}
+    END {exit found ? 0 : 1}
+  ' "${output_file}" || return 1
+  [[ "${generation}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${generation}"
+}
+
+wait_for_rog_numeric_unknown() {
+  local output_file="$1"
+  local generation
+  generation="$(read_rog_numeric_unknown_generation "${output_file}")" || return 1
+  ROG_NUMERIC_UNKNOWN_GENERATION="${generation}"
+}
+
+verify_rog_unknown_visualization() {
+  local header_file="$1"
+  local topic_info publisher_block
+  timeout 8 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
+    /rog_map/unk --field header >"${header_file}" 2>&1 || return 1
+  awk '
+    $1 == "frame_id:" && $2 == "odom" {frame = 1}
+    $1 == "sec:" && $2 ~ /^[0-9]+$/ && $2 > 0 {stamp = 1}
+    END {exit frame && stamp ? 0 : 1}
+  ' "${header_file}" || return 1
+  topic_info="$(timeout 6 ros2 topic info --no-daemon --verbose /rog_map/unk 2>/dev/null || true)"
+  publisher_block="$(sed -n '/^Publisher count:/,/^Subscription count:/p' <<<"${topic_info}")"
+  grep -q '^Publisher count: 1$' <<<"${topic_info}" &&
+    grep -q '^Node name: /ats_rog_map$' <<<"${publisher_block}" &&
+    awk '
+      $0 == "Node name: /ats_rog_map" {in_node = 1; next}
+      /^Node name:/ {in_node = 0}
+      in_node && $1 == "Reliability:" && $2 == "BEST_EFFORT" {found = 1}
+      END {exit found ? 0 : 1}
+    ' <<<"${publisher_block}"
+}
+
+record_unknown_timeline() {
+  local key="$1"
+  local value="${2:-$(date +%s%N)}"
+  printf '%s=%s\n' "${key}" "${value}" >>"${UNKNOWN_TIMELINE}"
+}
+
+assert_no_old_reference_revival() {
+  local output_file="$1"
+  : >"${output_file}"
+  timeout 4 ros2 topic echo --no-daemon --field poses /minco/reference_path \
+    nav_msgs/msg/Path >"${output_file}" 2>/dev/null || true
+  if grep -q 'position:' "${output_file}"; then
+    fail "old reference revived after map recovery without a new goal"
+  fi
+  echo "OK: no non-empty old /minco/reference_path revived after recovery"
 }
 
 assert_rviz_best_effort_observer() {
@@ -913,30 +985,122 @@ run_p2_fault_injection() {
       capture_zero_outputs input_stale_recovery
       ;;
     unknown)
-      # 前一任务成功后按契约保持急停，先进入独立的 ATS action tracking 任务；
-      # adapter 自身再发布 all-unknown blocked grid，避免临时 /map 写者与多源
-      # known-free 证据竞争，也保持 planning-grid 单一发布者不变。
+      # 真实 unknown 必须来自 ROGMap 的数值状态：先用持续发布的零回波
+      # 模拟 LiDAR 全遮挡，再由 ROGMap owner 清空既有观测。adapter 只在
+      # 融合前遮蔽辅助证据，绝不从 debug PointCloud2 或融合后栅格伪造结果。
+      local source_before source_after source_recovered publication_before publication_fault publication_after
+      local localization_epoch request_identity zero_window_started zero_window_finished
+      local unknown_header="/tmp/ats_p2_unknown_unk_header_${ROS_DOMAIN_ID}.out"
+      local numeric_unknown="/tmp/ats_p2_unknown_numeric_${ROS_DOMAIN_ID}.out"
+      UNKNOWN_TIMELINE="/tmp/ats_p2_unknown_timeline_${ROS_DOMAIN_ID}.log"
+      : >"${UNKNOWN_TIMELINE}"
       publish_relative_fault_goal unknown
-      baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
-        fail "cannot read generation before unknown fault"
-      timeout 8 ros2 param set /ats_rog_map_adapter test_force_all_unknown true \
-        >/tmp/ats_p3_fault_unknown_enable.out 2>&1 || \
-        fail "cannot enable adapter all-unknown fault"
+      wait_for_command "unknown action accepted" 8 \
+        bash -c "grep -q 'Goal accepted' '${FAULT_ACTION_OUTPUT}'"
+      request_identity="$(sed -n 's/^Goal accepted with ID: //p' "${FAULT_ACTION_OUTPUT}" | head -n 1)"
+      [[ "${request_identity}" =~ ^[[:xdigit:]]{32}$ ]] || \
+        fail "cannot capture unknown action request identity"
+      source_before="$(read_rog_numeric_projection_generation \
+        "/tmp/ats_p2_unknown_numeric_before_${ROS_DOMAIN_ID}.out")" || \
+        fail "cannot capture healthy ROGMap numeric source generation"
+      publication_before="$(read_topic_field /rog_map_adapter/status publication_sequence)"
+      [[ "${publication_before}" =~ ^[0-9]+$ ]] || \
+        fail "cannot capture adapter publication sequence before unknown fault"
+      localization_epoch="$(read_topic_field /rog_map_adapter/status localization_epoch)"
+      [[ "${localization_epoch}" =~ ^[0-9]+$ ]] || \
+        fail "cannot capture localization epoch before unknown fault"
+      record_unknown_timeline pre_fault_nonzero true
+      record_unknown_timeline source_generation_before "${source_before}"
+      record_unknown_timeline adapter_publication_sequence_before "${publication_before}"
+      record_unknown_timeline localization_epoch "${localization_epoch}"
+      record_unknown_timeline plan_request_identity "${request_identity}"
+      record_unknown_timeline fault_injected_ns
+      timeout 8 ros2 param set /ats_mujoco_sim lidar_occlusion_enabled true \
+        >/tmp/ats_p2_fault_unknown_occlusion_enable.out 2>&1 || \
+        fail "cannot enable MuJoCo LiDAR occlusion"
+      timeout 8 ros2 param set /ats_rog_map test_reset_to_unknown true \
+        >/tmp/ats_p2_fault_unknown_source_reset.out 2>&1 || \
+        fail "cannot reset ROGMap source to unknown"
+      wait_for_command "unknown fault keeps ROGMap input fresh" 12 \
+        topic_field_equals /rog_map/stale data false
+      wait_for_command "unknown fault obtains a ROGMap numeric unknown projection" 20 \
+        wait_for_rog_numeric_unknown "${numeric_unknown}"
+      source_after="${ROG_NUMERIC_UNKNOWN_GENERATION}"
+      awk -v current="${source_after}" -v baseline="${source_before}" \
+        'BEGIN {exit current > baseline ? 0 : 1}' || \
+        fail "ROGMap source generation did not advance into the unknown fixture"
+      record_unknown_timeline first_unknown_ns
+      record_unknown_timeline source_generation_unknown "${source_after}"
+      wait_for_command "unknown fault publishes non-empty ROGMap audit cloud" 12 \
+        topic_field_positive /rog_map/unk width best_effort
+      wait_for_command "unknown audit cloud frame stamp and QoS" 12 \
+        verify_rog_unknown_visualization "${unknown_header}"
+      timeout 8 ros2 param set /ats_rog_map_adapter test_mask_secondary_evidence true \
+        >/tmp/ats_p2_fault_unknown_mask_enable.out 2>&1 || \
+        fail "cannot enable adapter secondary-evidence mask"
       wait_for_command "unknown fault publishes all-unknown planning grid" 10 \
-        bash -c "timeout 5 python3 '${WORKSPACE_DIR}/scripts/query_occupancy_grid.py' --topic /rc_esdf/planning_grid --timeout 4 value --value -1 >/dev/null"
+        timeout 6 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
+        --topic /rc_esdf/planning_grid --timeout 4 all-value --value -1
       wait_for_command "unknown fault publishes adapter not-ready" 8 \
         topic_field_equals /rog_map_adapter/ready data false
+      publication_fault="$(read_topic_field /rog_map_adapter/status publication_sequence)"
+      [[ "${publication_fault}" =~ ^[0-9]+$ ]] || \
+        fail "cannot capture adapter publication sequence during unknown fault"
+      awk -v current="${publication_fault}" -v baseline="${publication_before}" \
+        'BEGIN {exit current > baseline ? 0 : 1}' || \
+        fail "adapter publication sequence did not advance into unknown fault"
+      record_unknown_timeline ready_false_ns
+      record_unknown_timeline adapter_publication_sequence_unknown "${publication_fault}"
       wait_for_fault_action_result unknown 4 12
       wait_for_command "unknown fault triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
-      capture_zero_outputs unknown
-      timeout 8 ros2 param set /ats_rog_map_adapter test_force_all_unknown false \
-        >/tmp/ats_p3_fault_unknown_disable.out 2>&1 || \
-        fail "cannot disable adapter all-unknown fault"
+      record_unknown_timeline emergency_stop_true_ns
+      zero_window_started="$(date +%s%N)"
+      sleep 0.5
+      capture_numeric_stream /cmd_vel_mpc "/tmp/ats_p2_fault_unknown_cmd.out" || \
+        fail "unknown fault did not publish /cmd_vel_mpc during stop"
+      assert_zero_stream "unknown /cmd_vel_mpc" "/tmp/ats_p2_fault_unknown_cmd.out"
+      record_unknown_timeline cmd_vel_zero_ns
+      capture_numeric_stream /motion_control "/tmp/ats_p2_fault_unknown_motion.out" || \
+        fail "unknown fault did not publish /motion_control during stop"
+      assert_zero_stream "unknown /motion_control" "/tmp/ats_p2_fault_unknown_motion.out"
+      record_unknown_timeline motion_control_zero_ns
+      zero_window_finished="$(date +%s%N)"
+      record_unknown_timeline zero_window_sec \
+        "$(awk -v start="${zero_window_started}" -v end="${zero_window_finished}" 'BEGIN {printf "%.3f", (end - start) / 1e9}')"
+      timeout 8 ros2 param set /ats_rog_map_adapter test_mask_secondary_evidence false \
+        >/tmp/ats_p2_fault_unknown_mask_disable.out 2>&1 || \
+        fail "cannot disable adapter secondary-evidence mask"
+      timeout 8 ros2 param set /ats_rog_map test_reset_to_unknown false \
+        >/tmp/ats_p2_fault_unknown_source_rearm.out 2>&1 || \
+        fail "cannot rearm ROGMap source reset fixture"
+      timeout 8 ros2 param set /ats_mujoco_sim lidar_occlusion_enabled false \
+        >/tmp/ats_p2_fault_unknown_occlusion_disable.out 2>&1 || \
+        fail "cannot restore MuJoCo LiDAR raycast"
       wait_for_command "unknown recovery restores adapter ready" 15 \
         topic_field_equals /rog_map_adapter/ready data true
-      wait_for_generation_advance "${baseline}" 15
+      source_recovered="$(read_rog_numeric_projection_generation \
+        "/tmp/ats_p2_unknown_numeric_recovery_${ROS_DOMAIN_ID}.out")" || \
+        fail "cannot capture recovered ROGMap numeric source generation"
+      awk -v current="${source_recovered}" -v baseline="${source_after}" \
+        'BEGIN {exit current > baseline ? 0 : 1}' || \
+        fail "ROGMap source generation did not advance after unknown recovery"
+      publication_after="$(read_topic_field /rog_map_adapter/status publication_sequence)"
+      [[ "${publication_after}" =~ ^[0-9]+$ ]] || \
+        fail "cannot capture recovered adapter publication sequence"
+      awk -v current="${publication_after}" -v baseline="${publication_before}" \
+        'BEGIN {exit current > baseline ? 0 : 1}' || \
+        fail "adapter publication sequence did not advance after unknown recovery"
+      record_unknown_timeline source_generation_recovered "${source_recovered}"
+      record_unknown_timeline adapter_publication_sequence_recovered "${publication_after}"
+      assert_no_old_reference_revival \
+        "/tmp/ats_p2_unknown_old_reference_${ROS_DOMAIN_ID}.out"
       capture_zero_outputs unknown_recovery
+      # Recovery must not replay the failed request.  A new independent goal
+      # is the only permitted way to re-establish planning and motion.
+      publish_relative_fault_goal unknown_recovery_new_goal
+      wait_for_fault_action_result unknown_recovery_new_goal 0 40
+      echo "RESULT: unknown timeline=${UNKNOWN_TIMELINE} source=${source_before}->${source_after}->${source_recovered} publication=${publication_before}->${publication_after} request=${request_identity}"
       ;;
     unreachable)
       # 该查询会在大规划栅格上保守展开，先在静止状态找目标；随后立即用

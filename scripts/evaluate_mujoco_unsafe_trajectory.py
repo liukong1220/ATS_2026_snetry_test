@@ -229,10 +229,7 @@ class UnsafeTrajectoryEvaluator(Node):
     def cancel_and_hold_stop(self, handle, old_sequence: int) -> None:
         cancel_future = handle.cancel_goal_async()
         self.wait_for(lambda: cancel_future.done(), 5.0, "fault action cancellation")
-        self.set_adapter_parameters(
-            test_inject_dynamic_obstacle=False,
-            test_force_all_unknown=False,
-        )
+        self.set_adapter_parameters(test_inject_dynamic_obstacle=False)
         old_execute_count = len(self.execution_commands)
         deadline = time.monotonic() + 0.8
         while time.monotonic() < deadline:
@@ -276,6 +273,11 @@ class UnsafeTrajectoryEvaluator(Node):
         self.wait_for(lambda: self.latest_telemetry is not None, 30.0, "/swerve/telemetry")
         if self.fault == "outside":
             return self.run_outside()
+        if self.fault == "unknown":
+            raise RuntimeError(
+                "P4 evaluator refuses the retired post-fusion unknown injection; "
+                "run the P2 source-unknown closure in test_mujoco_minco_mpc_chain.sh"
+            )
 
         before_commands = len(self.execution_commands)
         before_stops = len(self.stop_states)
@@ -294,10 +296,7 @@ class UnsafeTrajectoryEvaluator(Node):
             "initial non-zero control",
         )
 
-        if self.fault == "unknown":
-            self.set_adapter_parameters(test_force_all_unknown=True)
-        else:
-            self.inject_dynamic_obstacle(command, self.fault == "pure_rotation")
+        self.inject_dynamic_obstacle(command, self.fault == "pure_rotation")
 
         self.wait_for(
             lambda: True in self.stop_states[before_stops:],
@@ -309,17 +308,16 @@ class UnsafeTrajectoryEvaluator(Node):
             5.0,
             "MPC/bridge/wheel double zero",
         )
-        if self.fault != "unknown":
-            self.wait_for(
-                lambda: any(
-                    status.state == PlannerStatus.STATE_FAILED
-                    and status.failure_reason == PlannerStatus.FAILURE_RUNTIME_UNSAFE
-                    and status.goal_id == command.goal_id
-                    for status in self.planner_statuses[before_statuses:]
-                ),
-                5.0,
-                "runtime swept unsafe planner status",
-            )
+        self.wait_for(
+            lambda: any(
+                status.state == PlannerStatus.STATE_FAILED
+                and status.failure_reason == PlannerStatus.FAILURE_RUNTIME_UNSAFE
+                and status.goal_id == command.goal_id
+                for status in self.planner_statuses[before_statuses:]
+            ),
+            5.0,
+            "runtime swept unsafe planner status",
+        )
 
         self.cancel_and_hold_stop(handle, int(command.command_sequence))
         if self.latest_telemetry.contact_violation_count != 0:
