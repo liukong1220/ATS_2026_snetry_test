@@ -266,3 +266,30 @@ p50/p95/p99。当前节点没有 collision/footprint 或 map freshness 健康 pr
 但 QP status/iteration 与 callback deadline 未通过；分配/CPU profile、collision/footprint/map-health
 真实 producer、故障注入、P2 红框、HIL、实车和物理接触仍未验证。P2 仍未通过，P3 不得标记
 Nav2-free；不得引用本轮单测或该次 iLQR nominal 日志宣称 QP 50 Hz、6 ms、p99 实时性或生产准入。
+
+## 2026-08-09 domain 213 后续复核与 QP-2.7 阻塞
+
+本轮从三个仓库的 `origin/develop` 快进确认后，使用新的空闲 `ROS_DOMAIN_ID=213` 检查上游输入链。
+当前 Python 环境为 `mujoco==3.10.0`。headless LiDAR bridge 的实际消息证据为：
+
+- `/local_pointcloud`：`sensor_msgs/PointCloud2`，`frame_id=front_mid360`，`width=787`；
+- `/registered_scan`：`sensor_msgs/PointCloud2`，`frame_id=odom`，`width=104`；
+- ROGMap 日志 `cloud_age` 有限，source generation 从 `76` 增至 `90`；
+- adapter heartbeat `ready=1`，publication sequence 持续递增；脚本确认 `/rog_map/occ`、`/rog_map/inf_occ`
+  非空后在 `/rog_map/unk` gate 停止，因此 `/rog_map/esdf`、planning grid、action 和 ownership 尚未
+  取得该 profile 的运行期证据。
+
+该 profile 在 action、`/cmd_vel_mpc`/`/motion_control` ownership 和 telemetry dump 前停止于
+`/rog_map/unk` 非空 gate。有效参数为 `core.visualization.publish_unknown=false`，ROGMap/adapter 日志的
+unknown cell count 为 `0`。因此本轮没有 schema-3 raw profile，也没有 A/B/C 配对、QP status/残差分布、
+终点或 contact 证据；不能把 debug publisher 存在或上游 generation 递增写成 unknown 语义通过。
+
+后续 QP-2.7 的准入前置条件是由真实行为 owner 提供受版本控制的 unknown 场景或独立 fault fixture，并
+分别验证 raw unknown payload、frame/stamp/QoS、source generation、adapter heartbeat、all-unknown planning
+snapshot 与两级确定性零速度。不得伪造 unknown 点、修改 `cloud_age=inf`、关闭 stale/lease、使用静态假地图、
+或放宽规划/控制 fail-closed 逻辑。只有 nominal upstream gate、action、唯一 ownership 和完整 schema-3
+固定窗口全部满足后，才允许重新运行 A/B/C；窗口不完整或 digest 不一致时 analyzer 必须保持
+`not_comparable`/`withheld`。
+
+P2 仍未通过；P3 不得标记 Nav2-free；QP `solver_mode=qp`、iteration/deadline/residual 放宽、non-solved
+warm-start、HIL、实车、物理接触和可信 CPU/allocation profile 继续未验证。
