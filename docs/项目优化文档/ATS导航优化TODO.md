@@ -291,6 +291,45 @@
   iLQR、hard-check、status、iteration、residual、slack 和十类 root cause 分开记录。CPU/allocation、
   P2 red-box、HIL、实车和物理接触继续未验证。
 
+#### QP-2.7 本轮实现与停止记录（2026-08-09）
+
+- **已实现且聚焦构建/单测通过**：`P2_FAULT_CASE=unknown` 不再通过 adapter fusion 后覆写栅格或伪造
+  `/rog_map/unk`。MuJoCo `lidar_occlusion_enabled` 让 LiDAR worker 继续按原频率发布带有效
+  header/stamp 的零点云；ROGMap 的边沿触发 `test_reset_to_unknown` 清空概率、inflation、frontier 和
+  ESDF 表，并只递增 source generation；adapter 的 `test_mask_secondary_evidence` 只在确认 ROGMap
+  数值 projection 已含 `-1` 时把 static/terrain/slope 置为 unknown，再交给既有融合真值表。全
+  unknown 只会发布 `ready=false` 的 blocked unavailable snapshot，保留 audit occupancy、NaN ESDF/
+  gradient、source generation、publication sequence 与 localization epoch，绝不从调试 PointCloud2
+  反解析规划数据。
+- **已实现未运行**：unknown runner 先要求 action 已产生非零 `/cmd_vel_mpc`，再记录 fault、首次数值
+  unknown、`ready=false`、emergency stop、两级归零、source generation、adapter publication sequence、
+  localization epoch 和 request identity 到独立 timeline；恢复后只允许 generation/sequence 继续递增、
+  旧 `/minco/reference_path` 不复活、两级速度继续为零，并仅用新目标恢复运动。nominal 不再强制
+  `/rog_map/unk` 非空；unknown case 才审计该可视化 payload 的 `odom` frame、非零 stamp、唯一
+  `/ats_rog_map` publisher 和 `BEST_EFFORT` QoS。此路径尚无 runtime 证据，不能写为 P2/unknown 通过。
+- **已验证（最窄）**：`ats_rog_map`、`ats_rog_map_adapter`、`ats_mujoco_sim` 聚焦 CTest 分别为
+  `7/0/0`、`14/0/0`、`0/0/0`（tests/errors/failures）；ROGMap engine test 锁定 reset 后 generation
+  单调与 unknown 保留，adapter snapshot test 锁定 blocked all-unknown payload/NaN，融合既有测试锁定
+  occupied 不被 unknown 覆盖、任一 free 消解其他 unknown、全来源无证据才为 unknown、map 外 fail-closed。
+  指定八包 `--base-paths src` 单 worker build、脚本 `bash -n`、Python `py_compile`、三个 launch
+  `--show-args` 和三仓 `git diff --check` 均通过。MuJoCo Python pytest 因当前 install 不暴露
+  `carstatemsgs` 可 import module 而 collection 失败，不能记为通过。
+- **运行失败，first violation（Confidence: High）**：独立 headless nominal `ROS_DOMAIN_ID=181`
+  （`LOG_LEVEL=info`）和 `182`（`LOG_LEVEL=warn`）均使用 `PLANNING_GRID_OWNER=rog_map`、
+  `P2_FAULT_CASE=none`、`SOLVER_MODE=ilqr`。两轮都在 action accepted/tracking 前后验证了 LiDAR、
+  ROGMap numeric projection、adapter heartbeat/planning-grid owner 及两级 topic ownership；但 iLQR
+  full callback 持续超过 `20 Hz / 50 ms` 预算。domain `181` 最后样本为
+  `155.387/281.713/326.962 ms`，domain `182` 为 `94.671/268.061/392.287 ms`（p50/p95/p99），中途
+  出现 `MPC solve 482.97 ms`、odometry stale、ROGMap stale、projection 延迟和 planning-map heartbeat
+  lease timeout，action 最终 `ABORTED/result_code=4`。日志为
+  `/tmp/ats_minco_mpc_test_launch_181.log` 与 `/tmp/ats_minco_mpc_test_launch_182.log`。这证明
+  fail-closed 在健康链失效后生效，不证明 nominal action/schema-3 固定窗口通过。
+- **停止条件已执行**：nominal/action/ownership/schema-3 固定窗口未完整通过，故本轮未运行真实
+  unknown source fault、two-stage zero/recovery/old-reference runtime 验收，也未运行 paired Shadow
+  A/B/C；未启动 `solver_mode=qp`，未提高 OSQP iteration、未接受 `solved_inaccurate`/`max_iterations`，
+  未放宽 deadline、stale、lease、unknown、collision、footprint、localization 或 gimbal gate。P2、P3、
+  QP-2.7、QP-3、P4/HIL/实车均未通过；MuJoCo physical contact 亦未取得本轮可用证据。
+
 #### 下一阶段新对话提示词：QP-2.7 unknown 场景与 paired shadow
 
 ```text

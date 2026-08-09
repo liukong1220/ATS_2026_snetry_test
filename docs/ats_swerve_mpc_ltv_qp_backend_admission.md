@@ -1,6 +1,6 @@
 # ATS Swerve MPC LTV-QP Backend Admission
 
-更新时间：2026-08-07。本文是 `ats_swerve_mpc` LTV-QP 后端的准入记录，不是 QP 控制链、
+更新时间：2026-08-09。本文是 `ats_swerve_mpc` LTV-QP 后端的准入记录，不是 QP 控制链、
 `qp_shadow`、P2 或 P3 的验收声明。
 
 ## 当前结论
@@ -293,3 +293,35 @@ snapshot 与两级确定性零速度。不得伪造 unknown 点、修改 `cloud_
 
 P2 仍未通过；P3 不得标记 Nav2-free；QP `solver_mode=qp`、iteration/deadline/residual 放宽、non-solved
 warm-start、HIL、实车、物理接触和可信 CPU/allocation profile 继续未验证。
+
+## QP-2.7 unknown fixture 与 nominal realtime 阻塞（2026-08-09）
+
+**已实现且聚焦验证通过**：本轮把 P2 unknown fault 固定为真实 ROGMap 数值 source 路径。MuJoCo
+LiDAR worker 的 `lidar_occlusion_enabled` 在保持正常 message cadence、frame 和 stamp 的前提下发布空回波；
+ROGMap 的 test-only edge trigger 清空概率/inflation/frontier/ESDF 表并保持 source generation 单调；adapter
+只有在 numeric projection 已包含 unknown 时才在 fusion 前 mask static/terrain/slope。all-unknown 由既有
+fusion 真值表得出，blocked unavailable snapshot 保留 `-1` audit occupancy 与 NaN distance/gradient，且
+`ready=false`。这不修改 `ats_swerve_mpc` 的 tracker、last control、iLQR warm start、emergency-stop 或
+命令 publisher，也不读取 debug PointCloud2 作为地图。
+
+`ats_rog_map`（7）、`ats_rog_map_adapter`（14）聚焦 CTest 均为 0 failures；指定八包单 worker
+`colcon build --base-paths src`、脚本/Python syntax、三个相关 launch `--show-args` 和三仓 diff check
+通过。`test_freeze_motion_parameter.py` 的直接 pytest collection 被当前 install 的
+`ModuleNotFoundError: carstatemsgs` 阻断，故没有把它记为已通过。
+
+**运行失败，停止条件生效**：headless domain `181`（info）与 `182`（warn）都以
+`SOLVER_MODE=ilqr`、`P2_FAULT_CASE=none` 运行。ROGMap numeric projection、adapter heartbeat、唯一
+`/rc_esdf/planning_grid` owner、action accepted 和两级 command topic owner 已在运行期观察到；但 full
+callback 长期越过 `20 Hz/50 ms`。domain `181` 终样本 p50/p95/p99 为
+`155.387/281.713/326.962 ms`；domain `182` 为 `94.671/268.061/392.287 ms`，中途达到
+`482.97 ms` iLQR solve。随后 odometry/ROGMap stale、projection 延迟和 map heartbeat lease timeout 导致
+action `ABORTED/result_code=4`。这是 iLQR nominal realtime/health 输入链的 first violation；domain `182`
+显示的 `qp_status=backend_unavailable, iter=0` 仅表示 mode 为 ilqr，没有提供任何 OSQP solved、iteration、
+residual 或 QP timing 证据。
+
+因此本轮**未运行**真实 unknown 的 fault 前非零运动、unknown payload、all-unknown、two-stage zero、恢复后
+generation/sequence 递增、旧 reference 拒绝和新目标恢复；也**未运行** paired Shadow A/B/C。未启用
+`solver_mode=qp`，没有提高 OSQP iteration、接受 `solved_inaccurate`/`max_iterations`、放宽 deadline/residual，
+也没有削弱 map/unknown/collision/footprint/localization/gimbal/lease gate。QP-2.7 未通过；P2、P3、QP-3、
+P4/HIL/实车和 MuJoCo physical contact 继续未通过或未验证。运行日志：
+`/tmp/ats_minco_mpc_test_launch_181.log`、`/tmp/ats_minco_mpc_test_launch_182.log`。
