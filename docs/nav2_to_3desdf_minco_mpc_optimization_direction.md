@@ -316,6 +316,17 @@ infeasible、slack 超限或残差不合格必须沿现有 fail-stop 链输出�
   未到 command ownership/终点/contact 检查。故 P2 仍未通过，P3 仍不得标记 Nav2-free，HIL、实车和物理
   接触继续未验证。
 
+- **QP-2.6 后续 domain 213 输入链复核（2026-08-09）**：在当前 `mujoco==3.10.0` 运行时，headless
+  MuJoCo LiDAR 子进程正常启动并发布非空 `/local_pointcloud`（`frame_id=front_mid360`、宽度 `787`）
+  与 `/registered_scan`（`frame_id=odom`、宽度 `104`）。ROGMap 日志的 `cloud_age` 为有限值，source
+  generation `76 -> 90`，adapter `ready=1` 且 publication sequence 持续递增；脚本确认 occ/inf_occ
+  非空后在 unk gate 停止，因此 esdf、planning grid、action 和 ownership 尚未取得该 profile 的运行期证据。
+- 同一运行在 action、ownership 和 telemetry dump 前停止于 `/rog_map/unk` 非空 gate。有效 profile 的
+  `core.visualization.publish_unknown=false`，ROGMap/adapter unknown cell count 为 `0`。这是 nominal
+  debug/场景证据缺口，不是 LiDAR stale 或 QP solver 证据；没有 schema-3 raw profile，A/B/C 增量结论
+  继续 withheld。下一步只允许由 MuJoCo/ROGMap 实际 owner 提供真实、受控且独立的 unknown 场景，
+  保持 unknown/occupied/stale/lease fail-closed 语义；P2 仍未通过，P3 不得标记 Nav2-free。
+
 QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬软约束测试 -> `qp_shadow` 同输入
 诊断 -> 受控 `qp` 发布和有界 fallback -> 新 DDS domain 的 MuJoCo 故障验收 -> 抬轮 HIL/实车。
 不能将“构造矩阵”“QP 返回 solved”或“topic 存在”替代硬约束复核、两级零速度、红框、物理接触
