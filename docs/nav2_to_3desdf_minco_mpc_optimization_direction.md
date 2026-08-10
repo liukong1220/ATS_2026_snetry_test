@@ -450,7 +450,7 @@ QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬
 ## 2026-08-10 干净环境复跑与 unknown 证据修正
 
 用户授权后，精确终止遗留 ATS launch `PGID=42520` 及其子进程；后续环境审计未发现该导航树残留。本轮把
-实时 profile 的默认 `START_Z` 从错误的 `0.12 m` 对齐到主回归/MuJoCo launch 的 `0.42 m`，没有修改
+实时 profile 的默认 `START_Z` 从错误的 `-0.12 m` 对齐到主回归/MuJoCo launch 的 `0.42 m`，没有修改
 timeout、lease、unknown/occupied、footprint、MPC 或 QP 门禁。
 
 - **已验证，map-only A**：独立 domain `226`/`227` 各通过一次，采样仅归属本轮 launch PGID。adapter
