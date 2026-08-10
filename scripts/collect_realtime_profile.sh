@@ -20,7 +20,7 @@ SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-1.0}"
 # 固定条件：三个实验共用同一地图、起点与目标，便于逐项比较。
 export START_X="${START_X:--10.0}"
 export START_Y="${START_Y:-1.47}"
-export START_Z="${START_Z:-0.12}"
+export START_Z="${START_Z:-0.42}"
 export START_YAW="${START_YAW:-0.0}"
 export LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-2}"
 export USE_RVIZ=false

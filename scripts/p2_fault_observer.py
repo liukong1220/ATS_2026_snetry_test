@@ -84,6 +84,16 @@ def stream_qos(depth: int = 200) -> QoSProfile:
     )
 
 
+def reference_path_qos() -> QoSProfile:
+    """Match Goal Manager's reliable, volatile committed-reference publisher."""
+    return QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=1,
+        reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.VOLATILE,
+    )
+
+
 def stamp_ns(stamp) -> int:
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
@@ -213,7 +223,10 @@ class FaultObserver(Node):
             Twist, topics["cmd_vel"], self._on_cmd_vel, stream_qos()
         )
         self.create_subscription(
-            Path, topics["reference_path"], self._on_reference_path, status_qos()
+            Path,
+            topics["reference_path"],
+            self._on_reference_path,
+            reference_path_qos(),
         )
         self.subscription_count = 5
         if MotionCtrl is not None:
@@ -466,6 +479,10 @@ def gate_verdict(report: dict) -> dict:
     )
 
     recovery = report.get("recovery")
+    checks["recovery_observed"] = bool(recovery and recovery.get("observed"))
+    checks["pre_fault_non_empty_reference_observed"] = bool(
+        report.get("pre_fault_non_empty_reference_observed")
+    )
     if recovery and recovery.get("observed"):
         checks["recovery_publication_advanced_past_fault"] = bool(
             recovery["publication_advanced_past_fault"]
@@ -486,14 +503,23 @@ def gate_verdict(report: dict) -> dict:
                 "source_generation_matches_status_rog_generation"
             )
         )
-        checks["old_reference_did_not_revive"] = not recovery[
-            "non_empty_reference_after_recovery_without_new_goal"
-        ]
+        checks["old_reference_did_not_revive"] = bool(
+            report.get("pre_fault_non_empty_reference_observed")
+            and not recovery["non_empty_reference_after_recovery_without_new_goal"]
+        )
         checks["both_stages_stay_zero_without_a_new_goal"] = bool(
             recovery["no_new_goal_common_zero_window"][
                 "both_stages_zero_in_common_window"
             ]
         )
+    else:
+        checks["recovery_publication_advanced_past_fault"] = False
+        checks["recovered_status_paired_with_snapshot"] = False
+        checks["recovered_status_ready_matches_snapshot"] = False
+        checks["recovered_status_localization_epoch_consistent"] = False
+        checks["recovered_snapshot_source_generation_matches_status"] = False
+        checks["old_reference_did_not_revive"] = False
+        checks["both_stages_stay_zero_without_a_new_goal"] = False
     return {"checks": checks, "passed": all(checks.values())}
 
 
@@ -594,6 +620,10 @@ def build_report(args: argparse.Namespace, observation: Observation,
             for entry in observation.reference_path
             if entry[0] >= fault_monotonic
         ],
+        "pre_fault_non_empty_reference_observed": any(
+            entry[0] < fault_monotonic and entry[1] > 0
+            for entry in observation.reference_path
+        ),
         "motion_control_observed": MotionCtrl is not None,
     }
     return report

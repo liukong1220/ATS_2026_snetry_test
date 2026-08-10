@@ -617,6 +617,8 @@ wait_for_rog_numeric_unknown() {
   ROG_NUMERIC_UNKNOWN_GENERATION="${generation}"
 }
 
+# [Dead Code Suggestion] 由第二个 ros2cli subscriber 执行的旧 audit 验证存在图发现竞争；
+# 保留到 P2 unknown 闭环稳定后再单独删除，当前 runner 改用预先建立的持久 subscriber。
 verify_rog_unknown_visualization() {
   local header_file="$1"
   local topic_info publisher_block
@@ -637,6 +639,18 @@ verify_rog_unknown_visualization() {
       in_node && $1 == "Reliability:" && $2 == "BEST_EFFORT" {found = 1}
       END {exit found ? 0 : 1}
     ' <<<"${publisher_block}"
+}
+
+start_rog_unknown_audit_capture() {
+  local report_file="$1"
+  local log_file="$2"
+  local output_variable="$3"
+  timeout 35 python3 "${WORKSPACE_DIR}/scripts/capture_rog_unknown_audit.py" \
+    --topic /rog_map/unk --expected-frame odom --timeout-sec 30 --output "${report_file}" \
+    >"${log_file}" 2>&1 &
+  local capture_pid=$!
+  CAPTURE_PIDS+=("${capture_pid}")
+  printf -v "${output_variable}" '%s' "${capture_pid}"
 }
 
 record_unknown_timeline() {
@@ -901,6 +915,15 @@ stream_has_nonzero_command() {
   ' "${output_file}"
 }
 
+stream_has_boolean_value() {
+  local output_file="$1"
+  local expected_value="$2"
+  awk -v expected="${expected_value}" '
+    $1 == "data:" && $2 == expected {found = 1}
+    END {exit found ? 0 : 1}
+  ' "${output_file}"
+}
+
 capture_zero_outputs() {
   local label="$1"
   local cmd_file="/tmp/ats_p2_fault_${label}_cmd.out"
@@ -953,31 +976,50 @@ wait_for_fault_action_result() {
     bash -c "grep -q 'result_code: ${result_code}' '${FAULT_ACTION_OUTPUT}' && grep -q 'Goal finished with status:' '${FAULT_ACTION_OUTPUT}'"
 }
 
-publish_relative_fault_goal() {
+publish_fault_goal_with_motion_gate() {
   local label="$1"
-  local pose_file="/tmp/ats_p2_fault_${label}_pose.out"
+  local frame="$2"
+  local goal_x="$3"
+  local goal_y="$4"
+  local timeout_sec="${5:-30}"
   local command_file="/tmp/ats_p2_fault_${label}_motion_start.out"
-  local goal_output="/tmp/ats_p2_fault_${label}_goal.out"
-  local current_x current_y p3_goal_x monitor_pid
-  capture_pose "${pose_file}" || fail "cannot capture pose for ${label}"
-  current_x="$(pose_axis "${pose_file}" x)"
-  current_y="$(pose_axis "${pose_file}" y)"
+  local emergency_file="/tmp/ats_p2_fault_${label}_emergency_start.out"
+  local monitor_pid emergency_monitor_pid
   : >"${command_file}"
   # 重定向到文件时 ros2 Python CLI 会块缓冲；强制无缓冲才能在 tracking 期间
   # 立即观察到非零控制量，而不是等采样 timeout 后才注入故障。
   timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon /cmd_vel_mpc >"${command_file}" 2>/dev/null &
   monitor_pid=$!
   CAPTURE_PIDS+=("${monitor_pid}")
+  : >"${emergency_file}"
+  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon /planner/emergency_stop \
+    >"${emergency_file}" 2>/dev/null &
+  emergency_monitor_pid=$!
+  CAPTURE_PIDS+=("${emergency_monitor_pid}")
   sleep 2
+  send_fault_goal "${label}" "${frame}" "${goal_x}" "${goal_y}" "${timeout_sec}"
+  wait_for_command "${label} produces MPC motion" 12 \
+    stream_has_nonzero_command "${command_file}"
+  # The capture starts before the action is sent, so a transient-local one-shot subscriber cannot
+  # miss the release between planner updates.  Non-zero command evidence above binds the release
+  # to this current action rather than a prior idle state.
+  wait_for_command "${label} observes emergency-stop release during motion" 12 \
+    stream_has_boolean_value "${emergency_file}" false
+  stop_capture_process "${monitor_pid}"
+  stop_capture_process "${emergency_monitor_pid}"
+}
+
+publish_relative_fault_goal() {
+  local label="$1"
+  local pose_file="/tmp/ats_p2_fault_${label}_pose.out"
+  local current_x current_y p3_goal_x
+  capture_pose "${pose_file}" || fail "cannot capture pose for ${label}"
+  current_x="$(pose_axis "${pose_file}" x)"
+  current_y="$(pose_axis "${pose_file}" y)"
   # nominal single 由西向东完成；故障前置段改为反向 1.80 m，复用已经通过
   # footprint gate 的自由走廊，并给 DDS 采样与故障注入保留稳定 tracking 窗口。
   p3_goal_x="$(awk -v x="${current_x}" 'BEGIN {printf "%.6f", x - 1.80}')"
-  send_fault_goal "${label}" odom "${p3_goal_x}" "${current_y}" 30
-  wait_for_command "${label} clears emergency stop" 12 \
-    topic_field_equals /planner/emergency_stop data false
-  wait_for_command "${label} produces MPC motion" 12 \
-    stream_has_nonzero_command "${command_file}"
-  stop_capture_process "${monitor_pid}"
+  publish_fault_goal_with_motion_gate "${label}" odom "${p3_goal_x}" "${current_y}" 30
 }
 
 resume_process() {
@@ -1100,15 +1142,21 @@ run_p2_fault_injection() {
       # 模拟 LiDAR 全遮挡，再由 ROGMap owner 清空既有观测。adapter 只在
       # 融合前遮蔽辅助证据，绝不从 debug PointCloud2 或融合后栅格伪造结果。
       local source_before source_after source_recovered request_identity
-      local unknown_header="/tmp/ats_p2_unknown_unk_header_${ROS_DOMAIN_ID}.out"
       local numeric_unknown="/tmp/ats_p2_unknown_numeric_${ROS_DOMAIN_ID}.out"
       local observer_report="/tmp/ats_p2_unknown_observation_${ROS_DOMAIN_ID}.json"
       local observer_log="/tmp/ats_p2_unknown_observer_${ROS_DOMAIN_ID}.log"
       local fault_trigger="/tmp/ats_p2_unknown_fault_trigger_${ROS_DOMAIN_ID}"
       local recovery_trigger="/tmp/ats_p2_unknown_recovery_trigger_${ROS_DOMAIN_ID}"
       local downstream_grid="/tmp/ats_p2_unknown_downstream_grid_${ROS_DOMAIN_ID}.out"
+      local audit_report="/tmp/ats_p2_unknown_audit_${ROS_DOMAIN_ID}.json"
+      local audit_log="/tmp/ats_p2_unknown_audit_${ROS_DOMAIN_ID}.log"
+      local audit_capture_pid
       UNKNOWN_TIMELINE="/tmp/ats_p2_unknown_timeline_${ROS_DOMAIN_ID}.log"
       : >"${UNKNOWN_TIMELINE}"
+      # The committed reference is volatile, so observe its non-empty baseline before the
+      # pre-fault action.  A recovery cannot pass the no-revival gate without that baseline.
+      start_fault_observer "${observer_report}" "${fault_trigger}" \
+        "${recovery_trigger}" "${observer_log}"
       publish_relative_fault_goal unknown
       wait_for_command "unknown action accepted" 8 \
         bash -c "grep -q 'Goal accepted' '${FAULT_ACTION_OUTPUT}'"
@@ -1123,8 +1171,7 @@ run_p2_fault_injection() {
       record_unknown_timeline pre_fault_nonzero true
       record_unknown_timeline source_generation_before "${source_before}"
       record_unknown_timeline plan_request_identity "${request_identity}"
-      start_fault_observer "${observer_report}" "${fault_trigger}" \
-        "${recovery_trigger}" "${observer_log}"
+      start_rog_unknown_audit_capture "${audit_report}" "${audit_log}" audit_capture_pid
       record_unknown_timeline observer_ready_ns
       record_unknown_timeline fault_injected_ns
       # 触发文件先于参数写入落地：观测器的 fault 起点因此不晚于真实注入时刻，
@@ -1148,10 +1195,10 @@ run_p2_fault_injection() {
         fail "ROGMap source generation did not advance into the unknown fixture"
       record_unknown_timeline first_unknown_ns
       record_unknown_timeline source_generation_unknown "${source_after}"
-      wait_for_command "unknown fault publishes non-empty ROGMap audit cloud" 12 \
-        topic_field_positive /rog_map/unk width best_effort
-      wait_for_command "unknown audit cloud frame stamp and QoS" 12 \
-        verify_rog_unknown_visualization "${unknown_header}"
+      wait_for_command "unknown fault captures a non-empty ROGMap audit cloud" 12 \
+        test -s "${audit_report}"
+      wait "${audit_capture_pid}" || \
+        fail "unknown audit capture did not validate: $(<"${audit_log}")"
       timeout 8 ros2 param set /ats_rog_map_adapter test_mask_secondary_evidence true \
         >/tmp/ats_p2_fault_unknown_mask_enable.out 2>&1 || \
         fail "cannot enable adapter secondary-evidence mask"
@@ -1209,7 +1256,11 @@ run_p2_fault_injection() {
       await_fault_observer_gate "${observer_report}" "${observer_log}"
       # Recovery must not replay the failed request.  A new independent goal
       # is the only permitted way to re-establish planning and motion.
-      publish_relative_fault_goal unknown_recovery_new_goal
+      # Reuse the map-frame nominal target proven by this same fresh launch.  The earlier relative
+      # westbound fault-precondition target is intentionally not reused: after a fault it may be
+      # outside the footprint-safe corridor and should remain rejected by the real safety gate.
+      publish_fault_goal_with_motion_gate \
+        unknown_recovery_new_goal map "${GOAL_X}" "${GOAL_Y}" 40
       wait_for_fault_action_result unknown_recovery_new_goal 0 40
       echo "RESULT: unknown timeline=${UNKNOWN_TIMELINE} observation=${observer_report} source=${source_before}->${source_after}->${source_recovered} request=${request_identity}"
       ;;
