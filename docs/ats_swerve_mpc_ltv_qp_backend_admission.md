@@ -377,3 +377,22 @@ unknown，并要求 all-unknown 配对、确定性两级零速和恢复后旧 re
 发散、stale/lease/deadline、action failure 或环境污染都终止当前 run。只有这些运行期证据完整且 identity
 digest 可配对时，才允许重新运行 `qp_shadow` A/B/C；`solver_mode=qp` 继续拒绝，禁止提高 iteration、放宽
 time limit/residual 或接受 non-solved warm-start。
+
+### QP-2.7 干净环境前置状态（2026-08-10）
+
+QP shadow 仍被 P2 map/control 安全链阻断，本轮没有变更 OSQP、`LtvQpSolver`、`solver_mode`、iLQR command
+owner、QP iteration/time limit/residual 或 hard check。用户授权精确清理遗留 `PGID=42520` 后，两个独立 map-only
+A profile 已通过：domain `226`/`227` 的 ROGMap projection total p50/p95/p99 为
+`13.0/23.5/35.8 ms` 与 `14.1/24.8/43.1 ms`。这些只证明干净 profile 下的地图采样，不能作为 QP 或控制
+实时性准入。
+
+同环境的 domain `228` iLQR nominal action 成功，终点误差 `0.058256 m`，而 domain `225` 已观察到真实
+all-unknown 数值 snapshot、fail-closed status/sequence、急停和两级零速度。该 unknown observer 当时以
+`TRANSIENT_LOCAL` 订阅 Goal Manager `RELIABLE + VOLATILE` 的 `/minco/reference_path`，产生 durability
+不兼容警告；所以“旧 reference 不复活”没有有效 payload 观察，不能作为 QP 或 P2 前置通过证据。observer
+现改为兼容 QoS，并要求 fault 前 non-empty reference baseline 和真实 recovery，尚待新的 isolated runtime
+replay。
+
+更新 runner 的 domain `224` 在 fault 前置运动即 fail-closed：`map_fresh=0`、`tf=0`、`pose=(nan,nan)`。在
+定位该上游 state/TF/snapshot 时序问题并完成完整 unknown recovery 前，禁止运行或解读 paired `qp_shadow`
+A/B/C，`solver_mode=qp` 继续拒绝，P2/P3/Nav2-free/HIL/实车/物理 contact 均不通过或未验证。

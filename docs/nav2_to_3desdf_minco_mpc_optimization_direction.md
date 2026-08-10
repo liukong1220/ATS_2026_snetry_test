@@ -446,3 +446,30 @@ QP 迁移实施顺序固定为：后端准入和结果状态契约 -> 低速/硬
 - 此次是文档同步，不是新的构建、MuJoCo 或实车验收；README 中的“已验证”均指向本页先前
   记录的运行证据。P4 的原子链、连续 swept footprint、HIL 与实车门禁状态不因 README 更新
   而改变。
+
+## 2026-08-10 干净环境复跑与 unknown 证据修正
+
+用户授权后，精确终止遗留 ATS launch `PGID=42520` 及其子进程；后续环境审计未发现该导航树残留。本轮把
+实时 profile 的默认 `START_Z` 从错误的 `0.12 m` 对齐到主回归/MuJoCo launch 的 `0.42 m`，没有修改
+timeout、lease、unknown/occupied、footprint、MPC 或 QP 门禁。
+
+- **已验证，map-only A**：独立 domain `226`/`227` 各通过一次，采样仅归属本轮 launch PGID。adapter
+  generation 分别 `74 -> 164`、`82 -> 178`，两级速度全程零；projection total 的
+  p50/p95/p99 分别为 `13.0/23.5/35.8 ms` 与 `14.1/24.8/43.1 ms`。A 没有 tracking/MPC cycle，不能
+  推导 iLQR、QP 或控制实时性。
+- **已验证，iLQR nominal**：domain `228` 使用 headless、`planning_grid_owner=rog_map`、
+  `solver_mode=ilqr`，action 成功，终点 `(-9.058255, 1.470335)` 到目标误差 `0.058256 m`。adapter
+  generation `908 -> 1697`；MINCO raw/reference `20/357`、离散 `footprint_collisions=0`；MPC
+  reference/predicted 各 `4526`，两级速度曾非零跟踪并在结束归零。`contact_violation_count=0` 只是一项
+  MuJoCo telemetry，物理 contact/HIL/实车仍未验证。
+- **部分验证，真实 unknown**：domain `225` 实际取得 strict all-unknown numeric projection、fault-only
+  audit cloud、blocked status/snapshot 同 publication sequence、`ready=false -> emergency_stop=true`、共同
+  两级零速度窗口和 recovery sequence 推进。此前 observer 对 `/minco/reference_path` 的 durability 与
+  Goal Manager publisher 不兼容，日志明确报告 QoS warning；因此旧 reference 不复活不能被视为通过证据。
+  observer 已改为 `RELIABLE + VOLATILE`，且后续 gate 要求 fault 前收到非空 reference baseline 和真实
+  recovery；尚未在运行时重验。
+- **停止条件仍生效**：更新 runner 的 domain `224` 在 fault 前置动作中出现
+  `Progress watchdog unsafe gate: map_fresh=0, tf=0, pose=(nan,nan)`，12 s 未出现当前 action 的非零 MPC
+  command。不得通过延长等待、放宽 map/TF/unknown/lease/footprint 或复用旧 reference 绕过。完整 unknown
+  runner、P2 red-box、其它故障、paired `qp_shadow` A/B/C、P2/P3/Nav2-free、HIL、实车与物理接触均未通过或
+  未运行；`solver_mode=qp` 继续拒绝。
