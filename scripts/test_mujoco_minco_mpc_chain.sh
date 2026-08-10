@@ -59,6 +59,32 @@ QP_TELEMETRY_OUTPUT="${QP_TELEMETRY_OUTPUT:-}"
 QP_TELEMETRY_MANIFEST="${QP_TELEMETRY_MANIFEST:-}"
 QP_TELEMETRY_WINDOW_CYCLES="${QP_TELEMETRY_WINDOW_CYCLES:-0}"
 QP_TELEMETRY_RUN_START_EPOCH_NS="$(date +%s%N)"
+# 实时性采集实验 A：只让 ROGMap/LiDAR 地图链跑起来，不下发导航目标，因此
+# 不进入 tracking。这不是放宽任何门禁——所有静态契约、所有权、投影与 stale
+# 检查照旧执行；只有“目标动作 + 跟踪期非零速度”这一段被显式跳过，因为没有
+# 目标时 MPC 保持零速度是正确行为，对它断言非零就是错的。
+ATS_PROFILE_SKIP_ACTION="${ATS_PROFILE_SKIP_ACTION:-0}"
+case "${ATS_PROFILE_SKIP_ACTION}" in
+  0|1) ;;
+  *)
+    echo "ATS_PROFILE_SKIP_ACTION must be 0 or 1."
+    exit 2
+    ;;
+esac
+# 观测窗口（s）：跳过动作后仍需让地图链持续运行足够长时间才能采到样本。
+ATS_PROFILE_MAP_OBSERVE_SEC="${ATS_PROFILE_MAP_OBSERVE_SEC:-60}"
+if ! [[ "${ATS_PROFILE_MAP_OBSERVE_SEC}" =~ ^[0-9]+$ ]]; then
+  echo "ATS_PROFILE_MAP_OBSERVE_SEC must be a non-negative integer."
+  exit 2
+fi
+if [[ "${ATS_PROFILE_SKIP_ACTION}" == "1" && "${P2_FAULT_CASE}" != "none" ]]; then
+  echo "ATS_PROFILE_SKIP_ACTION=1 cannot be combined with P2_FAULT_CASE=${P2_FAULT_CASE}."
+  exit 2
+fi
+if [[ "${ATS_PROFILE_SKIP_ACTION}" == "1" && "${P3_FAULT_CASE}" != "none" ]]; then
+  echo "ATS_PROFILE_SKIP_ACTION=1 cannot be combined with P3_FAULT_CASE=${P3_FAULT_CASE}."
+  exit 2
+fi
 case "${SOLVER_MODE}" in
   ilqr|qp_shadow) ;;
   *)
@@ -553,34 +579,41 @@ verify_rog_map_planning_interface() {
   wait_for_generation_advance "${generation}" 30
 }
 
-read_rog_numeric_projection_generation() {
-  local output_file="${1:-/tmp/ats_p2_rog_numeric_projection.out}"
-  timeout 15 ros2 service call /rog_map/get_ground_projection \
-    ats_rog_map_interfaces/srv/GetRogMapProjection \
-    "{min_height: 0.1, max_height: 0.8, resolution: 0.1}" >"${output_file}" 2>&1 || return 1
-  grep -q '^ready: true$' "${output_file}" || return 1
-  grep -q '^stale: false$' "${output_file}" || return 1
-  awk '$1 == "generation:" && $2 ~ /^[0-9]+$/ {print $2; exit}' "${output_file}"
+# 数值投影一律经由结构化客户端读取，绝不再用文本 awk 扫描 `-1`：一个
+# 局部未知的栅格里也会出现 `-1`，把它当成 all-unknown 就是假阳性。
+query_rog_projection() {
+  local output_file="$1"
+  shift
+  timeout 20 python3 "${WORKSPACE_DIR}/scripts/query_rog_projection.py" \
+    --service /rog_map/get_ground_projection \
+    --min-height 0.1 --max-height 0.8 --resolution 0.1 --timeout 12 \
+    "$@" >"${output_file}" 2>&1
 }
 
+read_rog_numeric_projection_generation() {
+  local output_file="${1:-/tmp/ats_p2_rog_numeric_projection.out}"
+  query_rog_projection "${output_file}" --mode generation || return 1
+  awk '{for (i = 1; i <= NF; i++) if ($i ~ /^generation=[0-9]+$/) {sub(/^generation=/, "", $i); print $i; exit}}' \
+    "${output_file}" | grep -E '^[0-9]+$'
+}
+
+# 严格 all-unknown：结构合法（ready/stale/frame/stamp/resolution/尺寸/数组
+# 长度一致）、每个 cell 恰为 -1、数值数组全 NaN，且 generation 必须超过故障
+# 前基线。混合 free/occupied 会被显式拒绝并给出计数。
 read_rog_numeric_unknown_generation() {
   local output_file="${1:-/tmp/ats_p2_rog_numeric_unknown.out}"
-  local generation
-  generation="$(read_rog_numeric_projection_generation "${output_file}")" || return 1
-  awk '
-    $1 == "data:" {in_occupancy_data = 1}
-    $1 == "generation:" {exit}
-    in_occupancy_data && /(^|[[:space:],\[])-1([[:space:],\]]|$)/ {found = 1}
-    END {exit found ? 0 : 1}
-  ' "${output_file}" || return 1
-  [[ "${generation}" =~ ^[0-9]+$ ]] || return 1
-  printf '%s\n' "${generation}"
+  local baseline="${2:--1}"
+  query_rog_projection "${output_file}" --mode all-unknown \
+    --baseline-generation "${baseline}" || return 1
+  awk '{for (i = 1; i <= NF; i++) if ($i ~ /^generation=[0-9]+$/) {sub(/^generation=/, "", $i); print $i; exit}}' \
+    "${output_file}" | grep -E '^[0-9]+$'
 }
 
 wait_for_rog_numeric_unknown() {
   local output_file="$1"
+  local baseline="${2:--1}"
   local generation
-  generation="$(read_rog_numeric_unknown_generation "${output_file}")" || return 1
+  generation="$(read_rog_numeric_unknown_generation "${output_file}" "${baseline}")" || return 1
   ROG_NUMERIC_UNKNOWN_GENERATION="${generation}"
 }
 
@@ -610,6 +643,84 @@ record_unknown_timeline() {
   local key="$1"
   local value="${2:-$(date +%s%N)}"
   printf '%s=%s\n' "${key}" "${value}" >>"${UNKNOWN_TIMELINE}"
+}
+
+# 观测器必须在故障注入之前就完成订阅，否则 fault->first-unknown 的第一条消息
+# 会丢失，延迟无法测量。它用 monotonic 时钟计时，ROS stamp 只用于数据同一性。
+start_fault_observer() {
+  local report="$1"
+  local trigger="$2"
+  local recovery_trigger="$3"
+  local log="$4"
+  local ready_file="${log%.log}.ready"
+  local deadline
+  rm -f "${trigger}" "${recovery_trigger}" "${ready_file}" "${report}"
+  python3 "${WORKSPACE_DIR}/scripts/p2_fault_observer.py" \
+    --output "${report}" \
+    --fault-trigger-file "${trigger}" \
+    --recovery-trigger-file "${recovery_trigger}" \
+    --ready-file "${ready_file}" \
+    --settle-sec 25 \
+    --zero-window-sec 3 \
+    --require-gate >"${log}" 2>&1 &
+  FAULT_OBSERVER_PID="$!"
+  CAPTURE_PIDS+=("${FAULT_OBSERVER_PID}")
+  deadline=$((SECONDS + 30))
+  while (( SECONDS < deadline )); do
+    if [[ -f "${ready_file}" ]] && grep -q 'OBSERVER_READY' "${log}" 2>/dev/null; then
+      echo "OK: fault observer subscribed before fault injection ($(tr -d '\n' <"${ready_file}") topics)"
+      return 0
+    fi
+    if ! kill -0 "${FAULT_OBSERVER_PID}" 2>/dev/null; then
+      cat "${log}" || true
+      fail "fault observer exited before it finished subscribing"
+    fi
+    sleep 0.5
+  done
+  cat "${log}" || true
+  fail "fault observer did not report OBSERVER_READY"
+}
+
+# settle(25s) + 共同零速窗口(3s) 之后才允许改变系统状态。
+wait_fault_observer_window() {
+  local epoch="$1"
+  local span="$2"
+  local deadline=$((epoch + span))
+  while (( SECONDS < deadline )); do
+    if ! kill -0 "${FAULT_OBSERVER_PID}" 2>/dev/null; then
+      break
+    fi
+    sleep 0.5
+  done
+  echo "OK: fault-phase common zero window closed after ${span}s"
+}
+
+# 门禁判定完全由观测器的 JSON verdict 决定，不再解析文本。
+await_fault_observer_gate() {
+  local report="$1"
+  local log="$2"
+  local status=0
+  wait "${FAULT_OBSERVER_PID}" || status="$?"
+  cat "${log}" || true
+  if (( status != 0 )); then
+    fail "fault observer gate failed (exit ${status}); report=${report}"
+  fi
+  [[ -s "${report}" ]] || fail "fault observer produced no report at ${report}"
+  python3 - "${report}" <<'PY' || fail "fault observer report does not pass the unknown gate"
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+gate = report["gate"]
+for name, passed in sorted(gate["checks"].items()):
+    print(f"  gate {name}={'pass' if passed else 'FAIL'}")
+latency = report["latency_sec"]
+for name in sorted(latency):
+    print(f"  latency {name}={latency[name]}")
+sys.exit(0 if gate["passed"] else 1)
+PY
+  echo "OK: unknown fault observer gate passed; report=${report}"
 }
 
 assert_no_old_reference_revival() {
@@ -988,10 +1099,14 @@ run_p2_fault_injection() {
       # 真实 unknown 必须来自 ROGMap 的数值状态：先用持续发布的零回波
       # 模拟 LiDAR 全遮挡，再由 ROGMap owner 清空既有观测。adapter 只在
       # 融合前遮蔽辅助证据，绝不从 debug PointCloud2 或融合后栅格伪造结果。
-      local source_before source_after source_recovered publication_before publication_fault publication_after
-      local localization_epoch request_identity zero_window_started zero_window_finished
+      local source_before source_after source_recovered request_identity
       local unknown_header="/tmp/ats_p2_unknown_unk_header_${ROS_DOMAIN_ID}.out"
       local numeric_unknown="/tmp/ats_p2_unknown_numeric_${ROS_DOMAIN_ID}.out"
+      local observer_report="/tmp/ats_p2_unknown_observation_${ROS_DOMAIN_ID}.json"
+      local observer_log="/tmp/ats_p2_unknown_observer_${ROS_DOMAIN_ID}.log"
+      local fault_trigger="/tmp/ats_p2_unknown_fault_trigger_${ROS_DOMAIN_ID}"
+      local recovery_trigger="/tmp/ats_p2_unknown_recovery_trigger_${ROS_DOMAIN_ID}"
+      local downstream_grid="/tmp/ats_p2_unknown_downstream_grid_${ROS_DOMAIN_ID}.out"
       UNKNOWN_TIMELINE="/tmp/ats_p2_unknown_timeline_${ROS_DOMAIN_ID}.log"
       : >"${UNKNOWN_TIMELINE}"
       publish_relative_fault_goal unknown
@@ -1003,18 +1118,19 @@ run_p2_fault_injection() {
       source_before="$(read_rog_numeric_projection_generation \
         "/tmp/ats_p2_unknown_numeric_before_${ROS_DOMAIN_ID}.out")" || \
         fail "cannot capture healthy ROGMap numeric source generation"
-      publication_before="$(read_topic_field /rog_map_adapter/status publication_sequence)"
-      [[ "${publication_before}" =~ ^[0-9]+$ ]] || \
-        fail "cannot capture adapter publication sequence before unknown fault"
-      localization_epoch="$(read_topic_field /rog_map_adapter/status localization_epoch)"
-      [[ "${localization_epoch}" =~ ^[0-9]+$ ]] || \
-        fail "cannot capture localization epoch before unknown fault"
+      # publication_sequence / localization_epoch / ready 的同一性由观测器在
+      # 同一条 PlanningMapStatus 上判定，脚本不再分两次 echo 拼接跨消息字段。
       record_unknown_timeline pre_fault_nonzero true
       record_unknown_timeline source_generation_before "${source_before}"
-      record_unknown_timeline adapter_publication_sequence_before "${publication_before}"
-      record_unknown_timeline localization_epoch "${localization_epoch}"
       record_unknown_timeline plan_request_identity "${request_identity}"
+      start_fault_observer "${observer_report}" "${fault_trigger}" \
+        "${recovery_trigger}" "${observer_log}"
+      record_unknown_timeline observer_ready_ns
       record_unknown_timeline fault_injected_ns
+      # 触发文件先于参数写入落地：观测器的 fault 起点因此不晚于真实注入时刻，
+      # 测得的延迟只会偏保守，绝不会漏掉注入后的第一条消息。
+      : >"${fault_trigger}"
+      FAULT_OBSERVER_FAULT_EPOCH="${SECONDS}"
       timeout 8 ros2 param set /ats_mujoco_sim lidar_occlusion_enabled true \
         >/tmp/ats_p2_fault_unknown_occlusion_enable.out 2>&1 || \
         fail "cannot enable MuJoCo LiDAR occlusion"
@@ -1023,8 +1139,9 @@ run_p2_fault_injection() {
         fail "cannot reset ROGMap source to unknown"
       wait_for_command "unknown fault keeps ROGMap input fresh" 12 \
         topic_field_equals /rog_map/stale data false
-      wait_for_command "unknown fault obtains a ROGMap numeric unknown projection" 20 \
-        wait_for_rog_numeric_unknown "${numeric_unknown}"
+      # 结构化判据内建 generation > baseline，混合 free/occupied 会带计数被拒。
+      wait_for_command "unknown fault obtains a strictly all-unknown ROGMap projection" 20 \
+        wait_for_rog_numeric_unknown "${numeric_unknown}" "${source_before}"
       source_after="${ROG_NUMERIC_UNKNOWN_GENERATION}"
       awk -v current="${source_after}" -v baseline="${source_before}" \
         'BEGIN {exit current > baseline ? 0 : 1}' || \
@@ -1038,36 +1155,34 @@ run_p2_fault_injection() {
       timeout 8 ros2 param set /ats_rog_map_adapter test_mask_secondary_evidence true \
         >/tmp/ats_p2_fault_unknown_mask_enable.out 2>&1 || \
         fail "cannot enable adapter secondary-evidence mask"
-      wait_for_command "unknown fault publishes all-unknown planning grid" 10 \
-        timeout 6 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-        --topic /rc_esdf/planning_grid --timeout 4 all-value --value -1
+      # 下游 blocked 证据：融合后的规划栅格全 -1 只说明下游被正确阻断，
+      # 它绝不是融合 all-unknown 的证据来源，因此不再作为门禁的判定依据。
+      if timeout 6 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
+        --topic /rc_esdf/planning_grid --timeout 4 all-value --value -1 \
+        >"${downstream_grid}" 2>&1; then
+        record_unknown_timeline downstream_planning_grid_all_unknown true
+        echo "OK: downstream /rc_esdf/planning_grid blocked all-unknown (secondary evidence only)"
+      else
+        record_unknown_timeline downstream_planning_grid_all_unknown false
+        echo "NOTE: downstream /rc_esdf/planning_grid not all-unknown; see ${downstream_grid}"
+      fi
+      # ready / publication_sequence / localization_epoch / source_generation 的
+      # 同一性与推进关系全部交由观测器在同一条 PlanningMapStatus 上判定，并与
+      # 同 publication_sequence 的 PlanningMapSnapshot 配对。
       wait_for_command "unknown fault publishes adapter not-ready" 8 \
         topic_field_equals /rog_map_adapter/ready data false
-      publication_fault="$(read_topic_field /rog_map_adapter/status publication_sequence)"
-      [[ "${publication_fault}" =~ ^[0-9]+$ ]] || \
-        fail "cannot capture adapter publication sequence during unknown fault"
-      awk -v current="${publication_fault}" -v baseline="${publication_before}" \
-        'BEGIN {exit current > baseline ? 0 : 1}' || \
-        fail "adapter publication sequence did not advance into unknown fault"
       record_unknown_timeline ready_false_ns
-      record_unknown_timeline adapter_publication_sequence_unknown "${publication_fault}"
       wait_for_fault_action_result unknown 4 12
       wait_for_command "unknown fault triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
       record_unknown_timeline emergency_stop_true_ns
-      zero_window_started="$(date +%s%N)"
-      sleep 0.5
-      capture_numeric_stream /cmd_vel_mpc "/tmp/ats_p2_fault_unknown_cmd.out" || \
-        fail "unknown fault did not publish /cmd_vel_mpc during stop"
-      assert_zero_stream "unknown /cmd_vel_mpc" "/tmp/ats_p2_fault_unknown_cmd.out"
-      record_unknown_timeline cmd_vel_zero_ns
-      capture_numeric_stream /motion_control "/tmp/ats_p2_fault_unknown_motion.out" || \
-        fail "unknown fault did not publish /motion_control during stop"
-      assert_zero_stream "unknown /motion_control" "/tmp/ats_p2_fault_unknown_motion.out"
-      record_unknown_timeline motion_control_zero_ns
-      zero_window_finished="$(date +%s%N)"
-      record_unknown_timeline zero_window_sec \
-        "$(awk -v start="${zero_window_started}" -v end="${zero_window_finished}" 'BEGIN {printf "%.3f", (end - start) / 1e9}')"
+      # 两级零速度不再串行采样：观测器在一个共同的固定窗口内同时判定
+      # /cmd_vel_mpc 与 /motion_control，串行取样再声称同窗是不允许的。
+      # 恢复动作必须等到故障阶段的共同窗口关闭之后再执行，否则窗口内会混入
+      # 恢复后的数据。
+      wait_fault_observer_window "${FAULT_OBSERVER_FAULT_EPOCH}" 32
+      : >"${recovery_trigger}"
+      record_unknown_timeline recovery_started_ns
       timeout 8 ros2 param set /ats_rog_map_adapter test_mask_secondary_evidence false \
         >/tmp/ats_p2_fault_unknown_mask_disable.out 2>&1 || \
         fail "cannot disable adapter secondary-evidence mask"
@@ -1085,22 +1200,18 @@ run_p2_fault_injection() {
       awk -v current="${source_recovered}" -v baseline="${source_after}" \
         'BEGIN {exit current > baseline ? 0 : 1}' || \
         fail "ROGMap source generation did not advance after unknown recovery"
-      publication_after="$(read_topic_field /rog_map_adapter/status publication_sequence)"
-      [[ "${publication_after}" =~ ^[0-9]+$ ]] || \
-        fail "cannot capture recovered adapter publication sequence"
-      awk -v current="${publication_after}" -v baseline="${publication_before}" \
-        'BEGIN {exit current > baseline ? 0 : 1}' || \
-        fail "adapter publication sequence did not advance after unknown recovery"
       record_unknown_timeline source_generation_recovered "${source_recovered}"
-      record_unknown_timeline adapter_publication_sequence_recovered "${publication_after}"
+      # publication_after > publication_fault（不是故障前基线）、恢复后 identity
+      # 同消息一致、无新目标时旧 reference 不复活、两级速度维持零，全部由观测器
+      # 的 JSON verdict 判定。--require-gate 让不通过时进程非零退出。
       assert_no_old_reference_revival \
         "/tmp/ats_p2_unknown_old_reference_${ROS_DOMAIN_ID}.out"
-      capture_zero_outputs unknown_recovery
+      await_fault_observer_gate "${observer_report}" "${observer_log}"
       # Recovery must not replay the failed request.  A new independent goal
       # is the only permitted way to re-establish planning and motion.
       publish_relative_fault_goal unknown_recovery_new_goal
       wait_for_fault_action_result unknown_recovery_new_goal 0 40
-      echo "RESULT: unknown timeline=${UNKNOWN_TIMELINE} source=${source_before}->${source_after}->${source_recovered} publication=${publication_before}->${publication_after} request=${request_identity}"
+      echo "RESULT: unknown timeline=${UNKNOWN_TIMELINE} observation=${observer_report} source=${source_before}->${source_after}->${source_recovered} request=${request_identity}"
       ;;
     unreachable)
       # 该查询会在大规划栅格上保守展开，先在静止状态找目标；随后立即用
@@ -1562,6 +1673,36 @@ run_navigation_goal() {
   assert_pose_near_goal "${name} leg" "${after_pose}" "${goal_x}" "${goal_y}"
 }
 
+# MPC 分阶段耗时只存在于 telemetry ring 里，绝不为了采集在 20 Hz 控制定时器里
+# 新增日志。导出走独立 Python 客户端的既有服务调用，不进入 control timer。
+export_control_telemetry() {
+  [[ -n "${QP_TELEMETRY_OUTPUT}" ]] || return 0
+  [[ -n "${QP_TELEMETRY_MANIFEST}" ]] || \
+    fail "QP_TELEMETRY_OUTPUT requires QP_TELEMETRY_MANIFEST"
+  python3 "${WORKSPACE_DIR}/scripts/dump_ats_swerve_mpc_telemetry.py" \
+    --output "${QP_TELEMETRY_OUTPUT}" \
+    --manifest "${QP_TELEMETRY_MANIFEST}" \
+    --workspace "${WORKSPACE_DIR}" \
+    --solver-mode "${SOLVER_MODE}" \
+    --log-level "${LOG_LEVEL}" \
+    --test-profile "${TEST_PROFILE}" \
+    --planning-grid-owner "${PLANNING_GRID_OWNER}" \
+    --p2-fault-case "${P2_FAULT_CASE}" \
+    --p3-fault-case "${P3_FAULT_CASE}" \
+    --ros-domain-id "${ROS_DOMAIN_ID}" \
+    --params-file "${WORKSPACE_DIR}/src/ats_sentry_bringup/params/node_params.yaml" \
+    --start-x "${START_X}" --start-y "${START_Y}" \
+    --start-z "${START_Z}" --start-yaw "${START_YAW}" \
+    --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" \
+    --goal-yaw-w "${GOAL_YAW_W}" \
+    --run-start-epoch-ns "${QP_TELEMETRY_RUN_START_EPOCH_NS}" \
+    --sampling-window-cycles "${QP_TELEMETRY_WINDOW_CYCLES}" || \
+    fail "cannot export /ats_swerve_mpc/dump_control_telemetry"
+  [[ -s "${QP_TELEMETRY_OUTPUT}" ]] || fail "control telemetry output is empty"
+  [[ -s "${QP_TELEMETRY_MANIFEST}" ]] || fail "control telemetry manifest is empty"
+  echo "OK: exported control telemetry to ${QP_TELEMETRY_OUTPUT}"
+}
+
 LAUNCH_ARGS=(
   ats_mujoco_sim
   rmuc_2026_mujoco.launch.py
@@ -1589,6 +1730,17 @@ LAUNCH_ARGS=(
   telemetry_sampling_window_cycles:="${QP_TELEMETRY_WINDOW_CYCLES}"
   log_level:="${LOG_LEVEL}"
 )
+
+# 测试故障注入授权门禁默认关闭。只有隔离的 P2_FAULT_CASE=unknown 运行才显式
+# 打开它；nominal、其它故障用例、真车配置与默认 launch 一律保持 false，
+# 因此未授权的 test_reset_to_unknown / test_mask_secondary_evidence 请求会被
+# 节点显式拒绝，不会静默清图。
+if [[ "${P2_FAULT_CASE}" == "unknown" ]]; then
+  LAUNCH_ARGS+=(enable_test_fault_injection:=true)
+  echo "NOTE: P2_FAULT_CASE=unknown explicitly authorizes test fault injection"
+else
+  LAUNCH_ARGS+=(enable_test_fault_injection:=false)
+fi
 
 setsid ros2 launch "${LAUNCH_ARGS[@]}" >"${LAUNCH_LOG}" 2>&1 &
 LAUNCH_PID=$!
@@ -1672,6 +1824,35 @@ ensure_topic_capture_ready "P3 ExecutionCommand" /planner/execution_command \
   ats_navigation_interfaces/msg/ExecutionCommand "${EXECUTION_STREAM}" EXECUTION_STREAM_PID
 CAPTURE_PIDS+=("${EXECUTION_STREAM_PID}")
 
+if [[ "${ATS_PROFILE_SKIP_ACTION}" == "1" ]]; then
+  # 实验 A：地图链单独运行。不下发目标，因此不进入 tracking；MPC 依约定保持
+  # 零速度。这里断言的是“无目标时确实零速度”，而不是把非零断言删掉了。
+  echo "RUN: ATS_PROFILE_SKIP_ACTION=1, map chain only for ${ATS_PROFILE_MAP_OBSERVE_SEC}s (no goal, no tracking)"
+  profile_observe_deadline=$((SECONDS + ATS_PROFILE_MAP_OBSERVE_SEC))
+  while (( SECONDS < profile_observe_deadline )); do
+    kill -0 "${LAUNCH_PID}" 2>/dev/null || fail "launch exited during map-chain observation window"
+    sleep 2
+  done
+  # 观测窗口内地图链必须一直在推进 generation，否则采到的耗时样本不代表
+  # 一个活着的地图链。
+  wait_for_generation_advance "${P2_LAST_GENERATION}" 30
+  wait_for_command "ROGMap input still fresh after observation" 15 \
+    topic_field_equals /rog_map/stale data false
+  wait_for_command "ROGMap adapter still ready after observation" 15 \
+    topic_field_equals /rog_map_adapter/ready data true
+  stop_capture_process "${CMD_STREAM_PID}"
+  stop_capture_process "${MOTION_STREAM_PID}"
+  stop_capture_process "${EXECUTION_STREAM_PID}"
+  for index in "${!DEBUG_TOPICS[@]}"; do
+    stop_capture_process "${DEBUG_CAPTURE_PIDS[index]}"
+  done
+  assert_zero_stream "no-goal /cmd_vel_mpc" /tmp/ats_minco_mpc_cmd_vel_stream.out
+  assert_zero_stream "no-goal /motion_control" /tmp/ats_minco_mpc_motion_stream.out
+  export_control_telemetry
+  echo "PASS: map-chain-only profile completed with both command stages held at zero."
+  exit 0
+fi
+
 for index in "${!GOAL_NAMES[@]}"; do
   echo "RUN: ${TEST_PROFILE} goal $((index + 1))/${#GOAL_NAMES[@]} '${GOAL_NAMES[index]}' -> " \
     "(${GOAL_XS[index]}, ${GOAL_YS[index]})"
@@ -1705,32 +1886,7 @@ assert_final_swerve_telemetry \
   "${LAST_GOAL_SEND_EPOCH_SEC}" \
   "${LAST_GOAL_SEND_EPOCH_NANOSEC}"
 
-if [[ -n "${QP_TELEMETRY_OUTPUT}" ]]; then
-  [[ -n "${QP_TELEMETRY_MANIFEST}" ]] || \
-    fail "QP_TELEMETRY_OUTPUT requires QP_TELEMETRY_MANIFEST"
-  python3 "${WORKSPACE_DIR}/scripts/dump_ats_swerve_mpc_telemetry.py" \
-    --output "${QP_TELEMETRY_OUTPUT}" \
-    --manifest "${QP_TELEMETRY_MANIFEST}" \
-    --workspace "${WORKSPACE_DIR}" \
-    --solver-mode "${SOLVER_MODE}" \
-    --log-level "${LOG_LEVEL}" \
-    --test-profile "${TEST_PROFILE}" \
-    --planning-grid-owner "${PLANNING_GRID_OWNER}" \
-    --p2-fault-case "${P2_FAULT_CASE}" \
-    --p3-fault-case "${P3_FAULT_CASE}" \
-    --ros-domain-id "${ROS_DOMAIN_ID}" \
-    --params-file "${WORKSPACE_DIR}/src/ats_sentry_bringup/params/node_params.yaml" \
-    --start-x "${START_X}" --start-y "${START_Y}" \
-    --start-z "${START_Z}" --start-yaw "${START_YAW}" \
-    --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" \
-    --goal-yaw-w "${GOAL_YAW_W}" \
-    --run-start-epoch-ns "${QP_TELEMETRY_RUN_START_EPOCH_NS}" \
-    --sampling-window-cycles "${QP_TELEMETRY_WINDOW_CYCLES}" || \
-    fail "cannot export /ats_swerve_mpc/dump_control_telemetry"
-  [[ -s "${QP_TELEMETRY_OUTPUT}" ]] || fail "control telemetry output is empty"
-  [[ -s "${QP_TELEMETRY_MANIFEST}" ]] || fail "control telemetry manifest is empty"
-  echo "OK: exported control telemetry to ${QP_TELEMETRY_OUTPUT}"
-fi
+export_control_telemetry
 
 wait_for_generation_advance "${P2_LAST_GENERATION}" 30
 if [[ "${P2_FAULT_CASE}" != "none" ]]; then
