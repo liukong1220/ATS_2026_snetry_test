@@ -358,40 +358,69 @@
   未放宽 deadline、stale、lease、unknown、collision、footprint、localization 或 gimbal gate。P2、P3、
   QP-2.7、QP-3、P4/HIL/实车均未通过；MuJoCo physical contact 亦未取得本轮可用证据。
 
-#### 下一阶段新对话提示词：QP-2.7 unknown 场景与 paired shadow
+#### QP-2.7 review 修正与下一轮环境门禁（2026-08-10）
+
+- **已实现且已验证（组件层）**：review 后，实时采样器不再按全系统进程名聚合，而是从本轮
+  `setsid` launch 取得 PGID 后仅采集该进程组；报告保留 PGID 列，旧 PGID `42520` 不会再被写入本轮
+  CPU/RSS/线程/上下文切换样本。实验 B 仅改变 LiDAR downsample，用于验证投影成本是否随点云密度变化；
+  它不是固定 reference 或 MPC-only 实验，禁止据此单独归因 iLQR/MPC。
+- **已实现且已验证（故障判据）**：unknown observer 的 all-unknown snapshot 现在必须同时满足正
+  width/height、`occupancy_len == width*height`、全部 occupancy 为 `-1`、三组数值数组同长且全 NaN；
+  它还必须和同一 `publication_sequence` 的 `ready=false` status 配对，并复核 localization epoch 与
+  source generation。恢复 status/snapshot 也必须配对、ready/epoch/generation 一致，避免两个独立消息
+  分别满足条件时产生假阳性。
+- **已实现且已验证（仿真故障原子性）**：MuJoCo `freeze_motion` 与
+  `lidar_occlusion_enabled` 的单个 `SetParameters` 请求先完整校验再应用；合法参数后跟非法参数时不得
+  留下半生效的故障状态。遮挡仍发布有 header/stamp 的空 `PointCloud2`，并保持输入 fresh 与 input-stale
+  故障语义不同。
+- **本轮验证**：`ats_rog_map`/adapter/MPC 的 `colcon test-result` 分别为
+  `13/0/0`、`29/0/0`、`73/0/0`（tests/errors/failures）；MuJoCo ROS-free fault pytest 为
+  `16 passed`。四包单 worker 构建、Bash/Python 语法、两个受影响 launch `--show-args` 和三仓
+  `git diff --check` 通过。`ats_rog_map` 与 `ats_swerve_mpc` 目标 `flags.make` 均实际含 `-O3`。
+  全仓 `test-result --all` 的 710 failures 仍是未修改 `minco_planner` 的历史 lint 产物，不能计入本轮。
+- **提交证据**：根仓 `469ae5d`、`e60af36`，导航仓 `8fb2b74`、`1c7bfbd`，MuJoCo 仓 `9e91304` 已
+  SSH push 到各自 `origin/develop`。新提交作者均为 `liukong1220 <1625038134@qq.com>`，没有新增
+  Claude trailer。历史 commit 正文中仍存在旧 Claude co-author trailer；删除它需要改写已推送历史和
+  force-push，未获单独授权前不得执行。
+- **仍未通过/未运行**：旧 PGID `42520` 的归属没有得到确认，故未终止。没有干净环境下的两次 nominal、
+  unknown runtime、paired Shadow A/B/C、P2 red-box、HIL、实车或物理 contact 证据；P2/P3/QP-2.7/QP-3/
+  P4 均不得标记通过。
+
+#### 下一阶段新对话提示词：QP-2.7 干净环境 nominal 与 unknown 闭环
 
 ```text
-继续 ATS Sentry `ats_swerve_mpc` 的 QP-2.7。先完整阅读 `AGENTS.md`、QP TODO、backend admission、
-导航方向文档，以及当前 ROGMap LiDAR bridge、`ats_rog_map_node`、`ats_rog_map_adapter`、
-`scripts/test_mujoco_minco_mpc_chain.sh`、`scripts/test_mujoco_qp_shadow_profiles.sh`、
-`ControlCycleTelemetryRing` 和相关 GTest。先对根仓、导航仓、MuJoCo 仓执行
-`git status --short --branch`、`git pull --ff-only origin develop`、HEAD/origin HEAD 和 remote 核对；
-保留导航仓未跟踪 `ats_swerve_mpc/求解器.md`，禁止 `git add .`、`git add -A`、`reset --hard`、
-`checkout --`、删除用户文件或 force push。
+继续 ATS Sentry `ats_swerve_mpc` 的 QP-2.7，但本轮目标先限于“干净环境下 P2 nominal 与真实 unknown
+安全闭环”，不是直接切 QP 主控制链。完整阅读 `AGENTS.md`、ATS导航优化TODO、backend admission、导航
+方向文档，及 `scripts/collect_realtime_profile.sh`、`scripts/p2_fault_observer.py`、
+`scripts/test_mujoco_minco_mpc_chain.sh`、ROGMap/adapter/MuJoCo runtime fault 源码和相关测试。
 
-当前事实：OSQP v1.0.0、固定 CSC、primal/dual warm-start、same-snapshot、schema-3 固定窗口和
-fail-closed analyzer 已存在；默认 `solver_mode=ilqr`，`qp_shadow` 只诊断，`qp` 继续拒绝。domain 213
-在 `mujoco==3.10.0` 下已证明 `/local_pointcloud` 与 `/registered_scan` 非空、cloud_age 有限、
-ROGMap source generation 76->90、adapter ready/heartbeat 递增；但 nominal profile 在 action 前停止于
-`/rog_map/unk` 非空 gate。有效配置的 `core.visualization.publish_unknown=false`，运行 unknown count=0。
+先在根仓、导航仓、MuJoCo 仓执行 `git status --short --branch`、`git pull --ff-only origin develop`、
+`git rev-parse HEAD origin/develop` 与 remote 核对。保留导航仓未跟踪 `ats_swerve_mpc/求解器.md`，禁止
+`git add .`、`git add -A`、reset/checkout --、删除用户文件、force push。默认 `solver_mode=ilqr`；
+`qp_shadow` 只诊断，`solver_mode=qp` 继续拒绝，不能改变 `/cmd_vel_mpc` 唯一发布、tracker、last_control、
+急停、unknown/stale/lease/collision/footprint/localization/gimbal gate。
 
-目标只限于上游 unknown 证据和可配对 shadow 前置门禁：定位实际 owner，设计真实、受控、独立的 unknown
-区域或 fault fixture；不得伪造点云/地图、把无数据标 fresh、关闭 stale/lease、修改 RC-ESDF unknown
-或 occupied 语义、反解析 `/rog_map/esdf` PointCloud2、改变 MPC fail-closed、安全门、iLQR 发布和 topic
-ownership。nominal、unknown、timeout/infeasible 各使用新 ROS_DOMAIN_ID 和独立 launch。
+第一步只读环境审计：定位残留 PGID/ROS domain/父子进程、loadavg、CPU、内存和 swap。对未知归属的进程
+绝不能 kill；只有用户明确确认具体 PID/PGID 可清理，才用精确 PGID 终止并记录命令。若无法取得无遗留
+导航进程、无持续 CPU 饱和和足够资源的环境，停止并报告，禁止运行 nominal 或把受污染样本当准入证据。
 
-先给 DoD、精确文件范围、QoS/frame/time/generation 契约、验证命令、假设和停止条件。优先补最窄 producer
-或受版本控制测试 fixture，并增加 deterministic test 锁定：真实 unknown 点非空、all-unknown planning
-snapshot、source generation/adapter heartbeat 递增、unknown 时 ready=false 与两级零速度、恢复后旧
-reference 不复活。若只能得到 debug publisher 计数而无 payload，或需要放宽 nominal gate，停止并记录阻塞。
+干净环境后按严格顺序：
+1. 用两个新 `PROFILE_DOMAIN` 独立运行 `scripts/collect_realtime_profile.sh A`，确认样本只来自本轮
+   PGID；A 是 map-only，B 仅用于 LiDAR downsample 敏感性，不能称 MPC-only。
+2. 用一个新的 `ROS_DOMAIN_ID` 运行 headless `P2_FAULT_CASE=none`、`PLANNING_GRID_OWNER=rog_map`、
+   `SOLVER_MODE=ilqr` 的 single nominal；必须取得 action、终点误差、ROGMap/adapter generation 递增、
+   `/cmd_vel_mpc` 与 `/motion_control` 唯一 owner、非零跟踪后收尾零速、MINCO footprint 与 MuJoCo
+   contact telemetry。任何 z 发散、out-of-map reset、stale/lease、deadline 或 action 失败都停止并保留日志。
+3. 只有 nominal 在干净环境完整通过，才用另一个新的 domain 运行 `P2_FAULT_CASE=unknown`。必须从真实
+   LiDAR 遮挡 + ROGMap 数值 reset 获得 source projection all-unknown；observer 必须证明同一 publication
+   sequence 的 blocked snapshot/status 配对、`ready=false -> emergency_stop=true -> 两级零速度`、恢复后
+   generation/sequence 继续递增且无新 goal 时旧 reference 不复活。
 
-按顺序运行窄构建、相关 GTest、`colcon test-result`、受影响 launch `py_compile`、`ros2 launch ...
---show-args`、三仓 `git diff --check`；随后用新 domain 运行 nominal 和 unknown fault。只有 nominal action、
-两级速度唯一 owner、schema-3 固定窗口完整且 digest 可配对时，才重跑 A/B/C；不完整窗口必须输出
-`not_comparable`/`withheld`。记录 status、iteration、reported/C API wall solve、residual、slack、hard
-margin、candidate rejection、非零控制和 p50/p95/p99。P2 不得标记通过，P3 不得标记 Nav2-free；HIL、
-实车、物理 contact、可信 CPU/allocation profile 均明确未验证。完成后只显式 stage 实际修改文件，
-中文详细提交并 SSH push 实际修改仓库，报告 HEAD/origin 一致性与 shortlog 作者约束。
+先给 DoD、精确文件范围、QoS/frame/time/generation 契约、可执行验证命令、假设和停止条件。完成后再考虑
+`qp_shadow` A/B/C；若任一窗口 identity/digest 不一致，必须输出 `not_comparable`/`withheld`，不得调高
+OSQP iteration、放宽 deadline/residual 或接受 non-solved warm-start。P2/P3/HIL/实车/物理 contact 不得提前
+标记通过。每次实际修改后跑最窄构建/测试/launch/diff check，显式暂存、中文提交、SSH push，并报告三个
+仓库 HEAD 与 origin/develop 一致性和作者约束。
 ```
 
 #### QP-3：受控主链切换与回退
@@ -412,7 +441,7 @@ margin、candidate rejection、非零控制和 p50/p95/p99。P2 不得标记通�
 - [ ] 每例记录 terminal pose/error、MPC reference/predicted、`/cmd_vel_mpc` 与 `/motion_control` 唯一 ownership、minimum clearance、离散 footprint collision sample、QP status/残差/solve time、replan/fallback 次数及 MuJoCo contact telemetry。`contact_violation_count=0` 不得推导实车物理无碰撞。
 - [ ] 完成 MuJoCo 后才进入抬轮 HIL：先验证四模块 drive/steer 符号、零速过渡、速率/限位、物理急停和 watchdog，再受限低速实车。P2/P3 门禁与 Nav2-free 结论不因 QP 工作改变。
 
-#### 下一阶段新对话提示词：QP-2.6 可配对采样与数值归因
+#### [历史提示词，已被 QP-2.7 干净环境 nominal 与 unknown 闭环取代] QP-2.6 可配对采样与数值归因
 
 ```text
 继续 ATS Sentry `ats_swerve_mpc` 的 QP-2.6 可配对性能采样与数值归因。先完整阅读 `AGENTS.md`、

@@ -355,3 +355,25 @@ generation/sequence 递增、旧 reference 拒绝和新目标恢复；也**未�
 也没有削弱 map/unknown/collision/footprint/localization/gimbal/lease gate。QP-2.7 未通过；P2、P3、QP-3、
 P4/HIL/实车和 MuJoCo physical contact 继续未通过或未验证。运行日志：
 `/tmp/ats_minco_mpc_test_launch_181.log`、`/tmp/ats_minco_mpc_test_launch_182.log`。
+
+## 2026-08-10 review 修正与准入顺序
+
+本轮 review 没有降低任何安全门，而是收紧了运行证据来源：profile 进程资源采样从按名称匹配改为仅采集本轮
+`setsid` launch 的 PGID；机器上遗留 PGID `42520` 仍未获归属确认，故不得终止，也使此前受资源竞争影响的
+nominal 样本继续不具备 admission 资格。profile 的 B 条件仅改变 LiDAR downsample，不能称为 fixed-reference
+或 MPC-only 测试，不能用于分离 iLQR 与地图链成本。
+
+P2 unknown observer 现在只接受完整的 blocked all-unknown `PlanningMapSnapshot`，并要求它与同一
+publication sequence 的 `ready=false` `PlanningMapStatus` 匹配，且复核 ready、localization epoch 和 source
+generation；recovery 也执行同等身份复核。MuJoCo freeze/occlusion 的 runtime 参数批次先完整验证再应用，
+拒绝请求不会留下半生效状态。相应组件证据为：`ats_rog_map` `13/0/0`、adapter `29/0/0`、MPC `73/0/0`
+tests/errors/failures，MuJoCo ROS-free pytest `16 passed`；四包单 worker build 与受影响脚本/launch 静态检查
+通过，ROGMap/MPC 目标 flags 均实测 `-O3`。这些均不改变 OSQP 的 `solved` 准入、hard check 或 `solver_mode`
+限制，也不构成 QP candidate、QP timing、P2 或实车通过证据。
+
+**下一次准入顺序固定为**：先在无未知残留 ROS 进程、无持续 CPU 饱和的环境中完成两次 map-only profile A，
+确认 PGID 边界；再完成 iLQR nominal 的 action/owner/terminal/telemetry 门禁；再用独立 domain 运行真实
+unknown，并要求 all-unknown 配对、确定性两级零速和恢复后旧 reference 不复活。任何 out-of-map reset、z
+发散、stale/lease/deadline、action failure 或环境污染都终止当前 run。只有这些运行期证据完整且 identity
+digest 可配对时，才允许重新运行 `qp_shadow` A/B/C；`solver_mode=qp` 继续拒绝，禁止提高 iteration、放宽
+time limit/residual 或接受 non-solved warm-start。

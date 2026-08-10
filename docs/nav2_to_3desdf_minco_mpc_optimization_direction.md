@@ -186,6 +186,25 @@
   `launch_nav2:=false` 的 Nav2-free 验收。`solver_mode=ilqr` 保持唯一控制发布链，`qp_shadow` 未在本轮
   paired A/B/C 运行，`solver_mode=qp`、HIL 与实车自主运动均未启动。
 
+### P2.7 review 后的证据修正（2026-08-10）
+
+- **性能采样证据收紧**：实时采样器已改为以本轮 `setsid` launch 的 PGID 为边界，仅收集该进程组的
+  target node 资源数据，并在 TSV 中保留 PGID。此前机器上的 PGID `42520` 仍因归属未知而未终止；它不再
+  污染采样归属，但其资源竞争仍使所有旧 nominal 结果不具备准入资格。实验 B 只改变 LiDAR downsample，
+  不能再称为固定 reference/MPC-only 实验。[Confidence: High，脚本实现与 Bash 静态检查]
+- **unknown 判据收紧**：observer 的 blocked snapshot 必须具有有效维度、精确数组长度、全 `-1` occupancy
+  和全 NaN 数值 payload，并与相同 publication sequence 的 `ready=false` status 配对；fault/recovery 两端
+  均校验 ready、localization epoch 和 source generation。MuJoCo fault 参数批次先验证后应用，拒绝请求
+  不会留下半生效 freeze/occlusion 状态。[Confidence: High，源码与 ROS-free fault 测试]
+- **组件验证更新**：`ats_rog_map`、`ats_rog_map_adapter`、`ats_swerve_mpc` test-result 分别为
+  `13/0/0`、`29/0/0`、`73/0/0`；MuJoCo ROS-free pytest 为 `16 passed`，四包单 worker 构建、Bash/Python
+  语法、受影响 launch 参数和三仓 diff check 通过。两目标包编译 flags 已实测为 `-O3`。这不是闭环
+  nominal/unknown、P2、P3、HIL 或实车通过证据。
+- **下一步门禁**：先得到用户确认或自然不存在的干净环境，再用两个独立 map-only A run 验证采样 PGID
+  边界；随后依次重跑 headless nominal 与独立 unknown。任何 `cur_pose out of map range`、z 发散、stale/
+  lease、deadline、action failure 或环境污染都中止本阶段并保存日志。只有两者完整通过，才重新开始 paired
+  `qp_shadow` A/B/C；`solver_mode=qp` 继续禁止。
+
 ## P3
 
 - 正式入口为 `ats_sentry_bringup/launch/bringup.launch.py` 和中立命名的
