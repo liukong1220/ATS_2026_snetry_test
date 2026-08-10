@@ -315,9 +315,39 @@ fusion 真值表得出，blocked unavailable snapshot 保留 `-1` audit occupanc
 callback 长期越过 `20 Hz/50 ms`。domain `181` 终样本 p50/p95/p99 为
 `155.387/281.713/326.962 ms`；domain `182` 为 `94.671/268.061/392.287 ms`，中途达到
 `482.97 ms` iLQR solve。随后 odometry/ROGMap stale、projection 延迟和 map heartbeat lease timeout 导致
-action `ABORTED/result_code=4`。这是 iLQR nominal realtime/health 输入链的 first violation；domain `182`
-显示的 `qp_status=backend_unavailable, iter=0` 仅表示 mode 为 ilqr，没有提供任何 OSQP solved、iteration、
-residual 或 QP timing 证据。
+action `ABORTED/result_code=4`。
+
+**归因边界（不得声称唯一 first violation）**：按时间顺序，最早观察到的预算违反在 ROGMap
+ground projection——domain `192` 的 72 个 projection 样本为 `p50=2386.1 ms`、`p95=3304.5 ms`、
+`p99=3595.8 ms`，远超 `cloud_timeout_sec=2.0 s`，且发生在 tracking 建立之前。tracking 建立
+之后，iLQR solve 与 full callback 同样严重超过 `50 ms`（上述 `181`/`182` 数值）。这两者都是
+已观察到的违反，但缺少 CPU/scheduler trace（无 `perf`、无线程级 runqueue 采样、无 mutex
+contention profile），**无法确认单一根因**：iLQR 超时可能是 map 链阻塞的下游后果，也可能是
+独立的求解开销，两种解释与现有日志都相容。domain `182` 显示的
+`qp_status=backend_unavailable, iter=0` 仅表示 mode 为 ilqr，没有提供任何 OSQP solved、
+iteration、residual 或 QP timing 证据。在按阶段插桩把耗时归属到具体 owner 之前，不得据此
+放宽 cloud timeout、projection deadline、map lease、`20 Hz` 控制周期、MPC 约束或任何安全门禁。
+
+**本轮分阶段插桩结果（不推翻上述边界）**：按阶段插桩后，投影耗时归属到逐格占用类型查询。
+实验 A（domain `202`，`-O0`，不做动作跟踪，87 个样本）：`sample_ms` `p50=520.2 ms`，其中
+`grid_type_query_ms` `p50=420.3 ms`（60000 次 `getGridType`），`esdf_query_ms` 仅 `p50=8.9 ms`
+（2293 次 `getESDFDistance`）；`gradient_ms` `p50=0.5 ms`、`serialize_ms` `p50=0.1 ms`、
+`unaccounted_ms` `p50=0.2 ms`。`grid_type_queries` 在 A/B/C 恒为 60000，与 LiDAR downsample
+（2→8）无关，说明投影成本由投影栅格几何决定而非点云密度。
+
+同时定位到一个此前未记录的构建缺陷：整仓 36 个包的 `CMAKE_BUILD_TYPE` 均为空，`flags.make`
+中不含任何 `-O`，即全部以 `-O0` 编译；`ats_rog_map` 与 `ats_swerve_mpc` 的 `CMakeLists.txt`
+从未设置优化等级。补上包内 `Release` 默认后重建得到 `-O3`，实验 A 的 projection `total_ms`
+`p50` 由 `1515.9 ms` 降到 `21.2 ms`（71×），`map_lock_wait_ms` `p50` 由 `853.0 ms` 降到 `0.0 ms`。
+这**只是把 owner 归属到编译配置与 `getGridType` 调用量**，没有放宽任何超时、deadline、lease、
+控制周期、MPC 约束或门禁。
+
+**该轮运行不构成 nominal 通过证据**：采集期间机器上存在一个 20.7 小时前遗留的整套节点进程组
+（PGID `42520`，`ROS_DOMAIN_ID=179`，`ats_rog_map_node` 常驻 100% CPU，8 核 loadavg 12）。
+它与本轮 domain `201`–`207` 无 DDS 交叉，但持续占用约 2 个核。`-O3` 运行中出现 761–982 次
+`cur_pose out of map range, reset the map`、机体 z 发散至 −22 km；把 `ats_rog_map` 退回 `-O0`
+（MPC 保持 `-O3`）后仍发散 133 次，故**发散与优化等级无因果关系**，指向 CPU 争用下的仿真
+步进失稳。清理该遗留进程组需属主确认，本轮未执行，因此 nominal 两次独立通过未取得。
 
 因此本轮**未运行**真实 unknown 的 fault 前非零运动、unknown payload、all-unknown、two-stage zero、恢复后
 generation/sequence 递增、旧 reference 拒绝和新目标恢复；也**未运行** paired Shadow A/B/C。未启用

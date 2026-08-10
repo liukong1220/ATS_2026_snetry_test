@@ -314,16 +314,44 @@
   指定八包 `--base-paths src` 单 worker build、脚本 `bash -n`、Python `py_compile`、三个 launch
   `--show-args` 和三仓 `git diff --check` 均通过。MuJoCo Python pytest 因当前 install 不暴露
   `carstatemsgs` 可 import module 而 collection 失败，不能记为通过。
-- **运行失败，first violation（Confidence: High）**：独立 headless nominal `ROS_DOMAIN_ID=181`
-  （`LOG_LEVEL=info`）和 `182`（`LOG_LEVEL=warn`）均使用 `PLANNING_GRID_OWNER=rog_map`、
-  `P2_FAULT_CASE=none`、`SOLVER_MODE=ilqr`。两轮都在 action accepted/tracking 前后验证了 LiDAR、
-  ROGMap numeric projection、adapter heartbeat/planning-grid owner 及两级 topic ownership；但 iLQR
-  full callback 持续超过 `20 Hz / 50 ms` 预算。domain `181` 最后样本为
-  `155.387/281.713/326.962 ms`，domain `182` 为 `94.671/268.061/392.287 ms`（p50/p95/p99），中途
-  出现 `MPC solve 482.97 ms`、odometry stale、ROGMap stale、projection 延迟和 planning-map heartbeat
-  lease timeout，action 最终 `ABORTED/result_code=4`。日志为
-  `/tmp/ats_minco_mpc_test_launch_181.log` 与 `/tmp/ats_minco_mpc_test_launch_182.log`。这证明
-  fail-closed 在健康链失效后生效，不证明 nominal action/schema-3 固定窗口通过。
+- **运行失败，已观察到的预算违反（Confidence: High；唯一根因 Unconfirmed）**：独立 headless
+  nominal `ROS_DOMAIN_ID=181`（`LOG_LEVEL=info`）和 `182`（`LOG_LEVEL=warn`）均使用
+  `PLANNING_GRID_OWNER=rog_map`、`P2_FAULT_CASE=none`、`SOLVER_MODE=ilqr`。两轮都在 action
+  accepted/tracking 前后验证了 LiDAR、ROGMap numeric projection、adapter heartbeat/planning-grid
+  owner 及两级 topic ownership。
+  - 时间上**最早**观察到的预算违反是 ROGMap ground projection：domain `192` 的 72 个 projection
+    样本为 `p50=2386.1 ms`、`p95=3304.5 ms`、`p99=3595.8 ms`，对应
+    `cloud_timeout_sec=2.0 s`，且早于 tracking 建立。
+  - tracking 建立**之后**，iLQR solve/callback 同样严重超过 `20 Hz / 50 ms`：domain `181` 最后
+    样本为 `155.387/281.713/326.962 ms`，domain `182` 为 `94.671/268.061/392.287 ms`
+    （p50/p95/p99），中途出现 `MPC solve 482.97 ms`。
+  - 随后出现 odometry stale、ROGMap stale、projection 延迟和 planning-map heartbeat lease
+    timeout，action 最终 `ABORTED/result_code=4`。日志为
+    `/tmp/ats_minco_mpc_test_launch_181.log` 与 `/tmp/ats_minco_mpc_test_launch_182.log`。
+  - **缺少 CPU/scheduler trace，不能确认唯一根因**：现有证据无法区分「iLQR 超时是 map 链阻塞的
+    下游后果」与「iLQR 求解本身是独立的开销来源」。因此不写「iLQR 是唯一 first violation」。
+    这证明 fail-closed 在健康链失效后生效，不证明 nominal action/schema-3 固定窗口通过。
+  - **本轮新增：整仓以 `-O0` 编译（Confidence: High）**。`build/*/CMakeCache.txt` 全部 36 个包
+    `CMAKE_BUILD_TYPE` 为空，`flags.make` 里没有任何 `-O` 选项；`ats_rog_map` 与 `ats_swerve_mpc`
+    的 `CMakeLists.txt` 只设了 `-Wall -Wextra -Wpedantic`，从未设过优化等级。已在两个包内补
+    `if(NOT CMAKE_BUILD_TYPE ...) set(CMAKE_BUILD_TYPE Release)`，重建后 `flags.make` 出现 `-O3`。
+  - **分阶段证据把投影成本定位到 `getGridType`（Confidence: High）**。实验 A（domain 202，`-O0`，
+    不做动作跟踪）：`sample_ms` p50=520.2 ms 中 `grid_type_query_ms` p50=420.3 ms / 60000 次调用，
+    而 `esdf_query_ms` p50=8.9 ms / 2293 次；即成本在逐格占用类型查询，不在 ESDF 距离查询。
+    `grid_type_queries` 在 A/B/C 三个实验里恒为 60000，与 LiDAR 采样密度（downsample 2→8）无关，
+    说明投影成本由投影栅格几何决定，不由点云密度决定。
+  - **`-O3` 后投影耗时下降 71×（Confidence: Medium，受环境污染影响）**。domain 205 实验 A：
+    projection `total_ms` p50 由 1515.9 ms 降到 21.2 ms，`grid_type_query_ms` p50 420.3→10.9 ms，
+    `map_lock_wait_ms` p50 853.0→0.0 ms。倍数本身可信（同一固定条件、同一脚本、同一起点），
+    但该轮运行因下述环境污染未通过 admission，因此不作为 nominal 通过证据。
+  - **测得的 nominal 运行全部被残留进程污染（Confidence: High），故本轮不宣称 first violation 已解决**：
+    发现一个 20.7 小时前遗留的整套节点进程组（PGID 42520，`ROS_DOMAIN_ID=179`），其中
+    `ats_rog_map_node` 常驻 100% CPU、一个 `python3` 82%，8 核机器 loadavg 达到 12。该进程组
+    与本轮使用的 domain 201–207 无 DDS 交叉，但持续占用约 2 个核，且在本会话每一次采集期间都在运行。
+    `-O3` 运行中出现 761–982 次 `cur_pose out of map range, reset the map`、机体 z 发散到 −22 km，
+    而 `-O0` 基线只有 1 次 reset；把 `ats_rog_map` 单独退回 `-O0`（MPC 保持 `-O3`）后仍发散 133 次，
+    因此**发散与优化等级无因果关系**，指向 CPU 争用下的仿真步进失稳。清理该进程组需要属主确认，
+    本轮未执行，故 nominal 两次独立通过、unknown 故障注入与 paired Shadow A/B/C 均未运行。
 - **停止条件已执行**：nominal/action/ownership/schema-3 固定窗口未完整通过，故本轮未运行真实
   unknown source fault、two-stage zero/recovery/old-reference runtime 验收，也未运行 paired Shadow
   A/B/C；未启动 `solver_mode=qp`，未提高 OSQP iteration、未接受 `solved_inaccurate`/`max_iterations`，
