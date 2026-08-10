@@ -164,13 +164,22 @@
   `BEST_EFFORT` QoS、source generation、publication sequence、localization epoch 与 plan request
   identity，随后要求 `ready=false -> emergency_stop=true -> /cmd_vel_mpc=0 -> /motion_control=0`；
   恢复后不带新目标观察旧 reference 不复活。该 runtime 链尚未执行，不能作为实际 fail-closed 证据。
-- **nominal 实际失败，停止 unknown 升级（Confidence: High）**：在新的无 viewer/RViz MuJoCo domain
-  `181` 与 `182` 下，`planning_grid_owner=rog_map` 的 single nominal 已越过旧 `/rog_map/unk` gate，
-  实际观察到 ROGMap numeric service、adapter fresh heartbeat、唯一 planning-grid owner、ATS action
-  accepted 和 tracking 前的 `/cmd_vel_mpc`/`/motion_control` ownership。iLQR callback 却持续超过
-  `20 Hz/50 ms`：domain `181` p50/p95/p99=`155.387/281.713/326.962 ms`，domain `182` 为
-  `94.671/268.061/392.287 ms`，并伴随 odometry/ROGMap stale、projection/lease timeout，最终
-  `ABORTED/RESULT_MAP_UNREADY=4`。日志路径为 `/tmp/ats_minco_mpc_test_launch_181.log` 和
+- **nominal 实际失败，停止 unknown 升级（Confidence: High；唯一根因 Unconfirmed）**：在新的无
+  viewer/RViz MuJoCo domain `181` 与 `182` 下，`planning_grid_owner=rog_map` 的 single nominal 已越过
+  旧 `/rog_map/unk` gate，实际观察到 ROGMap numeric service、adapter fresh heartbeat、唯一
+  planning-grid owner、ATS action accepted 和 tracking 前的
+  `/cmd_vel_mpc`/`/motion_control` ownership。实时性归因按观测顺序分两段，两段都是已观察到的
+  违反，不能压缩成单一 owner：
+  - **最早观察到的预算违反是 ROGMap projection**：domain `192` 的 72 个样本为 `p50=2386.1 ms`、
+    `p95=3304.5 ms`、`p99=3595.8 ms`，对应 `cloud_timeout_sec=2.0 s`，发生在 tracking 建立之前。
+  - **tracking 之后 iLQR solve/callback 同样严重超过 `50 ms`**：domain `181`
+    p50/p95/p99=`155.387/281.713/326.962 ms`，domain `182` 为 `94.671/268.061/392.287 ms`，并伴随
+    odometry/ROGMap stale、projection/lease timeout，最终 `ABORTED/RESULT_MAP_UNREADY=4`。
+  - **缺少 CPU/scheduler trace（无 perf、无 runqueue 采样、无 mutex contention profile），不能
+    确认唯一根因**。iLQR 超时既可能是 map 链阻塞的下游后果，也可能是独立求解开销；在按阶段
+    插桩定位 owner 之前不做单一归因，也不放宽 cloud timeout、projection deadline、map lease、
+    `20 Hz` 控制周期、MPC 约束或安全门禁。
+  日志路径为 `/tmp/ats_minco_mpc_test_launch_181.log` 和
   `/tmp/ats_minco_mpc_test_launch_182.log`。本轮没有冒充运行中 unknown、two-stage zero、恢复后旧轨迹
   拒绝、终点、schema-3 固定窗口或 contact 验收。
 - **状态边界**：P2 nominal 未闭环，真实 unknown runtime、P2 红框与完整故障矩阵未通过；P3 仍未满足
