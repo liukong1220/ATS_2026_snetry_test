@@ -765,6 +765,13 @@ ats_rog_map:
     core.raycasting.clear_clipped_endpoint: true
     core.virtual_ground_height: -0.50
     core.virtual_ceil_height: 1.00
+    # Startup-only authorization gate for every test-only fault fixture. It must
+    # stay false for nominal, real-vehicle and default-launch runs; only the
+    # isolated MuJoCo P2_FAULT_CASE=unknown launch may override it to true.
+    # While false, test_reset_to_unknown is both rejected at the parameter
+    # service and ineffective at the reset site, so the map is never cleared.
+    enable_test_fault_injection: false
+    test_reset_to_unknown: false
 
 ats_rog_map_adapter:
   ros__parameters:
@@ -809,6 +816,15 @@ ats_rog_map_adapter:
     footprint_safety_margin: 0.05
     robot_frame: gimbal_yaw_odom
     robot_unknown_clear_radius: 0.0
+    # Startup-only authorization gate for every test-only fault fixture. It must
+    # stay false for nominal, real-vehicle and default-launch runs; only the
+    # isolated MuJoCo P2_FAULT_CASE=unknown launch may override it to true.
+    # While false, test_mask_secondary_evidence and the P4 swept-volume
+    # injection parameters are rejected at the parameter service and are also
+    # ineffective at their read sites.
+    enable_test_fault_injection: false
+    test_mask_secondary_evidence: false
+    test_inject_dynamic_obstacle: false
 
 minco_planner:
   ros__parameters:
