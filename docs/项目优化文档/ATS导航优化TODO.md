@@ -389,7 +389,7 @@
 #### QP-2.7 干净环境执行结果与当前停止点（2026-08-10）
 
 - **A profile 已通过**：在用户授权精确终止遗留 `PGID=42520` 后，无 ATS 导航进程残留。实时采样器将
-  `START_Z` 默认值从错误的 `0.12 m` 与主回归/MuJoCo launch 对齐为 `0.42 m`。干净的 domain `226`/`227`
+  `START_Z` 默认值从错误的 `-0.12 m` 与主回归/MuJoCo launch 对齐为 `0.42 m`。干净的 domain `226`/`227`
   各完成一次 map-only A，均 `run_status=0`，且 PGID TSV 仅含本轮 launch（`372618`/`376017`）；adapter
   generation 分别 `74 -> 164`、`82 -> 178`，尾端 fresh/ready 均为真，`/cmd_vel_mpc` 与
   `/motion_control` 全程为零。投影 total A1 `p50/p95/p99=13.0/23.5/35.8 ms`，A2
