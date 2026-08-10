@@ -386,7 +386,61 @@
   unknown runtime、paired Shadow A/B/C、P2 red-box、HIL、实车或物理 contact 证据；P2/P3/QP-2.7/QP-3/
   P4 均不得标记通过。
 
-#### 下一阶段新对话提示词：QP-2.7 干净环境 nominal 与 unknown 闭环
+#### QP-2.7 干净环境执行结果与当前停止点（2026-08-10）
+
+- **A profile 已通过**：在用户授权精确终止遗留 `PGID=42520` 后，无 ATS 导航进程残留。实时采样器将
+  `START_Z` 默认值从错误的 `0.12 m` 与主回归/MuJoCo launch 对齐为 `0.42 m`。干净的 domain `226`/`227`
+  各完成一次 map-only A，均 `run_status=0`，且 PGID TSV 仅含本轮 launch（`372618`/`376017`）；adapter
+  generation 分别 `74 -> 164`、`82 -> 178`，尾端 fresh/ready 均为真，`/cmd_vel_mpc` 与
+  `/motion_control` 全程为零。投影 total A1 `p50/p95/p99=13.0/23.5/35.8 ms`，A2
+  `14.1/24.8/43.1 ms`；map-only 无 tracking/MPC cycle sample，不构成 MPC 或 QP 性能证据。
+- **iLQR nominal 已通过**：domain `228`、headless、`solver_mode=ilqr`、`planning_grid_owner=rog_map`
+  的 single action `SUCCEEDED`。终点 `(-9.058255,1.470335)` 相对目标误差 `0.058256 m`；adapter generation
+  `908 -> 1697`；MINCO raw/reference `20/357`、离散 `footprint_collisions=0`；MPC
+  reference/predicted 各 `4526` poses；两级速度有非零跟踪并在收尾为零。MuJoCo
+  `contact_violation_count=0` 只是仿真字段，不能推导物理或实车无碰撞。
+- **真实 unknown 的部分核心证据已取得一次**：domain `225` 使用持续 LiDAR 空回波、ROGMap 数值 reset 和
+  adapter 融合前 secondary-evidence mask；没有伪造 planning grid。数值 projection 严格 all-unknown，新的
+  fault-only `/rog_map/unk` audit cloud 只由同一权威 numerical grid 的 all-`-1` payload 生成。observer
+  已记录 blocked snapshot/status 同 publication sequence、epoch/source generation、
+  `ready=false -> emergency_stop=true -> /cmd_vel_mpc=0 + /motion_control=0` 与恢复 sequence 推进。实测
+  fault-to-all-unknown=`10.675 s`、ready-false=`10.635 s`、emergency-stop=`0.294 s`、两级首个零命令
+  `0.429/0.385 s`。但当时 observer 对 `/minco/reference_path` 请求 `TRANSIENT_LOCAL`，而 Goal Manager
+  publisher 为 `RELIABLE + VOLATILE`，DDS 已报告 durability 不兼容；故“旧 reference 不复活”是空观察，
+  必须降级为未验证。脚本现以兼容 QoS 在故障前订阅，并强制先看到非空 baseline reference 与 recovery，
+  否则该 gate 失败。
+- **停止结论**：这不是 P2 全部通过。domain `225` 的固定向西 recovery goal 被 footprint gate 正确拒绝
+  `trajectory footprint is unsafe`；runner 已改用同一 fresh launch 已成功的 nominal map-frame goal。之后
+  domain `224` 在 fault 前置动作中反复记录 `Progress watchdog unsafe gate: map_fresh=0, tf=0,
+  pose=(nan,nan)`，12 s 内未出现当前 action 的非零 MPC 命令。不得通过延长等待、放宽 map/TF/footprint/
+  unknown/lease 或使用旧 reference 绕过。完整 unknown runner、P2 red-box、freeze/其他 fault、paired
+  `qp_shadow` A/B/C、HIL、实车和物理 contact 仍未通过或未运行。
+- **最窄验证**：ROGMap pure helper GTest 覆盖 all-unknown、mixed、malformed 与 origin yaw；
+  `ats_rog_map` 单 worker build 通过，`colcon test-result=16 tests, 0 errors, 0 failures, 0 skipped`。
+  新 Python audit capture 的 `py_compile`、两脚本 `bash -n` 与 diff check 通过；既有核心头文件 warning 未修改。
+
+#### 下一阶段新对话提示词：QP-2.7 unknown 前置 unsafe-gate 根因与稳定回归
+
+```text
+继续 ATS Sentry QP-2.7，但只解决干净环境 P2 unknown 完整 runner 的 fault 前置动作偶发
+Progress watchdog unsafe gate（map_fresh=0、tf=0、pose=(nan,nan)），禁止切换 solver_mode=qp。
+先完整阅读 AGENTS.md、三份 QP 文档、本轮运行工件，以及 collect_realtime_profile、
+capture_rog_unknown_audit、p2_fault_observer、test_mujoco_minco_mpc_chain、Goal Manager watchdog/
+safety gate、ROGMap adapter 和 MuJoCo localization producer。保留导航仓未跟踪 ats_swerve_mpc/求解器.md。
+
+起点：A1/A2（226/227）和 iLQR nominal（228）通过；unknown domain 225 的 all-unknown、blocked
+status/snapshot 同 sequence、急停、共同零速度和恢复 generation 已观察一次；旧 reference 不复活因 QoS
+不兼容已降级为未验证。domain 224 在 fault 前置无故障动作发生 unsafe gate，完整 runner 未通过。
+
+先 git pull --ff-only 和只读环境审计；用源码与日志分辨 localization 是否真的 NaN、TF 的时间/frame
+是否失配、watchdog 判定点的 heartbeat/snapshot 是否过期、是否存在跨 topic 非原子顺序。禁止用 sleep、
+放宽 timeout、跳过 footprint、忽略 NaN 或使用旧 reference 修复。若要修改，先给 DoD、文件范围、
+frame/time/generation/QoS 契约、最窄测试和停止条件；之后新 domain 依次 A/A、nominal、unknown，要求
+recovery new goal 成功。仅在完整 unknown 稳定通过后才恢复 qp_shadow A/B/C；P2、P3、HIL、实车不提前通过。
+最终更新三份文档，分仓中文提交和 SSH push，作者仅 liukong1220。
+```
+
+#### [历史提示词，已被 2026-08-10 执行结果取代] QP-2.7 干净环境 nominal 与 unknown 闭环
 
 ```text
 继续 ATS Sentry `ats_swerve_mpc` 的 QP-2.7，但本轮目标先限于“干净环境下 P2 nominal 与真实 unknown
