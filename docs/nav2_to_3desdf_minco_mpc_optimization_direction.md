@@ -473,3 +473,20 @@ timeout、lease、unknown/occupied、footprint、MPC 或 QP 门禁。
   command。不得通过延长等待、放宽 map/TF/unknown/lease/footprint 或复用旧 reference 绕过。完整 unknown
   runner、P2 red-box、其它故障、paired `qp_shadow` A/B/C、P2/P3/Nav2-free、HIL、实车与物理接触均未通过或
   未运行；`solver_mode=qp` 继续拒绝。
+
+## 2026-08-11 QP 数值防御与本机运行门禁
+
+`ats_swerve_mpc` 的 LTV-QP shadow 保持在执行跟踪层，未替代 Point-LIO、ROGMap、ground projection、
+PlanningMapSnapshot、Goal Manager、JPS、MINCO、footprint safety 或 Local Collision Repair。本轮把 QP
+candidate 的 dense LTV layout、双边 bounds、dual payload 与 reported/wall deadline 复核收紧为
+fail-closed，并在 builder 阶段拒绝非有限/非凸权重和非有限动力学限制；iLQR 仍是
+`/cmd_vel_mpc` 唯一 publisher，`solver_mode=qp_shadow` 不发布 Twist，`solver_mode=qp` 继续拒绝。
+`ats_swerve_mpc` 的实际组件结果为 12 个 CTest target、`77 tests, 0 errors, 0 failures, 0 skipped`；
+这只证明算法接口和安全拒绝路径，不能证明完整规控系统已运行。
+
+本机再次准备 headless MuJoCo 前的资源审计显示约 `2.5 GiB` available memory、`9.8 GiB` 已用 swap，
+且用户 `rviz2` 有持续约 `18% CPU` 负载。依据 CPU/swap 争用停止条件，本轮没有启动新的 ROS domain，
+故没有 nominal terminal、all-unknown 同 sequence、`ready=false -> emergency_stop=true ->` 两级零速度、
+recovery old-reference 拒绝、QP p50/p95/p99、P2 red-box 或 contact runtime 证据。不得把先前 iLQR nominal
+或组件测试外推为 QP shadow/P2 通过；P2 仍未通过，P3 仍不得标记 Nav2-free，P4/HIL/实车和连续 swept
+footprint 继续未验证。
