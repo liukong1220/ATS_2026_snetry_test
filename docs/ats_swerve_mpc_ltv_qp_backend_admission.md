@@ -425,7 +425,7 @@ CPU/swap 争用停止条件；没有终止用户进程，也没有把旧 iLQR/OS
 因此没有新的 QP status/residual/timing 分布、candidate feasible、P2 unknown recovery、P2 red-box、HIL、
 实车或物理 contact 通过结论。P2 仍未通过，P3 不得标记 Nav2-free，`solver_mode=qp` 继续拒绝。
 
-## 2026-08-11 QP-2.8.1 数值对象与完整 phase 加固
+## 2026-08-11 QP-2.8.1 数值对象与 backend phase 加固
 
 `LtvQpProblem` 的资源与数值准入已补齐为 backend 访问前的可审计契约。唯一
 `checkedLtvQpDimensions()` 使用 checked `size_t` 运算，锁定 `horizon <= 64` 与 `<= 3 MiB` 的 dense
@@ -442,11 +442,18 @@ Hessian/equality columns、gradient 或 bound vector 长度损坏时直接 `inva
 adapter counter 测试证明污染后 OSQP numeric update 完全不发生并返回 `kInvalidProblem`。因此“dense-to-CSC
 copy 在读取矩阵前 fail-closed”的表述自本节起有源码和单测支持；它不等同于 runtime 实时性或 QP 主链准入。
 
-计时口径也已修正：`wall_update_time_ms` 覆盖 `osqp_update_settings()`、`osqp_update_data_vec/mat()` 与
+计时口径已修正：`wall_update_time_ms` 覆盖 `osqp_update_settings()`、`osqp_update_data_vec/mat()` 与
 primal/dual warm-start；`wall_qp_phase_time_ms` 从 settings update 前连续覆盖至 `osqp_solve()` 返回。candidate
-对 reported update/solve、wall update/solve 和完整 phase 分别执行 finite、非负与 deadline gate；telemetry
-新增 `qp_backend_phase_ms`、`osqp_wall_qp_phase_ms`、`qp_phase_budget_overrun_count`。这是未来完整 QP phase
+对 reported update/solve、wall update/solve 和 backend phase 分别执行 finite、非负与 deadline gate；telemetry
+新增 `qp_backend_phase_ms`、`osqp_wall_qp_phase_ms`、`qp_phase_budget_overrun_count`。这是 OSQP backend phase
 p50/p95/p99 的数据接口，当前没有把组件墙钟样本写成 MuJoCo 或实车性能结论。
+
+**QP-2.8.2 review 阻塞**：`solveLtvProblem()` 仍先执行 dense-to-CSC 的 `copyLtvNumericalValues()`，再进入
+上述 `wall_qp_phase_time_ms` 的起点。因此 copy 不在 backend phase 或 candidate deadline 中，现有
+`qp_backend_phase_ms` 不能代表 complete QP adapter/solver cost。另一个携带 reconstructed candidate 的 validator
+overload 也需要在 identity reconstruction 的 `controlOffset()`/`segment()` 访问前重做 layout/bounds/finite gate。
+这两个问题只影响 shadow 数值准入与未来 QP 主链评审，不改变当前 iLQR 命令发布权；QP-2.8.2 必须先完成连续
+complete-phase 计时、deadline 和 corrupted-object GTest，之后才允许资源门禁后的 P2/Shadow runtime。
 
 本轮实际组件证据是单 worker build、12/12 CTest target 与 `83 tests, 0 errors, 0 failures, 0 skipped`，另有
 `p2_fault_observer` `3/0/0`、导航配置 `4/0/0`、受影响 launch/runner 静态检查通过。运行前资源审计发现

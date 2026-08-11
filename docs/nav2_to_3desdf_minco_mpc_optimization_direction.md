@@ -502,7 +502,7 @@ iLQR 已发布后读取同周期 snapshot，`solver_mode=qp` 仍在构造期拒�
 builder 与 OSQP CSC setup 之前统一拒绝 `horizon > 64` 或超过 `3 MiB` 的 dense payload；正式 horizon 30
 的 payload 是 `543144 bytes`。完整 layout 损坏不再在 timer 内重分配，NaN/Inf dense 数值在 OSQP copy、
 primal reconstruction 与 candidate hard-check 的索引前拒绝。OSQP update 的墙钟已覆盖 settings update、
-numeric update 和 warm-start，并新增覆盖完整 solve phase 的 deadline、telemetry 和 p50/p95/p99 数据入口。
+numeric update 和 warm-start，并新增覆盖 **backend solve phase** 的 deadline、telemetry 和 p50/p95/p99 数据入口。
 这保持 all-unknown、lease、emergency stop、localization/TF、gimbal、map/reference freshness、footprint 和
 四轮 hard-check 的原 fail-closed 语义，不会把 QP 结果发布给底盘。
 
@@ -512,3 +512,9 @@ numeric update 和 warm-start，并新增覆盖完整 solve phase 的 deadline�
 used、约 `3.6` load average；未杀该进程且未启动新 domain。因而没有新的 nominal terminal、all-unknown
 publication-sequence 配对、两级零速/recovery、QP phase p50/p95/p99、paired shadow A/B/C、red-box、HIL、
 实车或 physical contact 结论。P2 不通过，P3 不得称 Nav2-free，P4 未通过，`solver_mode=qp` 不得启用。
+
+**后续 review 阻塞（QP-2.8.2）**：`copyLtvNumericalValues()` 在 backend phase steady-clock 起点前执行，故目前
+`qp_backend_phase_ms` 不含 dense-to-CSC copy，不能写成 complete QP adapter/solver timing，也不能单独作为未来
+QP 主链的 deadline 准入。携带 reconstructed candidate 的 validator overload 也仍需在 identity 重建前重复执行
+layout/bounds/finite gate。下一轮先用连续 complete phase wall clock、独立 telemetry/deadline、corrupted-object
+GTest 关闭这两个缺口；再按资源门禁、iLQR nominal、真实 all-unknown、paired qp_shadow A/B/C 的顺序恢复运行。
