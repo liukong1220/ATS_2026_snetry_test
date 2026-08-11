@@ -396,3 +396,31 @@ replay。
 更新 runner 的 domain `224` 在 fault 前置运动即 fail-closed：`map_fresh=0`、`tf=0`、`pose=(nan,nan)`。在
 定位该上游 state/TF/snapshot 时序问题并完成完整 unknown recovery 前，禁止运行或解读 paired `qp_shadow`
 A/B/C，`solver_mode=qp` 继续拒绝，P2/P3/Nav2-free/HIL/实车/物理 contact 均不通过或未验证。
+
+## 2026-08-11 QP candidate 数值准入加固与环境停止
+
+本轮只收紧 adapter/candidate 的数值契约，没有改变 OSQP v1.0.0 vendor、固定 CSC pattern、
+`solver_mode`、iLQR 控制/发布链、`ControlCycleSnapshot`、ExecutionCommand、emergency stop、定位、gimbal、
+map/reference freshness 或底盘 ownership。`LtvQpProblem` 现在显式验证固定 `[delta_x, delta_u]` dense
+layout、等式/不等式/变量 bounds 的尺寸及逐项 `lower <= upper`；builder、OSQP dense-to-CSC numeric copy
+与 candidate validator 都在读取矩阵前执行该检查。因此即使错误对象的 `valid` 标志被保留，也会
+fail-closed，而不是在 control timer 内越界读取 Eigen buffer。
+
+candidate 对 OSQP telemetry 的准入现在同时要求：primal/dual payload 为精确固定维度且 finite；reported
+`solve_time/update_time` 与 C API wall `wall_update_time/wall_solve_time` 均不超过
+`qp_time_limit_ms`；残差、slack 和 hard violation 为有限非负值。builder 进一步拒绝非有限或负的
+动力学限制，以及非有限或负的 state/control/control-delta/terminal 权重，防止 NaN 或非凸 Hessian
+进入后端。`solved_inaccurate`、`max_iterations`、`time_limit` 和其他 non-`solved` status 仍只作诊断，
+绝不保存 warm-start 或产生可执行 candidate。
+
+组件级实际证据为：单 worker `ats_swerve_mpc` build 通过；12 个 CTest target，
+`colcon test-result` 为 `77 tests, 0 errors, 0 failures, 0 skipped`。新增测试覆盖 wall deadline、
+dual 缺失/NaN、malformed dense layout 与 reverse bounds；既有 ZeroSpeedGuard、真实四轮速度/向量增量、
+有效舵角速率、hard gate、CSC pattern、warm-start 和 `qp_shadow` single-publisher 测试仍通过。launch
+Python syntax 与 `ros2 launch ats_swerve_mpc ats_swerve_mpc.launch.py --show-args` 也通过。
+
+本轮**未启动** headless MuJoCo nominal、unknown 或 A/B/C：审计时有约 `2.5 GiB` available memory、
+`9.8 GiB` 已用 swap，用户 `rviz2` 持续约 `18% CPU`。虽未见残留 ATS/MuJoCo launch，这仍满足项目的
+CPU/swap 争用停止条件；没有终止用户进程，也没有把旧 iLQR/OSQP 日志复用为本 revision 的 runtime 证据。
+因此没有新的 QP status/residual/timing 分布、candidate feasible、P2 unknown recovery、P2 red-box、HIL、
+实车或物理 contact 通过结论。P2 仍未通过，P3 不得标记 Nav2-free，`solver_mode=qp` 继续拒绝。

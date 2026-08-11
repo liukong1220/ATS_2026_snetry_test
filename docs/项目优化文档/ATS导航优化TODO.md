@@ -477,6 +477,62 @@ OSQP iteration、放宽 deadline/residual 或接受 non-solved warm-start。P2/P
 仓库 HEAD 与 origin/develop 一致性和作者约束。
 ```
 
+#### QP-2.8：candidate 数值布局准入加固（2026-08-11）
+
+- [x] `LtvQpProblem` 新增固定 dense LTV layout 与双边 bounds 自检：严格要求
+  `[delta_x, delta_u]` 的决策维度、等式/不等式行数和每个 Eigen 向量尺寸一致，并拒绝任一
+  `lower > upper` 或 NaN bound。`LtvQpBuilder`、OSQP dense-to-CSC 数值拷贝和
+  `LtvQpCandidateValidator` 都在访问数值前执行该检查；不能仅信任可被错误保留的 `problem.valid`。
+- [x] candidate 同时拒绝 OSQP reported `solve/update_time` 与 adapter/C API
+  `wall_update/wall_solve` 任一超过 `qp_time_limit_ms`；dual payload 也必须与固定总约束行数严格
+  同维且有限。builder 拒绝非有限/负的动力学限制与非有限/负的 Q/R/Rd/terminal 权重，避免把 NaN 或
+  非凸 Hessian 交给后端后才失败。该修改没有改变 `solver_mode=ilqr`、`qp_shadow` 的只读诊断、
+  `solver_mode=qp` 拒绝、iLQR 的 `/cmd_vel_mpc` 唯一 publisher，或任一 emergency/lease/map/TF gate。
+- [x] 窄验证实际通过：单 worker `ats_swerve_mpc` 构建；12 个 CTest target、`77 tests, 0 errors,
+  0 failures, 0 skipped`。新增 GTest 锁定 wall deadline、dual payload、dense layout 和反向 bounds 的
+  fail-closed 拒绝；`p2_fault_observer` 为 `3/0/0`，导航配置为 `4/0/0`，MuJoCo 主链脚本 Bash
+  syntax、MPC launch Python syntax 与 `ros2 launch ... --show-args` 均通过。
+- [ ] 本轮没有启动 nominal、unknown 或 paired `qp_shadow` MuJoCo：检查时机器只有约 `2.5 GiB`
+  available memory、`9.8 GiB` 已用 swap，且用户 `rviz2` 持续消耗约 `18% CPU`。这属于 CPU/swap
+  争用硬停止条件；不得终止用户进程、不得把既有 iLQR nominal 当作本 revision 的 QP/P2 运行证据。
+  因此 p50/p95/p99、all-unknown 同 publication sequence、两级零速度、恢复后旧 reference 不复活、
+  `qp_shadow` A/B/C、P2 red-box、HIL、实车与物理接触均仍未验证。P2 不得标记通过，P3 不得标记
+  Nav2-free，`solver_mode=qp` 继续禁止。
+
+#### 下一阶段提示词：QP-2.8 资源门禁后的 P2 unknown 回归与 Shadow 恢复
+
+```text
+继续 ATS Sentry QP-2.8。先完整读取 AGENTS.md、QP TODO、backend admission、导航方向文档，以及
+LtvQpProblem/LtvQpOsqpSolver/LtvQpCandidateValidator、ats_swerve_mpc_node、p2_fault_observer、
+test_mujoco_minco_mpc_chain、Goal Manager watchdog、ROGMap adapter 和 MuJoCo localization producer。
+
+先对根仓、导航仓、MuJoCo 仓依次执行 git status --short --branch、git pull --ff-only origin develop、
+git rev-parse HEAD origin/develop、git remote -v。全部必须为 develop 和 SSH remote。保留导航仓用户
+未跟踪 ats_swerve_mpc/求解器.md；禁止 git add .、git add -A、git reset --hard、git checkout --、
+force push、删除用户文件或修改无关模块。作者只允许 liukong1220 <1625038134@qq.com>。
+
+运行前先做只读资源门禁：无完整 ATS/MuJoCo 残留 launch、无用户 RViz/桌面负载造成的持续 CPU/swap
+争用、无 NaN localization/TF、ROGMap projection 和 adapter heartbeat 均 fresh。未知用户进程不得
+终止。任一不满足即停止并记录，不启动 MuJoCo，不把静态/旧 nominal 结果写成 runtime 通过。
+
+门禁满足后，每个 case 使用新的空 ROS_DOMAIN_ID、独立日志目录、headless use_viewer:=false，并按顺序：
+1. solver_mode=ilqr、planning_grid_owner=rog_map、P2_FAULT_CASE=none 的 single nominal；验证 action、
+   terminal error、source generation/adapter sequence 递增、MINCO footprint、/cmd_vel_mpc 和
+   /motion_control 的唯一 owner、非零跟踪和收尾零速。
+2. 只有 nominal 完整通过后，另一个 domain 运行真实 P2_FAULT_CASE=unknown；observer 必须以
+   RELIABLE+VOLATILE 订阅 /minco/reference_path，并按同一 publication_sequence 配对 strict all-unknown
+   PlanningMapSnapshot 与 ready=false status。验证 ready=false -> emergency_stop=true -> 两级速度为零、
+   recovery 后 generation/sequence 继续递增且无新 goal 时旧 reference 不复活。
+3. unknown 完整通过后才运行配对 qp_shadow A/B/C；所有 profile 必须逐周期 snapshot identity 可比，
+   否则保留 not_comparable/withheld。记录 iLQR/QP status、iteration、reported/wall timing、residual、
+   hard margin、slack、warm-start、p50/p95/p99 和唯一 ownership。
+
+禁止启用 solver_mode=qp、提高 qp_max_iterations、放宽 time limit/residual、保存任何 non-solved
+warm-start、乐观设置 collision/map health、放宽 unknown/lease/footprint/TF/localization 语义，或把 iLQR
+baseline 冒充 QP feasible。最后只显式 stage 本轮文件，分仓中文详细提交、SSH push；报告 HEAD/origin
+一致性、shortlog 作者约束、实际运行日志和未验证边界。P2/P3/HIL/实车不得提前通过。
+```
+
 #### QP-3：受控主链切换与回退
 
 - [ ] `solver_mode=qp` 只能在 QP candidate 已通过全部 hard check 后发布 `controls.front()`；任何 `timeout`、`infeasible`、`numerical_failure`、residual 不合格、slack 超限或输入不健康都必须调用现有 `publishZeroCommandForFailure()`/`engageFailStop()` 语义。
