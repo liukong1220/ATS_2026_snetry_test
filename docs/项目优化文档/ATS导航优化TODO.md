@@ -499,11 +499,44 @@ OSQP iteration、放宽 deadline/residual 或接受 non-solved warm-start。P2/P
   `qp_shadow` A/B/C、P2 red-box、HIL、实车与物理接触均仍未验证。P2 不得标记通过，P3 不得标记
   Nav2-free，`solver_mode=qp` 继续禁止。
 
-#### 下一阶段提示词：QP-2.8 资源门禁后的 P2 unknown 回归与 Shadow 恢复
+#### QP-2.8.1：dimensions、backend 数值访问与完整 QP phase 准入（2026-08-11）
+
+- [x] 新增唯一、无分配的 `checkedLtvQpDimensions()`：使用 checked `size_t` 算术统一给出
+  decision/equality/inequality/total constraint rows 和 dense payload 字节数。受版本控制的上限是
+  `horizon <= 64`、dense matrix/vector payload `<= 3 MiB`；正式 `horizon=30` 对应
+  `decision=183`、`equality=93`、`inequality=90`、`constraint=366`、`543144 bytes`。node 在创建
+  `Se2MpcController` 前、builder 在分配前、生产 OSQP setup 在创建 CSC 前均消费该结果；`65` 与
+  `INT_MAX` 均在 `solver_mode=ilqr` 构造期 fail-closed，未发生整数溢出或 dense 分配。
+- [x] 预分配 `LtvQpBuilder::build(..., buffer)` 改为完整 `hasExpectedLayout()` gate。horizon、任一
+  matrix rows/columns、gradient 或 bounds 向量长度损坏时，在第一次 `setZero/block/segment` 前返回
+  invalid，不在控制 timer 重新分配；one-shot 调用仍显式在 timer 外 `allocate()`。
+- [x] `LtvQpProblem::hasFiniteNumerics()` 现在是 dense-to-CSC copy、primal reconstructor 和 candidate
+  validator 的索引前共同门禁：Hessian/gradient/equality/inequality matrix 与其 bounds 必须 finite；
+  variable bounds 仅允许 `+/-Inf`、拒绝 NaN。OSQP adapter 的 numeric-update counter GTest 证明 build 后
+  保留 `valid=true` 而污染 Hessian、gradient、矩阵、equality/inequality bounds 或 variable bound 时，返回
+  `invalid_problem` 且没有调用 `osqp_update_data_*()`。
+- [x] `wall_update_time_ms` 的口径已扩大为 settings update、数值 `q/l/u/P/A` update 和可选
+  primal/dual warm-start；`wall_qp_phase_time_ms` 从 settings update 前连续计至 `osqp_solve()` 返回。
+  candidate 同时拒绝 phase 非有限/负值或超过 `qp_time_limit_ms`；telemetry 增加
+  `qp_backend_phase_ms`、`osqp_wall_qp_phase_ms` 与 `qp_phase_budget_overrun_count`，因此未来 p50/p95/p99
+  可按完整 QP phase 统计，不能仅以 OSQP reported solve time 代替。
+- [x] 本轮实际验证：单 worker `ats_swerve_mpc` build；12/12 CTest target；`colcon test-result` 为
+  `83 tests, 0 errors, 0 failures, 0 skipped`。新增测试覆盖 checked dimensions、buffer columns/vector
+  损坏、OSQP copy 前 NaN/Inf、update 未触发、warm-start phase 计时、phase deadline 与 node 创建拒绝；
+  `p2_fault_observer` 为 `3/0/0`、导航配置为 `4/0/0`、MuJoCo runner Bash syntax、MPC launch
+  Python syntax 与 `ros2 launch ... --show-args` 均通过。
+- [ ] 本轮未启动 headless MuJoCo：运行前审计发现未知归属的用户 `ros2 topic echo
+  /ats_swerve_mpc/reference_horizon`，机器约 `1.6 GiB` available memory、`9.3 GiB` 已用 swap、load average
+  约 `3.6`。未终止用户进程；这触发残留 ROS/CPU-swap 争用停止条件。因此没有本 revision 的 nominal、真实
+  all-unknown、安全两级零速/recovery、QP status/residual/phase p50-p99、paired shadow A/B/C、P2 red-box、
+  HIL、实车或物理 contact 证据。P2 仍未通过，P3 不得标记 Nav2-free，`solver_mode=qp` 继续拒绝。
+
+#### 下一阶段提示词：QP-2.8.1 资源门禁后的 P2 unknown 回归与 Shadow 恢复
 
 ```text
-继续 ATS Sentry QP-2.8。先完整读取 AGENTS.md、QP TODO、backend admission、导航方向文档，以及
-LtvQpProblem/LtvQpOsqpSolver/LtvQpCandidateValidator、ats_swerve_mpc_node、p2_fault_observer、
+继续 ATS Sentry QP-2.8.1。数值对象/资源/完整 phase 修复已完成组件验证；先完整读取 AGENTS.md、QP TODO、
+backend admission、导航方向文档，以及 LtvQpProblem/LtvQpOsqpSolver/LtvQpCandidateValidator、
+ats_swerve_mpc_node、p2_fault_observer、
 test_mujoco_minco_mpc_chain、Goal Manager watchdog、ROGMap adapter 和 MuJoCo localization producer。
 
 先对根仓、导航仓、MuJoCo 仓依次执行 git status --short --branch、git pull --ff-only origin develop、
@@ -511,9 +544,9 @@ git rev-parse HEAD origin/develop、git remote -v。全部必须为 develop 和 
 未跟踪 ats_swerve_mpc/求解器.md；禁止 git add .、git add -A、git reset --hard、git checkout --、
 force push、删除用户文件或修改无关模块。作者只允许 liukong1220 <1625038134@qq.com>。
 
-运行前先做只读资源门禁：无完整 ATS/MuJoCo 残留 launch、无用户 RViz/桌面负载造成的持续 CPU/swap
-争用、无 NaN localization/TF、ROGMap projection 和 adapter heartbeat 均 fresh。未知用户进程不得
-终止。任一不满足即停止并记录，不启动 MuJoCo，不把静态/旧 nominal 结果写成 runtime 通过。
+运行前先做只读资源门禁：无完整 ATS/MuJoCo 残留 launch、无未知 ROS observer、无用户 RViz/桌面负载造成的
+持续 CPU/swap 争用、无 NaN localization/TF、ROGMap projection 和 adapter heartbeat 均 fresh。未知用户进程
+不得终止。任一不满足即停止并记录，不启动 MuJoCo，不把静态/旧 nominal 结果写成 runtime 通过。
 
 门禁满足后，每个 case 使用新的空 ROS_DOMAIN_ID、独立日志目录、headless use_viewer:=false，并按顺序：
 1. solver_mode=ilqr、planning_grid_owner=rog_map、P2_FAULT_CASE=none 的 single nominal；验证 action、

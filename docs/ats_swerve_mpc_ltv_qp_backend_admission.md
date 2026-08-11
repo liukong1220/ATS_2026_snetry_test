@@ -424,3 +424,32 @@ Python syntax 与 `ros2 launch ats_swerve_mpc ats_swerve_mpc.launch.py --show-ar
 CPU/swap 争用停止条件；没有终止用户进程，也没有把旧 iLQR/OSQP 日志复用为本 revision 的 runtime 证据。
 因此没有新的 QP status/residual/timing 分布、candidate feasible、P2 unknown recovery、P2 red-box、HIL、
 实车或物理 contact 通过结论。P2 仍未通过，P3 不得标记 Nav2-free，`solver_mode=qp` 继续拒绝。
+
+## 2026-08-11 QP-2.8.1 数值对象与完整 phase 加固
+
+`LtvQpProblem` 的资源与数值准入已补齐为 backend 访问前的可审计契约。唯一
+`checkedLtvQpDimensions()` 使用 checked `size_t` 运算，锁定 `horizon <= 64` 与 `<= 3 MiB` 的 dense
+matrix/vector payload；正式 `horizon=30` 是 `543144 bytes`。节点在创建 iLQR controller 之前、builder
+在分配之前、生产 OSQP setup 在 CSC 创建之前共用该计算，不再在 node 以未经检查的整数表达式独立计算
+decision/constraint rows。`horizon=65` 与 `INT_MAX` 的 node GTest 都在任何 controller/QP workspace 分配前
+抛出 `std::invalid_argument`。
+
+对预分配 buffer，`LtvQpBuilder::build(..., buffer)` 现在要求完整 `hasExpectedLayout()`；rows 正确但
+Hessian/equality columns、gradient 或 bound vector 长度损坏时直接 `invalid`，不会在 control timer 重新分配
+或进入 `setZero/block/segment`。`hasFiniteNumerics()` 独立于 `problem.valid`：所有 dense coefficient、gradient
+和 equality/inequality bounds 必须 finite，variable bounds 仅允许 `+/-Inf` 而禁止 NaN。它在
+`copyLtvNumericalValues()`、`LtvQpCandidateReconstructor` 和 candidate validator 的一切索引前执行；新增
+adapter counter 测试证明污染后 OSQP numeric update 完全不发生并返回 `kInvalidProblem`。因此“dense-to-CSC
+copy 在读取矩阵前 fail-closed”的表述自本节起有源码和单测支持；它不等同于 runtime 实时性或 QP 主链准入。
+
+计时口径也已修正：`wall_update_time_ms` 覆盖 `osqp_update_settings()`、`osqp_update_data_vec/mat()` 与
+primal/dual warm-start；`wall_qp_phase_time_ms` 从 settings update 前连续覆盖至 `osqp_solve()` 返回。candidate
+对 reported update/solve、wall update/solve 和完整 phase 分别执行 finite、非负与 deadline gate；telemetry
+新增 `qp_backend_phase_ms`、`osqp_wall_qp_phase_ms`、`qp_phase_budget_overrun_count`。这是未来完整 QP phase
+p50/p95/p99 的数据接口，当前没有把组件墙钟样本写成 MuJoCo 或实车性能结论。
+
+本轮实际组件证据是单 worker build、12/12 CTest target 与 `83 tests, 0 errors, 0 failures, 0 skipped`，另有
+`p2_fault_observer` `3/0/0`、导航配置 `4/0/0`、受影响 launch/runner 静态检查通过。运行前资源审计发现
+未知用户 `ros2 topic echo /ats_swerve_mpc/reference_horizon`、约 `1.6 GiB` available、`9.3 GiB` swap used 与
+约 `3.6` load average，故本 revision 不运行 nominal、unknown 或 paired shadow。P2、P3/Nav2-free、HIL、
+实车、physical contact 与 `solver_mode=qp` 主控制切换均仍未验证且不得标记通过。
