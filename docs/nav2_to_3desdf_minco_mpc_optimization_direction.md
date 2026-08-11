@@ -490,3 +490,25 @@ fail-closed，并在 builder 阶段拒绝非有限/非凸权重和非有限动�
 recovery old-reference 拒绝、QP p50/p95/p99、P2 red-box 或 contact runtime 证据。不得把先前 iLQR nominal
 或组件测试外推为 QP shadow/P2 通过；P2 仍未通过，P3 仍不得标记 Nav2-free，P4/HIL/实车和连续 swept
 footprint 继续未验证。
+
+## 2026-08-11 QP-2.8.1 数值准入与运行停止边界
+
+本轮仍只修改执行跟踪层的 LTV-QP adapter，不替代或改动 Point-LIO、ROGMap、ground projection、
+PlanningMapSnapshot、Goal Manager、JPS、MINCO、footprint safety、Local Collision Repair、ExecutionCommand、
+速度 frame 或底盘 ownership。`solver_mode=ilqr` 保持默认和唯一 `/cmd_vel_mpc` publisher；`qp_shadow` 只在
+iLQR 已发布后读取同周期 snapshot，`solver_mode=qp` 仍在构造期拒绝。
+
+为消除 QP-2.8 review 中的资源与数值访问缺口，shared `checkedLtvQpDimensions()` 在 node/controller、dense
+builder 与 OSQP CSC setup 之前统一拒绝 `horizon > 64` 或超过 `3 MiB` 的 dense payload；正式 horizon 30
+的 payload 是 `543144 bytes`。完整 layout 损坏不再在 timer 内重分配，NaN/Inf dense 数值在 OSQP copy、
+primal reconstruction 与 candidate hard-check 的索引前拒绝。OSQP update 的墙钟已覆盖 settings update、
+numeric update 和 warm-start，并新增覆盖完整 solve phase 的 deadline、telemetry 和 p50/p95/p99 数据入口。
+这保持 all-unknown、lease、emergency stop、localization/TF、gimbal、map/reference freshness、footprint 和
+四轮 hard-check 的原 fail-closed 语义，不会把 QP 结果发布给底盘。
+
+**已验证的是组件边界**：单 worker build、12/12 CTest target、`83 tests, 0 errors, 0 failures, 0 skipped`、
+`p2_fault_observer` `3/0/0`、导航配置 `4/0/0`、Bash/Python launch 静态检查。**未验证的是运行闭环**：审计到
+未知用户 `ros2 topic echo /ats_swerve_mpc/reference_horizon`、约 `1.6 GiB` available memory、`9.3 GiB` swap
+used、约 `3.6` load average；未杀该进程且未启动新 domain。因而没有新的 nominal terminal、all-unknown
+publication-sequence 配对、两级零速/recovery、QP phase p50/p95/p99、paired shadow A/B/C、red-box、HIL、
+实车或 physical contact 结论。P2 不通过，P3 不得称 Nav2-free，P4 未通过，`solver_mode=qp` 不得启用。
