@@ -499,7 +499,7 @@ OSQP iteration、放宽 deadline/residual 或接受 non-solved warm-start。P2/P
   `qp_shadow` A/B/C、P2 red-box、HIL、实车与物理接触均仍未验证。P2 不得标记通过，P3 不得标记
   Nav2-free，`solver_mode=qp` 继续禁止。
 
-#### QP-2.8.1：dimensions、backend 数值访问与完整 QP phase 准入（2026-08-11）
+#### QP-2.8.1：dimensions、backend 数值访问与 backend phase 准入（2026-08-11）
 
 - [x] 新增唯一、无分配的 `checkedLtvQpDimensions()`：使用 checked `size_t` 算术统一给出
   decision/equality/inequality/total constraint rows 和 dense payload 字节数。受版本控制的上限是
@@ -518,8 +518,17 @@ OSQP iteration、放宽 deadline/residual 或接受 non-solved warm-start。P2/P
 - [x] `wall_update_time_ms` 的口径已扩大为 settings update、数值 `q/l/u/P/A` update 和可选
   primal/dual warm-start；`wall_qp_phase_time_ms` 从 settings update 前连续计至 `osqp_solve()` 返回。
   candidate 同时拒绝 phase 非有限/负值或超过 `qp_time_limit_ms`；telemetry 增加
-  `qp_backend_phase_ms`、`osqp_wall_qp_phase_ms` 与 `qp_phase_budget_overrun_count`，因此未来 p50/p95/p99
-  可按完整 QP phase 统计，不能仅以 OSQP reported solve time 代替。
+  `qp_backend_phase_ms`、`osqp_wall_qp_phase_ms` 与 `qp_phase_budget_overrun_count`。该指标严格表示
+  **OSQP backend phase**，不能仅以 OSQP reported solve time 代替。
+- [ ] review 发现 `solveLtvProblem()` 在 backend phase 起点前调用 `copyLtvNumericalValues()`；这段 dense-to-CSC
+  数值拷贝属于控制 callback 的 QP adapter 成本，却未包含在 `wall_qp_phase_time_ms` 或 candidate deadline。
+  因此当前不能将 backend phase p50/p95/p99 写成完整 QP adapter/solver cost。QP-2.8.2 必须以连续 wall clock 覆盖
+  dense-to-CSC copy、settings update、C API data update、warm-start 与 solve，并为 complete phase 增加独立 telemetry、
+  deadline gate 和 deterministic GTest。
+- [ ] review 发现携带 `LtvQpPrimalCandidate` 的 validator overload 在用 `controlOffset()` 重建 identity 前未再次执行
+  `hasExpectedLayout()`、`hasOrderedBounds()`、`hasFiniteNumerics()`。当前 `runQpShadow()` 只传入本周期 builder 成功的
+  buffer，未发现运行期触发路径；但公开接口不能依赖该调用约定。QP-2.8.2 必须在该 overload 的任何 `decisionSize()`/
+  `segment()` 访问前加入相同防御门，并用 corrupted-but-valid fixture 证明 fail-closed。
 - [x] 本轮实际验证：单 worker `ats_swerve_mpc` build；12/12 CTest target；`colcon test-result` 为
   `83 tests, 0 errors, 0 failures, 0 skipped`。新增测试覆盖 checked dimensions、buffer columns/vector
   损坏、OSQP copy 前 NaN/Inf、update 未触发、warm-start phase 计时、phase deadline 与 node 创建拒绝；
@@ -531,18 +540,36 @@ OSQP iteration、放宽 deadline/residual 或接受 non-solved warm-start。P2/P
   all-unknown、安全两级零速/recovery、QP status/residual/phase p50-p99、paired shadow A/B/C、P2 red-box、
   HIL、实车或物理 contact 证据。P2 仍未通过，P3 不得标记 Nav2-free，`solver_mode=qp` 继续拒绝。
 
-#### 下一阶段提示词：QP-2.8.1 资源门禁后的 P2 unknown 回归与 Shadow 恢复
+#### 下一阶段提示词：QP-2.8.2 complete QP phase 审计、P2 unknown 与 Shadow 恢复
 
 ```text
-继续 ATS Sentry QP-2.8.1。数值对象/资源/完整 phase 修复已完成组件验证；先完整读取 AGENTS.md、QP TODO、
-backend admission、导航方向文档，以及 LtvQpProblem/LtvQpOsqpSolver/LtvQpCandidateValidator、
-ats_swerve_mpc_node、p2_fault_observer、
-test_mujoco_minco_mpc_chain、Goal Manager watchdog、ROGMap adapter 和 MuJoCo localization producer。
+继续 ATS Sentry QP-2.8.2。先完整读取 AGENTS.md、QP TODO、backend admission、导航方向文档，以及
+LtvQpProblem/LtvQpOsqpSolver/LtvQpCandidateValidator、ats_swerve_mpc_node、相关 GTest、
+p2_fault_observer、test_mujoco_minco_mpc_chain、Goal Manager watchdog、ROGMap adapter 和 MuJoCo
+localization producer。
 
 先对根仓、导航仓、MuJoCo 仓依次执行 git status --short --branch、git pull --ff-only origin develop、
-git rev-parse HEAD origin/develop、git remote -v。全部必须为 develop 和 SSH remote。保留导航仓用户
-未跟踪 ats_swerve_mpc/求解器.md；禁止 git add .、git add -A、git reset --hard、git checkout --、
-force push、删除用户文件或修改无关模块。作者只允许 liukong1220 <1625038134@qq.com>。
+git rev-parse HEAD origin/develop、git remote -v。全部必须为 develop 和 SSH remote。若导航仓存在用户
+未跟踪 ats_swerve_mpc/求解器.md 则原样保留；禁止 git add .、git add -A、git reset --hard、git checkout --、
+force push、删除用户文件或修改无关模块。作者只允许 liukong1220 <1625038134@qq.com>，禁止
+Claude/Anthropic co-author。
+
+本轮先完成 QP-2.8.2，未完成前不得运行 MuJoCo：
+1. `copyLtvNumericalValues()` 是 `solveLtvProblem()` 的 dense-to-CSC adapter 成本，当前发生在
+   `wall_qp_phase_time_ms` 起点之前。以连续 steady-clock 完整覆盖 copy、settings update、
+   `osqp_update_data_vec/mat`、warm-start 与 `osqp_solve()`；保留 backend-only 子阶段，但新增
+   `complete_qp_phase` telemetry、JSON 字段、summary p50/p95/p99 和 candidate deadline gate。
+2. candidate 的 deadline 既要拒绝 backend substage 超期，也要拒绝 complete QP phase 超期；不得把
+   problem build、primal reconstruction/hard-check 与 complete phase 混成同一数值，但 full callback
+   telemetry 必须继续记录它们的总成本。
+3. `LtvQpCandidateValidator::validate(..., LtvQpPrimalCandidate)` 在所有 `decisionSize()`、
+   `controlOffset()` 或 Eigen `segment()` 前必须执行完整 layout、ordered bounds、finite numerics 和
+   result-size gate。加入 corrupted-but-valid state/control dimension、matrix/vector layout 与 finite payload
+   fixture，证明不会索引负 offset 或越界，并返回稳定的 fail-closed reason。
+4. 更新受影响 GTest、telemetry serialization 和三份根仓文档。禁止放宽 horizon=64/3 MiB 资源门、
+   qp_time_limit_ms、residual、unknown/lease/footprint/TF/localization 或任何四轮 hard-check。
+5. 先运行单 worker `ats_swerve_mpc` build、相关 CTest/完整 package tests、test-result、launch syntax、
+   `--show-args`、三仓 `git diff --check`。只在这些通过后进入运行前资源门禁。
 
 运行前先做只读资源门禁：无完整 ATS/MuJoCo 残留 launch、无未知 ROS observer、无用户 RViz/桌面负载造成的
 持续 CPU/swap 争用、无 NaN localization/TF、ROGMap projection 和 adapter heartbeat 均 fresh。未知用户进程
@@ -557,8 +584,8 @@ force push、删除用户文件或修改无关模块。作者只允许 liukong12
    PlanningMapSnapshot 与 ready=false status。验证 ready=false -> emergency_stop=true -> 两级速度为零、
    recovery 后 generation/sequence 继续递增且无新 goal 时旧 reference 不复活。
 3. unknown 完整通过后才运行配对 qp_shadow A/B/C；所有 profile 必须逐周期 snapshot identity 可比，
-   否则保留 not_comparable/withheld。记录 iLQR/QP status、iteration、reported/wall timing、residual、
-   hard margin、slack、warm-start、p50/p95/p99 和唯一 ownership。
+   否则保留 not_comparable/withheld。记录 iLQR/QP status、iteration、reported/backend/complete phase wall
+   timing、residual、hard margin、slack、warm-start、p50/p95/p99 和唯一 ownership。
 
 禁止启用 solver_mode=qp、提高 qp_max_iterations、放宽 time limit/residual、保存任何 non-solved
 warm-start、乐观设置 collision/map health、放宽 unknown/lease/footprint/TF/localization 语义，或把 iLQR
