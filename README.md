@@ -347,5 +347,20 @@ ATS_2026_snetry_test/
 | MuJoCo | 四舵轮刚体、接触与传感器物理仿真 | [google-deepmind/mujoco](https://github.com/google-deepmind/mujoco) |
 | Livox ROS Driver 2 | Livox 设备接入与带点时间戳的消息 | [Livox-SDK/livox_ros_driver2](https://github.com/Livox-SDK/livox_ros_driver2) |
 
+### 技术交流与开源贡献致谢
+
+除上述直接使用的开源项目外，本项目的学习、设计和工程实践也受到了许多高校、战队和个人的帮助。在此特别致谢：
+
+| 致谢对象 | 交流与贡献 | 相关链接 |
+| :--- | :--- | :--- |
+| 中国科学技术大学技术开源报告、张昊鹏、邵宜阳等同学 | 感谢技术开源报告，以及在导航、算法思路和工程问题交流中的帮助与贡献 | [张昊鹏 GitHub](https://github.com/ZhangHaopeng-Dino) |
+| 武汉科技大学武晓健（hyheiyue） | 感谢在导航实践与开源交流中的帮助，以及 `rose_navigation` 项目的开源贡献 | [rose_navigation](https://github.com/hyheiyue/rose_navigation) |
+| 哈尔滨工业大学（威海）HERO 战队 | 感谢在 RoboMaster 导航与工程实践方面的开源贡献 | [HERO_2026_Sentry_NAV](https://github.com/LiuJinbo1027/HERO_2026_Sentry_NAV) |
+| 同济大学 SuperPower 战队 | 感谢在 RoboMaster 视觉方向的开源项目与技术贡献 | [sp_vision_25](https://github.com/TongjiSuperPower/sp_vision_25) |
+| 昆明理工大学津桥学院王从亦同学 | 感谢在项目进入导航方向初期给予的指导、交流与大力帮助 | — |
+| 深圳北理莫斯科大学陈力瀚、北极熊战队 | 特别感谢在进入 RoboMaster 视觉与导航领域初期给予的引导、经验分享和技术帮助 | [SMBU-PolarBear-Robotics-Team](https://github.com/SMBU-PolarBear-Robotics-Team) |
+
+以上致谢名单不分先后。因篇幅所限，未能尽列所有曾经给予支持的院校、战队、个人与开源项目，在此谨表歉意，并致以同样诚挚的谢意。衷心感谢 RoboMaster 各高校在算法研究、工程实践和开源生态建设方面的贡献与无私帮助。最后，特别感谢所有 RoboMaster 参赛队伍，你们的实践与探索让我获得了更深层次的学习与成长。
+
 工作区聚合了多个独立 Git 仓库和不同许可证的 ROS 包。每个包、模型和第三方资产的最终许可与
 再分发要求，以其自身的 `LICENSE`、`NOTICE`、`package.xml` 和上游声明为准。
