@@ -460,3 +460,28 @@ complete-phase 计时、deadline 和 corrupted-object GTest，之后才允许资
 未知用户 `ros2 topic echo /ats_swerve_mpc/reference_horizon`、约 `1.6 GiB` available、`9.3 GiB` swap used 与
 约 `3.6` load average，故本 revision 不运行 nominal、unknown 或 paired shadow。P2、P3/Nav2-free、HIL、
 实车、physical contact 与 `solver_mode=qp` 主控制切换均仍未验证且不得标记通过。
+
+## 2026-08-12 QP-2.8.2 complete phase 与 candidate 防御
+
+本 revision 已闭合两个 review 阻塞项，仍保持 `solver_mode=ilqr` 默认、iLQR 为 `/cmd_vel_mpc` 唯一 publisher，
+`qp_shadow` 只做同周期诊断，未改变 OSQP 迭代/时间/残差准入或地图、TF、lease、footprint、急停和四轮 hard-check。
+
+- `LtvQpOsqpSolver::solveLtvProblem()` 在 `copyLtvNumericalValues()` 前创建 steady-clock；新的
+  `wall_complete_qp_phase_time_ms` 连续覆盖 dense-to-CSC copy、settings/data update、primal/dual warm-start
+  和 `osqp_solve()`。原 `wall_qp_phase_time_ms` 保留为 settings update 到 solve 返回的 backend-only 子阶段。
+- telemetry 新增 `qp_complete_phase_ms` 与 `qp_complete_phase_budget_overrun_count`，JSON schema 升级为 `4`；
+  backend-only 与 complete phase 均进入 ring 分布和日志 p50/p95/p99，candidate deadline 同时拒绝两者超期。
+  QP build、primal reconstruction 和 hard-check 仍有独立 stage/full callback 计时。
+- reconstructed-candidate validator overload 在任何 `decisionSize()`、`controlOffset()`、Eigen `segment<3>()`
+  前依次执行 expected layout、ordered bounds、finite numerics、horizon/nominal、primal exact-size/finite gate，
+  并显式检查 control offset 范围。新增 state/control dimension、matrix/vector layout、NaN/Inf 与 corrupted-but-valid
+  fixture 均稳定 fail-closed，无负 offset 或 Eigen 越界访问。
+
+实际验证：单 worker build 通过；完整 `colcon test` 的 12/12 target 通过，`colcon test-result` 为
+`85 tests, 0 errors, 0 failures, 0 skipped`；`test_p2_fault_observer.py` 为 `3/0/0`，导航配置为 `4/0/0`；
+MPC/MuJoCo runner `bash -n`、相关 Python `py_compile` 和 `ros2 launch ... --show-args` 均通过。未 source 工作区时
+observer 的 import 失败是环境调用条件，source `install/setup.bash` 后通过。
+
+本 revision 未启动 MuJoCo，故没有 nominal、真实 all-unknown 两级零速与恢复、paired `qp_shadow` A/B/C、runtime
+phase p50/p95/p99、P2 red-box、物理 contact、HIL 或实车证据。`solver_mode=qp` 继续禁止；P2、P3/Nav2-free 和
+HIL/实车均不得标记通过。

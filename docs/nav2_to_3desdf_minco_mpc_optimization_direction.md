@@ -518,3 +518,19 @@ publication-sequence 配对、两级零速/recovery、QP phase p50/p95/p99、pai
 QP 主链的 deadline 准入。携带 reconstructed candidate 的 validator overload 也仍需在 identity 重建前重复执行
 layout/bounds/finite gate。下一轮先用连续 complete phase wall clock、独立 telemetry/deadline、corrupted-object
 GTest 关闭这两个缺口；再按资源门禁、iLQR nominal、真实 all-unknown、paired qp_shadow A/B/C 的顺序恢复运行。
+
+## 2026-08-12 QP-2.8.2 实现边界与证据
+
+QP adapter 现在区分两个 steady-clock 口径：`qp_backend_phase_ms` 仅覆盖 settings/data update、warm-start 与
+`osqp_solve()`；`qp_complete_phase_ms` 从 dense-to-CSC 数值拷贝开始连续覆盖到 solve 返回。两者均进入 JSON
+schema `4`、ring 汇总 p50/p95/p99 和独立 deadline counter；QP build、primal reconstruction、hard-check 不混入
+complete phase，但仍保留 full callback telemetry。candidate deadline 同时拒绝 backend-only 与 complete phase 超期。
+
+validator reconstructed-candidate overload 已在 `decisionSize()`、`controlOffset()` 与 Eigen segment 之前执行完整
+layout/bounds/finite、horizon、nominal 与 primal exact-size gate，并检查 offset 非负且三维块不越界。腐坏但 `valid=true`
+的 state/control dimension、矩阵/向量 layout、NaN/Inf fixture 组件测试通过，保持 fail-closed。
+
+本 revision 的已验证证据仅为 `ats_swerve_mpc` 单 worker build、12/12 CTest、`85 tests, 0 errors, 0 failures, 0 skipped`、
+P2 observer/config Python tests、Bash/Python/launch 静态校验。未进行 MuJoCo nominal、真实 unknown 安全停机/recovery、
+paired shadow A/B/C、red-box、P2/P3、物理接触、HIL 或实车；不得将组件 phase 样本外推为 20 Hz 周期预算或主链准入，
+也不得启用 `solver_mode=qp`。

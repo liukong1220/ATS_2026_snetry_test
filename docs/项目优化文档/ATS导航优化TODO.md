@@ -499,6 +499,22 @@ OSQP iteration、放宽 deadline/residual 或接受 non-solved warm-start。P2/P
   `qp_shadow` A/B/C、P2 red-box、HIL、实车与物理接触均仍未验证。P2 不得标记通过，P3 不得标记
   Nav2-free，`solver_mode=qp` 继续禁止。
 
+#### QP-2.8.2：complete phase 与公开 validator 防御（2026-08-12）
+
+- [x] `solveLtvProblem()` 的连续 complete phase 从 `copyLtvNumericalValues()` 前开始，覆盖 dense-to-CSC、
+  settings/data numeric update、primal/dual warm-start 和 `osqp_solve()`；原 backend-only phase 保留且不混入
+  problem build、primal reconstruction 或 hard-check。
+- [x] 新增 `qp_complete_phase_ms` JSON 字段（schema `4`）、ring 分布/log p50/p95/p99 和
+  `qp_complete_phase_budget_overrun_count`；candidate 同时拒绝 backend-only 与 complete phase deadline 超期。
+- [x] reconstructed-candidate validator 在任何 `decisionSize()`/`controlOffset()`/`segment()` 前检查
+  expected layout、ordered bounds、finite numerics、horizon/nominal、primal exact-size/finite 和 offset 范围。
+  corrupted-but-valid state/control dimension、matrix/vector layout、NaN/Inf fixture 全部 fail-closed。
+- [x] 组件验证：单 worker build；12/12 CTest target；`85 tests, 0 errors, 0 failures, 0 skipped`；P2 observer
+  `3/0/0`；导航配置 `4/0/0`；MPC/MuJoCo Bash、Python compile、launch `--show-args` 通过。
+- [ ] 本 revision 未启动 MuJoCo。nominal、真实 all-unknown `ready=false -> emergency_stop -> 两级零速 -> recovery`、
+  paired `qp_shadow` A/B/C、runtime timing p50/p95/p99、red-box、P2/P3、physical contact、HIL/实车均未验证；
+  `solver_mode=qp` 继续禁止。
+
 #### QP-2.8.1：dimensions、backend 数值访问与 backend phase 准入（2026-08-11）
 
 - [x] 新增唯一、无分配的 `checkedLtvQpDimensions()`：使用 checked `size_t` 算术统一给出
