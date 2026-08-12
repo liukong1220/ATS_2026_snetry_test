@@ -81,7 +81,7 @@ def main() -> int:
             detail = "no response" if response is None else response.message
             raise RuntimeError(f"telemetry service rejected dump: {detail}")
         payload = json.loads(response.message)
-        if payload.get("schema_version") != 3 or not isinstance(payload.get("samples"), list):
+        if payload.get("schema_version") != 4 or not isinstance(payload.get("samples"), list):
             raise RuntimeError("telemetry service returned an unsupported schema")
         sampling_window = payload.get("sampling_window")
         if not isinstance(sampling_window, dict):

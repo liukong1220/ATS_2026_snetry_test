@@ -62,7 +62,7 @@ def load_run(specification: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
     root = Path(directory)
     telemetry = json.loads((root / "raw_telemetry.json").read_text())
     manifest = json.loads((root / "manifest.json").read_text())
-    if telemetry.get("schema_version") not in (2, 3):
+    if telemetry.get("schema_version") not in (2, 3, 4):
         raise ValueError(f"{name}: unsupported telemetry schema")
     if not isinstance(telemetry.get("samples"), list):
         raise ValueError(f"{name}: missing samples")
@@ -82,6 +82,7 @@ def summarize(telemetry: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
         "osqp_reported_solve_ms": distribution([sample.get("osqp_reported_solve_ms") for sample in attempted]),
         "osqp_wall_update_ms": distribution([sample.get("osqp_wall_update_ms") for sample in attempted]),
         "osqp_wall_solve_ms": distribution([sample.get("osqp_wall_solve_ms") for sample in attempted]),
+        "qp_complete_phase_ms": distribution([sample.get("qp_complete_phase_ms") for sample in attempted]),
     }
     metrics = [sample.get("qp_problem_metrics") for sample in samples]
     metric_names = sorted({key for metric in metrics if isinstance(metric, dict) for key in metric})
