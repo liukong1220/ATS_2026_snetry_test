@@ -172,18 +172,18 @@ Visualization Manager:
         Value: /rog_map/viz
       Use Fixed Frame: true
       Value: true
-    - Alpha: 1.0
+    - Alpha: 0.85
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 0; 220; 255
       Enabled: true
       Line Style: Lines
-      Line Width: 0.04
+      Line Width: 0.025
       Name: Global Planning / JPS Search Path
       Offset:
         X: 0
         Y: 0
-        Z: 0
+        Z: 0.02
       Pose Color: 0; 220; 255
       Pose Style: None
       Topic:
@@ -193,7 +193,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /minco/raw_path
       Value: true
-    - Alpha: 1.0
+    - Alpha: 0.95
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 50; 255; 80
@@ -204,7 +204,7 @@ Visualization Manager:
       Offset:
         X: 0
         Y: 0
-        Z: 0
+        Z: 0.04
       Pose Color: 50; 255; 80
       Pose Style: None
       Topic:
@@ -214,19 +214,19 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /minco/reference_path
       Value: true
-    - Alpha: 0.8
+    - Alpha: 0.95
       Buffer Length: 1
       Class: rviz_default_plugins/Path
-      Color: 255; 255; 0
+      Color: 255; 196; 0
       Enabled: true
       Line Style: Lines
       Line Width: 0.03
-      Name: MPC Follow / Reference Horizon
+      Name: MPC Follow / Active Reference Horizon
       Offset:
         X: 0
         Y: 0
-        Z: 0
-      Pose Color: 255; 255; 0
+        Z: 0.08
+      Pose Color: 255; 196; 0
       Pose Style: None
       Topic:
         Depth: 1
@@ -235,18 +235,18 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /ats_swerve_mpc/reference_horizon
       Value: true
-    - Alpha: 0.8
+    - Alpha: 0.9
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 255; 80; 255
       Enabled: true
-      Line Style: Lines
-      Line Width: 0.03
-      Name: MPC Follow / Predicted Rollout
+      Line Style: Billboards
+      Line Width: 0.075
+      Name: MPC Prediction / iLQR Follow Rollout
       Offset:
         X: 0
         Y: 0
-        Z: 0
+        Z: 0.12
       Pose Color: 255; 80; 255
       Pose Style: None
       Topic:

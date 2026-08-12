@@ -20,12 +20,39 @@ ROG_MAP_DEBUG_TOPICS = (
     "/rog_map/esdf",
     "/rog_map/viz",
 )
-NAVIGATION_PATH_DISPLAYS = {
-    "/minco/raw_path": "Global Planning / JPS Search Path",
-    "/minco/reference_path": "Local Control / MINCO Timed Reference",
-    "/ats_swerve_mpc/reference_horizon": "MPC Follow / Reference Horizon",
-    "/ats_swerve_mpc/predicted_path": "MPC Follow / Predicted Rollout",
+NAVIGATION_PATH_DISPLAY_CONTRACTS = {
+    "/minco/raw_path": {
+        "name": "Global Planning / JPS Search Path",
+        "color": "0; 220; 255",
+        "line_style": "Lines",
+        "line_width": 0.025,
+        "offset_z": 0.02,
+    },
+    "/minco/reference_path": {
+        "name": "Local Control / MINCO Timed Reference",
+        "color": "50; 255; 80",
+        "line_style": "Lines",
+        "line_width": 0.05,
+        "offset_z": 0.04,
+    },
+    "/ats_swerve_mpc/reference_horizon": {
+        "name": "MPC Follow / Active Reference Horizon",
+        "color": "255; 196; 0",
+        "line_style": "Lines",
+        "line_width": 0.03,
+        "offset_z": 0.08,
+    },
+    "/ats_swerve_mpc/predicted_path": {
+        "name": "MPC Prediction / iLQR Follow Rollout",
+        "color": "255; 80; 255",
+        "line_style": "Billboards",
+        "line_width": 0.075,
+        "offset_z": 0.12,
+    },
 }
+NAVIGATION_PATH_DISPLAY_NAMES = tuple(
+    contract["name"] for contract in NAVIGATION_PATH_DISPLAY_CONTRACTS.values()
+)
 
 
 class DuplicateKeyLoader(yaml.SafeLoader):
@@ -190,16 +217,28 @@ def assert_navigation_rviz_contract(document, fixed_frame: str, context: str):
         f"{context} /rog_map/bounds must use Best Effort"
     )
 
-    for topic, display_name in NAVIGATION_PATH_DISPLAYS.items():
+    for topic, contract in NAVIGATION_PATH_DISPLAY_CONTRACTS.items():
         display = single_display_for_topic(document, topic, context)
         assert display["Class"] == "rviz_default_plugins/Path", (
             f"{context} {topic} must be a Path display"
         )
-        assert display["Name"] == display_name, (
-            f"{context} {topic} display name must be {display_name!r}"
+        assert display["Name"] == contract["name"], (
+            f"{context} {topic} display name must be {contract['name']!r}"
         )
         assert display["Topic"]["Reliability Policy"] == "Reliable", (
             f"{context} {topic} must use Reliable"
+        )
+        assert display["Color"] == contract["color"], (
+            f"{context} {topic} color must be {contract['color']!r}"
+        )
+        assert display["Line Style"] == contract["line_style"], (
+            f"{context} {topic} line style must be {contract['line_style']!r}"
+        )
+        assert display["Line Width"] == contract["line_width"], (
+            f"{context} {topic} line width must be {contract['line_width']}"
+        )
+        assert display["Offset"]["Z"] == contract["offset_z"], (
+            f"{context} {topic} Z offset must be {contract['offset_z']}"
         )
 
 
@@ -465,7 +504,11 @@ def main():
 
     rviz = load_yaml(workspace / "src/ats_sentry_bringup/rviz/sentry_default_view.rviz")
     rviz_topics = set(collect_topic_values(rviz))
-    for topic in (*ROG_MAP_DEBUG_TOPICS, "/rog_map/bounds", *NAVIGATION_PATH_DISPLAYS):
+    for topic in (
+        *ROG_MAP_DEBUG_TOPICS,
+        "/rog_map/bounds",
+        *NAVIGATION_PATH_DISPLAY_CONTRACTS,
+    ):
         assert topic in rviz_topics, f"RViz config missing {topic}"
     assert_navigation_rviz_contract(rviz, rog_map["map_frame"], "default RViz")
     rviz_text = (
@@ -485,7 +528,7 @@ def main():
         "Style: Boxes",
         "Color Transformer: Intensity",
         "Name: Planning Grid",
-        *NAVIGATION_PATH_DISPLAYS.values(),
+        *NAVIGATION_PATH_DISPLAY_NAMES,
     ):
         assert required in rviz_text, f"RViz ROGMap display contract missing {required}"
     for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool"):
@@ -498,7 +541,7 @@ def main():
         *ROG_MAP_DEBUG_TOPICS,
         "/rog_map/bounds",
         "/rc_esdf/planning_grid",
-        *NAVIGATION_PATH_DISPLAYS,
+        *NAVIGATION_PATH_DISPLAY_CONTRACTS,
     ):
         assert topic in mujoco_rviz_topics, f"MuJoCo RViz config missing {topic}"
     assert_navigation_rviz_contract(mujoco_rviz, rog_map["map_frame"], "MuJoCo RViz")
@@ -517,7 +560,7 @@ def main():
         "Name: ROGMap ESDF Debug",
         ROG_MAP_LOCAL_VOXEL_DISPLAY_NAME,
         ROG_MAP_BOUNDS_DISPLAY_NAME,
-        *NAVIGATION_PATH_DISPLAYS.values(),
+        *NAVIGATION_PATH_DISPLAY_NAMES,
         "Value: /goal_pose",
     ):
         assert required in mujoco_rviz_text, f"MuJoCo RViz display contract missing {required}"
