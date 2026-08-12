@@ -847,6 +847,27 @@ assert_path_has_poses() {
   echo "OK: ${label} published ${pose_count} poses"
 }
 
+# JPS、MINCO 和 MPC 的四层诊断 Path 都在 ROGMap/MPC 的 planning frame `odom`
+# 中显示；目标 action 输入可为 `map`，不能把它误当作 Path 的显示 frame。
+assert_path_visualization_frame() {
+  local label="$1"
+  local output_file="$2"
+  local expected_frame="${3:-odom}"
+  if ! awk -v expected="${expected_frame}" '
+    /^header:$/ {in_path_header = 1; frame = ""; next}
+    /^poses:$/ {
+      if (in_path_header && frame == expected) found = 1
+      in_path_header = 0
+      next
+    }
+    in_path_header && $1 == "frame_id:" {frame = $2}
+    END {exit found ? 0 : 1}
+  ' "${output_file}"; then
+    fail "${label} did not publish a Path header in RViz fixed frame '${expected_frame}'"
+  fi
+  echo "OK: ${label} Path header frame is ${expected_frame}"
+}
+
 assert_nonzero_stream() {
   local label="$1"
   local output_file="$2"
@@ -1590,6 +1611,7 @@ wait_for_capture() {
     then
       stop_capture_process "${pid}"
       assert_path_has_poses "${label}" "${output_file}"
+      assert_path_visualization_frame "${label}" "${output_file}"
       return
     fi
     if ! kill -0 "${pid}" 2>/dev/null; then
@@ -1659,7 +1681,15 @@ run_navigation_goal() {
   telemetry_sequence="$(read_swerve_telemetry_sequence)"
   [[ "${telemetry_sequence}" =~ ^[0-9]+$ ]] || \
     fail "cannot capture /swerve/telemetry sequence before ${name}"
-  local -a path_topics=(/minco/raw_path /minco/reference_path)
+  # 每个 action 必须捕获四层可视化 Path：JPS 离散搜索、MINCO 局部参考、
+  # 当前 MPC 跟随 horizon 与 iLQR 预测 rollout。这样证明它们在同一目标执行
+  # 窗口中可观察，而不是仅在 launch 生命周期的某个时刻出现过一次。
+  local -a path_topics=(
+    /minco/raw_path
+    /minco/reference_path
+    /ats_swerve_mpc/reference_horizon
+    /ats_swerve_mpc/predicted_path
+  )
   for topic in "${path_topics[@]}"; do
     output_file="${prefix}_${topic//\//_}.out"
     ensure_topic_capture_ready "${name} ${topic}" "${topic}" nav_msgs/msg/Path \
@@ -1928,6 +1958,7 @@ for index in "${!DEBUG_TOPICS[@]}"; do
   output_file="/tmp/ats_minco_mpc_${topic//\//_}.out"
   [[ -s "${output_file}" ]] || fail "${topic} did not publish after the goal"
   assert_path_has_poses "${topic}" "${output_file}"
+  assert_path_visualization_frame "${topic}" "${output_file}"
 done
 assert_nonzero_stream /cmd_vel_mpc /tmp/ats_minco_mpc_cmd_vel_stream.out
 assert_nonzero_stream /motion_control /tmp/ats_minco_mpc_motion_stream.out

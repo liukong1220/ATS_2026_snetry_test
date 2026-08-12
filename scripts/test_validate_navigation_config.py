@@ -26,6 +26,9 @@ class NavigationRvizContractTest(unittest.TestCase):
             self.load_default_rviz(), "odom", "test RViz"
         )
 
+    def test_full_navigation_configuration_contract_passes(self):
+        VALIDATOR.main()
+
     def test_legacy_bounds_name_is_rejected(self):
         rviz = copy.deepcopy(self.load_default_rviz())
         bounds = VALIDATOR.single_display_for_topic(
@@ -39,11 +42,30 @@ class NavigationRvizContractTest(unittest.TestCase):
     def test_mpc_reference_display_requires_reliable_qos(self):
         rviz = copy.deepcopy(self.load_default_rviz())
         reference = VALIDATOR.single_display_for_topic(
-            rviz, "/ats_swerve_mpc/reference_horizon", "test RViz"
+            rviz, "/ats_swerve_mpc/predicted_path", "test RViz"
         )
         reference["Topic"]["Reliability Policy"] = "Best Effort"
 
         with self.assertRaisesRegex(AssertionError, "must use Reliable"):
+            VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
+
+    def test_mpc_follow_display_requires_billboards_and_elevation(self):
+        rviz = copy.deepcopy(self.load_default_rviz())
+        reference = VALIDATOR.single_display_for_topic(
+            rviz, "/ats_swerve_mpc/predicted_path", "test RViz"
+        )
+        reference["Line Style"] = "Lines"
+
+        with self.assertRaisesRegex(AssertionError, "line style must be 'Billboards'"):
+            VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
+
+        reference = VALIDATOR.single_display_for_topic(
+            rviz, "/ats_swerve_mpc/predicted_path", "test RViz"
+        )
+        reference["Line Style"] = "Billboards"
+        reference["Offset"]["Z"] = 0.0
+
+        with self.assertRaisesRegex(AssertionError, "Z offset must be 0.12"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
     def test_local_voxel_display_requires_producer_rgb(self):

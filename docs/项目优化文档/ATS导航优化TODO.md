@@ -16,7 +16,7 @@
 | 批次 | 直接行为所有者与文件范围 | 必须保持的契约 | 验收与停止条件 |
 | --- | --- | --- | --- |
 | P2.1 ROGMap 显示对齐 | 导航仓 `ats_rog_map/src/ats_rog_map_node.cpp`、`rog_map/prob_map.*`、两份正式参数；根仓/仿真仓 RViz 配置 | 橙色是滑窗存储边界、紫色是机器人中心可视范围、绿色是量化后的 raycast 更新范围；occupancy、unknown、signed distance、gradient 和 adapter 数值服务绝不从 Marker/PointCloud2 反解析 | 代码/engine 单测、launch 参数、MuJoCo `/rog_map/bounds` 三 namespace 和一张同帧截图；若 frame、时间戳或数值 projection 变更，停止并先补接口测试 |
-| P2.2 JPS/MINCO/MPC RViz 语义 | 根仓 `sentry_default_view.rviz`、MuJoCo 仓 `mujoco_navigation.rviz`；producer 只读检查 `minco_planner_node.cpp`、`ats_swerve_mpc` | `/minco/raw_path` 是 JPS/A* 全局搜索引导线，淡蓝；`/minco/reference_path` 是局部时间 reference，绿；MPC reference horizon 黄、predicted rollout 品红；显示层不得新增控制/规划 writer | RViz 配置语法、topic/QoS 账本、MuJoCo 截图；topic 不存在、frame 不一致或 publisher 非唯一时不宣称显示验收通过 |
+| P2.2 JPS/MINCO/MPC RViz 语义 | 根仓 `sentry_default_view.rviz`、MuJoCo 仓 `mujoco_navigation.rviz`；producer 只读检查 `minco_planner_node.cpp`、`ats_swerve_mpc` | `/minco/raw_path` 是淡蓝 JPS 离散搜索线（`Z=0.02 m`）；`/minco/reference_path` 是绿色 MINCO 时间 reference（`Z=0.04 m`）；当前 MPC follow horizon 是琥珀色细线（`Z=0.08 m`），iLQR predicted follow rollout 是品红 `Billboards`（`Z=0.12 m`）；显示层不得新增控制/规划 writer | RViz 配置语法、topic/QoS 账本、每个 action 四条 Path 非空与同帧截图；topic 不存在、frame 不一致或 publisher 非唯一时不宣称显示验收通过 |
 | P2.3 平滑与 reference 恢复 | 导航仓 `minco_planner`、`ats_goal_manager`、`ats_swerve_mpc` 及最窄 GTest | 仅在同一 immutable map snapshot、目标 epoch、localization identity 和 heartbeat 有效时重定时并发布新 reference；急停前旧 reference 永不复活 | 先为 JPS corner、S3 continuity、reference 时间单调、旧 reference 拒绝/恢复添加确定性单测；红框前必须独立复核离散 footprint |
 | P2.4 无进展有界重规划 | 导航仓新增/扩展 `PlanProgressWatchdog`，由 Goal Manager 拥有任务级状态机，MINCO 只拥有单次规划 | steady-clock stall deadline、inside-map/free/footprint 验证、goal epoch、snapshot generation、最小重规划间隔、最大尝试次数；stale/unknown/TF failure/no-path 均 fail-closed 零速度 | 单点不可过、机器人冻结、map stale、lease stale、unreachable 分别使用新 DDS domain 和新 MuJoCo；超过最大恢复次数必须保持急停，不允许循环重规划 |
 
@@ -706,7 +706,7 @@ develop，并报告本地 HEAD 与 origin/develop 是否一致及 shortlog 作�
 
 - [x] 全局控制路径：`/minco/raw_path` 已标记为 `Global Planning / JPS Search Path`，淡蓝色；只表达 JPS/A* 的任务级拓扑搜索结果。
 - [x] 局部控制路径：`/minco/reference_path` 已标记为 `Local Control / MINCO Timed Reference`，绿色；不与全局路径共用 display 名称。
-- [x] MPC：`/ats_swerve_mpc/reference_horizon` 已标记为 `MPC Follow / Reference Horizon`（黄），`/ats_swerve_mpc/predicted_path` 为 `MPC Follow / Predicted Rollout`（品红）；使用独立 display。
+- [x] MPC：`/ats_swerve_mpc/reference_horizon` 为 `MPC Follow / Active Reference Horizon`（琥珀色细线、`Z=0.08 m`），`/ats_swerve_mpc/predicted_path` 为 `MPC Prediction / iLQR Follow Rollout`（品红 `Billboards`、`Z=0.12 m`）；实际跟随预测不再以普通重叠线覆盖 JPS/MINCO。
 - [x] MuJoCo 与实机 RViz 配置使用同一 topic、QoS、fixed frame 语义；本轮只调整显示名称，未改变 planner/control topic ownership。
 - [x] 增加 `/rog_map/viz` 的 RViz-only RGB 体素诊断层：全局 `/map`/planning grid 保持底图，局部层按 `Visualization Range` 裁剪，`/rog_map/bounds` 保持三色范围框；`/minco/raw_path` 淡蓝 JPS、`/minco/reference_path` 绿色 MINCO、MPC reference/predicted 分别为黄/品红。
 - [x] 以静态配置校验和 domain `195` ROS payload/QoS 观察验证 `/rog_map/viz` 的 `frame_id=odom`、`PointCloud2.rgb` 与 RViz Best Effort subscriber；该次未保留可复查截图，不能将其写成截图回归通过。
@@ -738,6 +738,42 @@ develop，并报告本地 HEAD 与 origin/develop 是否一致及 shortlog 作�
 - [ ] 必须在不受外层会话时限影响的环境中完整重跑 headless nominal、freeze 和 red-box。domain
   `208`/`210` 在 action 前被执行会话回收，只有基础 graph/ROGMap fresh 证据；没有当前 revision
   的 RViz 截图，且本机虽具备 `ffmpeg`，本轮没有运行中的窗口可捕获。不得将它们记为通过。
+
+### 2026-08-12 路径显示分层与 MuJoCo 观察入口
+
+- [x] 两份实际加载的 RViz 配置已经同步四层 `nav_msgs/Path` 语义：JPS `/minco/raw_path` 为淡蓝
+  `Lines`、`Z=0.02 m`；MINCO `/minco/reference_path` 为绿色 `Lines`、`Z=0.04 m`；当前跟随的
+  `/ats_swerve_mpc/reference_horizon` 为琥珀色细 `Lines`、`Z=0.08 m`；MPC/iLQR
+  `/ats_swerve_mpc/predicted_path` 为品红 `Billboards`、`Line Width=0.075`、`Z=0.12 m`。颜色、线宽、样式和高度
+  同时变化，避免跟随 horizon 与全局/局部规划线重合后不可辨识。
+- [x] `scripts/validate_navigation_config.py` 将四条路径的 topic、Reliable QoS、名称、颜色、样式、线宽
+  和 Z offset 固化为结构化契约；`scripts/test_validate_navigation_config.py` 增加完整入口和 Billboards/高度
+  回归。根仓默认 RViz 与 MuJoCo RViz 均通过 `6 tests` 和完整配置检查。
+- [x] `scripts/test_mujoco_minco_mpc_chain.sh` 现在在每个 action 窗口同步捕获四个 Path，并要求各自存在
+  非空 pose 和根 `Path.header.frame_id=odom`（两份 RViz 的 fixed frame）；原有 MPC 全程 debug capture
+  仍保留。action 输入可为 `map`，但不能将其混同为诊断 Path frame。该检查只证明可观察性与 topic payload，
+  不将 RViz 可见性写成规划、控制或 P2 闭环通过。
+- [x] 受影响包构建和安装产物已核对：`ats_sentry_bringup` 与 `ats_mujoco_sim` 单包构建通过，安装目录中的
+  两份 RViz 文件包含 `Billboards` 和新显示名称，两个 launch 的 `--show-args` 默认路径指向对应安装文件。
+- [ ] 本轮未启动 MuJoCo：运行前资源门禁为 available memory 约 `1.2 GiB`、swap 已用约 `8.9 GiB`，且存在用户
+  的 `/ats_swerve_mpc/reference_horizon` observer 与桌面高 CPU renderer。未知用户进程未被终止；因此没有当前
+  revision 的 nominal、四条 Path 运行期非空、RViz 截图、终点、两级速度、unknown/recovery 或 contact 证据。
+
+下一次低负载 MuJoCo 可视化验证固定使用新 domain、单一 RViz、无 MuJoCo viewer：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ROS_DOMAIN_ID=<new-domain> USE_RVIZ=true RVIZ_DELAY_SEC=18 \
+  PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none TEST_PROFILE=single \
+  scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+运行记录必须同时保存：四个 Path 的非空 pose、`header.frame_id=odom` 与 fixed frame、RViz subscriber QoS、
+唯一 publisher/consumer、`/cmd_vel_mpc`/`/motion_control` 的非零跟随和收尾零速，以及同帧截图。若资源、
+ROGMap projection、localization/TF 或 adapter heartbeat 任一门禁不满足，立即停止，不放宽 timeout、QoS、
+unknown 或安全门。实车使用同一 `sentry_default_view.rviz`，但必须先完成 MuJoCo nominal/unknown/recovery、
+HIL 和 Gate 0--3；当前仍禁止 `solver_mode=qp` 主链、P2/P3/HIL/实车通过声明。
 ## P2/P3/P4 边界
 
 - P2 当前目标是 ROGMap ground projection、terrain/static wall/unknown 融合、唯一 planning-grid owner、单次 MINCO immutable snapshot 和安全停机；ROS 2 可视化框不改变这些数值语义。

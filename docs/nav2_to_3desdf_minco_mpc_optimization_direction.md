@@ -56,13 +56,16 @@
   截图验收通过。P2/P3 状态均不变。
 - 淡蓝色 JPS 搜索框不属于 ROGMap owner；官方 A* 每次 start/goal 生成临时搜索框，ATS
   后续应由 `minco_planner` 发布同一 frame 的 JPS debug marker，不能混入 ROGMap 数值服务。
-- [已实现未运行] 两份正式 RViz 配置已把 `/minco/raw_path` 标记为淡蓝色
-  `Global Planning / JPS Search Path`，把 `/minco/reference_path` 标记为绿色
-  `Local Control / MINCO Timed Reference`，并独立显示 MPC 的黄色 reference horizon 与
-  品红 predicted rollout。`minco_planner_node.cpp` 直接发布 `GridJps::plan()` 的
-  `search_result.path` 到 `/minco/raw_path`，因此该命名反映实际 producer，而非只按 topic
-  名称推断。当前 revision 尚未保存同帧截图或做实车 RViz 验收。[Confidence: High，源码与
-  RViz 配置交叉证据；运行截图未验证]
+- [已实现未运行] 仿真 `mujoco_navigation.rviz` 与实车默认 `sentry_default_view.rviz` 共享四层路径
+  可视化契约：`/minco/raw_path` 是淡蓝色、`Z=0.02 m` 的 JPS 离散搜索路径；
+  `/minco/reference_path` 是绿色、`Z=0.04 m` 的 MINCO 时间化局部参考；
+  `/ats_swerve_mpc/reference_horizon` 是琥珀色细线、`Z=0.08 m` 的当前 MPC 跟随 horizon；
+  `/ats_swerve_mpc/predicted_path` 是品红色、`Z=0.12 m`、`Line Style: Billboards` 的 iLQR 预测跟随 rollout。
+  通过不同颜色、线宽、样式和高度避免局部重合时被同一条线覆盖。`minco_planner_node.cpp` 直接发布
+  `GridJps::plan()` 的 `search_result.path` 到 `/minco/raw_path`；MPC node 对同周期 reference 与
+  iLQR states 分别发布 horizon/predicted，因此该命名反映实际 producer，而非只按 topic 名称推断。
+  这四个 `Path` 均为诊断输出，不改变规划、安全或 `/cmd_vel_mpc` 所有权。当前 revision 尚未保存同帧截图
+  或做实车 RViz 验收。[Confidence: High，源码、配置与静态回归交叉证据；运行截图未验证]
 
 - `planning_grid_owner:=rog_map` 时，`ats_rog_map_adapter` 是
   `/rc_esdf/planning_grid` 的唯一发布者；adapter 直接调用
