@@ -796,3 +796,84 @@ HIL 和 Gate 0--3；当前仍禁止 `solver_mode=qp` 主链、P2/P3/HIL/实车�
 实现 PlanProgressWatchdog：以 steady clock、同一 goal epoch、immutable snapshot generation、localization identity、inside-map/free/footprint、最小重规划间隔、最大连续尝试次数为条件。地图 stale/unknown、TF 失败、无路、unsafe trajectory 或次数耗尽必须保持 emergency_stop=true、/cmd_vel_mpc=0、/motion_control=0；恢复时只能发布急停之后重新定时且经提交点复核的新 reference。
 先补 deterministic 单测（reference 时间单调、旧轨迹不得复活、冻结无进展触发一次有界重规划、次数耗尽停机），再构建、运行 MuJoCo 新 DDS domain 的 nominal/red_box/单点不可过/冻结/stale/unreachable。每个有改动仓库显式 stage、中文详细提交、SSH push；最终报告实际 terminal 坐标、位置误差、replan 次数、最小 clearance、离散 footprint 冲突、MPC reference/predicted、两级速度、contact evaluator 与未运行实车 Gate。
 ```
+
+## 2026-08-14 Gazebo ATS 闭环接入与运行证据
+
+### 接入范围与所有权
+
+- [x] Gazebo 后端是用户 fork `git@github.com:liukong1220/rmu_gazebo_simulator.git`，root
+  `dependencies.repos` 固定为 `src/sim/gazebo_simulator` 的 `main`。原
+  `SMBU-PolarBear-Robotics-Team/rmu_gazebo_simulator` 只保留为只读 `upstream`，不向其提交或推送。
+- [x] 原 `src/sim/gazebo_simulator/dependencies.repos` 已变为显式空兼容 manifest；root
+  manifest 将 Gazebo 的 rmoss 依赖统一导入 `src/dependencies`。活动代码搜索未发现
+  `gazebo_simulator/dependencies` 引用。
+- [x] `pb2025_robot_description` 的活动引用已清除，仿真资源唯一来自
+  `ats_robot_description`；该描述含四个 steer + drive module、Mid360、云台和底盘接口，不复制第二份
+  robot description。
+- [x] 默认 profile 为 `world:=rmuc_2025`，静态图由
+  `src/ats_sentry_bringup/map/rmuc_2025.yaml` 的 `image` 字段解析，PGM 不复制进 simulator。
+  `planning_grid_owner:=rog_map`、`solver_mode:=ilqr`、`headless:=true`、`use_rviz:=false` 是默认值；
+  `solver_mode=qp` 继续拒绝，`qp_shadow` 不拥有控制发布权。
+
+### 运动学与闭环接口
+
+- [x] Gazebo `AtsSwerveDrive4WS` 与 HERO/ATS 的车体系约定一致，控制为 `[vx, vy, wz]`。第 $i$
+  个模块按 $[vx-wz\,y_i,\ vy+wz\,x_i]$ 求轮心速度、以 `atan2` 求舵角、以模长除 `0.0425 m`
+  求轮速；转向超过 $90^\circ$ 时翻转舵角并反转轮速。没有迁入 HERO 控制器，没有差速、ICR 或
+  `vy=0` 约束。独立 C++ 测试覆盖前进、横移、原地转向、混合、最短转向和零速 hold。
+- [x] 主链为 `Gazebo Mid360/IMU -> gz_livox_bridge(C++) -> Point-LIO -> /localization +
+  /registered_scan -> ROGMap -> adapter -> JPS -> MINCO -> ats_swerve_mpc -> /cmd_vel_mpc ->
+  gz_chassis_cmd_adapter -> /motion_control + Gazebo chassis`。ground truth 只用于回归观测，未接管
+  `/localization`。
+- [x] Gazebo profile 将 `sensor_scan_generation.base_frame` 显式置空，解除 global
+  `base_footprint` 输入缺失引起的 localization 自举死锁；`executed_path_observer` 对
+  `/localization` 使用 `BEST_EFFORT`。Mid360 为 `10 Hz x 625 x 32`，约 `200k points/s`；导航
+  profile 默认剥离相机 `<sensor>`，但保持 URDF、link 和 joint 不变。
+- [x] C++ evidence recorder 在 action 生命周期内确认 `/cmd_vel_mpc`、`/motion_control` 和 Gazebo
+  chassis command 的 publisher max 均为 `1`；`gz_chassis_cmd_adapter` 是 Gazebo profile 唯一底盘命令
+  owner。
+
+### 可视化与名义运行
+
+- [x] RViz 截图：
+  `log/gazebo_minco_mpc_chain/20260814_212305_nominal_none_domain183/rviz_navigation_active.png`
+  实际显示 Static Map、Planning Grid、`/registered_scan` 局部点云，和独立 display 的蓝色 JPS、
+  橙色 MINCO、洋红 MPC predicted、绿色 executed path；executed path 来自实际 `/localization`，不是
+  复制参考。RViz 使用 `Billboards` 显示执行路径。该 run 因 `trajectory footprint is unsafe` 被安全拒绝，
+  只能作为可视化和 fail-stop 证据，不能标为 nominal 成功。
+- [x] 行为链 nominal：domain `181` 的 headless action 成功，终点误差 `0.0502185 m`；JPS/MINCO/
+  MPC predicted/executed 点数为 `3/67/31/19`，三段速度均曾非零，Gazebo GT 位移 `2.1284 m`，ROG
+  source generation `220 -> 332`、adapter publication sequence `56 -> 86`。该成功运行发生在最终
+  RViz 显示/截取修复之前，故不替代最终可视化代码版本的一次成功 nominal。
+- [x] 最终可视化版本安全拒绝：domain `183` 记录 swept-footprint `collisions=9` 和 MPC odometry age
+  超过 `0.250 s`，action `ABORTED`。未放宽 age、unknown、lease、footprint 或 emergency-stop 阈值。
+
+### 独立故障运行（headless，新 ROS domain）
+
+| 用例 | domain | 实际观察 |
+| --- | ---: | --- |
+| `all-unknown` | 184 | 数值 projection `10000/10000` unknown；`ready=false -> emergency_stop=true -> /cmd_vel_mpc=0 -> /motion_control=0`，未派发 goal。 |
+| `map-unready` | 185 | 健康 action 后停止 adapter；急停与两级零速度成立。 |
+| `map-stale` | 186 | action 后停止 `gz_livox_bridge`；action `ABORTED`，急停与两级零速度成立。 |
+| `input-stale` | 187 | 独立 input stale run；action `ABORTED`，急停与两级零速度成立。 |
+| `goal-unreachable` | 188 | `(999,999)` action accepted 后 `ABORTED`；路径/轮速均未激活，GT 位移为零。 |
+| `adapter-lease` | 189 | 停止 heartbeat owner 后 action `ABORTED`，急停与两级零速度成立。 |
+| `projection-timeout` | 190 | 停止 ROGMap projection service 后进入 fail-stop；两级速度为零。 |
+| `emergency-stop-recovery` | 191 | 非零命令后 cancel action，连续 3 个零命令样本；无新目标期间 source generation `203 -> 436`、publication sequence `50 -> 103`，新 `(0.5,0)` goal 才成功。 |
+
+每个脚本结果为 `failures: 0`，日志目录保留完整 summary、launch、topics 和 metrics。它们证明列出的
+Gazebo profile fail-closed 行为，不替代连续 swept-footprint、physical contact、HIL 或实车安全结论。
+
+### 组件验证与边界
+
+- [x] 已执行 `vcs validate dependencies.repos`、Python launch/bridge `py_compile`、Gazebo 回归脚本
+  `bash -n`、三个目标仓库 `git diff --check`、三个 Gazebo launch `--show-args` 和九包单 worker build。
+- [x] CTest：`rmu_gazebo_simulator 28/0/0`、`ats_goal_manager 14/0/0`、`ats_rog_map 16/0/0`、
+  `ats_rog_map_adapter 29/0/0`、`ats_swerve_mpc 85/0/0`、`small_gicp_relocalization 42/0/0`。
+  `sensor_scan_generation` 与 `ats_nav_bringup` 全包 lint 仍有原有 copyright/Black/PEP257 债务；本轮未
+  以无关格式化掩盖它们。
+- [ ] 未验证/未完成：最终 RViz 代码 revision 的成功 nominal、minimum clearance、MINCO 离散 footprint
+  collision 完整评估、Gazebo physical contact telemetry、红框、HIL、实车与连续 swept footprint；P2 不得
+  因此标记完整通过。
+- [ ] P3 边界：Gazebo launch 默认 `launch_nav2:=false`，但尚未按 P3 全部 action/取消/preempt/timeout
+  场景和扩大路线完成验收，**不得称 Nav2-free 已完成**。
