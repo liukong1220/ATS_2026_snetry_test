@@ -7,9 +7,11 @@
 # because it owns the complete robot startup entrypoints, deployment parameters,
 # maps, PCD assets and RViz views. Do not add it here as a split repository.
 #
-# All repositories are imported through HTTPS URLs for public open-source use.
-# Upstream tools and dependencies are expected to be forked under liukong1220
-# and tagged with the ats-nav topic for ATS_NAV project grouping.
+# Public dependencies use HTTPS where possible. The user-owned Gazebo fork is
+# intentionally SSH-only so a clean import cannot resolve the original upstream
+# repository by accident. Upstream tools and dependencies are expected to be
+# forked under liukong1220 and tagged with the ats-nav topic for ATS_NAV project
+# grouping.
 # Repository paths are grouped by domain:
 #   src/sim/*                  simulation repositories
 #   src/interfaces/*           message/interface repositories
@@ -24,6 +26,11 @@
 #   is not evidence that the formal navigation graph depends on Nav2.
 repositories:
   # Simulation.
+  src/sim/gazebo_simulator:
+    type: git
+    url: git@github.com:liukong1220/rmu_gazebo_simulator.git
+    version: main
+
   src/sim/ats_mujoco_sim:
     type: git
     url: https://github.com/liukong1220/ats_mujoco_sim.git
@@ -119,6 +126,21 @@ repositories:
     type: git
     url: https://github.com/liukong1220/rmoss_interfaces.git
     version: humble
+
+  # Gazebo-domain rmoss sources. They were previously carried by the nested
+  # manifest src/sim/gazebo_simulator/dependencies.repos; the workspace now owns
+  # them here so that only one dependency root (src/dependencies) is active.
+  # rmoss_gazebo provides rmoss_gz_base/bridge/cam/plugins, including the
+  # Ignition system plugins used by the robot SDF.
+  src/dependencies/rmoss_gazebo:
+    type: git
+    url: https://github.com/liukong1220/rmoss_gazebo.git
+    version: humble
+
+  src/dependencies/rmoss_gz_resources:
+    type: git
+    url: https://github.com/liukong1220/rmoss_gz_resources.git
+    version: main
 
   src/dependencies/BehaviorTree.ROS2:
     type: git
