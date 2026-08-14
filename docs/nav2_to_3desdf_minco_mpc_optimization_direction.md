@@ -537,3 +537,52 @@ layout/bounds/finite、horizon、nominal 与 primal exact-size gate，并检查 
 P2 observer/config Python tests、Bash/Python/launch 静态校验。未进行 MuJoCo nominal、真实 unknown 安全停机/recovery、
 paired shadow A/B/C、red-box、P2/P3、物理接触、HIL 或实车；不得将组件 phase 样本外推为 20 Hz 周期预算或主链准入，
 也不得启用 `solver_mode=qp`。
+
+## 2026-08-14 Gazebo 导航后端接入证据
+
+本节只记录本轮实际运行的 Gazebo 结果，不回填或覆盖前述 MuJoCo/QP 结论。新后端由用户 fork
+`liukong1220/rmu_gazebo_simulator` 提供，root `dependencies.repos` 以 SSH 固定到其 `main`；
+嵌套 Gazebo manifest 已退役，Gazebo-domain rmoss 依赖统一由 root manifest 导入
+`src/dependencies`。`pb2025_robot_description` 的活动引用已清除，机器人资源唯一来自
+`ats_robot_description`。
+
+### 配置和闭环契约
+
+- 默认 `world=rmuc_2025`，`map_yaml` 为 root-owned
+  `src/ats_sentry_bringup/map/rmuc_2025.yaml`；PGM 始终从 YAML 的 `image` 字段解析，不复制到
+  simulator。默认 `planning_grid_owner=rog_map` 与 `solver_mode=ilqr`；`qp_shadow` 只诊断，`qp`
+  继续拒绝。
+- 闭环为 `Gazebo Mid360/IMU -> C++ PointCloud2-to-Livox adapter -> Point-LIO ->
+  /localization,/registered_scan -> ROGMap -> adapter/RC-ESDF -> JPS -> MINCO ->
+  MPC -> /cmd_vel_mpc -> chassis adapter -> Gazebo 4WD4WS`。Gazebo ground truth 只用于观测，
+  不是 localization 输入。
+- 车体系命令是 `[vx,vy,wz]`。四个模块各用
+  $[vx-wz\,y_i,vy+wz\,x_i]$ 求轮心速度；因而横移存在、非差速、无 `vy=0`/ICR 假设。短转向
+  翻转和 command timeout 都在 Gazebo actuator 内 fail-closed。
+- `sensor_scan_generation.base_frame=""` 只作用于 Gazebo profile，消除
+  `base_footprint` 无输入时的 localization 自举死锁；实车默认入口未改。observer 对 sensor
+  stream 使用 `BEST_EFFORT`，不会因 QoS 不兼容产生空 executed path。
+
+### 已验证的运行结果
+
+- domain `181` 的 headless nominal action 成功：终点误差 `0.0502185 m`、JPS/MINCO/
+  predicted/executed path `3/67/31/19`、GT 位移 `2.1284 m`、ROG source generation
+  `220->332`、adapter sequence `56->86`。运行期 evidence recorder 中
+  `/cmd_vel_mpc`、`/motion_control`、Gazebo chassis command 的 publisher max 都是 `1`。
+- domain `183` 的最终 RViz 配置实际显示 static map、planning grid、registered scan，以及蓝色
+  JPS、橙色 MINCO、洋红 predicted 和绿色真实 executed path；图像为
+  `log/gazebo_minco_mpc_chain/20260814_212305_nominal_none_domain183/rviz_navigation_active.png`。
+  同次 action 被 unsafe footprint 拒绝，故它不是 nominal success 证据。
+- domain `184` 至 `191` 分别运行 all-unknown、map-unready、map-stale、input-stale、
+  goal-unreachable、adapter-lease、projection-timeout 和 emergency-stop-recovery，均为独立 ROS
+  domain、`failures: 0`。所有故障用例观测到 emergency stop 与两级精确零速度。recovery run 在
+  cancel 后取得 3 个零命令样本、generation/sequence `203->436`/`50->103` 持续前进，只有新的
+  recovery goal 才重新成功。
+
+### 边界
+
+这些结果说明 Gazebo 后端已能以真实导航主链、地图 owner、路径、控制和安全退化行为回归算法修改；
+它们不证明 P2 完整通过，也不证明 P3 Nav2-free。最终可视化代码版本尚无成功 nominal；minimum
+clearance、MINCO 离散 footprint collision、Gazebo physical contact telemetry、红框、HIL、实车和连续
+swept footprint 均未验证。不得通过放宽 TF wait、input/map timeout、unknown、lease、old reference
+或 emergency stop 来处理 domain `183` 的安全拒绝。
