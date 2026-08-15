@@ -573,6 +573,16 @@ paired shadow A/B/C、red-box、P2/P3、物理接触、HIL 或实车；不得将
   JPS、橙色 MINCO、洋红 predicted 和绿色真实 executed path；图像为
   `log/gazebo_minco_mpc_chain/20260814_212305_nominal_none_domain183/rviz_navigation_active.png`。
   同次 action 被 unsafe footprint 拒绝，故它不是 nominal success 证据。
+- domain `206` 的 Gazebo RViz 操作层新增 `2D Goal Pose -> /goal_pose`；现有
+  `ats_goal_manager` 仍独占 frame/map/localization/急停校验和 JPS/MINCO/MPC 任务生命周期，未引入
+  Nav2 action。显示分为 `Global Map and Planning`（`/map`、`/traversability_grid`、唯一
+  `/rc_esdf/planning_grid`）与 `ROGMap Local Quality`（默认 `/rog_map/viz`、
+  `/rog_map/bounds`，可选 occ/inf_occ/unk/esdf）。`/registered_scan` 仍可用但默认关闭，避免软件
+  渲染与 Gazebo/Point-LIO 争用；四条真实 Path 继续为独立 display，predicted/executed 使用
+  `Billboards`。最终界面工件为
+  `log/gazebo_minco_mpc_chain/20260815_102643_rviz_ui_final_readable_none_domain206/rviz_navigation_active.png`；
+  同次 metrics 为 JPS/MINCO/predicted `3/101/31` 点且三段命令非零。action 未成功，故该工件只证明
+  可视化和诊断 payload，不是 Gazebo nominal 或 P2 通过。
 - domain `184` 至 `191` 分别运行 all-unknown、map-unready、map-stale、input-stale、
   goal-unreachable、adapter-lease、projection-timeout 和 emergency-stop-recovery，均为独立 ROS
   domain、`failures: 0`。所有故障用例观测到 emergency stop 与两级精确零速度。recovery run 在
