@@ -43,6 +43,10 @@ ICR 或 `vy=0`。
   Gazebo fork `a28ccd20428ffc4bdd7fbbc22fee884fa1db72eb` 还修复了 CMake 引用 ignored 测试源的
   clean-build 缺陷。该目录的最窄 Gazebo 依赖闭包构建 17 包通过，Gazebo CTest `4/4` 和
   `ats_gazebo_nav.launch.py --show-args` 通过。该证据只覆盖复建和资源解析，不覆盖运行期导航。
+- 独立目录 `/tmp/ats_p0_remote_final.Lgyalq` 又以 SSH 对 root `origin/develop` 做 depth-1 clone，
+  得到 `f2d049cbf245b6fdfbad0d4870e53dc3ab09cbeb` 后直接导入 exact lock；全流程
+  `250.2 s`、`rc=0`，22 个依赖均从远端 checkout。至此 root 传输、manifest、锁定与最窄构建具有
+  相互独立的复建证据。
 - 两份 RViz 已配置全局 `/rc_esdf/signed_distance_grid` 和局部 ROGMap debug，但当前 revision 尚无
   全局 ESDF/三米滑窗运行截图；
 - MINCO 已有 geometry preprocessor、curvature-aware time allocation、ESDF refinement 和 quality
