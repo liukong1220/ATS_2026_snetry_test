@@ -131,6 +131,11 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   --parallel-workers 1`，17 包在 `11 min 13 s` 内通过；唯一 stderr 是上游 `rmoss_base` 既有
   `pipe()` 返回值 warning。`ctest --test-dir build/rmu_gazebo_simulator --output-on-failure` 为
   `4/4` 通过，`ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py --show-args` 通过。
+- 为排除 archive 不能证明 root 远端传输的边界，又在独立目录
+  `/tmp/ats_p0_remote_final.Lgyalq` 以 SSH 对 `origin/develop` 执行 depth-1 root clone，得到
+  `f2d049cbf245b6fdfbad0d4870e53dc3ab09cbeb`；随后直接使用受版本控制的
+  `dependencies.lock.repos` 执行 exact SHA import。全流程耗时 `250.2 s`、`rc=0`，22 个依赖均
+  从远端 detached checkout，未使用本机 archive、build、install 或未跟踪文件。
 - 该 P0 只证明远端复建、锁定与启动前资源解析；未启动 Gazebo，不构成 freshness、P2、安全或性能结论。
 
 ### DoD

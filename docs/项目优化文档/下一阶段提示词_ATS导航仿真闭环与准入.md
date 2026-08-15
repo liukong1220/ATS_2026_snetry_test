@@ -18,8 +18,8 @@ P1 Gazebo localization freshness 开始。完整读取：
 
 当前已验证基线：
 
-- P0 已完成：最终 clean workspace 的 vcs import 成功取得 22 个仓库；锁文件由
-  vcs export --exact -n 生成。
+- P0 已完成：从用户 SSH `origin/develop` 的 depth-1 root clone 后，使用 exact lock import
+  成功取得 22 个仓库；锁文件由 vcs export --exact -n 生成。
 - rmoss_gz_resources 使用 humble=b5c759f08844dfda19c79aa870866ace8d4c7b3a；
   ats_mujoco_sim、teleop_gimbal_keyboard 使用已验证的用户 SSH URL。
 - Gazebo fork a28ccd20428ffc4bdd7fbbc22fee884fa1db72eb 在 clean checkout 中通过依赖闭包构建，
