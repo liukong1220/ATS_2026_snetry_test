@@ -1,0 +1,89 @@
+repositories:
+  src/ats_robot_description:
+    type: git
+    url: https://github.com/liukong1220/ats_robot_description.git
+    version: dea591e53fa0f5f612ef63669a8eddb2cedf34a4
+  src/ats_sentry_behavior:
+    type: git
+    url: https://github.com/liukong1220/ats_sentry_behavior.git
+    version: 6dd7dd166cbc849dcd6d78984c4af709c2333157
+  src/ats_sentry_nav:
+    type: git
+    url: https://github.com/liukong1220/ats_sentry_nav.git
+    version: 5ea786eb2e7086b6790db165206fd8dac4f9e0d8
+  src/ats_sentry_nav/sentry_chassis_vel_transform:
+    type: git
+    url: https://github.com/liukong1220/sentry_chassis_vel_transform.git
+    version: 486d02afce2be6c00fa3f604a7bfb4e0aadb98f0
+  src/dependencies/BehaviorTree.ROS2:
+    type: git
+    url: https://github.com/liukong1220/BehaviorTree.ROS2.git
+    version: bd5b4700e911ba0fd1ec2d0270ae5c1eebad43da
+  src/dependencies/joint_state_publisher:
+    type: git
+    url: https://github.com/liukong1220/joint_state_publisher.git
+    version: ecf1e49822b85ad6d642ad78f911855e1289913d
+  src/dependencies/rmoss_core:
+    type: git
+    url: https://github.com/liukong1220/rmoss_core.git
+    version: da601402b4c2d3494c1c0a5959c921684a32af41
+  src/dependencies/rmoss_gazebo:
+    type: git
+    url: https://github.com/liukong1220/rmoss_gazebo.git
+    version: 7443ff06c345752d0e23172c479d99b27207e2c7
+  src/dependencies/rmoss_gz_resources:
+    type: git
+    url: https://github.com/liukong1220/rmoss_gz_resources.git
+    version: b5c759f08844dfda19c79aa870866ace8d4c7b3a
+  src/dependencies/rmoss_interfaces:
+    type: git
+    url: https://github.com/liukong1220/rmoss_interfaces.git
+    version: 486bd0feb63ca559ed267512afef582604d5a1cf
+  src/dependencies/sdformat_tools:
+    type: git
+    url: https://github.com/liukong1220/sdformat_tools.git
+    version: 7f3f5a6c37c7e89077912bdd11c2561408d40722
+  src/interfaces:
+    type: git
+    url: https://github.com/liukong1220/interfaces.git
+    version: b1a1f1a6e7bcc72043c03ec8b68ddf1cf7733db4
+  src/interfaces/carstatemsgs:
+    type: git
+    url: https://github.com/liukong1220/carstatemsgs.git
+    version: 5078cfc56ead12d5e07d52981c07a15ab20884c4
+  src/interfaces/manda_can_control:
+    type: git
+    url: https://github.com/liukong1220/manda_can_control.git
+    version: 91e1a415cc8e8195664f78c959e09389285ced89
+  src/sim/ats_mujoco_sim:
+    type: git
+    url: git@github.com:liukong1220/ats_mujoco_sim.git
+    version: e3d6ea7a5e6161f3d5e861c523710546f973b034
+  src/sim/gazebo_simulator:
+    type: git
+    url: git@github.com:liukong1220/rmu_gazebo_simulator.git
+    version: a28ccd20428ffc4bdd7fbbc22fee884fa1db72eb
+  src/sim/loopback_sim:
+    type: git
+    url: https://github.com/liukong1220/loopback_sim.git
+    version: 493f9259b209ff17c2429fe83ea8712c7011edb2
+  src/sp_vision25:
+    type: git
+    url: https://github.com/liukong1220/sp_vision25.git
+    version: a08a9d92cc2a068fcf71bf4e970053ccec3d5680
+  src/standard_robot_pp_ros2:
+    type: git
+    url: https://github.com/liukong1220/standard_robot_pp_ros2.git
+    version: 74296b23baeaaf96f85b0571598aa5df9344f8aa
+  src/tools/pcd2pgm:
+    type: git
+    url: https://github.com/liukong1220/pcd2pgm.git
+    version: 30ad57a0cd2248483a7c45684bdb4857a388f11b
+  src/tools/rosbag2_composable_recorder:
+    type: git
+    url: https://github.com/liukong1220/rosbag2_composable_recorder.git
+    version: 2668cb4e62c57c7c57747931832f67d7d5e79d80
+  src/tools/teleop_gimbal_keyboard:
+    type: git
+    url: git@github.com:liukong1220/teleop_gimbal_keyboard.git
+    version: 3cdbb084cee27d659cdeaf5cd909dfdfddaa5a2a
