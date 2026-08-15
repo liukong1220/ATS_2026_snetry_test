@@ -307,11 +307,72 @@ MuJoCo、机器人描述和 MPC 在没有直接行为缺陷证据时不修改；
 - 作者固定为 `liukong1220 <1625038134@qq.com>`，不得包含 Claude/Anthropic co-author；
 - 每项报告 baseline/final commit、实际命令、指标、失败首因、未运行测试和 `HEAD == upstream branch`。
 
-## 9. 当前边界
+## 9. 2026-08-15 实施与证据边界
 
-本文档只完成源码审计与实施设计，没有修改 ROGMap、adapter、MINCO、RViz 或参数，没有新增构建、单测、
-Gazebo/MuJoCo、HIL 或实车证据。用户截图说明期望的显示布局，不证明当前全局 grid 或局部滑窗运行错误；
-“直线仍弯折”的根因也必须由下一阶段的 raw/guide/ref 配对指标确认。
+### 已实现并通过静态/组件验证
 
-下一阶段执行入口见
-[下一阶段提示词_ROGMap全局可视化与MINCO轨迹质量优化.md](./下一阶段提示词_ROGMap全局可视化与MINCO轨迹质量优化.md)。
+- [x] 两份实际 RViz 配置均启用 `Global Fused RC-ESDF (ROGMap + Static + Terrain)`：
+  `rviz_default_plugins/Map` 订阅 `/rc_esdf/signed_distance_grid`，使用 `Reliable + Transient Local
+  + Keep Last 1`、`costmap`、`Alpha=0.62`、`Draw Behind=true`；static PGM alpha 降至 `0.30`。
+  局部 `/rog_map/viz`、`/rog_map/esdf`、`/rog_map/bounds` 仍叠加在全局层上，`/rog_map/viz`
+  `Decay Time=0`。`0..100` 只作为 display encoding，未被反解析为米制 signed distance。
+- [x] `scripts/validate_navigation_config.py` 和其 9 个 Python 聚焦测试锁定两份 RViz 的全局层、
+  QoS、层级、MINCO 两个中间 guide display 与局部 cloud 的无累积契约；配置 validator、Python
+  syntax、runner shell syntax 均通过。
+- [x] 新增 `PathGeometryPreprocessor`、`MincoTimeAllocator` 和 `TrajectoryQualityEvaluator`。前者在
+  同一 immutable planning snapshot 上完成去重、近共线/短段处理、角点标记和 footprint-aware shortcut；
+  unknown/outside/occupied 仍 fail-closed，并精确保留 start/goal。后两者分别完成曲率限速、
+  前后向加速度传播、局部相邻段 time scaling，以及长度、横向偏差、曲率、clearance、collision、
+  v/a/j、duration、finite/严格时间单调的独立复核。
+- [x] TODO 列出的十个聚焦 GTest 已落到三个目标：`StraightPathRemainsStraightWithRedundantCollinearPoints`、
+  `BlockedShortcutPreservesCollisionFreeCorner`、`ShortcutRejectsUnknownOutsideAndSweptFootprintCollision`、
+  `CurvatureAwareAllocationSlowsCornerWithoutSlowingUnrelatedStraightSegments`、
+  `ShortEndpointSegmentsRemainFiniteAndMonotonic`、`SafeStraightPathDoesNotTriggerEsdfRefinement`、
+  `NoisyAlternatingGradientDoesNotCreateZigzag`、`RefinementBacktracksWhenClearanceOrCurvatureRegresses`、
+  `FinalCandidatePreservesEndpointsInitialStateAndTerminalStop`、
+  `UnsafeCandidateFailsClosedAndOldReferenceCannotRevive`。完整 `minco_planner` CTest 为 `11/11`，
+  三个新增目标的再运行也为 `3/3`。
+- [x] `MincoPlannerNode` 发布 `/minco/raw_path`、`/minco/preprocessed_guide`、
+  `/minco/esdf_refined_guide`、candidate/final reference；运行日志包含 raw/guide 点数、snapshot
+  generation/publication sequence、质量指标、各段 duration、失败首因和 optimizer wall time。
+  `MincoS3` 已公开解析 jerk sample；原有 S3、独立 yaw 与全向 `[v_x,v_y,w_z]` 契约未改变。
+
+### 已保存的 Gazebo 证据
+
+- [x] **未修改源码 baseline**：headless domain `221`、`222` 与五层 payload capture domain `223`
+  已在任何源码编辑前保存。domain `223` rosbag 为 `38.3 MiB / 26.737 s / 605 messages`，包含
+  `/map`、planning/signed-distance grid、三类 ROGMap local debug、`/localization`、JPS raw、
+  MINCO reference、MPC predicted/executed。其最大点数为 `19/111/31/13`，ROG source generation
+  `128->194`、adapter sequence `79->122`。这些 baseline 最终均因后续 watchdog/freshness 终止，
+  只能证明链路曾实际生成五层轨迹，不能归因 MINCO 为唯一根因。
+- [x] domain `226` 给出可复现的 MINCO 回归：安全二点直线被 ESDF 阶段无条件加密成 9 个硬控制点，
+  `peak_a=2.659 > 2.5 m/s^2`。实现已改为先评估连续曲线，只有 clearance trigger 才插入内部控制点；
+  同时局部 time scaling 覆盖违反段及一阶相邻段，远端无关直线段不被整体放慢。
+- [x] 修复后的 domain `227` 和 `228/229/230` 都实际观测到 `raw/preprocessed/refined=2/2/2`
+  的自由空间直线以及 MINCO/MPC/执行路径和两级非零速度。domain `230` 的 candidate 例子为
+  `length_ratio=1.000`、`lateral=0`、`curvature_max/p95/TV=0/0/0`、`curvature_sign_changes=0`、
+  `collisions=0`、`peak_v<=2.0`、`peak_a<=2.5`、`peak_j<=12.0`；该 `collisions=0` 仅是规划
+  离散检查，不能推出 Gazebo physical contact 为零。
+- [x] runner 改为由 C++ 只读 recorder 在 action 期间记录 planning-grid graph ownership；启动期
+  `ros2cli` graph cache 仅作诊断，不再把 health gate 前的 `unverified` 误判为 owner 失败。domain
+  `230` 记录 `/rc_esdf/planning_grid` publisher max `1`、adapter 已见、无命名非 adapter；
+  `_NODE_*_UNKNOWN_` 端点保留为 CycloneDDS 匿名诊断，未被计入第二个实际 publisher。速度链仍为
+  `/cmd_vel_mpc=1`、`/motion_control=1`、Gazebo chassis command=`1` 个动作期 publisher。
+
+### 当前停止条件与未完成门禁
+
+- [x] domain `230` 在 action 中触发 freshness 停止条件：`localization` wall interval
+  `p50/p95/p99=0.371/0.994/1.612 s`，adapter 多次发布 `ready=false`，目标在 `0.802 m` 处
+  `ABORTED`，随后两级速度为零。资源快照仍显示历史高 swap，因此这些 samples 不能作为低负载
+  p50/p95/p99、nominal 通过或性能对比证据；没有修改 localization/TF、lease、unknown、footprint、
+  old-reference 或 emergency-stop 门禁。
+- [ ] 因上述停止条件，尚未运行单拐角、S 弯、窄通道、nominal 两次、red-box、单 RViz 截图与三米
+  sliding-window 跟随、八个独立 fault domain、MuJoCo 跨后端、HIL 或实车。未采集全局 ESDF 与局部
+  bounds 同帧截图，也未验证 visualization/local/update center 或旧点残留。
+- [ ] runner 仍没有独立 Gazebo contact evaluator，`minimum_clearance_m`、全轨迹 footprint/swept
+  collision 和 physical contact 必须保持 `unverified`，不得由 MINCO telemetry 代替。
+- [ ] P2 未通过；P3 不得标记 Nav2-free；P4 连续 swept footprint、实车动力学、HIL/实车均未进入。
+
+下一次低负载复验必须从新的 `ROS_DOMAIN_ID` 开始，先取得一次不触发 localization/TF/heartbeat
+freshness gate 的 headless straight，再按本文件第 7 节推进；不得复用 domain `227--230` 的 timing
+样本替代该门禁。
