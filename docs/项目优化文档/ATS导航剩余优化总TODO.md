@@ -162,15 +162,35 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
 
 ### 插桩与指标
 
-- [ ] recorder 同时订阅 `/lidar_odometry`、`/odometry`、`/localization` 和 status；
-- [ ] 每级记录 wall arrival、ROS stamp、stamp age、重复/倒退 stamp、消息数和最长 gap；
-- [ ] 记录 `/clock` wall interval、sim-time 增量和 Gazebo RTF；
-- [ ] 记录 `sensor_scan_generation` TF lookup 失败次数与耗时；
-- [ ] 记录 Point-LIO、bridge、sensor generation、fusion 的 CPU/RSS/thread/context switch；
-- [ ] 记录 executor、DDS queue/drop 和 callback 阻塞证据；
+- [x] 单一 C++ recorder 同时订阅 `/clock`、`/lidar_odometry`、`/odometry`、`/localization`
+  和 `/localization/status`；
+- [x] 每级记录 steady wall arrival、ROS stamp interval、`/clock` 相对 stamp age、重复/倒退 stamp、
+  消息数和最大 gap；
+- [x] 记录 `/clock` wall interval、sim-time interval 与 RTF 分位数；
+- [x] 以 `map -> gimbal_yaw_odom` 的实际零超时查询记录 TF lookup attempt/success/failure/max duration；
+- [x] runner 只对本 launch session 内的 bridge、Point-LIO、loam、sensor generation、fusion、ROGMap
+  与 adapter 写入 CPU tick、RSS、线程和 voluntary/nonvoluntary context-switch 两次原始快照；
+- [x] DDS queue/drop 无可移植 RMW counter 时显式写入
+  `unverified_no_portable_rmw_counter`，不得当作零丢包；
 - [ ] 区分 publisher 慢、subscriber 丢包、sim 慢和 wall watchdog 四类根因；
 - [ ] A/B 每次只改变一个因素：headless、recorder、RViz、相机、LiDAR profile、日志；
 - [ ] 所有 profile 使用新 domain、相同 revision、相同起点和固定窗口。
+
+### 2026-08-15 P1 插桩与 preflight
+
+- **已验证（组件）**：Gazebo fork 的 `EvidenceStatistics` 确定性 CTest、`rmu_gazebo_simulator`
+  单 worker Release build、完整包级 CTest（`32 tests, 0 errors, 0 failures`）、runner `bash -n`、
+  当前 revision `ats_gazebo_nav.launch.py --show-args` 和五仓 `git diff --check` 均通过。
+- **已实现未运行（闭环）**：新 recorder/runner 现已输出上述链路、状态、RTF、TF 与资源字段；尚未在
+  新 ROS domain 启动，不存在新的 timing 分布、action、owner、终点、两级零速度或 P2 结论。
+- **已验证（停止）**：运行前 artifact
+  `log/gazebo_minco_mpc_chain/20260815_2150_stage1_preflight_resource_stop/preflight_resource_stop.txt`
+  记录 first violation 为 `swap_used=5.7 GiB`。审计未发现残留导航/Gazebo/MuJoCo 进程，但该高 swap
+  已满足停止条件，故未分配 ROS domain、未启动 Gazebo。
+- **推断 [Confidence: Medium]**：旧 domain `230` 三个下游 topic 的相近 wall gap 可能共同受上游 cadence、
+  仿真 RTF 或资源争用影响；新增观测尚未运行，不能归因任何行为 owner。
+- **未验证**：DDS 中间件可报告的队列/丢包计数、各进程 CPU rate/context-switch delta、`/clock` 与各级
+  stamp/age 分布、持续 TRACKING、TF failure、first violating publisher/subscriber 以及所有 A/B 因子。
 
 ### 修复原则
 

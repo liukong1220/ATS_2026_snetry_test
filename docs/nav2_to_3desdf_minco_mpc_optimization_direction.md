@@ -50,6 +50,11 @@ ICR 或 `vy=0`。
 - Gazebo domain `228/229` 的短直线 action 成功，终点误差约 `0.060/0.045 m`；
 - domain `230` 的直线 candidate 长度比 `1.000`、曲率为零，但 `/localization` wall interval
   `p50/p95/p99=0.371/0.994/1.612 s`，adapter 反复 `ready=false`，action fail-closed；
+- P1 的单 recorder 已补齐 `/clock`、三段 odometry、`/localization/status` 与 adapter 的 wall/stamp/age、
+  duplicate/backward、RTF、TRACKING、TF lookup 和本 session 进程资源字段；组件 build/CTest/launch
+  静态验证通过。当前 preflight 的 first violation 是 `swap_used=5.7 GiB`，因此未启动新 domain，
+  这些字段仍没有 runtime 分布，不能确定 freshness 行为 owner；DDS queue/drop 计数明确为
+  `unverified_no_portable_rmw_counter`，不能解释为零丢包；
 - production MINCO node 尚未把实时 `InitialKinematicState` 传入 optimizer；几何质量指标主要用于
   telemetry，尚未形成完整候选接受门禁；
 - Gazebo runner 的 `TEST_PROFILE` 尚未拥有实际 corner/S/narrow/red-box 场景逻辑；
@@ -72,7 +77,8 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 
 ## 5. 下一优化顺序
 
-1. 定位并修复 Gazebo localization freshness 首个违反者；
+1. 在 swap 低于运行停止阈值、无残留导航进程的环境中，以新 ROS domain 运行 60 s headless P1 recorder，
+   先定位 Gazebo localization freshness 首个违反者；
 2. 将实际运动状态接入 MINCO 四条生产优化路径；
 3. 把几何质量 telemetry 升级为按路径类别生效的候选门禁；
 4. 实现真实 Gazebo straight/corner/S/narrow/nominal/red-box runner；
