@@ -877,3 +877,24 @@ Gazebo profile fail-closed 行为，不替代连续 swept-footprint、physical c
   因此标记完整通过。
 - [ ] P3 边界：Gazebo launch 默认 `launch_nav2:=false`，但尚未按 P3 全部 action/取消/preempt/timeout
   场景和扩大路线完成验收，**不得称 Nav2-free 已完成**。
+
+## 2026-08-15 ROGMap 全局可视化与 MINCO 轨迹质量设计
+
+- [x] 已完成源码审计和第一版实施设计，详细任务见
+  [ROGMap全局可视化与MINCO轨迹质量优化TODO.md](./ROGMap全局可视化与MINCO轨迹质量优化TODO.md)。
+- [x] 已确认 `/rog_map/esdf` 是被当前 ESDF bounds 与机器人中心 visualization range 共同裁剪的局部
+  debug cloud；ROGMap 正式配置使用 `10 x 10 x 1 m` 滑动窗口。不得靠累积历史 debug 点或扩大滑窗
+  伪造全局地图。
+- [x] 已确认 adapter 以静态图全尺寸构造融合 planning grid 和 RC-ESDF，并发布当前 RViz 默认关闭的
+  `/rc_esdf/signed_distance_grid`。第一版全局效果应直接启用并明确标注该 display，再叠加随机器人移动的
+  `/rog_map/viz`、`/rog_map/esdf` 和 `/rog_map/bounds`；显示栅格不得被反解析成规划数值。
+- [x] 已确认当前 MINCO 前端只做固定阈值共线点删除，按 `segment_length/reference_speed` 分配时间；ESDF
+  阶段会加密并独立移动控制点，动力学越限则统一缩放全部 segment duration。现有测试没有直线不增弯、
+  曲率变化、局部时间分配或 noisy-gradient 防锯齿门禁。
+- [ ] 下一轮先冻结 raw JPS、预处理 guide、ESDF guide、MINCO final、MPC predicted 和 executed 的同输入
+  指标，再依次实施保守 footprint-aware shortcut、曲率感知时间分配、法向/平滑 ESDF offset 和独立质量门禁。
+- [ ] 本节只是设计与静态源码证据，没有修改 RViz/ROGMap/MINCO，没有新增构建或仿真结果；用户截图和
+  目测弯折都不能替代当前 revision 的配对运行证据。
+
+可直接复制的新对话执行入口见
+[下一阶段提示词_ROGMap全局可视化与MINCO轨迹质量优化.md](./下一阶段提示词_ROGMap全局可视化与MINCO轨迹质量优化.md)。
