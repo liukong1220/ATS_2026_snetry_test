@@ -112,6 +112,7 @@ ACTIVE_EVIDENCE_LOG="$RUN_DIR/active_navigation_evidence.log"
 ACTIVE_EVIDENCE_PID=""
 ACTIVE_EVIDENCE_SESSION_ID=""
 ACTIVE_OWNERSHIP_LOG="$RUN_DIR/active_ownership.log"
+PROCESS_RESOURCE_LOG="$RUN_DIR/launch_process_resources.log"
 HEALTH_PROBE_LOG="$RUN_DIR/navigation_health_probe.log"
 RECOVERY_CANCEL_LOG="$RUN_DIR/recovery_cancel_on_command.log"
 RECOVERY_CANCEL_RESULT=""
@@ -638,6 +639,53 @@ start_active_observers() {
   ACTIVE_EVIDENCE_SESSION_ID="$(ps -o sid= -p "$ACTIVE_EVIDENCE_PID" 2>/dev/null | tr -d ' ' || true)"
 }
 
+# Snapshot only known nodes inside this run's launch session.  It never matches
+# across sessions and never signals a process, so an unrelated user's ROS or
+# simulator process cannot become test input or a cleanup target.  The raw
+# CPU ticks/RSS/thread/context-switch values deliberately remain raw: two
+# snapshots can be compared offline without pretending that a point sample is
+# a process-rate or DDS drop measurement.
+capture_launch_process_resources() {
+  local phase="$1" pid sid args stat_path status_path cpu_ticks rss_kb threads vctx ivctx
+  sid="${LAUNCH_SESSION_ID:-}"
+  {
+    printf 'phase=%s steady_epoch_ns=%s launch_session=%s\n' \
+      "$phase" "$(date +%s%N)" "${sid:-unverified}"
+    if [ -z "$sid" ]; then
+      printf 'resource_capture=unverified_missing_launch_session\n'
+      return 0
+    fi
+    while IFS=$'\t' read -r pid args; do
+      [ -n "$pid" ] || continue
+      stat_path="/proc/$pid/stat"
+      status_path="/proc/$pid/status"
+      if [ ! -r "$stat_path" ] || [ ! -r "$status_path" ]; then
+        printf 'pid=%s resource_capture=unverified_process_exited args=%s\n' "$pid" "$args"
+        continue
+      fi
+      cpu_ticks="$(awk '{print $14 + $15}' "$stat_path" 2>/dev/null || true)"
+      rss_kb="$(awk '/^VmRSS:/ {print $2; exit}' "$status_path" 2>/dev/null || true)"
+      threads="$(awk '/^Threads:/ {print $2; exit}' "$status_path" 2>/dev/null || true)"
+      vctx="$(awk '/^voluntary_ctxt_switches:/ {print $2; exit}' "$status_path" 2>/dev/null || true)"
+      ivctx="$(awk '/^nonvoluntary_ctxt_switches:/ {print $2; exit}' "$status_path" 2>/dev/null || true)"
+      printf 'pid=%s cpu_ticks=%s rss_kb=%s threads=%s voluntary_ctxt=%s nonvoluntary_ctxt=%s args=%s\n' \
+        "$pid" "${cpu_ticks:-unverified}" "${rss_kb:-unverified}" \
+        "${threads:-unverified}" "${vctx:-unverified}" "${ivctx:-unverified}" "$args"
+    done < <(
+      ps -eo pid=,sid=,args= | awk -v sid="$sid" '
+        $2 == sid &&
+        $0 ~ /(gz_livox_bridge_node|pointlio_mapping|loam_interface_node|sensor_scan_generation_node|localization_fusion_node|ats_rog_map_node|ats_rog_map_adapter_node|ign gazebo)/ {
+          pid = $1
+          $1 = ""
+          $2 = ""
+          sub(/^[[:space:]]+/, "")
+          print pid "\t" $0
+        }'
+    )
+    printf 'dds_queue_drop_counter=unverified_no_portable_rmw_counter\n'
+  } >>"$PROCESS_RESOURCE_LOG"
+}
+
 # The recovery client owns the exact action it cancels. Unlike a shell SIGINT,
 # its command callback and GoalHandle share one rclcpp executor, so an early
 # progress watchdog cannot win merely because a CLI process was re-parented by
@@ -1102,6 +1150,7 @@ if [ "$ACTION_READY" = "yes" ] && [ "$HEALTH_READY" = "yes" ]; then
   # setup interval. A one-metre nominal goal can complete before a post-dispatch
   # ros2cli process has joined its volatile Path publishers.
   start_active_observers
+  capture_launch_process_resources "active_start"
   sleep "${ACTIVE_OBSERVER_SETTLE_SEC:-2}"
   if [ "$P2_FAULT_CASE" = "emergency-stop-recovery" ]; then
     RECOVERY_SOURCE_GENERATION_BEFORE="$(status_value rog_generation)"
@@ -1284,6 +1333,7 @@ fi
 # action is required to publish zero velocity, so only these read-only logs can
 # distinguish a completed trajectory from a goal that never commanded motion.
 stop_active_observers
+capture_launch_process_resources "active_end"
 EVIDENCE_RESULT="$(awk '/^ATS_NAVIGATION_EVIDENCE_RESULT / {line=$0} END {print line}' "$ACTIVE_EVIDENCE_LOG")"
 if [ -z "$EVIDENCE_RESULT" ]; then
   fail "active C++ navigation evidence recorder produced no result"
@@ -1302,13 +1352,40 @@ GT1="$(evidence_value gt_end_xyz | tr ',' ' ')"
 if [ "$GT0" = "unverified" ]; then GT0=""; fi
 if [ "$GT1" = "unverified" ]; then GT1=""; fi
 metric "active_evidence" "${EVIDENCE_RESULT:-unverified}"
-for stage in lidar_odometry odometry localization; do
+metric "launch_process_resources" "$PROCESS_RESOURCE_LOG"
+for stage in clock lidar_odometry odometry localization localization_status; do
   metric "${stage}_samples" "$(evidence_value "${stage}_samples")"
   metric "${stage}_p50_wall_interval_s" "$(evidence_value "${stage}_p50_wall_interval_s")"
   metric "${stage}_p95_wall_interval_s" "$(evidence_value "${stage}_p95_wall_interval_s")"
   metric "${stage}_p99_wall_interval_s" "$(evidence_value "${stage}_p99_wall_interval_s")"
   metric "${stage}_max_wall_interval_s" "$(evidence_value "${stage}_max_wall_interval_s")"
+  metric "${stage}_p50_stamp_interval_s" "$(evidence_value "${stage}_p50_stamp_interval_s")"
+  metric "${stage}_p95_stamp_interval_s" "$(evidence_value "${stage}_p95_stamp_interval_s")"
+  metric "${stage}_p99_stamp_interval_s" "$(evidence_value "${stage}_p99_stamp_interval_s")"
+  metric "${stage}_max_stamp_interval_s" "$(evidence_value "${stage}_max_stamp_interval_s")"
+  metric "${stage}_p50_stamp_age_s" "$(evidence_value "${stage}_p50_stamp_age_s")"
+  metric "${stage}_p95_stamp_age_s" "$(evidence_value "${stage}_p95_stamp_age_s")"
+  metric "${stage}_p99_stamp_age_s" "$(evidence_value "${stage}_p99_stamp_age_s")"
+  metric "${stage}_max_stamp_age_s" "$(evidence_value "${stage}_max_stamp_age_s")"
+  metric "${stage}_duplicate_stamp_count" "$(evidence_value "${stage}_duplicate_stamp_count")"
+  metric "${stage}_backward_stamp_count" "$(evidence_value "${stage}_backward_stamp_count")"
+  metric "${stage}_invalid_stamp_count" "$(evidence_value "${stage}_invalid_stamp_count")"
+  metric "${stage}_future_stamp_count" "$(evidence_value "${stage}_future_stamp_count")"
 done
+metric "clock_rtf_p50" "$(evidence_value clock_rtf_p50)"
+metric "clock_rtf_p95" "$(evidence_value clock_rtf_p95)"
+metric "clock_rtf_p99" "$(evidence_value clock_rtf_p99)"
+metric "localization_status_tracking_samples" "$(evidence_value localization_status_tracking_samples)"
+metric "localization_status_non_tracking_samples" "$(evidence_value localization_status_non_tracking_samples)"
+metric "localization_status_last_state" "$(evidence_value localization_status_last_state)"
+metric "localization_status_observation_age_p50_s" "$(evidence_value localization_status_observation_age_p50_s)"
+metric "localization_status_observation_age_p95_s" "$(evidence_value localization_status_observation_age_p95_s)"
+metric "localization_status_observation_age_p99_s" "$(evidence_value localization_status_observation_age_p99_s)"
+metric "tf_lookup_attempts" "$(evidence_value tf_lookup_attempts)"
+metric "tf_lookup_successes" "$(evidence_value tf_lookup_successes)"
+metric "tf_lookup_failures" "$(evidence_value tf_lookup_failures)"
+metric "tf_lookup_max_ms" "$(evidence_value tf_lookup_max_ms)"
+metric "dds_queue_drop_counter" "$(evidence_value dds_queue_drop_counter)"
 metric "adapter_max_wall_interval_s" "$(evidence_value adapter_max_wall_interval_s)"
 metric "adapter_ready_seen_active" "$(evidence_value adapter_ready_seen)"
 metric "adapter_source_generation_active" "$(evidence_value adapter_source_generation_begin)->$(evidence_value adapter_source_generation_end)"
