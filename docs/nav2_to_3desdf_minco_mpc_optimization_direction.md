@@ -37,7 +37,11 @@ ICR 或 `vy=0`。
 
 - 根仓 `90b5bfbceb88`、导航仓 `5ea786eb2e70`、Gazebo fork `9ed6c41650e6`、MuJoCo
   `e3d6ea7a5e61` 已同步各自远端；
-- `ats_robot_description` 本地 `dea591e53fa0` 仍领先远端 `ed293ca0613e` 一个提交，干净复建未通过；
+- `ats_robot_description` 的 `dea591e53fa0` 已经 SSH 推送并与 `origin/develop` 同步；但 2026-08-15
+  的干净复建尚未通过：根仓 SSH clone pack 接收超时、HTTPS depth-1 clone 报
+  `GnuTLS recv error (-9)`/EOF，SSH-only Gazebo fork clone 也超时。远端根仓归档中的实际
+  `vcs import --recursive --shallow` 于 `190 s` 退出 `124`，且 Gazebo 未形成有效 checkout。远端 refs
+  与根仓 codeload 归档可读，不能替代成功的 Git + `vcs import` 证据；
 - 两份 RViz 已配置全局 `/rc_esdf/signed_distance_grid` 和局部 ROGMap debug，但当前 revision 尚无
   全局 ESDF/三米滑窗运行截图；
 - MINCO 已有 geometry preprocessor、curvature-aware time allocation、ESDF refinement 和 quality
@@ -67,7 +71,7 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 
 ## 5. 下一优化顺序
 
-1. 推送并干净复建 `ats_robot_description`；
+1. 修复本机 Git pack 传输并完成干净 `vcs import`、locked manifest、最窄 Gazebo 资源解析；
 2. 定位并修复 Gazebo localization freshness 首个违反者；
 3. 将实际运动状态接入 MINCO 四条生产优化路径；
 4. 把几何质量 telemetry 升级为按路径类别生效的候选门禁；

@@ -41,7 +41,7 @@
 | 导航仓 | `5ea786eb2e70` | `origin/develop` 已同步 | ROGMap、JPS/MINCO、Goal Manager、MPC |
 | Gazebo 用户 fork | `9ed6c41650e6` | `origin/main` 已同步 | 禁止向 `upstream` 写入 |
 | MuJoCo | `e3d6ea7a5e61` | `origin/develop` 已同步 | 当前轮未修改 |
-| `ats_robot_description` | 本地 `dea591e53fa0` | 远端 `ed293ca0613e` | **领先一个关键提交，阻塞干净复建** |
+| `ats_robot_description` | `dea591e53fa0` | `origin/develop` 已同步 | 该提交已于 2026-08-15 经 SSH 推送；干净 Git/vcs 复建仍受本机传输失败阻塞 |
 
 受保护的用户内容继续保留：
 
@@ -106,14 +106,29 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
 
 ### 工作项
 
-- [ ] 将 `ats_robot_description` 本地提交 `dea591e53fa0` 推送到用户远端；
-- [ ] 将 push remote 改为可非交互使用的 SSH 地址；
-- [ ] 确认活动引用只来自 `ats_robot_description`，没有 `pb2025_robot_description`；
+- [x] 将 `ats_robot_description` 本地提交 `dea591e53fa0` 推送到用户远端；
+- [x] 将 push remote 改为可非交互使用的 SSH 地址；
+- [x] 确认活动引用只来自 `ats_robot_description`，没有 `pb2025_robot_description`；
 - [ ] 在临时干净目录执行 `vcs import dependencies.repos`；
 - [ ] 记录每个仓库实际 checkout SHA，而不是只记录分支名；
 - [ ] 生成验收用 locked manifest，固定关键依赖 commit；
 - [ ] 在干净工作区完成最窄 Gazebo 导航包构建和 `--show-args`；
 - [ ] 确认不依赖本机未跟踪 bridge、旧 install 或旧 build。
+
+### 2026-08-15 P0 执行状态
+
+- `ats_robot_description` 已由 SSH `git push origin develop` 从 `ed293ca0613e` 推进至
+  `dea591e53fa0f5f612ef63669a8eddb2cedf34a4`；推送后本地与 `origin/develop` 一致。
+- 远端 refs 可读：根仓 `develop=c75a825fe93f036eb042605d3b6ca3ebd77d1744`、机器人描述
+  `develop=dea591e53fa0f5f612ef63669a8eddb2cedf34a4`；根仓 codeload 归档可下载。
+- 干净复建尚未通过：SSH 根仓完整 clone 在 pack 接收阶段超过 `600 s`；HTTPS depth-1 clone 失败于
+  `GnuTLS recv error (-9)` 与意外 EOF；manifest 中 SSH-only Gazebo fork 的 depth-1 clone 也在
+  pack 接收阶段超过 `120 s`。以根仓远端归档创建的全新目录实际执行
+  `vcs import --recursive --shallow --skip-existing . < dependencies.repos`，`190 s` 后退出 `124`；
+  部分仓库已完成 checkout，但 Gazebo 目录未形成有效 Git checkout。故不能生成可靠的 locked manifest、
+  也不能声称新电脑可复建。
+- 本机无残留 ATS/Gazebo/MuJoCo launch，但当时 swap 已使用约 `7.1 GiB`。P1 Gazebo 运行未启动；
+  在干净 Git/vcs 复建完成前，不进入 freshness、MINCO、场景或 P2 故障验收。
 
 ### DoD
 
