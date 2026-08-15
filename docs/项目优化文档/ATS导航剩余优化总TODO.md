@@ -35,7 +35,7 @@
 
 ### 2.1 仓库基线
 
-| 仓库 | 当前 revision | 远端状态 | 说明 |
+| 仓库 | P0 起始 revision | 远端状态 | 说明 |
 | --- | --- | --- | --- |
 | 根仓 | `c7cc0e54cc7d` | `origin/develop` 已同步 | P0 阻塞记录后的文档基线 |
 | 导航仓 | `5ea786eb2e70` | `origin/develop` 已同步 | ROGMap、JPS/MINCO、Goal Manager、MPC |
