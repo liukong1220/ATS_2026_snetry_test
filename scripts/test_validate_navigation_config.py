@@ -78,6 +78,35 @@ class NavigationRvizContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "preserve producer voxel-state colors"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
+    def test_global_fused_esdf_display_contract_passes(self):
+        VALIDATOR.assert_global_fused_esdf_display(self.load_default_rviz(), "test RViz")
+
+    def test_global_fused_esdf_rejects_volatile_qos_and_hidden_layer(self):
+        rviz = copy.deepcopy(self.load_default_rviz())
+        display = VALIDATOR.single_display_for_topic(
+            rviz, VALIDATOR.GLOBAL_FUSED_ESDF_TOPIC, "test RViz"
+        )
+        display["Topic"]["Durability Policy"] = "Volatile"
+        with self.assertRaisesRegex(AssertionError, "Transient Local"):
+            VALIDATOR.assert_global_fused_esdf_display(rviz, "test RViz")
+
+        rviz = copy.deepcopy(self.load_default_rviz())
+        display = VALIDATOR.single_display_for_topic(
+            rviz, VALIDATOR.GLOBAL_FUSED_ESDF_TOPIC, "test RViz"
+        )
+        display["Enabled"] = False
+        with self.assertRaisesRegex(AssertionError, "must be enabled"):
+            VALIDATOR.assert_global_fused_esdf_display(rviz, "test RViz")
+
+    def test_minco_intermediate_guide_display_requires_reliable_qos(self):
+        rviz = copy.deepcopy(self.load_default_rviz())
+        guide = VALIDATOR.single_display_for_topic(
+            rviz, "/minco/preprocessed_guide", "test RViz"
+        )
+        guide["Topic"]["Reliability Policy"] = "Best Effort"
+        with self.assertRaisesRegex(AssertionError, "must use Reliable"):
+            VALIDATOR.assert_minco_guide_displays(rviz, "test RViz")
+
 
 if __name__ == "__main__":
     unittest.main()

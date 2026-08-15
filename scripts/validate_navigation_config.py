@@ -13,6 +13,8 @@ ROG_MAP_BOUNDS_DISPLAY_NAME = (
     "ROGMap Bounds: Orange Local / Purple Visualization / Green Update"
 )
 ROG_MAP_LOCAL_VOXEL_DISPLAY_NAME = "ROGMap Local Voxel State (debug only)"
+GLOBAL_FUSED_ESDF_DISPLAY_NAME = "Global Fused RC-ESDF (ROGMap + Static + Terrain)"
+GLOBAL_FUSED_ESDF_TOPIC = "/rc_esdf/signed_distance_grid"
 ROG_MAP_DEBUG_TOPICS = (
     "/rog_map/occ",
     "/rog_map/inf_occ",
@@ -53,6 +55,10 @@ NAVIGATION_PATH_DISPLAY_CONTRACTS = {
 NAVIGATION_PATH_DISPLAY_NAMES = tuple(
     contract["name"] for contract in NAVIGATION_PATH_DISPLAY_CONTRACTS.values()
 )
+MINCO_GUIDE_DISPLAY_CONTRACTS = {
+    "/minco/preprocessed_guide": "MINCO Guide / Geometry Preprocessed",
+    "/minco/esdf_refined_guide": "MINCO Guide / ESDF Refined",
+}
 
 
 class DuplicateKeyLoader(yaml.SafeLoader):
@@ -239,6 +245,61 @@ def assert_navigation_rviz_contract(document, fixed_frame: str, context: str):
         )
         assert display["Offset"]["Z"] == contract["offset_z"], (
             f"{context} {topic} Z offset must be {contract['offset_z']}"
+        )
+
+
+def assert_global_fused_esdf_display(document, context: str):
+    """Lock the display-only global RC-ESDF layer without changing ESDF ownership."""
+    display = single_display_for_topic(document, GLOBAL_FUSED_ESDF_TOPIC, context)
+    assert display["Class"] == "rviz_default_plugins/Map", (
+        f"{context} global fused ESDF must be a Map display"
+    )
+    assert display["Name"] == GLOBAL_FUSED_ESDF_DISPLAY_NAME, (
+        f"{context} global fused ESDF display name must be {GLOBAL_FUSED_ESDF_DISPLAY_NAME!r}"
+    )
+    assert display["Topic"]["Reliability Policy"] == "Reliable", (
+        f"{context} global fused ESDF must use Reliable"
+    )
+    assert display["Topic"]["Durability Policy"] == "Transient Local", (
+        f"{context} global fused ESDF must use Transient Local"
+    )
+    assert display["Topic"]["History Policy"] == "Keep Last", (
+        f"{context} global fused ESDF must keep only the latest grid"
+    )
+    assert display["Topic"]["Depth"] == 1, (
+        f"{context} global fused ESDF depth must be one"
+    )
+    assert display["Color Scheme"] == "costmap", (
+        f"{context} global fused ESDF must use costmap colors"
+    )
+    assert display["Alpha"] >= 0.55 and display["Alpha"] <= 0.70, (
+        f"{context} global fused ESDF alpha must stay in [0.55, 0.70]"
+    )
+    assert display["Draw Behind"] is True, (
+        f"{context} global fused ESDF must draw behind local diagnostics"
+    )
+    assert display["Enabled"] is True, (
+        f"{context} global fused ESDF must be enabled"
+    )
+
+
+def assert_minco_guide_displays(document, context: str):
+    for topic, name in MINCO_GUIDE_DISPLAY_CONTRACTS.items():
+        display = single_display_for_topic(document, topic, context)
+        assert display["Class"] == "rviz_default_plugins/Path", (
+            f"{context} {topic} must be a Path display"
+        )
+        assert display["Name"] == name, (
+            f"{context} {topic} display name must be {name!r}"
+        )
+        assert display["Topic"]["Reliability Policy"] == "Reliable", (
+            f"{context} {topic} must use Reliable"
+        )
+        assert display["Topic"]["History Policy"] == "Keep Last", (
+            f"{context} {topic} must preserve only the current planning stage"
+        )
+        assert display["Enabled"] is True, (
+            f"{context} {topic} must be enabled for trajectory attribution"
         )
 
 
@@ -511,6 +572,8 @@ def main():
     ):
         assert topic in rviz_topics, f"RViz config missing {topic}"
     assert_navigation_rviz_contract(rviz, rog_map["map_frame"], "default RViz")
+    assert_global_fused_esdf_display(rviz, "default RViz")
+    assert_minco_guide_displays(rviz, "default RViz")
     rviz_text = (
         workspace / "src/ats_sentry_bringup/rviz/sentry_default_view.rviz"
     ).read_text(encoding="utf-8")
@@ -528,10 +591,13 @@ def main():
         "Style: Boxes",
         "Color Transformer: Intensity",
         "Name: Planning Grid",
+        GLOBAL_FUSED_ESDF_DISPLAY_NAME,
+        "Value: /rc_esdf/signed_distance_grid",
+        *MINCO_GUIDE_DISPLAY_CONTRACTS,
         *NAVIGATION_PATH_DISPLAY_NAMES,
     ):
         assert required in rviz_text, f"RViz ROGMap display contract missing {required}"
-    for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool"):
+    for forbidden in ("\n        Value: /plan\n", "transformed_global_plan", "GoalTool"):
         assert forbidden not in rviz_text, f"RViz retains Nav2 display/tool: {forbidden}"
 
     mujoco_rviz_path = workspace / "src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz"
@@ -566,6 +632,13 @@ def main():
         assert required in mujoco_rviz_text, f"MuJoCo RViz display contract missing {required}"
     for forbidden in ("\n        Value: /plan\n", "costmap", "transformed_global_plan", "GoalTool", "nav2_rviz_plugins"):
         assert forbidden not in mujoco_rviz_text, f"MuJoCo RViz retains Nav2 display/tool: {forbidden}"
+
+    gazebo_rviz_path = workspace / "src/sim/gazebo_simulator/rmu_gazebo_simulator/rviz/ats_gazebo_nav.rviz"
+    gazebo_rviz = load_yaml(gazebo_rviz_path)
+    assert_global_fused_esdf_display(gazebo_rviz, "Gazebo RViz")
+    assert_minco_guide_displays(gazebo_rviz, "Gazebo RViz")
+    gazebo_local = single_display_for_topic(gazebo_rviz, "/rog_map/viz", "Gazebo RViz")
+    assert gazebo_local["Decay Time"] == 0, "Gazebo RViz local ROGMap voxels must not accumulate"
 
     print("PASS: formal single-source behavior, navigation configuration, and ROGMap visualization contract")
 
