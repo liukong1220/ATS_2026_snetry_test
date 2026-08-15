@@ -594,7 +594,7 @@ topic_type() {
     /rog_map_adapter/status) echo ats_navigation_interfaces/msg/PlanningMapStatus ;;
     /rog_map_adapter/planning_snapshot) echo ats_navigation_interfaces/msg/PlanningMapSnapshot ;;
     /rog_map/occ|/rog_map/inf_occ|/rog_map/unk|/rog_map/esdf|/traversability_grid|/rc_esdf/planning_grid) echo nav_msgs/msg/OccupancyGrid ;;
-    /minco/raw_path|/minco/reference_path|/ats_swerve_mpc/predicted_path|/ats_swerve_mpc/executed_path) echo nav_msgs/msg/Path ;;
+    /minco/raw_path|/minco/preprocessed_guide|/minco/esdf_refined_guide|/minco/reference_path|/ats_swerve_mpc/predicted_path|/ats_swerve_mpc/executed_path) echo nav_msgs/msg/Path ;;
     /localization|/odometry|*/chassis_odometry_gt) echo nav_msgs/msg/Odometry ;;
     /registered_scan|/livox/lidar|*/livox/lidar) echo sensor_msgs/msg/PointCloud2 ;;
     /livox/imu|*/livox/imu) echo sensor_msgs/msg/Imu ;;
@@ -928,10 +928,11 @@ for t in /rog_map/occ /rog_map/inf_occ /rog_map/unk /rog_map/esdf \
 done
 
 read -r GRID_PUB GRID_SUB <<<"$(topic_counts /rc_esdf/planning_grid)"
-metric "planning_grid_pub/sub" "${GRID_PUB:-unverified}/${GRID_SUB:-unverified}"
-if [ "$PLANNING_GRID_OWNER" = "rog_map" ] && [ "${GRID_PUB:-0}" != "1" ]; then
-  fail "/rc_esdf/planning_grid must have exactly one publisher, got ${GRID_PUB:-0}"
-fi
+# This startup CLI query is only a discovery diagnostic.  A fresh ros2cli
+# participant can miss the DDS graph while the C++ health probe already has a
+# valid grid payload.  The action-lifetime recorder below owns the definitive
+# publisher-count and identity gate once the map health gate has opened.
+metric "planning_grid_pub/sub_startup_cli" "${GRID_PUB:-unverified}/${GRID_SUB:-unverified}"
 
 MAP_READY="$(echo_once /rog_map_adapter/ready | awk '/data:/ {print $2; exit}')"
 metric "map_ready_heartbeat" "${MAP_READY:-unverified}"
@@ -1314,6 +1315,8 @@ metric "adapter_source_generation_active" "$(evidence_value adapter_source_gener
 metric "adapter_publication_sequence_active" "$(evidence_value adapter_publication_sequence_begin)->$(evidence_value adapter_publication_sequence_end)"
 
 metric "jps_raw_path_points" "${JPS_POINTS:-unverified}"
+metric "minco_preprocessed_guide_points" "$(evidence_value preprocessed_guide_max_points)"
+metric "minco_esdf_refined_guide_points" "$(evidence_value esdf_refined_guide_max_points)"
 metric "minco_reference_path_points" "${MINCO_POINTS:-unverified}"
 metric "mpc_predicted_path_points" "${MPC_PRED_POINTS:-unverified}"
 metric "mpc_executed_path_points" "${EXEC_POINTS:-unverified}"
@@ -1332,10 +1335,26 @@ MOTION_ACTIVE_PUB="$(evidence_value motion_control_publisher_max)"
 MOTION_ACTIVE_SUB="$(evidence_value motion_control_subscriber_max)"
 CHASSIS_ACTIVE_PUB="$(evidence_value chassis_cmd_publisher_max)"
 CHASSIS_ACTIVE_SUB="$(evidence_value chassis_cmd_subscriber_max)"
+GRID_ACTIVE_PUB="$(evidence_value planning_grid_publisher_max)"
+GRID_ACTIVE_SUB="$(evidence_value planning_grid_subscriber_max)"
+GRID_ACTIVE_PUBLISHERS="$(evidence_value planning_grid_publisher_names)"
+GRID_ADAPTER_SEEN="$(evidence_value planning_grid_adapter_seen)"
+GRID_NAMED_NON_ADAPTER_SEEN="$(evidence_value planning_grid_named_non_adapter_seen)"
+GRID_ANONYMOUS_ENDPOINT_SEEN="$(evidence_value planning_grid_anonymous_endpoint_seen)"
 metric "cmd_vel_mpc_pub/sub_active" "${CMD_ACTIVE_PUB:-unverified}/${CMD_ACTIVE_SUB:-unverified}"
 metric "motion_control_pub/sub_active" "${MOTION_ACTIVE_PUB:-unverified}/${MOTION_ACTIVE_SUB:-unverified}"
 metric "gz_chassis_cmd_pub/sub_active" "${CHASSIS_ACTIVE_PUB:-unverified}/${CHASSIS_ACTIVE_SUB:-unverified}"
+metric "planning_grid_pub/sub_active" "${GRID_ACTIVE_PUB:-unverified}/${GRID_ACTIVE_SUB:-unverified}"
+metric "planning_grid_publishers_active" "${GRID_ACTIVE_PUBLISHERS:-unverified}"
+metric "planning_grid_adapter_seen_active" "${GRID_ADAPTER_SEEN:-unverified}"
+metric "planning_grid_named_non_adapter_seen_active" "${GRID_NAMED_NON_ADAPTER_SEEN:-unverified}"
+metric "planning_grid_anonymous_endpoint_seen_active" "${GRID_ANONYMOUS_ENDPOINT_SEEN:-unverified}"
 if [ "$P2_FAULT_CASE" = "none" ]; then
+  [ "${GRID_ACTIVE_PUB:-0}" = "1" ] || fail "/rc_esdf/planning_grid must have exactly one active publisher, got ${GRID_ACTIVE_PUB:-unverified}"
+  [ "${GRID_ADAPTER_SEEN:-no}" = "yes" ] || \
+    fail "/rc_esdf/planning_grid never identified /ats_rog_map_adapter as its active publisher"
+  [ "${GRID_NAMED_NON_ADAPTER_SEEN:-yes}" = "no" ] || \
+    fail "/rc_esdf/planning_grid identified a named non-adapter publisher: ${GRID_ACTIVE_PUBLISHERS:-unverified}"
   [ "${CMD_ACTIVE_PUB:-0}" = "1" ] || fail "/cmd_vel_mpc must have exactly one active publisher, got ${CMD_ACTIVE_PUB:-unverified}"
   [ "${MOTION_ACTIVE_PUB:-0}" = "1" ] || fail "/motion_control must have exactly one active publisher, got ${MOTION_ACTIVE_PUB:-unverified}"
   [ "${CHASSIS_ACTIVE_PUB:-0}" = "1" ] || fail "/${ROBOT_NAME}/cmd_vel must have exactly one active publisher, got ${CHASSIS_ACTIVE_PUB:-unverified}"
