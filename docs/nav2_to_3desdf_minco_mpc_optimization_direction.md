@@ -596,3 +596,25 @@ paired shadow A/B/C、red-box、P2/P3、物理接触、HIL 或实车；不得将
 clearance、MINCO 离散 footprint collision、Gazebo physical contact telemetry、红框、HIL、实车和连续
 swept footprint 均未验证。不得通过放宽 TF wait、input/map timeout、unknown、lease、old reference
 或 emergency stop 来处理 domain `183` 的安全拒绝。
+
+## 2026-08-15 ROGMap 显示层与 MINCO 几何/时间后端方向
+
+当前 ROGMap 数值地图是 `10 x 10 x 1 m` 滑动窗口，`/rog_map/esdf` 只导出当前 ESDF bounds 与机器人中心
+visualization range 的交集，因此“把该点云显示为整张赛场”与源码的局部地图契约冲突。adapter 已经把
+static/terrain/slope 与当前 ROGMap projection 融合到静态图全尺寸 planning grid，并发布
+`/rc_esdf/signed_distance_grid`。下一轮先把它作为 **Global Fused RC-ESDF** 启用，再叠加随机器人移动的
+`/rog_map/viz`、`/rog_map/esdf` 与三类 bounds；不得累积历史 debug cloud、扩大滑窗或反解析显示数据。
+
+MINCO 的当前问题不能只用“平滑权重不足”解释。源码显示时间初值仅为段长除参考速度，动力学越限时统一
+拉长全部段；ESDF 处理先按固定距离加密 JPS guide，再让内部点独立响应梯度。这个流程缺少保守 shortcut、
+直线不增弯、曲率/转角感知速度、局部 time scaling、offset 平滑和 candidate 质量回溯，因此需要先保存
+`raw -> guide -> refined guide -> MINCO -> predicted -> executed` 的配对指标，再判断主因。
+
+后端优化保持 MINCO S3、独立 yaw 和四舵轮全向模型。离散几何曲率仅用于轨迹质量与局部速度分配，不能迁入
+Ackermann、ICR 或 `vy=0` 约束。最终 reference 仍需同一 immutable snapshot 上的 footprint/swept safety、
+freshness 和提交点复核；任何 candidate 回归或失败均只能回退到同 snapshot 的安全 baseline，否则保持急停和
+两级零速度。详细阶段、公式、测试矩阵和停止条件见
+`docs/项目优化文档/ROGMap全局可视化与MINCO轨迹质量优化TODO.md`；可执行的新对话提示词已作为独立文档保存。
+
+本轮只形成设计文档，没有修改算法或显示配置，也没有运行新的 build、Gazebo、MuJoCo、HIL 或实车测试。
+P2、P3/Nav2-free 和 P4 结论保持不变。
