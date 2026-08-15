@@ -878,23 +878,33 @@ Gazebo profile fail-closed 行为，不替代连续 swept-footprint、physical c
 - [ ] P3 边界：Gazebo launch 默认 `launch_nav2:=false`，但尚未按 P3 全部 action/取消/preempt/timeout
   场景和扩大路线完成验收，**不得称 Nav2-free 已完成**。
 
-## 2026-08-15 ROGMap 全局可视化与 MINCO 轨迹质量设计
+## 2026-08-15 ROGMap 全局可视化与 MINCO 轨迹质量实施
 
-- [x] 已完成源码审计和第一版实施设计，详细任务见
+- [x] 已在根默认 RViz 与 Gazebo RViz 同步启用 `Global Fused RC-ESDF (ROGMap + Static + Terrain)`。
+  它直接显示 `/rc_esdf/signed_distance_grid` 的 `Map/costmap` display（Reliable、Transient Local、
+  Keep Last 1、`Alpha=0.62`、Draw Behind），并降低 static PGM alpha；局部 ROGMap cloud/bounds
+  保持局部诊断层，未累计成伪全局地图，未修改 ROGMap map size 或 ESDF 数值语义。
+- [x] 已新增 raw、preprocessed guide、ESDF-refined guide、MINCO final、MPC predicted、executed
+  的诊断链。`PathGeometryPreprocessor`、`MincoTimeAllocator`、`TrajectoryQualityEvaluator` 与十个
+  指定聚焦 GTest 已实现；完整 `minco_planner` CTest `11/11`、配置 Python tests `9/9` 和 validator
+  均通过。保持 MINCO S3、独立 yaw、四舵轮 `[v_x,v_y,w_z]` 和原有 fail-closed ownership。
+- [x] 未修改源码的 Gazebo baseline 已在 domain `221--223` 保存；domain `223` 记录了五层 topic payload、
+  generation `128->194`、adapter sequence `79->122`。修复后的运行确认自由空间二点直线不被 ESDF
+  无条件加密：`raw/preprocessed/refined=2/2/2`，candidate `length_ratio=1.000`、横向偏差和曲率为零，
+  v/a/j 均在配置限值内。
+- [x] headless domain `228/229` action 到达目标，终点距离分别为 `0.05994/0.04513 m`；动作期观测到
+  JPS/MINCO/MPC/执行路径、两级非零速度和四舵轮活动。runner 现以 C++ action-lifetime recorder
+  复核 `/rc_esdf/planning_grid` 的 publisher max、adapter identity 与速度唯一 owner，避免启动期
+  ros2cli graph discovery 误报。
+- [x] **停止条件已触发**：domain `230` 的定位间隔 p50/p95/p99 为 `0.371/0.994/1.612 s`，adapter
+  heartbeat 反复 `ready=false`，action 在距目标 `0.802 m` 时 `ABORTED` 并 fail-closed 零速度。该问题
+  位于 freshness/安全链，不能据此断定 MINCO 是唯一根因，也不得放宽 freshness、lease、unknown、
+  footprint 或急停规则。
+- [ ] 因 freshness 和历史 high-swap 资源边界，尚未继续 Gazebo corner/S/narrow/nominal/red-box、单 RViz
+  截图/三米 sliding-window、fault matrix、MuJoCo、HIL 或实车。未取得 Gazebo physical contact、全轨迹
+  clearance/footprint/swept collision 或低负载性能 p50/p95/p99；P2 未通过，P3 不得称 Nav2-free，P4
+  未进入。详细日志索引、指标和下次起点见
   [ROGMap全局可视化与MINCO轨迹质量优化TODO.md](./ROGMap全局可视化与MINCO轨迹质量优化TODO.md)。
-- [x] 已确认 `/rog_map/esdf` 是被当前 ESDF bounds 与机器人中心 visualization range 共同裁剪的局部
-  debug cloud；ROGMap 正式配置使用 `10 x 10 x 1 m` 滑动窗口。不得靠累积历史 debug 点或扩大滑窗
-  伪造全局地图。
-- [x] 已确认 adapter 以静态图全尺寸构造融合 planning grid 和 RC-ESDF，并发布当前 RViz 默认关闭的
-  `/rc_esdf/signed_distance_grid`。第一版全局效果应直接启用并明确标注该 display，再叠加随机器人移动的
-  `/rog_map/viz`、`/rog_map/esdf` 和 `/rog_map/bounds`；显示栅格不得被反解析成规划数值。
-- [x] 已确认当前 MINCO 前端只做固定阈值共线点删除，按 `segment_length/reference_speed` 分配时间；ESDF
-  阶段会加密并独立移动控制点，动力学越限则统一缩放全部 segment duration。现有测试没有直线不增弯、
-  曲率变化、局部时间分配或 noisy-gradient 防锯齿门禁。
-- [ ] 下一轮先冻结 raw JPS、预处理 guide、ESDF guide、MINCO final、MPC predicted 和 executed 的同输入
-  指标，再依次实施保守 footprint-aware shortcut、曲率感知时间分配、法向/平滑 ESDF offset 和独立质量门禁。
-- [ ] 本节只是设计与静态源码证据，没有修改 RViz/ROGMap/MINCO，没有新增构建或仿真结果；用户截图和
-  目测弯折都不能替代当前 revision 的配对运行证据。
 
 可直接复制的新对话执行入口见
 [下一阶段提示词_ROGMap全局可视化与MINCO轨迹质量优化.md](./下一阶段提示词_ROGMap全局可视化与MINCO轨迹质量优化.md)。

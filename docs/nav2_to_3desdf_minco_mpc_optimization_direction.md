@@ -597,24 +597,27 @@ clearance、MINCO 离散 footprint collision、Gazebo physical contact telemetry
 swept footprint 均未验证。不得通过放宽 TF wait、input/map timeout、unknown、lease、old reference
 或 emergency stop 来处理 domain `183` 的安全拒绝。
 
-## 2026-08-15 ROGMap 显示层与 MINCO 几何/时间后端方向
+## 2026-08-15 ROGMap 显示层与 MINCO 几何/时间后端实施
 
-当前 ROGMap 数值地图是 `10 x 10 x 1 m` 滑动窗口，`/rog_map/esdf` 只导出当前 ESDF bounds 与机器人中心
-visualization range 的交集，因此“把该点云显示为整张赛场”与源码的局部地图契约冲突。adapter 已经把
-static/terrain/slope 与当前 ROGMap projection 融合到静态图全尺寸 planning grid，并发布
-`/rc_esdf/signed_distance_grid`。下一轮先把它作为 **Global Fused RC-ESDF** 启用，再叠加随机器人移动的
-`/rog_map/viz`、`/rog_map/esdf` 与三类 bounds；不得累积历史 debug cloud、扩大滑窗或反解析显示数据。
+`/rog_map/esdf` 继续是 `10 x 10 x 1 m` 滑动窗口的局部 debug cloud，未被累积或扩大。两份实际 RViz
+配置现直接显示 adapter 的全局 `/rc_esdf/signed_distance_grid`，名称为
+`Global Fused RC-ESDF (ROGMap + Static + Terrain)`，并保留局部 RGB voxel/ESDF/bounds 覆盖层。它的
+`0..100` 仅为 display encoding，规划仍消费数值 `PlanningMapSnapshot`/RC-ESDF，adapter 也未订阅 debug
+point cloud。配置 validator 和 9 个 Python 聚焦测试已通过；尚无本 revision 的 RViz 截图或三米滑窗跟随证据。
 
-MINCO 的当前问题不能只用“平滑权重不足”解释。源码显示时间初值仅为段长除参考速度，动力学越限时统一
-拉长全部段；ESDF 处理先按固定距离加密 JPS guide，再让内部点独立响应梯度。这个流程缺少保守 shortcut、
-直线不增弯、曲率/转角感知速度、局部 time scaling、offset 平滑和 candidate 质量回溯，因此需要先保存
-`raw -> guide -> refined guide -> MINCO -> predicted -> executed` 的配对指标，再判断主因。
+MINCO 现以同一 immutable snapshot 保留 `raw -> preprocessed guide -> ESDF-refined guide -> MINCO ->
+predicted -> executed`。几何预处理、footprint-aware fail-closed shortcut、曲率感知 time allocation、局部
+相邻段 scaling、ESDF trigger/target、法向 projection、offset smoothing/backtracking 与独立 v/a/j/footprint
+quality gate 已实现，十个指定 GTest 与完整 `minco_planner` CTest `11/11` 通过。实现保持 MINCO S3、独立
+yaw 和全向 `[v_x,v_y,w_z]`；没有 Ackermann、ICR 或 `vy=0` 约束。
 
-后端优化保持 MINCO S3、独立 yaw 和四舵轮全向模型。离散几何曲率仅用于轨迹质量与局部速度分配，不能迁入
-Ackermann、ICR 或 `vy=0` 约束。最终 reference 仍需同一 immutable snapshot 上的 footprint/swept safety、
-freshness 和提交点复核；任何 candidate 回归或失败均只能回退到同 snapshot 的安全 baseline，否则保持急停和
-两级零速度。详细阶段、公式、测试矩阵和停止条件见
-`docs/项目优化文档/ROGMap全局可视化与MINCO轨迹质量优化TODO.md`；可执行的新对话提示词已作为独立文档保存。
+未修改源码 Gazebo baseline 已先保存在 domain `221--223`。随后 domain `226` 证明无条件 ESDF densify 会把
+二点直线变为 9 个硬控制点并导致 `peak_a=2.659>2.5`；现已修复为仅在真实 clearance trigger 下插点。修复后
+直线候选实际为二点 guide、`length_ratio=1.000`、横向偏差/曲率符号变化为零，轨迹、MPC、执行和两级非零速度
+均曾观测到。C++ recorder 进一步确认动作期 planning grid publisher max 为 `1`、adapter 已见且没有命名的
+非 adapter publisher；匿名 DDS endpoint 只作为诊断保存。
 
-本轮只形成设计文档，没有修改算法或显示配置，也没有运行新的 build、Gazebo、MuJoCo、HIL 或实车测试。
-P2、P3/Nav2-free 和 P4 结论保持不变。
+但 P2 不得更新为通过：domain `230` 的 localization interval 为 `0.371/0.994/1.612 s` (p50/p95/p99)，adapter
+反复 `ready=false`，goal 在距目标 `0.802 m` 时 fail-closed `ABORTED`。此 freshness 停止条件也使新样本不能
+作为低负载性能结论；Gazebo corner/S/narrow/nominal/red-box、RViz 截图、故障矩阵、MuJoCo、HIL、实车、
+physical contact 与完整 clearance/swept collision 仍未验证。P3 仍不是 Nav2-free，P4 仍未进入。
