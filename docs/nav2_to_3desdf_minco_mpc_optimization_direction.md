@@ -35,13 +35,15 @@ ICR 或 `vy=0`。
 
 ## 3. 最新有效证据
 
-- 本轮 P0 执行前根仓 `c75a825fe93`、导航仓 `5ea786eb2e70`、Gazebo fork `9ed6c41650e6`、MuJoCo
-  `e3d6ea7a5e61` 已同步各自远端；
+- 本轮 P0 复建审计后的根仓 `08874b8e63c8`、导航仓 `5ea786eb2e70`、Gazebo fork
+  `9ed6c41650e6`、MuJoCo `e3d6ea7a5e61` 已同步各自远端；
 - `ats_robot_description` 的 `dea591e53fa0` 已经 SSH 推送并与 `origin/develop` 同步；但 2026-08-15
-  的干净复建尚未通过：根仓 SSH clone pack 接收超时、HTTPS depth-1 clone 报
-  `GnuTLS recv error (-9)`/EOF，SSH-only Gazebo fork clone 也超时。远端根仓归档中的实际
-  `vcs import --recursive --shallow` 于 `190 s` 退出 `124`，且 Gazebo 未形成有效 checkout。远端 refs
-  与根仓 codeload 归档可读，不能替代成功的 Git + `vcs import` 证据；
+  的两次全新目录复建均未通过：第一次 `vcs import` 在 `104676 ms`、`rc=1` 暴露
+  `rmoss_gz_resources@main` 不存在和 `teleop_gimbal_keyboard` 的 `GnuTLS recv error (-110)`；
+  第二次按正确根目录布局运行 `vcs import`，在 `705745 ms`、`rc=143` 时卡在
+  `ats_mujoco_sim` HTTPS clone。部分 checkout SHA 和原始日志保存在
+  `/tmp/ats_p0_repro.nC3VBM`、`/tmp/ats_p0_repro_root.h4j6mB`，但不能替代完整复建证据；
+  因此未生成可靠 locked manifest，也未运行干净 Gazebo 构建或 `--show-args`。
 - 两份 RViz 已配置全局 `/rc_esdf/signed_distance_grid` 和局部 ROGMap debug，但当前 revision 尚无
   全局 ESDF/三米滑窗运行截图；
 - MINCO 已有 geometry preprocessor、curvature-aware time allocation、ESDF refinement 和 quality
