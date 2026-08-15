@@ -35,7 +35,7 @@ ICR 或 `vy=0`。
 
 ## 3. 最新有效证据
 
-- 根仓 `90b5bfbceb88`、导航仓 `5ea786eb2e70`、Gazebo fork `9ed6c41650e6`、MuJoCo
+- 本轮 P0 执行前根仓 `c75a825fe93`、导航仓 `5ea786eb2e70`、Gazebo fork `9ed6c41650e6`、MuJoCo
   `e3d6ea7a5e61` 已同步各自远端；
 - `ats_robot_description` 的 `dea591e53fa0` 已经 SSH 推送并与 `origin/develop` 同步；但 2026-08-15
   的干净复建尚未通过：根仓 SSH clone pack 接收超时、HTTPS depth-1 clone 报

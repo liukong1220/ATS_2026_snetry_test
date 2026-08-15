@@ -37,7 +37,7 @@
 
 | 仓库 | 当前 revision | 远端状态 | 说明 |
 | --- | --- | --- | --- |
-| 根仓 | `90b5bfbceb88` | `origin/develop` 已同步 | 文档、脚本、bringup |
+| 根仓 | `c75a825fe93` | `origin/develop` 已同步 | 本轮 P0 执行前的文档、脚本、bringup 基线 |
 | 导航仓 | `5ea786eb2e70` | `origin/develop` 已同步 | ROGMap、JPS/MINCO、Goal Manager、MPC |
 | Gazebo 用户 fork | `9ed6c41650e6` | `origin/main` 已同步 | 禁止向 `upstream` 写入 |
 | MuJoCo | `e3d6ea7a5e61` | `origin/develop` 已同步 | 当前轮未修改 |
