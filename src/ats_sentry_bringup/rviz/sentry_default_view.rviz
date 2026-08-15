@@ -35,7 +35,7 @@ Visualization Manager:
       Show Axes: false
       Show Names: false
       Value: true
-    - Alpha: 0.35
+    - Alpha: 0.30
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: true
@@ -47,6 +47,23 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /map
+      Use Timestamp: false
+      Value: true
+    # This is the globally fused ROGMap/static/terrain display encoding.  The
+    # 0..100 values are only RViz colours; numerical ESDF queries stay on the
+    # immutable RC-ESDF snapshot and never consume this topic.
+    - Alpha: 0.62
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Draw Behind: true
+      Enabled: true
+      Name: Global Fused RC-ESDF (ROGMap + Static + Terrain)
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /rc_esdf/signed_distance_grid
       Use Timestamp: false
       Value: true
     - Alpha: 1.0
@@ -192,6 +209,48 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /minco/raw_path
+      Value: true
+    - Alpha: 0.95
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 220; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.02
+      Name: MINCO Guide / Geometry Preprocessed
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.03
+      Pose Color: 255; 220; 0
+      Pose Style: None
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /minco/preprocessed_guide
+      Value: true
+    - Alpha: 0.95
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 145; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.03
+      Name: MINCO Guide / ESDF Refined
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.035
+      Pose Color: 255; 145; 0
+      Pose Style: None
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /minco/esdf_refined_guide
       Value: true
     - Alpha: 0.95
       Buffer Length: 1
