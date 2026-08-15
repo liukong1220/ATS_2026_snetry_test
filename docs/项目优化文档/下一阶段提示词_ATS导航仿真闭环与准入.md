@@ -22,12 +22,15 @@ P1 Gazebo localization freshness 开始。完整读取：
   成功取得 22 个仓库；锁文件由 vcs export --exact -n 生成。
 - rmoss_gz_resources 使用 humble=b5c759f08844dfda19c79aa870866ace8d4c7b3a；
   ats_mujoco_sim、teleop_gimbal_keyboard 使用已验证的用户 SSH URL。
-- Gazebo fork a28ccd20428ffc4bdd7fbbc22fee884fa1db72eb 在 clean checkout 中通过依赖闭包构建，
-  rmu_gazebo_simulator CTest 4/4 与 ats_gazebo_nav.launch.py --show-args 均通过。
+- Gazebo fork ac2085fcf5e109f9f53d80e5d0661facbe588a6a 已加入单一 C++ recorder、
+  EvidenceStatistics 与 runner resource telemetry；Release build、包级 CTest 32/32、
+  runner bash -n 和 launch --show-args 已通过。
 - 历史 domain 230 的 /localization interval p50/p95/p99 为 0.371/0.994/1.612 s，
   adapter 反复 ready=false，action fail-closed。
 - 尚未找到该 freshness 首个违反者；不能直接归因 LiDAR、Point-LIO、DDS、Gazebo RTF、TF、
   localization_fusion、recorder 或资源争用。
+- P1 闭环尚未启动：最新 preflight artifact 的 first violation 是 swap_used=5.7 GiB；没有新的
+  ROS domain、timing 分布、action、owner、终点或 P2 证据。
 - MINCO production node 仍未将 InitialKinematicState 传到 center、footprint、fallback、
   repair 四条路径；geometry telemetry 还不是完整 production gate。
 - TEST_PROFILE 尚未真正控制 straight/corner/S/narrow/red-box 场景，GOAL_YAW 未进入 action payload。
@@ -40,7 +43,6 @@ MuJoCo、Gazebo fork、机器人描述仓的 branch/HEAD/upstream/remote/status�
 
 - src/ats_sentry_nav/ats_nav_bringup/scripts/static_map_publisher.py
 - src/ats_sentry_nav/ats_swerve_mpc/求解器.md
-- src/sim/gazebo_simulator/rmu_gazebo_simulator/include/rmu_gazebo_simulator/evidence_statistics.hpp
 - src/sim/gazebo_simulator/rmu_gazebo_simulator/scripts/ats_bridge/gz_livox_bridge.py
 
 禁止 git add .、git add -A、破坏性恢复或 force push。Gazebo 只能写用户 origin/main，
@@ -48,19 +50,23 @@ MuJoCo、Gazebo fork、机器人描述仓的 branch/HEAD/upstream/remote/status�
 
 阶段 P1：定位 Gazebo localization freshness 的首个违反者。
 
-1. 在已有 Gazebo C++ evidence recorder 中低开销订阅并测量：
+1. 先审计残留导航进程、ROS domain、load、CPU、内存、swap、RTF、TF owner 和速度 owner。
+   未知归属进程不得终止。高 swap、低可用内存、CPU 饱和、Gazebo z 发散、RTF 异常、TF/速度多 owner
+   或关键 telemetry 缺失时立即停止，不输出性能通过结论；必须复用现有 runner preflight artifact。
+2. 当前 recorder 已低开销订阅并测量：
    /clock、/lidar_odometry、/odometry、/localization、/localization/status、
-   /rog_map_adapter/ready。
-2. 每级记录 steady_clock wall arrival interval p50/p95/p99/max、ROS stamp interval、
+   /rog_map_adapter/ready；先审计实现和现有 CTest，只有字段缺失时才修改它。
+3. 每级记录 steady_clock wall arrival interval p50/p95/p99/max、ROS stamp interval、
    stamp age、重复/倒退、最长 gap、消息数；记录 RTF、TF lookup failure、关键进程
    CPU/RSS/thread/context switch、DDS queue/drop 与 callback blocking。
-3. 建立字段级 contract table：
+4. 建立字段级 contract table：
    /clock -> /lidar_odometry -> /odometry -> /localization -> status -> adapter
    必须涵盖 frame、clock、QoS、producer、consumer、timeout、health gate、fallback。
-4. 每次只改变一个因素，使用全新 ROS domain 和固定 60 s 窗口做 A/B：
+5. 资源门通过后，先用全新 ROS domain 和固定 60 s headless baseline 运行一次；不得复用旧 domain
+   230 或 preflight 样本。随后每次只改变一个因素做 A/B：
    headless、RViz、viewer、camera sensor、LiDAR profile、recorder/logging。
    禁止高频 ros2 topic echo 干扰被测链。
-5. 找到最早违反 freshness 的行为 owner 后，只修改该 owner，并补最窄 deterministic regression。
+6. 找到最早违反 freshness 的行为 owner 后，只修改该 owner，并补最窄 deterministic regression。
    禁止提高 odom/localization/map/reference timeout、adapter lease 或 projection deadline；
    禁止 Ground Truth 接管正式 /localization。
 
@@ -68,10 +74,6 @@ P1 DoD：低负载 headless 连续至少 60 s，/localization p99 interval < 0.2
 无 >0.5 s gap，stamp 不倒退，status 持续 TRACKING，adapter 不因 localization 抖动
 变为 ready=false；随后两个独立 ROS domain 的 straight action 成功，并记录终点误差、
 规划/速度唯一 owner 与收尾零速。
-
-每个 domain 前审计残留导航进程、ROS domain、load、CPU、内存、swap、RTF、TF owner、
-速度 owner。未知归属进程不得终止。高 swap、低可用内存、CPU 饱和、Gazebo z 发散、
-RTF 异常、TF/速度多 owner 或关键 telemetry 缺失时立即停止，不输出性能通过结论。
 
 仅当 P1 通过，才依总 TODO 顺序推进：
 
