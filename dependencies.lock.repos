@@ -62,7 +62,7 @@ repositories:
   src/sim/gazebo_simulator:
     type: git
     url: git@github.com:liukong1220/rmu_gazebo_simulator.git
-    version: a28ccd20428ffc4bdd7fbbc22fee884fa1db72eb
+    version: ac2085fcf5e109f9f53d80e5d0661facbe588a6a
   src/sim/loopback_sim:
     type: git
     url: https://github.com/liukong1220/loopback_sim.git
