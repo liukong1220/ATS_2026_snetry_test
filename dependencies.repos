@@ -33,7 +33,7 @@ repositories:
 
   src/sim/ats_mujoco_sim:
     type: git
-    url: https://github.com/liukong1220/ats_mujoco_sim.git
+    url: git@github.com:liukong1220/ats_mujoco_sim.git
     version: develop
 
   src/sim/loopback_sim:
@@ -92,7 +92,7 @@ repositories:
   # Workspace tools.
   src/tools/teleop_gimbal_keyboard:
     type: git
-    url: https://github.com/liukong1220/teleop_gimbal_keyboard.git
+    url: git@github.com:liukong1220/teleop_gimbal_keyboard.git
     version: main
 
   src/tools/pcd2pgm:
@@ -140,7 +140,7 @@ repositories:
   src/dependencies/rmoss_gz_resources:
     type: git
     url: https://github.com/liukong1220/rmoss_gz_resources.git
-    version: main
+    version: humble
 
   src/dependencies/BehaviorTree.ROS2:
     type: git

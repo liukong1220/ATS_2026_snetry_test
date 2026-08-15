@@ -35,15 +35,14 @@ ICR 或 `vy=0`。
 
 ## 3. 最新有效证据
 
-- 本轮 P0 复建审计后的根仓 `08874b8e63c8`、导航仓 `5ea786eb2e70`、Gazebo fork
-  `9ed6c41650e6`、MuJoCo `e3d6ea7a5e61` 已同步各自远端；
-- `ats_robot_description` 的 `dea591e53fa0` 已经 SSH 推送并与 `origin/develop` 同步；但 2026-08-15
-  的两次全新目录复建均未通过：第一次 `vcs import` 在 `104676 ms`、`rc=1` 暴露
-  `rmoss_gz_resources@main` 不存在和 `teleop_gimbal_keyboard` 的 `GnuTLS recv error (-110)`；
-  第二次按正确根目录布局运行 `vcs import`，在 `705745 ms`、`rc=143` 时卡在
-  `ats_mujoco_sim` HTTPS clone。部分 checkout SHA 和原始日志保存在
-  `/tmp/ats_p0_repro.nC3VBM`、`/tmp/ats_p0_repro_root.h4j6mB`，但不能替代完整复建证据；
-  因此未生成可靠 locked manifest，也未运行干净 Gazebo 构建或 `--show-args`。
+- P0 已通过：`dependencies.repos` 将不存在的 `rmoss_gz_resources@main` 修正为可验证的
+  `humble`，并将曾经传输不稳定的 `ats_mujoco_sim` 和 `teleop_gimbal_keyboard` 切换到可达的
+  用户 SSH URL；`dependencies.lock.repos` 由最终干净目录的 `vcs export --exact -n` 生成，锁定
+  22 个实际 checkout SHA。
+- 最终干净目录 `/tmp/ats_p0_repro_final.6xNq8i` 的 `vcs import` 于 `152.2 s`、`rc=0` 完成；
+  Gazebo fork `a28ccd20428ffc4bdd7fbbc22fee884fa1db72eb` 还修复了 CMake 引用 ignored 测试源的
+  clean-build 缺陷。该目录的最窄 Gazebo 依赖闭包构建 17 包通过，Gazebo CTest `4/4` 和
+  `ats_gazebo_nav.launch.py --show-args` 通过。该证据只覆盖复建和资源解析，不覆盖运行期导航。
 - 两份 RViz 已配置全局 `/rc_esdf/signed_distance_grid` 和局部 ROGMap debug，但当前 revision 尚无
   全局 ESDF/三米滑窗运行截图；
 - MINCO 已有 geometry preprocessor、curvature-aware time allocation、ESDF refinement 和 quality
@@ -73,16 +72,15 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 
 ## 5. 下一优化顺序
 
-1. 修复本机 Git pack 传输并完成干净 `vcs import`、locked manifest、最窄 Gazebo 资源解析；
-2. 定位并修复 Gazebo localization freshness 首个违反者；
-3. 将实际运动状态接入 MINCO 四条生产优化路径；
-4. 把几何质量 telemetry 升级为按路径类别生效的候选门禁；
-5. 实现真实 Gazebo straight/corner/S/narrow/nominal/red-box runner；
-6. 重跑当前 revision 的 P2 名义、边界和故障矩阵；
-7. 完成 RViz 全局/局部滑窗、clearance、continuous swept 和 contact；
-8. 完成 P3 Nav2-free action 生命周期；
-9. 完成长时间性能、MuJoCo 跨后端和 HIL；
-10. P2/P3/P4 通过后再推进 QP 主链和低速实车。
+1. 定位并修复 Gazebo localization freshness 首个违反者；
+2. 将实际运动状态接入 MINCO 四条生产优化路径；
+3. 把几何质量 telemetry 升级为按路径类别生效的候选门禁；
+4. 实现真实 Gazebo straight/corner/S/narrow/nominal/red-box runner；
+5. 重跑当前 revision 的 P2 名义、边界和故障矩阵；
+6. 完成 RViz 全局/局部滑窗、clearance、continuous swept 和 contact；
+7. 完成 P3 Nav2-free action 生命周期；
+8. 完成长时间性能、MuJoCo 跨后端和 HIL；
+9. P2/P3/P4 通过后再推进 QP 主链和低速实车。
 
 详细任务、DoD、验证命令和停止条件见：
 
