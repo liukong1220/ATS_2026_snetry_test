@@ -37,7 +37,7 @@
 
 | 仓库 | 当前 revision | 远端状态 | 说明 |
 | --- | --- | --- | --- |
-| 根仓 | `c75a825fe93` | `origin/develop` 已同步 | 本轮 P0 执行前的文档、脚本、bringup 基线 |
+| 根仓 | `08874b8e63c8` | `origin/develop` 已同步 | 本轮 P0 复建审计后的文档基线 |
 | 导航仓 | `5ea786eb2e70` | `origin/develop` 已同步 | ROGMap、JPS/MINCO、Goal Manager、MPC |
 | Gazebo 用户 fork | `9ed6c41650e6` | `origin/main` 已同步 | 禁止向 `upstream` 写入 |
 | MuJoCo | `e3d6ea7a5e61` | `origin/develop` 已同步 | 当前轮未修改 |
@@ -119,16 +119,40 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
 
 - `ats_robot_description` 已由 SSH `git push origin develop` 从 `ed293ca0613e` 推进至
   `dea591e53fa0f5f612ef63669a8eddb2cedf34a4`；推送后本地与 `origin/develop` 一致。
-- 远端 refs 可读：根仓 `develop=c75a825fe93f036eb042605d3b6ca3ebd77d1744`、机器人描述
-  `develop=dea591e53fa0f5f612ef63669a8eddb2cedf34a4`；根仓 codeload 归档可下载。
-- 干净复建尚未通过：SSH 根仓完整 clone 在 pack 接收阶段超过 `600 s`；HTTPS depth-1 clone 失败于
-  `GnuTLS recv error (-9)` 与意外 EOF；manifest 中 SSH-only Gazebo fork 的 depth-1 clone 也在
-  pack 接收阶段超过 `120 s`。以根仓远端归档创建的全新目录实际执行
-  `vcs import --recursive --shallow --skip-existing . < dependencies.repos`，`190 s` 后退出 `124`；
-  部分仓库已完成 checkout，但 Gazebo 目录未形成有效 Git checkout。故不能生成可靠的 locked manifest、
-  也不能声称新电脑可复建。
-- 本机无残留 ATS/Gazebo/MuJoCo launch，但当时 swap 已使用约 `7.1 GiB`。P1 Gazebo 运行未启动；
-  在干净 Git/vcs 复建完成前，不进入 freshness、MINCO、场景或 P2 故障验收。
+- 远端 refs 可读：根仓当前 `develop=08874b8e63c89b60f9268fd1c3047bd67acd937b`、机器人描述
+  `develop=dea591e53fa0f5f612ef63669a8eddb2cedf34a4`；`rmoss_gz_resources` 仅有 `humble`，
+  manifest 指定的 `main` 不存在。
+- 阶段 0 在两个互不复用缓存的临时目录执行。第一次误用 `src` 作为 import 目标（产生
+  `src/src/...`，仅保留网络证据）耗时 `104676 ms`、`rc=1`，明确失败为
+  `rmoss_gz_resources: fatal: 无法找到远程引用 main` 和
+  `teleop_gimbal_keyboard: GnuTLS recv error (-110)`；目录为
+  `/tmp/ats_p0_repro.nC3VBM`，成功 checkout SHA 见该目录 `checkouts.txt`。
+- 第二次按规范执行 `vcs import --recursive --shallow --skip-existing . < dependencies.repos`，
+  在 `/tmp/ats_p0_repro_root.h4j6mB` 完成部分 checkout 后卡在
+  `ats_mujoco_sim` HTTPS clone；耗时 `705745 ms`，为本轮自有进程收到 `SIGTERM` 的 `rc=143`。
+  已记录的实际 checkout SHA 为：`ats_sentry_behavior=6dd7dd166cbc849dcd6d78984c4af709c2333157`、
+  `interfaces=b1a1f1a6e7bcc72043c03ec8b68ddf1cf7733db4`、
+  `interfaces/manda_can_control=91e1a415cc8e8195664f78c959e09389285ced89`、
+  `interfaces/carstatemsgs=5078cfc56ead12d5e07d52981c07a15ab20884c4`、
+  `tools/rosbag2_composable_recorder=2668cb4e62c57c7c57747931832f67d7d5e79d80`、
+  `tools/teleop_gimbal_keyboard=3cdbb084cee27d659cdeaf5cd909dfdfddaa5a2a`、
+  `tools/pcd2pgm=30ad57a0cd2248483a7c45684bdb4857a388f11b`、
+  `sp_vision25=a08a9d92cc2a068fcf71bf4e970053ccec3d5680`、
+  `standard_robot_pp_ros2=74296b23baeaaf96f85b0571598aa5df9344f8aa`、
+  `ats_sentry_nav=5ea786eb2e7086b6790db165206fd8dac4f9e0d8`、
+  `ats_sentry_nav/sentry_chassis_vel_transform=486d02afce2be6c00fa3f604a7bfb4e0aadb98f0`、
+  `dependencies/rmoss_core=da601402b4c2d3494c1c0a5959c921684a32af41`、
+  `dependencies/sdformat_tools=7f3f5a6c37c7e89077912bdd11c2561408d40722`、
+  `dependencies/BehaviorTree.ROS2=bd5b4700e911ba0fd1ec2d0270ae5c1eebad43da`、
+  `dependencies/rmoss_interfaces=486bd0feb63ca559ed267512afef582604d5a1cf`、
+  `dependencies/rmoss_gazebo=7443ff06c345752d0e23172c479d99b27207e2c7`、
+  `dependencies/joint_state_publisher=ecf1e49822b85ad6d642ad78f911855e1289913d`、
+  `ats_robot_description=dea591e53fa0f5f612ef63669a8eddb2cedf34a4`、
+  `sim/loopback_sim=493f9259b209ff17c2429fe83ea8712c7011edb2`、
+  `sim/gazebo_simulator=9ed6c41650e6e2fddd73ad0e35071831575c7771`。
+- 两次复建均不完整，故本轮**未生成可靠的受版本控制 locked manifest**，未执行干净 Gazebo
+  资源解析、`colcon build` 或 launch `--show-args`，也未使用现有 `build/install` 替代证据。
+  P0 停止条件生效：不进入 freshness、MINCO、场景、P2 故障或任何性能结论。
 
 ### DoD
 
