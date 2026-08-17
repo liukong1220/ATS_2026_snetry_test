@@ -59,6 +59,14 @@ FAULT_INJECTION_DELAY_SEC="${FAULT_INJECTION_DELAY_SEC:-$((RUN_DURATION_SEC / 3)
 SHUTDOWN_GRACE_SEC="${SHUTDOWN_GRACE_SEC:-10}"
 SAMPLE_SEC="${SAMPLE_SEC:-5}"
 COUNT_EXTRA_TIMEOUT_SEC="${COUNT_EXTRA_TIMEOUT_SEC:-10}"
+# P1 admission is deliberately before ROS graph creation. A host with pages
+# actively resident in swap cannot provide a defensible localization-freshness
+# baseline. The admission threshold may be tightened by the caller but never
+# disabled. Exploratory mode is an explicit development escape hatch: it may
+# continue past swap pressure, but its evidence is permanently non-admissible.
+P1_MAX_SWAP_USED_GIB="${P1_MAX_SWAP_USED_GIB:-4.0}"
+P1_RESOURCE_MODE="${P1_RESOURCE_MODE:-admission}"
+P1_RESOURCE_PREFLIGHT_ONLY="${P1_RESOURCE_PREFLIGHT_ONLY:-false}"
 # The graph is only a discovery aid.  A long ros2cli spin sends a fresh DDS
 # participant into a resource-constrained simulation, so retain just enough
 # time for loopback discovery and cache the result per observation phase.
@@ -113,6 +121,11 @@ ACTIVE_EVIDENCE_PID=""
 ACTIVE_EVIDENCE_SESSION_ID=""
 ACTIVE_OWNERSHIP_LOG="$RUN_DIR/active_ownership.log"
 PROCESS_RESOURCE_LOG="$RUN_DIR/launch_process_resources.log"
+P1_RESOURCE_PREFLIGHT_LOG="$RUN_DIR/preflight_resource.txt"
+P1_RESOURCE_QUALITY="unverified"
+P1_RESOURCE_DEGRADED_REASON="none"
+P1_ADMISSION_EVIDENCE="false"
+P1_TIMING_VALID_FOR_ADMISSION="false"
 HEALTH_PROBE_LOG="$RUN_DIR/navigation_health_probe.log"
 RECOVERY_CANCEL_LOG="$RUN_DIR/recovery_cancel_on_command.log"
 RECOVERY_CANCEL_RESULT=""
@@ -126,9 +139,136 @@ fail() {
   log "FAIL: $1"
 }
 
+run_p1_resource_preflight() {
+  local swap_total_kib swap_free_kib swap_used_kib swap_used_gib mem_available_kib
+  local residual_processes violation decision resource_gate
+  violation=""
+
+  case "$P1_RESOURCE_MODE" in
+    admission) ;;
+    exploratory)
+      P1_RESOURCE_QUALITY="degraded"
+      P1_RESOURCE_DEGRADED_REASON="exploratory_mode_non_admission"
+      ;;
+    *) violation="preflight_invalid_p1_resource_mode_${P1_RESOURCE_MODE}" ;;
+  esac
+
+  if ! awk -v limit="$P1_MAX_SWAP_USED_GIB" \
+      'BEGIN {exit !(limit ~ /^[0-9]+([.][0-9]+)?$/ && (limit + 0.0) >= 0.0)}'; then
+    violation="${violation:-preflight_invalid_p1_max_swap_used_gib}"
+  fi
+
+  swap_total_kib="$(awk '/^SwapTotal:/{print $2; exit}' /proc/meminfo)"
+  swap_free_kib="$(awk '/^SwapFree:/{print $2; exit}' /proc/meminfo)"
+  mem_available_kib="$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo)"
+  if [ -z "$swap_total_kib" ] || [ -z "$swap_free_kib" ] || [ -z "$mem_available_kib" ]; then
+    violation="${violation:-preflight_missing_proc_meminfo_field}"
+    swap_used_kib="unverified"
+    swap_used_gib="unverified"
+  else
+    swap_used_kib=$((swap_total_kib - swap_free_kib))
+    swap_used_gib="$(awk -v kib="$swap_used_kib" 'BEGIN {printf "%.3f", kib / 1048576.0}')"
+    if [ -z "${violation:-}" ] && awk -v used="$swap_used_gib" -v limit="$P1_MAX_SWAP_USED_GIB" \
+        'BEGIN {exit !(used > limit)}'; then
+      if [ "$P1_RESOURCE_MODE" = "admission" ]; then
+        violation="preflight_swap_used_${swap_used_gib}GiB_exceeds_${P1_MAX_SWAP_USED_GIB}GiB"
+      else
+        P1_RESOURCE_QUALITY="degraded"
+        P1_RESOURCE_DEGRADED_REASON="${P1_RESOURCE_DEGRADED_REASON};swap_used_${swap_used_gib}GiB_exceeds_${P1_MAX_SWAP_USED_GIB}GiB"
+      fi
+    fi
+  fi
+
+  # Match process names, not full command lines: the preflight itself must not
+  # be mistaken for a residual simulator merely because its arguments mention
+  # the diagnostic patterns.
+  residual_processes="$(ps -eo pid=,comm=,args= | awk '
+    $2 ~ /^(ign|gazebo|gzserver|gzclient|mujoco|pointlio|loam_interface|sensor_scan_gene|localization_fu|ats_rog_map|ats_navigation|gz_livox_bridge|gz_clock_relay|gz_chassis_cmd)/ {print}
+  ')"
+  if [ -z "${violation:-}" ] && [ -n "$residual_processes" ]; then
+    violation="preflight_residual_navigation_or_simulator_process"
+  fi
+
+  if [ "$P1_RESOURCE_QUALITY" = "unverified" ] && [ -z "${violation:-}" ]; then
+    P1_RESOURCE_QUALITY="admission"
+    P1_TIMING_VALID_FOR_ADMISSION="true"
+  fi
+
+  decision="closed_loop_not_started"
+  if [ -n "${violation:-}" ]; then
+    resource_gate="fail"
+  elif [ "$P1_RESOURCE_MODE" = "exploratory" ]; then
+    resource_gate="degraded"
+    decision="exploratory_degraded_continue"
+  else
+    resource_gate="pass"
+    decision="resource_gate_passed"
+  fi
+  {
+    date --iso-8601=seconds
+    printf 'resource_mode=%s\n' "$P1_RESOURCE_MODE"
+    printf 'resource_quality=%s\n' "$P1_RESOURCE_QUALITY"
+    printf 'resource_gate=%s\n' "$resource_gate"
+    printf 'first_violation=%s\n' "${violation:-none}"
+    printf 'decision=%s\n' "$decision"
+    printf 'p1_admission_evidence=%s\n' "$P1_ADMISSION_EVIDENCE"
+    printf 'timing_valid_for_admission=%s\n' "$P1_TIMING_VALID_FOR_ADMISSION"
+    printf 'degraded_reason=%s\n' "$P1_RESOURCE_DEGRADED_REASON"
+    printf 'ros_domain=not_allocated\n'
+    printf 'ros_domain_candidate=%s\n' "$ROS_DOMAIN_ID"
+    printf 'p1_max_swap_used_gib=%s\n' "$P1_MAX_SWAP_USED_GIB"
+    printf 'swap_total_kib=%s\n' "${swap_total_kib:-unverified}"
+    printf 'swap_free_kib=%s\n' "${swap_free_kib:-unverified}"
+    printf 'swap_used_kib=%s\n' "$swap_used_kib"
+    printf 'swap_used_gib=%s\n' "$swap_used_gib"
+    printf 'mem_available_kib=%s\n' "${mem_available_kib:-unverified}"
+    printf 'root_head=%s\n' "$(git rev-parse HEAD)"
+    printf 'gazebo_head=%s\n' "$(git -C src/sim/gazebo_simulator rev-parse HEAD)"
+    if [ -n "$residual_processes" ]; then
+      printf 'residual_navigation_or_simulator_processes=detected\n'
+      printf '%s\n' "$residual_processes"
+    else
+      printf 'residual_navigation_or_simulator_processes=none_detected\n'
+    fi
+    uptime
+    free -h
+    swapon --show
+  } | tee "$P1_RESOURCE_PREFLIGHT_LOG" >>"$SUMMARY"
+
+  metric "p1_resource_mode" "$P1_RESOURCE_MODE"
+  metric "p1_resource_quality" "$P1_RESOURCE_QUALITY"
+  metric "p1_resource_preflight" "$decision"
+  metric "p1_resource_preflight_artifact" "$P1_RESOURCE_PREFLIGHT_LOG"
+  metric "p1_max_swap_used_gib" "$P1_MAX_SWAP_USED_GIB"
+  metric "p1_swap_used_gib" "$swap_used_gib"
+  metric "p1_mem_available_kib" "${mem_available_kib:-unverified}"
+  metric "p1_admission_evidence" "$P1_ADMISSION_EVIDENCE"
+  metric "p1_timing_valid_for_admission" "$P1_TIMING_VALID_FOR_ADMISSION"
+  metric "p1_resource_degraded_reason" "$P1_RESOURCE_DEGRADED_REASON"
+  metric "p1_residual_navigation_or_simulator_processes" \
+    "$( [ -n "$residual_processes" ] && printf detected || printf none_detected )"
+
+  if [ -n "${violation:-}" ]; then
+    fail "$violation"
+    return 1
+  fi
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
+
+if ! run_p1_resource_preflight; then
+  exit 3
+fi
+if [ "$P1_RESOURCE_MODE" = "exploratory" ]; then
+  log "WARNING: exploratory resource mode; this run is diagnostic only and cannot produce P1 admission, timing, performance, P2, or safety-pass evidence"
+fi
+if [ "$P1_RESOURCE_PREFLIGHT_ONLY" = "true" ]; then
+  log "P1 resource preflight completed in mode=$P1_RESOURCE_MODE quality=$P1_RESOURCE_QUALITY; no ROS domain or Gazebo launch requested"
+  exit 0
+fi
 
 if ! command -v ros2 >/dev/null 2>&1; then
   echo "ros2 not on PATH; source the ROS 2 and workspace setup first." >&2
@@ -875,6 +1015,11 @@ strictly_increases() {
 write_artifact_summary() {
   {
     echo
+    echo "resource mode: $P1_RESOURCE_MODE"
+    echo "resource quality: $P1_RESOURCE_QUALITY"
+    echo "p1 admission evidence: $P1_ADMISSION_EVIDENCE"
+    echo "timing valid for admission: $P1_TIMING_VALID_FOR_ADMISSION"
+    echo "degraded reason: $P1_RESOURCE_DEGRADED_REASON"
     echo "artifacts:"
     echo "  summary : $SUMMARY"
     echo "  launch  : $LAUNCH_LOG"
@@ -1371,6 +1516,11 @@ for stage in clock lidar_odometry odometry localization localization_status; do
   metric "${stage}_backward_stamp_count" "$(evidence_value "${stage}_backward_stamp_count")"
   metric "${stage}_invalid_stamp_count" "$(evidence_value "${stage}_invalid_stamp_count")"
   metric "${stage}_future_stamp_count" "$(evidence_value "${stage}_future_stamp_count")"
+  metric "${stage}_callback_count" "$(evidence_value "${stage}_callback_count")"
+  metric "${stage}_p50_callback_duration_s" "$(evidence_value "${stage}_p50_callback_duration_s")"
+  metric "${stage}_p95_callback_duration_s" "$(evidence_value "${stage}_p95_callback_duration_s")"
+  metric "${stage}_p99_callback_duration_s" "$(evidence_value "${stage}_p99_callback_duration_s")"
+  metric "${stage}_max_callback_duration_s" "$(evidence_value "${stage}_max_callback_duration_s")"
 done
 metric "clock_rtf_p50" "$(evidence_value clock_rtf_p50)"
 metric "clock_rtf_p95" "$(evidence_value clock_rtf_p95)"
@@ -1387,6 +1537,11 @@ metric "tf_lookup_failures" "$(evidence_value tf_lookup_failures)"
 metric "tf_lookup_max_ms" "$(evidence_value tf_lookup_max_ms)"
 metric "dds_queue_drop_counter" "$(evidence_value dds_queue_drop_counter)"
 metric "adapter_max_wall_interval_s" "$(evidence_value adapter_max_wall_interval_s)"
+metric "adapter_status_callback_count" "$(evidence_value adapter_status_callback_count)"
+metric "adapter_status_callback_p50_s" "$(evidence_value adapter_status_callback_p50_s)"
+metric "adapter_status_callback_p95_s" "$(evidence_value adapter_status_callback_p95_s)"
+metric "adapter_status_callback_p99_s" "$(evidence_value adapter_status_callback_p99_s)"
+metric "adapter_status_callback_max_s" "$(evidence_value adapter_status_callback_max_s)"
 metric "adapter_ready_seen_active" "$(evidence_value adapter_ready_seen)"
 metric "adapter_source_generation_active" "$(evidence_value adapter_source_generation_begin)->$(evidence_value adapter_source_generation_end)"
 metric "adapter_publication_sequence_active" "$(evidence_value adapter_publication_sequence_begin)->$(evidence_value adapter_publication_sequence_end)"

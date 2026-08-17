@@ -35,6 +35,12 @@ P1 Gazebo localization freshness 开始。完整读取：
   repair 四条路径；geometry telemetry 还不是完整 production gate。
 - TEST_PROFILE 尚未真正控制 straight/corner/S/narrow/red-box 场景，GOAL_YAW 未进入 action payload。
 - 默认保持 solver_mode=ilqr；qp_shadow 只诊断，solver_mode=qp 继续拒绝。
+- 资源 runner 默认 `P1_RESOURCE_MODE=admission`、`P1_MAX_SWAP_USED_GIB=4.0`。当前主机
+  `swap_used=5.158 GiB`，正式 P1 会在 ROS/Gazebo 启动前 fail-closed；不要把阈值改大来伪造准入。
+- 若必须继续做算法观察，可显式使用 `P1_RESOURCE_MODE=exploratory`。该模式只允许越过 swap 超限，
+  artifact 必须保持 `resource_quality=degraded`、`p1_admission_evidence=false`、
+  `timing_valid_for_admission=false`；探索结果不得用于 P1/P2、性能、实时性或安全通过结论。
+  `P1_RESOURCE_PREFLIGHT_ONLY=true` 在两种模式下都不得创建 ROS domain。
 
 开始前先报告 DoD、精确文件范围、验证清单、假设/未验证项/停止条件，并核对根仓、导航仓、
 MuJoCo、Gazebo fork、机器人描述仓的 branch/HEAD/upstream/remote/status。
@@ -50,23 +56,37 @@ MuJoCo、Gazebo fork、机器人描述仓的 branch/HEAD/upstream/remote/status�
 
 阶段 P1：定位 Gazebo localization freshness 的首个违反者。
 
-1. 先审计残留导航进程、ROS domain、load、CPU、内存、swap、RTF、TF owner 和速度 owner。
-   未知归属进程不得终止。高 swap、低可用内存、CPU 饱和、Gazebo z 发散、RTF 异常、TF/速度多 owner
-   或关键 telemetry 缺失时立即停止，不输出性能通过结论；必须复用现有 runner preflight artifact。
-2. 当前 recorder 已低开销订阅并测量：
+先执行资源模式选择：
+
+```bash
+# 正式准入（默认，swap_used 必须不超过 4.0 GiB）
+P1_RESOURCE_MODE=admission P1_MAX_SWAP_USED_GIB=4.0 \
+  P1_RESOURCE_PREFLIGHT_ONLY=true scripts/test_gazebo_minco_mpc_chain.sh
+
+# 仅用于当前资源受限主机的算法观察，不能产出 P1 证据
+P1_RESOURCE_MODE=exploratory P1_RESOURCE_PREFLIGHT_ONLY=false \
+  scripts/test_gazebo_minco_mpc_chain.sh
+```
+
+探索运行开始前仍须审计残留进程、Gazebo z/RTF、内存和关键 telemetry；一旦系统失稳、残留进程、
+TF/速度多 owner、unknown/lease/急停门异常或 callback/话题证据缺失，立即保存 raw artifact 并停止。
+不要通过调大 swap 阈值、提高 localization/adapter/MPC timeout 或关闭 fail-closed 来“通过”。
+
+
+1. 当前 recorder 已低开销订阅并测量：
    /clock、/lidar_odometry、/odometry、/localization、/localization/status、
    /rog_map_adapter/ready；先审计实现和现有 CTest，只有字段缺失时才修改它。
-3. 每级记录 steady_clock wall arrival interval p50/p95/p99/max、ROS stamp interval、
+2. 每级记录 steady_clock wall arrival interval p50/p95/p99/max、ROS stamp interval、
    stamp age、重复/倒退、最长 gap、消息数；记录 RTF、TF lookup failure、关键进程
    CPU/RSS/thread/context switch、DDS queue/drop 与 callback blocking。
-4. 建立字段级 contract table：
+3. 建立字段级 contract table：
    /clock -> /lidar_odometry -> /odometry -> /localization -> status -> adapter
    必须涵盖 frame、clock、QoS、producer、consumer、timeout、health gate、fallback。
-5. 资源门通过后，先用全新 ROS domain 和固定 60 s headless baseline 运行一次；不得复用旧 domain
+4. 资源门通过后，先用全新 ROS domain 和固定 60 s headless baseline 运行一次；不得复用旧 domain
    230 或 preflight 样本。随后每次只改变一个因素做 A/B：
    headless、RViz、viewer、camera sensor、LiDAR profile、recorder/logging。
    禁止高频 ros2 topic echo 干扰被测链。
-6. 找到最早违反 freshness 的行为 owner 后，只修改该 owner，并补最窄 deterministic regression。
+5. 找到最早违反 freshness 的行为 owner 后，只修改该 owner，并补最窄 deterministic regression。
    禁止提高 odom/localization/map/reference timeout、adapter lease 或 projection deadline；
    禁止 Ground Truth 接管正式 /localization。
 
