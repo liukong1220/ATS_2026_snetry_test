@@ -77,6 +77,12 @@ ICR 或 `vy=0`。
 - 当前主机 domain `324` 的探索 preflight 实测 `swap_used=5.333 GiB`、`MemAvailable=1.836 GiB`，
   返回 `0` 但明确标记为 `resource_quality=degraded`，未分配 ROS domain；该结果仅证明开发模式
   分支可继续，不是 P1 runtime 或性能证据；
+- domain `233` 的尝试首先触发 Fast DDS 合法 domain 上限（`Calculated port number is too high`），
+  不能作为 Gazebo/导航运行证据。随后使用合法 domain `231` 并将 `ROS_LOG_DIR` 指到 `/tmp`，Gazebo
+  和导航链成功启动，health gate 通过并观察到 JPS/MINCO/MPC/底盘非零动作；但 degraded 运行的
+  `/clock` RTF p50/p95=`0.2518/0.4815`、`/localization` wall interval p50/p95/p99=`0.484/1.506/2.185 s`，
+  status `TRACKING/non-TRACKING=189/111`，TF lookup failure=`17/300`，action 未成功并最终 fail-closed。
+  该结果定位了资源/RTF 下的 freshness 风险，但尚不能确定首个行为 owner，也不是 P1/P2 通过证据；
 - production MINCO node 尚未把实时 `InitialKinematicState` 传入 optimizer；几何质量指标主要用于
   telemetry，尚未形成完整候选接受门禁；
 - Gazebo runner 的 `TEST_PROFILE` 尚未拥有实际 corner/S/narrow/red-box 场景逻辑；
@@ -103,7 +109,9 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
    以新 ROS domain 运行 60 s headless P1 recorder，先定位 Gazebo localization freshness 首个违反者；
    在资源未恢复前只能显式使用 `P1_RESOURCE_MODE=exploratory` 做短时算法观察，并将结果标为 degraded，
    不得写入 P1/P2 或性能通过结论；
-2. 将实际运动状态接入 MINCO 四条生产优化路径；
+2. 在 exploratory 证据中先区分 RTF/CPU/swap 资源影响、publisher cadence、subscriber/DDS 丢包和
+   localization_fusion/TF 行为；不得根据 domain `231` 单次运行直接修改 timeout 或指定算法 owner；
+3. 将实际运动状态接入 MINCO 四条生产优化路径；
 3. 把几何质量 telemetry 升级为按路径类别生效的候选门禁；
 4. 实现真实 Gazebo straight/corner/S/narrow/nominal/red-box runner；
 5. 重跑当前 revision 的 P2 名义、边界和故障矩阵；
