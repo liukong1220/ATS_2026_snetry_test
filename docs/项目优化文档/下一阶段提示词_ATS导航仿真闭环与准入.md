@@ -29,8 +29,12 @@ P1 Gazebo localization freshness 开始。完整读取：
   adapter 反复 ready=false，action fail-closed。
 - 尚未找到该 freshness 首个违反者；不能直接归因 LiDAR、Point-LIO、DDS、Gazebo RTF、TF、
   localization_fusion、recorder 或资源争用。
-- P1 闭环尚未启动：最新 preflight artifact 的 first violation 是 swap_used=5.7 GiB；没有新的
-  ROS domain、timing 分布、action、owner、终点或 P2 证据。
+- P1 admission 闭环尚未启动：正式 admission 的 timing 分布、action、owner、终点和 P2 证据仍为空；
+  exploratory 运行不能替代正式准入证据。
+- exploratory domain `233` 不合法（Fast DDS domain 上限/port 计算错误），不得再使用大于 `232` 的
+  domain。合法 domain `231` 已在 `ROS_LOG_DIR=/tmp` 下成功启动 Gazebo 和完整导航链，但该次仍是
+  degraded 观察：RTF 低、localization wall gap 最大约 `2.185 s`、status 有非 TRACKING 样本，
+  action 未完成并最终急停。该结果只用于定位资源/RTF/freshness 关系，不能作为 P1 通过。
 - MINCO production node 仍未将 InitialKinematicState 传到 center、footprint、fallback、
   repair 四条路径；geometry telemetry 还不是完整 production gate。
 - TEST_PROFILE 尚未真正控制 straight/corner/S/narrow/red-box 场景，GOAL_YAW 未进入 action payload。
@@ -82,8 +86,9 @@ TF/速度多 owner、unknown/lease/急停门异常或 callback/话题证据缺�
 3. 建立字段级 contract table：
    /clock -> /lidar_odometry -> /odometry -> /localization -> status -> adapter
    必须涵盖 frame、clock、QoS、producer、consumer、timeout、health gate、fallback。
-4. 资源门通过后，先用全新 ROS domain 和固定 60 s headless baseline 运行一次；不得复用旧 domain
-   230 或 preflight 样本。随后每次只改变一个因素做 A/B：
+4. 资源门通过后，先用全新且合法（`0..232`）的 ROS domain 和固定 60 s headless baseline 运行一次；
+   不得复用旧 domain `231/232/233` 的 exploratory 结果。设置 `ROS_LOG_DIR=/tmp/<run>`，避免用户
+   home 的只读日志路径干扰。随后每次只改变一个因素做 A/B：
    headless、RViz、viewer、camera sensor、LiDAR profile、recorder/logging。
    禁止高频 ros2 topic echo 干扰被测链。
 5. 找到最早违反 freshness 的行为 owner 后，只修改该 owner，并补最窄 deterministic regression。

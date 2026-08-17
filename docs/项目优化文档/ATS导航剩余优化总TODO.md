@@ -219,10 +219,28 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   `swap_used=5.333 GiB`、`MemAvailable=1.836 GiB`，artifact 标记
   `resource_quality=degraded`、`p1_admission_evidence=false`、`timing_valid_for_admission=false`、
   `ros_domain=not_allocated`。未启动 ROS/Gazebo，不能作为 P1 runtime 或性能证据。
+- **已验证（exploratory Gazebo 启动边界，2026-08-17）**：domain `233` 不可作为实验 domain；Fast DDS
+  在当前 portBase 下对 `domain_id > 232` 报 `Calculated port number is too high`，多个 ROS 节点
+  立即退出，`/clock` 不推进。该次不能归因导航算法，后续 domain 必须保持在合法范围内。
+- **已验证（exploratory Gazebo 有效启动，2026-08-17，非准入证据）**：domain `231` 配合
+  `ROS_LOG_DIR=/tmp` 成功启动 Gazebo、传感器、localization、ROGMap/adapter、MINCO 和 iLQR MPC；
+  `/clock` 推进，health gate `stable=3/3`，source generation `87->122`、adapter publication
+  sequence `219->334`，JPS/preprocessed/refined/reference/predicted/executed 点数为
+  `31/3/3/32/31/4`，两级速度和 Gazebo chassis command 均曾非零。该运行处于 exploratory degraded
+  资源质量（`swap_used=4.688 GiB`、`MemAvailable=1.85 GiB`），故不能作为 P1/P2/性能证据。
+  运行期间 `/clock` RTF p50/p95 为 `0.2518/0.4815`，`/localization` wall interval
+  p50/p95/p99 为 `0.484/1.506/2.185 s`，最大 gap `2.185 s`；localization status 有
+  `189` 个 TRACKING 与 `111` 个非 TRACKING 样本，TF lookup `17/300` 失败。action 被接受但在
+  `60 s` 观察窗口内未成功，终点误差约 `1.528 m`，最终 planner emergency_stop=true 且两级速度为零。
+  recorder callback p99 仍在微秒量级，DDS queue/drop 仍为 `unverified_no_portable_rmw_counter`；
+  因此当前只能确认 degraded 运行下 RTF/freshness 不满足，不能把首因归因给 Point-LIO、DDS、
+  localization_fusion、ROGMap、MINCO 或 MPC 中任一 owner。
 - **推断 [Confidence: Medium]**：旧 domain `230` 三个下游 topic 的相近 wall gap 可能共同受上游 cadence、
   仿真 RTF 或资源争用影响；新增观测尚未运行，不能归因任何行为 owner。
-- **未验证**：DDS 中间件可报告的队列/丢包计数、各进程 CPU rate/context-switch delta、`/clock` 与各级
-  stamp/age 分布、持续 TRACKING、TF failure、first violating publisher/subscriber 以及所有 A/B 因子。
+- **未验证**：正式 admission 资源条件下的 60 s baseline、DDS 中间件可报告的队列/丢包计数、各进程
+  CPU rate/context-switch delta、first violating publisher/subscriber、两次 straight action、所有 A/B
+  因子、P2 red-box、HIL 和实车。domain `231` 的探索数据只能用于定位资源/RTF/freshness 关系，不能升级
+  为正式准入结论。
 
 ### 修复原则
 
