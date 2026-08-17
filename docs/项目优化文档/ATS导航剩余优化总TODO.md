@@ -171,6 +171,8 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   和 `/localization/status`；
 - [x] 每级记录 steady wall arrival、ROS stamp interval、`/clock` 相对 stamp age、重复/倒退 stamp、
   消息数和最大 gap；
+- [x] 同一 recorder 记录其对 `/clock`、三段 odometry、`/localization/status` 和 adapter status 的
+  callback 执行时长分布；它只量化观测器自身开销，不可替代行为 owner 的 executor/queue trace；
 - [x] 记录 `/clock` wall interval、sim-time interval 与 RTF 分位数；
 - [x] 以 `map -> gimbal_yaw_odom` 的实际零超时查询记录 TF lookup attempt/success/failure/max duration；
 - [x] runner 只对本 launch session 内的 bridge、Point-LIO、loam、sensor generation、fusion、ROGMap
@@ -186,12 +188,37 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
 - **已验证（组件）**：Gazebo fork 的 `EvidenceStatistics` 确定性 CTest、`rmu_gazebo_simulator`
   单 worker Release build、完整包级 CTest（`32 tests, 0 errors, 0 failures`）、runner `bash -n`、
   当前 revision `ats_gazebo_nav.launch.py --show-args` 和五仓 `git diff --check` 均通过。
+- **已验证（组件，2026-08-17）**：recorder 的 callback duration 统计已进入每级 timing 输出与
+  runner artifact；单 worker `rmu_gazebo_simulator` Release build、focused
+  `test_evidence_statistics`、runner `bash -n`、launch Python 编译、`--show-args` 与相关 diff check
+  均通过。当前 sandbox 下完整包 CTest 的 `ament_black` 因禁止 Python `SyncManager` 创建本地 socket
+  而失败（`33 tests, 1 error, 1 failure`）；该限制不是本轮 C++ 测试失败，仍待可执行的主机环境复跑。
 - **已实现未运行（闭环）**：新 recorder/runner 现已输出上述链路、状态、RTF、TF 与资源字段；尚未在
-  新 ROS domain 启动，不存在新的 timing 分布、action、owner、终点、两级零速度或 P2 结论。
+  新 ROS domain 启动，不存在新的 timing 分布、action、owner、终点、两级零速度或 P2 结论。callback
+  duration 只用于证明 recorder 的观测开销，DDS queue/drop 与其他节点 callback blocking 仍未验证。
 - **已验证（停止）**：运行前 artifact
   `log/gazebo_minco_mpc_chain/20260815_2150_stage1_preflight_resource_stop/preflight_resource_stop.txt`
   记录 first violation 为 `swap_used=5.7 GiB`。审计未发现残留导航/Gazebo/MuJoCo 进程，但该高 swap
   已满足停止条件，故未分配 ROS domain、未启动 Gazebo。
+- **已验证（资源门，2026-08-17）**：runner 在任何 ROS graph 或 Gazebo 进程创建前执行正式
+  `P1_RESOURCE_MODE=admission` 资源门，默认 `P1_MAX_SWAP_USED_GIB=4.0 GiB`；artifact 同时保存
+  `SwapTotal/SwapFree/MemAvailable`、候选 domain、仓库 SHA 和按进程名匹配的残留导航/仿真进程。
+  `P1_RESOURCE_PREFLIGHT_ONLY=true` 不会启动 ROS 或 Gazebo。候选 domain `313` 的 raw artifact
+  `log/gazebo_minco_mpc_chain/20260817_114122_nominal_none_domain313/preflight_resource.txt`
+  记录 `swap_used=5.158 GiB > 4.0 GiB`、`ros_domain=not_allocated`、无残留进程，runner 返回 `3`。
+- **已实现（探索资源模式，尚未形成闭环证据）**：显式 `P1_RESOURCE_MODE=exploratory` 允许开发者
+  在 swap 超过正式阈值时继续启动观察，但只将资源质量标为 `degraded`，并固定写入
+  `p1_admission_evidence=false`、`timing_valid_for_admission=false`。该模式仍拒绝非法模式、缺失
+  `/proc` 字段和残留导航/仿真进程，且不改变任何 TF、planning owner、unknown、lease、急停、零速度
+  或 action 安全门。探索结果只能用于算法调试，不能写成 P1/P2、性能、实时性或安全通过。
+- **已验证（探索资源门回归）**：`scripts/test_gazebo_resource_gate.sh` 覆盖非法模式、正式模式 swap
+  超限 fail-closed、探索模式 degraded 标记和 `P1_RESOURCE_PREFLIGHT_ONLY` 不分配 ROS domain；
+  该回归不启动 ROS 或 Gazebo。
+- **已验证（当前主机探索 preflight，2026-08-17）**：domain `324` 以
+  `P1_RESOURCE_MODE=exploratory P1_RESOURCE_PREFLIGHT_ONLY=true` 返回 `0`，实测
+  `swap_used=5.333 GiB`、`MemAvailable=1.836 GiB`，artifact 标记
+  `resource_quality=degraded`、`p1_admission_evidence=false`、`timing_valid_for_admission=false`、
+  `ros_domain=not_allocated`。未启动 ROS/Gazebo，不能作为 P1 runtime 或性能证据。
 - **推断 [Confidence: Medium]**：旧 domain `230` 三个下游 topic 的相近 wall gap 可能共同受上游 cadence、
   仿真 RTF 或资源争用影响；新增观测尚未运行，不能归因任何行为 owner。
 - **未验证**：DDS 中间件可报告的队列/丢包计数、各进程 CPU rate/context-switch delta、`/clock` 与各级
@@ -216,7 +243,9 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
 
 ### 停止条件
 
-- 高 swap、低可用内存、持续 CPU 饱和或残留导航进程；
+- 正式模式下 `P1_MAX_SWAP_USED_GIB=4.0` 的高 swap、低可用内存、持续 CPU 饱和或残留导航进程；
+- 探索模式不得把 degraded 运行写成正式 P1/P2/性能证据，且仍须在 Gazebo z 发散、RTF 异常、关键
+  telemetry 缺失或系统失稳时停止；
 - Gazebo z 发散、RTF 异常、TF 冲突或多个 localization publisher；
 - 需要放宽安全 timeout 才能通过；
 - 无法区分上游发布慢和下游丢包。

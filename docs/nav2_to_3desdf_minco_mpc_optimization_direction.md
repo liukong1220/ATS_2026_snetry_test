@@ -1,6 +1,6 @@
 # ATS 自研导航 V1 当前状态与优化方向
 
-> 更新时间：2026-08-15
+> 更新时间：2026-08-17
 > 本页只记录当前准入状态、不可破坏的架构边界和下一执行入口。历史阶段流水账已从活动文档移除，
 > 仍可由 Git 历史和专项准入记录追溯。
 
@@ -55,10 +55,28 @@ ICR 或 `vy=0`。
 - domain `230` 的直线 candidate 长度比 `1.000`、曲率为零，但 `/localization` wall interval
   `p50/p95/p99=0.371/0.994/1.612 s`，adapter 反复 `ready=false`，action fail-closed；
 - P1 的单 recorder 已补齐 `/clock`、三段 odometry、`/localization/status` 与 adapter 的 wall/stamp/age、
-  duplicate/backward、RTF、TRACKING、TF lookup 和本 session 进程资源字段；组件 build/CTest/launch
-  静态验证通过。当前 preflight 的 first violation 是 `swap_used=5.7 GiB`，因此未启动新 domain，
-  这些字段仍没有 runtime 分布，不能确定 freshness 行为 owner；DDS queue/drop 计数明确为
+  duplicate/backward、RTF、TRACKING、TF lookup、本 session 进程资源与 recorder callback duration
+  字段；callback 仅量化观测器自身开销，不代表上游 executor 或 DDS queue。新统计的 focused CTest、
+  Release build、runner/launch 静态检查通过；完整包 CTest 的 `ament_black` 仍受 sandbox 禁止本地 socket
+  所限，尚未取得主机复跑结果。当前 preflight 的 first violation 是 `swap_used=5.7 GiB`，因此未启动
+  新 domain，这些字段仍没有 runtime 分布，不能确定 freshness 行为 owner；DDS queue/drop 计数明确为
   `unverified_no_portable_rmw_counter`，不能解释为零丢包；
+- P1 runner 的正式准入模式保持默认 `P1_RESOURCE_MODE=admission` 与
+  `P1_MAX_SWAP_USED_GIB=4.0`，并在 ROS graph 创建前把 swap、`MemAvailable`、残留导航/仿真进程、
+  候选 domain 与仓库 SHA 写入 raw artifact。2026-08-17 的 `domain313` preflight 记录
+  `5.158 GiB > 4.0 GiB`、无残留进程并返回 `3`，故 `ros_domain` 未分配、未启动 Gazebo。
+  该正式门仍是 P1 timing/admission 的唯一有效资源前置条件。
+- runner 另提供显式 `P1_RESOURCE_MODE=exploratory` 开发模式，允许在 swap 超过正式阈值时继续做
+  算法观察，但 artifact 固定写入 `resource_quality=degraded`、`p1_admission_evidence=false`、
+  `timing_valid_for_admission=false`，并在 summary 输出不可准入警告。探索模式只放宽 swap 这一项；
+  残留导航/仿真进程、无效 `/proc` 数据、TF/owner、unknown、lease、急停、零速度和 action 安全门
+  均不放宽。探索运行不能作为 P1/P2、性能、实时性或安全通过证据。
+- `P1_RESOURCE_PREFLIGHT_ONLY=true` 在两种模式下都只记录资源 artifact，不创建 ROS domain；非法
+  `P1_RESOURCE_MODE` 在任何 ROS/Gazebo 启动前以专用失败返回。因而当前 P1 runtime timing、first
+  freshness behavior owner 与 action 结论仍全部未验证；
+- 当前主机 domain `324` 的探索 preflight 实测 `swap_used=5.333 GiB`、`MemAvailable=1.836 GiB`，
+  返回 `0` 但明确标记为 `resource_quality=degraded`，未分配 ROS domain；该结果仅证明开发模式
+  分支可继续，不是 P1 runtime 或性能证据；
 - production MINCO node 尚未把实时 `InitialKinematicState` 传入 optimizer；几何质量指标主要用于
   telemetry，尚未形成完整候选接受门禁；
 - Gazebo runner 的 `TEST_PROFILE` 尚未拥有实际 corner/S/narrow/red-box 场景逻辑；
@@ -81,8 +99,10 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 
 ## 5. 下一优化顺序
 
-1. 在 swap 低于运行停止阈值、无残留导航进程的环境中，以新 ROS domain 运行 60 s headless P1 recorder，
-   先定位 Gazebo localization freshness 首个违反者；
+1. 正式验收必须在 `P1_RESOURCE_MODE=admission` 且 `swap_used <= 4.0 GiB`、无残留导航进程的环境中，
+   以新 ROS domain 运行 60 s headless P1 recorder，先定位 Gazebo localization freshness 首个违反者；
+   在资源未恢复前只能显式使用 `P1_RESOURCE_MODE=exploratory` 做短时算法观察，并将结果标为 degraded，
+   不得写入 P1/P2 或性能通过结论；
 2. 将实际运动状态接入 MINCO 四条生产优化路径；
 3. 把几何质量 telemetry 升级为按路径类别生效的候选门禁；
 4. 实现真实 Gazebo straight/corner/S/narrow/nominal/red-box runner；
