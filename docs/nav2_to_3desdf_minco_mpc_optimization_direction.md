@@ -1,6 +1,6 @@
 # ATS 自研导航 V1 当前状态与优化方向
 
-> 更新时间：2026-08-17
+> 更新时间：2026-08-19
 > 本页只记录当前准入状态、不可破坏的架构边界和下一执行入口。历史阶段流水账已从活动文档移除，
 > 仍可由 Git 历史和专项准入记录追溯。
 
@@ -61,6 +61,22 @@ ICR 或 `vy=0`。
   所限，尚未取得主机复跑结果。当前 preflight 的 first violation 是 `swap_used=5.7 GiB`，因此未启动
   新 domain，这些字段仍没有 runtime 分布，不能确定 freshness 行为 owner；DDS queue/drop 计数明确为
   `unverified_no_portable_rmw_counter`，不能解释为零丢包；
+- 根仓 runner 新增纯函数 `scripts/gazebo_freshness_classifier.sh` 和确定性回归，按
+  `/clock -> /lidar_odometry -> /odometry -> /localization -> status` 顺序输出
+  `p1_first_freshness_violation`；只在完整 P1 条件满足时置 `p1_admission_evidence=true`，不改变
+  timeout、lease、QoS 或控制行为。
+- **已验证（2026-08-19，非准入）**：正式资源 preflight 在新候选 domain `231` 以
+  `swap_used=10.560 GiB > 4.0 GiB` fail-closed；修改后的 runner 再次记录 `10.973 GiB > 4.0 GiB`，
+  两次均 `ros_domain=not_allocated`。探索 domain `220` headless 30 s 运行的 resource quality 为
+  `degraded`，`/clock` p99/max=`0.122538/0.135193 s`，`/lidar_odometry`=`1.671385/1.671385 s`，
+  `/odometry`=`1.659046/1.659046 s`，`/localization`=`1.663433/1.663433 s`；RTF p50/p95/p99=
+  `0.199802/0.409690/0.596497`，status `178/119`（TRACKING/non-TRACKING），TF failure `18/300`，
+  action 未成功。分类器把 `/lidar_odometry` 标为首个可见 timing 违反者；这只是 degraded 运行的
+  观测，不是 P1/P2/性能或安全通过证据。
+- **推断 [Confidence: Medium]**：本次 gap 首先出现在 `/lidar_odometry`，下游两段保持相同数量级，
+  callback p99 为微秒级，优先调查 Gazebo 传感器/RTF、`loam_interface` 发布 cadence 与 DDS 丢包；
+  尚不能把行为 owner 归因到其中任一单独组件。DDS counter 仍为
+  `unverified_no_portable_rmw_counter`。
 - P1 runner 的正式准入模式保持默认 `P1_RESOURCE_MODE=admission` 与
   `P1_MAX_SWAP_USED_GIB=4.0`，并在 ROS graph 创建前把 swap、`MemAvailable`、残留导航/仿真进程、
   候选 domain 与仓库 SHA 写入 raw artifact。2026-08-17 的 `domain313` preflight 记录
@@ -110,7 +126,8 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
    在资源未恢复前只能显式使用 `P1_RESOURCE_MODE=exploratory` 做短时算法观察，并将结果标为 degraded，
    不得写入 P1/P2 或性能通过结论；
 2. 在 exploratory 证据中先区分 RTF/CPU/swap 资源影响、publisher cadence、subscriber/DDS 丢包和
-   localization_fusion/TF 行为；不得根据 domain `231` 单次运行直接修改 timeout 或指定算法 owner；
+   localization_fusion/TF 行为；本轮首违分类器已把 `/lidar_odometry` 作为首个可见边界，但不得根据
+   domain `220` 单次 degraded 运行直接修改 timeout 或指定唯一算法 owner；
 3. 将实际运动状态接入 MINCO 四条生产优化路径；
 3. 把几何质量 telemetry 升级为按路径类别生效的候选门禁；
 4. 实现真实 Gazebo straight/corner/S/narrow/nominal/red-box runner；

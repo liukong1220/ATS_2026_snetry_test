@@ -1,7 +1,7 @@
 # ATS 导航剩余优化总 TODO
 
 > 状态：唯一活动导航优化清单
-> 更新时间：2026-08-15
+> 更新时间：2026-08-19
 > 适用范围：Gazebo、MuJoCo、HIL 与实车共用的 ATS 四驱四转哨兵导航链
 > 历史说明：旧阶段 TODO 已退役；历史实现与运行证据通过 Git 历史、
 > `docs/ats_swerve_mpc_ltv_qp_backend_admission.md` 和状态文档追溯。
@@ -179,6 +179,8 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   与 adapter 写入 CPU tick、RSS、线程和 voluntary/nonvoluntary context-switch 两次原始快照；
 - [x] DDS queue/drop 无可移植 RMW counter 时显式写入
   `unverified_no_portable_rmw_counter`，不得当作零丢包；
+- [x] runner 按 `/clock -> /lidar_odometry -> /odometry -> /localization -> status` 顺序输出
+  `p1_first_freshness_violation`；分类器只消费单行 recorder witness，不修改运行时 timeout；
 - [ ] 区分 publisher 慢、subscriber 丢包、sim 慢和 wall watchdog 四类根因；
 - [ ] A/B 每次只改变一个因素：headless、recorder、RViz、相机、LiDAR profile、日志；
 - [ ] 所有 profile 使用新 domain、相同 revision、相同起点和固定窗口。
@@ -242,6 +244,38 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   因子、P2 red-box、HIL 和实车。domain `231` 的探索数据只能用于定位资源/RTF/freshness 关系，不能升级
   为正式准入结论。
 
+- **已验证（runner/回归，2026-08-19）**：根仓新增
+  `scripts/gazebo_freshness_classifier.sh`，按固定阈值 p99 `<0.25 s`、最大 wall gap `<=0.5 s`
+  在链路顺序中输出首个可见违反者；`scripts/test_gazebo_freshness_classifier.sh` 覆盖上游首违、健康
+  和缺字段三类确定性输入。runner 只有在 admission 资源、60 s observer、无首违、status 全部 TRACKING、
+  无 TF lookup failure 且 straight action 成功时才将 `p1_admission_evidence=true`，分类器本身不改变
+  任何安全 timeout 或行为参数。
+- **已验证（正式资源停止，2026-08-19）**：使用新候选 domain `231`、
+  `P1_RESOURCE_MODE=admission P1_MAX_SWAP_USED_GIB=4.0 P1_RESOURCE_PREFLIGHT_ONLY=true`，
+  artifact `/tmp/ats_p1_admission_preflight/20260819_110903_nominal_none_domain231/`
+  记录 `swap_used=10.560 GiB > 4.0 GiB`，返回码 `3`，`ros_domain=not_allocated`；随后修改后的
+  runner 再次 preflight 记录 `10.973 GiB > 4.0 GiB` 并同样 fail-closed。两次均未启动 ROS/Gazebo，
+  不是 P1 runtime 证据。
+- **已验证（探索 runtime，2026-08-19，非准入证据）**：新合法 domain `220`、headless、
+  `RUN_DURATION_SEC=30`、`P1_RESOURCE_MODE=exploratory` 启动完整 Gazebo 链；artifact
+  `/tmp/ats_p1_exploratory_220/20260819_112403_nominal_none_domain220/` 明确标记
+  `resource_quality=degraded`、`p1_admission_evidence=false`、`timing_valid_for_admission=false`。
+  recorder 记录 `/clock` wall p99/max=`0.122538/0.135193 s`，`/lidar_odometry`=`1.671385/1.671385 s`，
+  `/odometry`=`1.659046/1.659046 s`，`/localization`=`1.663433/1.663433 s`；三段各 `37` 条，
+  stamp p99=`0.300 s`，callback p99 均为微秒级。RTF p50/p95/p99=`0.199802/0.409690/0.596497`，
+  status `TRACKING/non-TRACKING=178/119`，TF lookup `18/300` 失败，adapter ready 曾为 true，
+  action 未在 30 s 内成功但 `/cmd_vel_mpc`、`/motion_control`、Gazebo chassis 和轮关节均曾非零。
+  分类器输出首个可见违反者为 `/lidar_odometry`，不是 `/odometry` 或 `/localization`。
+- **推断 [Confidence: Medium]**：`/lidar_odometry` 是本次窗口中最早违反 p99/max wall cadence 的
+  可观测边界；`/odometry` 与 `/localization` 保持同量级 gap，且 recorder callback p99 为微秒级，
+  因此不支持把首因归给 recorder 或 localization_fusion callback 阻塞。该证据仍不能在
+  `ign gazebo` 传感器负载、`loam_interface` publisher cadence、DDS subscriber 丢包和系统 swap/RTF
+  之间完成行为 owner 归因；DDS queue/drop 继续为 `unverified_no_portable_rmw_counter`。
+- **未验证**：正式 admission 资源条件下的 60 s baseline、adapter ready=false 计数与持续 lease、
+  publisher/subscriber/DDS 分层、两次 straight action、所有 A/B 因子、P2 red-box、HIL 和实车。
+  domain `220` 的探索结果只能支持“先调查上游 lidar cadence/仿真资源”，不能升级为 P1/P2、性能、
+  实时性或安全通过。
+
 ### 修复原则
 
 - 只修改最早违反 freshness 的行为 owner；
@@ -258,6 +292,22 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
 - [ ] stamp 不倒退，sensor-to-localization age 有 p50/p95/p99；
 - [ ] straight action 两次成功，终点误差、owner 和收尾零速均通过；
 - [ ] 修复有聚焦单测或 deterministic fault test。
+
+### 首违分类设计
+
+分类器只处理 recorder 的结构化单行结果，契约顺序固定为：
+
+```text
+/clock(max wall gap <= 0.5 s)
+-> /lidar_odometry(p99 < 0.25 s, max gap <= 0.5 s)
+-> /odometry(p99 < 0.25 s, max gap <= 0.5 s)
+-> /localization(p99 < 0.25 s, max gap <= 0.5 s)
+-> /localization/status(p99 < 0.25 s, max gap <= 0.5 s)
+```
+
+缺字段输出 `first_violation=unverified` 并阻止 admission 结论；首违输出只作为定位证据，不能
+替代 publisher/DDS/RTF 独立实验。正式 P1 仍要求新 domain、固定 revision、60 s headless、资源门
+通过和两次 straight action；探索模式固定为 degraded/non-admission。
 
 ### 停止条件
 
