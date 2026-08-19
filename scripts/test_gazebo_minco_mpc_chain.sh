@@ -25,6 +25,8 @@ set -u -o pipefail
 
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$WORKSPACE_ROOT"
+# shellcheck source=scripts/gazebo_freshness_classifier.sh
+source "$WORKSPACE_ROOT/scripts/gazebo_freshness_classifier.sh"
 
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-91}"
 PLANNING_GRID_OWNER="${PLANNING_GRID_OWNER:-rog_map}"
@@ -928,6 +930,45 @@ evidence_bool_as_int() {
   esac
 }
 
+set_p1_admission_evidence() {
+  P1_ADMISSION_EVIDENCE="false"
+  P1_ADMISSION_REASON="not_eligible"
+  if [ "$P1_RESOURCE_MODE" != "admission" ]; then
+    P1_ADMISSION_REASON="resource_mode_${P1_RESOURCE_MODE}"
+    return 0
+  fi
+  if [ "$P1_TIMING_VALID_FOR_ADMISSION" != "true" ]; then
+    P1_ADMISSION_REASON="resource_timing_not_valid"
+    return 0
+  fi
+  if [ "$P2_FAULT_CASE" != "none" ]; then
+    P1_ADMISSION_REASON="fault_case_${P2_FAULT_CASE}"
+    return 0
+  fi
+  if ! awk -v duration="$ACTIVE_OBSERVER_WINDOW_SEC" 'BEGIN {exit !(duration + 0.0 >= 60.0)}'; then
+    P1_ADMISSION_REASON="observer_window_shorter_than_60s"
+    return 0
+  fi
+  if [ "$(freshness_metric_value "$FRESHNESS_CLASSIFICATION" first_violation)" != "none" ]; then
+    P1_ADMISSION_REASON="freshness_$(freshness_metric_value "$FRESHNESS_CLASSIFICATION" first_violation)"
+    return 0
+  fi
+  if [ "$(evidence_value localization_status_non_tracking_samples)" != "0" ]; then
+    P1_ADMISSION_REASON="localization_status_not_continuously_tracking"
+    return 0
+  fi
+  if [ "$(evidence_value tf_lookup_failures)" != "0" ]; then
+    P1_ADMISSION_REASON="tf_lookup_failures_$(evidence_value tf_lookup_failures)"
+    return 0
+  fi
+  if [ "${GOAL_SUCCEEDED:-0}" != "1" ]; then
+    P1_ADMISSION_REASON="straight_action_not_succeeded"
+    return 0
+  fi
+  P1_ADMISSION_EVIDENCE="true"
+  P1_ADMISSION_REASON="all_p1_gates_passed"
+}
+
 active_owner_count() {
   local topic="$1" field="$2"
   awk -v topic="$topic" -v field="$field" '
@@ -1522,6 +1563,16 @@ for stage in clock lidar_odometry odometry localization localization_status; do
   metric "${stage}_p99_callback_duration_s" "$(evidence_value "${stage}_p99_callback_duration_s")"
   metric "${stage}_max_callback_duration_s" "$(evidence_value "${stage}_max_callback_duration_s")"
 done
+FRESHNESS_CLASSIFICATION="$(classify_gazebo_freshness "$EVIDENCE_RESULT" \
+  "${P1_LOCALIZATION_P99_INTERVAL_LIMIT_SEC:-0.25}" \
+  "${P1_LOCALIZATION_MAX_GAP_LIMIT_SEC:-0.5}")"
+FRESHNESS_CLASSIFICATION_RC=$?
+metric "p1_freshness_contract" "${FRESHNESS_CLASSIFICATION//$'\n'/ }"
+metric "p1_first_freshness_violation" "$(freshness_metric_value "$FRESHNESS_CLASSIFICATION" first_violation)"
+metric "p1_first_freshness_reason" "$(freshness_metric_value "$FRESHNESS_CLASSIFICATION" reason)"
+if [ "$FRESHNESS_CLASSIFICATION_RC" -ne 0 ]; then
+  fail "P1 freshness classification is unverified: $FRESHNESS_CLASSIFICATION"
+fi
 metric "clock_rtf_p50" "$(evidence_value clock_rtf_p50)"
 metric "clock_rtf_p95" "$(evidence_value clock_rtf_p95)"
 metric "clock_rtf_p99" "$(evidence_value clock_rtf_p99)"
@@ -1748,6 +1799,10 @@ if [ "$P2_FAULT_CASE" = "goal-unreachable" ]; then
     *) fail "unreachable goal did not finish with ABORTED" ;;
   esac
 fi
+
+set_p1_admission_evidence
+metric "p1_admission_evidence" "$P1_ADMISSION_EVIDENCE"
+metric "p1_admission_reason" "$P1_ADMISSION_REASON"
 
 # There is no standalone Gazebo contact evaluator in this profile, so physical
 # contact must stay explicitly unverified. footprint_collisions=0 is a planner
