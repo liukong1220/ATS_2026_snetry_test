@@ -256,6 +256,10 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   记录 `swap_used=10.560 GiB > 4.0 GiB`，返回码 `3`，`ros_domain=not_allocated`；随后修改后的
   runner 再次 preflight 记录 `10.973 GiB > 4.0 GiB` 并同样 fail-closed。两次均未启动 ROS/Gazebo，
   不是 P1 runtime 证据。
+- **已验证（正式资源停止，2026-08-19 13:18）**：使用未复用的合法候选 domain `222` 执行同一
+  preflight，artifact `/tmp/ats_p1_admission_222/20260819_131843_nominal_none_domain222/` 记录
+  `swap_used=11.170 GiB > 4.0 GiB`，返回码 `3`，`ros_domain=not_allocated`。该结果再次满足停止条件，
+  未启动 ROS/Gazebo，不能作为 P1 runtime timing 或 first-owner 证据。
 - **已验证（探索 runtime，2026-08-19，非准入证据）**：新合法 domain `220`、headless、
   `RUN_DURATION_SEC=30`、`P1_RESOURCE_MODE=exploratory` 启动完整 Gazebo 链；artifact
   `/tmp/ats_p1_exploratory_220/20260819_112403_nominal_none_domain220/` 明确标记

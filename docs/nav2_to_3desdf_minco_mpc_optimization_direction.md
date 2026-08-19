@@ -73,6 +73,9 @@ ICR 或 `vy=0`。
   `0.199802/0.409690/0.596497`，status `178/119`（TRACKING/non-TRACKING），TF failure `18/300`，
   action 未成功。分类器把 `/lidar_odometry` 标为首个可见 timing 违反者；这只是 degraded 运行的
   观测，不是 P1/P2/性能或安全通过证据。
+- **已验证（正式资源停止，2026-08-19 13:18）**：使用未复用的合法候选 domain `222` 做 admission
+  preflight，`swap_used=11.170 GiB > 4.0 GiB`，返回码 `3`，`ros_domain=not_allocated`；因此本轮
+  没有启动 ROS/Gazebo，也没有产生新的 runtime timing 或 first-owner 结论。
 - **推断 [Confidence: Medium]**：本次 gap 首先出现在 `/lidar_odometry`，下游两段保持相同数量级，
   callback p99 为微秒级，优先调查 Gazebo 传感器/RTF、`loam_interface` 发布 cadence 与 DDS 丢包；
   尚不能把行为 owner 归因到其中任一单独组件。DDS counter 仍为
