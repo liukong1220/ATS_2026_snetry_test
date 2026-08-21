@@ -11,9 +11,7 @@ from ats_navigation_interfaces.action import NavigateToPose
 from ats_navigation_interfaces.msg import ExecutionCommand
 from ats_navigation_interfaces.msg import PlannerStatus
 from ats_navigation_interfaces.msg import PlanningMapStatus
-from ats_navigation_interfaces.msg import SwerveTelemetry
 from geometry_msgs.msg import Twist
-from manda_can_control.msg import MotionCtrl
 from nav_msgs.msg import Odometry
 from rcl_interfaces.srv import SetParameters
 import rclpy
@@ -50,8 +48,6 @@ class UnsafeTrajectoryEvaluator(Node):
         self.planner_statuses = []
         self.stop_states = []
         self.latest_cmd = None
-        self.latest_motion = None
-        self.latest_telemetry = None
         self.transient_qos = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -82,10 +78,6 @@ class UnsafeTrajectoryEvaluator(Node):
             self.transient_qos,
         )
         self.create_subscription(Twist, "/cmd_vel_mpc", self._on_command, 20)
-        self.create_subscription(MotionCtrl, "/motion_control", self._on_motion, 20)
-        self.create_subscription(
-            SwerveTelemetry, "/swerve/telemetry", self._on_telemetry, 20
-        )
         self.action_client = ActionClient(self, NavigateToPose, "/ats_navigate_to_pose")
         self.adapter_parameters = self.create_client(
             SetParameters, "/ats_rog_map_adapter/set_parameters"
@@ -101,16 +93,6 @@ class UnsafeTrajectoryEvaluator(Node):
             float(message.angular.z),
         )
 
-    def _on_motion(self, message: MotionCtrl) -> None:
-        self.latest_motion = (
-            float(message.linear_x),
-            float(message.linear_y),
-            float(message.angular_z),
-        )
-
-    def _on_telemetry(self, message: SwerveTelemetry) -> None:
-        self.latest_telemetry = message
-
     def wait_for(self, predicate, timeout: float, label: str) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -124,17 +106,7 @@ class UnsafeTrajectoryEvaluator(Node):
         return math.hypot(command[0], command[1]) + abs(command[2]) if command else 0.0
 
     def commands_are_zero(self) -> bool:
-        return (
-            self.latest_cmd is not None
-            and self.latest_motion is not None
-            and self.command_norm(self.latest_cmd) < 1e-3
-            and self.command_norm(self.latest_motion) < 1e-3
-        )
-
-    def wheels_are_zero(self) -> bool:
-        return self.latest_telemetry is not None and all(
-            abs(float(value)) < 2.0 for value in self.latest_telemetry.drive_rpm
-        )
+        return self.latest_cmd is not None and self.command_norm(self.latest_cmd) < 1e-3
 
     def set_adapter_parameters(self, **values) -> None:
         self.wait_for(
@@ -240,7 +212,7 @@ class UnsafeTrajectoryEvaluator(Node):
                 for command in self.execution_commands[old_execute_count:]
             ):
                 raise RuntimeError("old execution command revived after the stop")
-            if not self.commands_are_zero() or not self.wheels_are_zero():
+            if not self.commands_are_zero():
                 raise RuntimeError("motion resumed after cancellation without a new goal")
 
     def run_outside(self) -> dict:
@@ -252,15 +224,13 @@ class UnsafeTrajectoryEvaluator(Node):
             raise RuntimeError("outside-map goal unexpectedly succeeded")
         self.wait_for(lambda: True in self.stop_states[before_stop:], 5.0, "outside-map stop")
         self.wait_for(
-            lambda: self.commands_are_zero() and self.wheels_are_zero(),
+            self.commands_are_zero,
             5.0,
-            "outside-map double zero",
+            "outside-map /cmd_vel_mpc zero",
         )
         return {
             "fault": self.fault,
             "result_code": int(result.result.result_code),
-            "final_drive_rpm": [float(value) for value in self.latest_telemetry.drive_rpm],
-            "contact_violation_count": int(self.latest_telemetry.contact_violation_count),
         }
 
     def run(self) -> dict:
@@ -270,7 +240,6 @@ class UnsafeTrajectoryEvaluator(Node):
             120.0,
             "ready planning map",
         )
-        self.wait_for(lambda: self.latest_telemetry is not None, 30.0, "/swerve/telemetry")
         if self.fault == "outside":
             return self.run_outside()
         if self.fault == "unknown":
@@ -290,8 +259,7 @@ class UnsafeTrajectoryEvaluator(Node):
         )
         command = self.latest_execute(before_commands)
         self.wait_for(
-            lambda: self.command_norm(self.latest_cmd) > 0.02
-            and self.command_norm(self.latest_motion) > 0.02,
+            lambda: self.command_norm(self.latest_cmd) > 0.02,
             20.0,
             "initial non-zero control",
         )
@@ -304,9 +272,9 @@ class UnsafeTrajectoryEvaluator(Node):
             "Goal Manager emergency stop",
         )
         self.wait_for(
-            lambda: self.commands_are_zero() and self.wheels_are_zero(),
+            self.commands_are_zero,
             5.0,
-            "MPC/bridge/wheel double zero",
+            "/cmd_vel_mpc zero after unsafe trajectory",
         )
         self.wait_for(
             lambda: any(
@@ -320,8 +288,6 @@ class UnsafeTrajectoryEvaluator(Node):
         )
 
         self.cancel_and_hold_stop(handle, int(command.command_sequence))
-        if self.latest_telemetry.contact_violation_count != 0:
-            raise RuntimeError("physical contact violation detected")
         return {
             "fault": self.fault,
             "goal_id": int(command.goal_id),
@@ -329,8 +295,6 @@ class UnsafeTrajectoryEvaluator(Node):
             "old_map_generation": int(command.map_generation),
             "old_map_publication_sequence": int(command.map_publication_sequence),
             "planner_statuses_after_fault": len(self.planner_statuses) - before_statuses,
-            "final_drive_rpm": [float(value) for value in self.latest_telemetry.drive_rpm],
-            "contact_violation_count": int(self.latest_telemetry.contact_violation_count),
         }
 
 

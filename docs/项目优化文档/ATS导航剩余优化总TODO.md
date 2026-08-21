@@ -2,14 +2,15 @@
 
 > 状态：唯一活动导航优化清单
 > 更新时间：2026-08-20
-> 适用范围：Gazebo、MuJoCo、HIL 与实车共用的 ATS 四驱四转哨兵导航链
+> 适用范围：Gazebo、MuJoCo 与实机导航软件侧的 ATS 四驱四转哨兵导航链
 > 历史说明：旧阶段 TODO 已退役；历史实现与运行证据通过 Git 历史、
 > `docs/ats_swerve_mpc_ltv_qp_backend_admission.md` 和状态文档追溯。
 
 ## 1. 目标与完成定义
 
-本清单用于收敛当前仍未完成的生产能力和准入证据。它不把组件测试、单次仿真成功、HIL 和实车通过
-混为同一状态。最终目标链保持不变：
+本清单用于收敛当前仍未完成的导航生产能力和准入证据。它不把组件测试、单次仿真成功与实际导航
+任务成功混为同一状态。底盘 CAN、电机、轮速、电流、电压、温度、底盘反馈和硬件 watchdog 由下位机
+或 HIL 诊断维护，不属于本导航清单的检测、门禁或通过条件。最终目标链保持不变：
 
 ```text
 传感器 + 独立状态估计
@@ -18,17 +19,17 @@
 -> RC-ESDF 规划接口
 -> ATS Goal Manager -> JPS -> MINCO S3 + 独立 yaw
 -> footprint safety + Local Collision Repair
--> 全向 SE(2) MPC -> 四驱四转底盘
+-> 全向 SE(2) MPC -> `/cmd_vel_mpc` -> 云台 yaw 速度变换 -> `/cmd_vel` 下位机速度接口
 ```
 
 总体验收必须同时满足：
 
 - 干净主机可从远端仓库复建全部依赖和仿真资源；
-- 地图、定位、规划、控制和底盘命令各有唯一 owner；
+- 地图、定位、规划、控制和导航速度输出各有唯一 owner；
 - nominal、边界场景和故障恢复均有独立 ROS domain 的证据；
 - stale、unknown、无路、unsafe、solver failure 或 lease failure 都确定性零速度；
 - P2、P3、P4 和 QP 主链分别通过自己的门禁，不相互替代；
-- HIL 前完成 Gate 0--2，实车前完成 Gate 0--3；
+- 仿真与实机导航侧分别保留独立 artifact；下位机/HIL 诊断不构成导航准入；
 - 性能结论来自固定 revision、配置、硬件和原始 artifact。
 
 ## 2. 当前冻结基线
@@ -79,7 +80,7 @@
 - unknown、occupied、outside-map、signed-distance 正负号和 gradient 语义不得放宽；
 - JPS、MINCO S3、独立 yaw、footprint gate、Local Collision Repair 和 SE(2) MPC 必须保留；
 - 四舵轮控制保持车体系 `[vx,vy,wz]`，禁止差速、Ackermann、ICR 或 `vy=0`；
-- `/cmd_vel_mpc` 和 `/motion_control` 必须各自只有一个发布 owner；
+- `/cmd_vel_mpc` 必须只有 `ats_swerve_mpc` 一个发布 owner；
 - 急停必须清空 tracker，急停前 reference 不得在恢复后复活；
 - 不能通过增大 freshness timeout、QP iteration、residual 或 deadline 掩盖失败；
 - `solver_mode=qp` 在 QP-3 门禁通过前继续拒绝启动。
@@ -94,10 +95,10 @@ P0 远端复建
         -> P4 P2 完整仿真验收
           -> P5 RViz/ROGMap 运行验收
           -> P6 P3 Nav2-free 验收
-          -> P7 P4 仿真安全与 HIL
+          -> P7 P4 仿真算法安全
 
 P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
-所有分支 -> 长时间稳定性 -> HIL -> 低速实车
+所有分支 -> 长时间导航稳定性 -> 受限低速实机导航
 ```
 
 禁止跳过 P0/P1 直接调 MINCO 或 QP；污染环境中的 timing 只能保存为无效样本。
@@ -181,7 +182,7 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   `unverified_no_portable_rmw_counter`，不得当作零丢包；
 - [x] runner 按 `/clock -> /lidar_odometry -> /odometry -> /localization -> status` 顺序输出
   `p1_first_freshness_violation`；分类器只消费单行 recorder witness，不修改运行时 timeout；
-- [ ] 区分 publisher 慢、subscriber 丢包、sim 慢和 wall watchdog 四类根因；
+- [ ] 区分 publisher 慢、subscriber 丢包、sim 慢和 wall-time deadline 四类根因；
 - [ ] A/B 每次只改变一个因素：headless、recorder、RViz、相机、LiDAR profile、日志；
 - [ ] 所有 profile 使用新 domain、相同 revision、相同起点和固定窗口。
 
@@ -205,7 +206,7 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   p99/max=`0.122538/0.135193 s`，`/lidar_odometry`=`1.671385/1.671385 s`，`/odometry`=
   `1.659046/1.659046 s`，`/localization`=`1.663433/1.663433 s`；RTF p50/p95/p99=
   `0.199802/0.409690/0.596497`，status `TRACKING/non-TRACKING=178/119`，TF lookup `18/300` 失败。
-  action 在 30 s 内未成功，但 `/cmd_vel_mpc`、`/motion_control`、Gazebo chassis 和轮关节均曾非零。
+  action 在 30 s 内未成功，但 `/cmd_vel_mpc` 曾有非零导航速度输出。
   分类器输出首个可见违反者为 `/lidar_odometry`。
 - **推断 [Confidence: Medium]**：`/lidar_odometry` 是该窗口中最早违反 wall cadence 的可观测边界；下游
   `/odometry` 与 `/localization` 具有同量级 gap，recorder callback p99 为微秒级，因此现有证据不支持将
@@ -216,15 +217,15 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   `planning_grid_owner=rog_map` 的 runner 返回 `0`。recorder 实际 `completed=yes`、`duration_s=60.003753`，
   修复了短 action 截断观察的旧缺口：`p1_admission_evidence` 现在还要求 recorder 正常完成且实际 duration
   不短于请求窗口。action 成功，最终误差 `0.146 m`；JPS/reference/predicted/executed 点数为
-  `3/32/31/10`，`/cmd_vel_mpc`、`/motion_control`、Gazebo chassis 和轮关节均曾非零。运行期
-  `/rc_esdf/planning_grid`、`/cmd_vel_mpc`、`/motion_control` 和 chassis command 均为单一 publisher，
-  terminal `emergency_stop=true`，两级速度均为零。无残留进程，启动前审计通过。
+  `3/32/31/10`，`/cmd_vel_mpc` 曾有非零导航速度输出。运行期
+  `/rc_esdf/planning_grid` 与 `/cmd_vel_mpc` 均为单一 publisher，terminal `emergency_stop=true`，
+  `/cmd_vel_mpc` 采样为零。无残留进程，启动前审计通过。
 - **未通过（P1 freshness）**：该实际 60 s 窗口中 `/lidar_odometry` p99/max wall interval 为
   `1.144617/1.488598 s`，下游 `/odometry`=`1.143652/1.490561 s`、`/localization`=
   `1.142361/1.490312 s`，故首违仍是 `/lidar_odometry`；RTF p50/p95/p99=
   `0.331409/0.502033/0.560295`，status `TRACKING/non-TRACKING=535/56`，TF lookup failure=`16/600`。
-  `p1_admission_evidence=false`，原因为 `freshness_lidar_odometry`。物理接触评估和 MINCO 离散
-  footprint 冲突采样仍为未验证，不能由成功 action 或终态零速推导。
+  `p1_admission_evidence=false`，原因为 `freshness_lidar_odometry`。该结果不能由单次 action 成功或
+  终态 `/cmd_vel_mpc=0` 升级为当前 revision 的导航准入。
 - **推断 [Confidence: Medium]**：`loam_interface` 仅在 `cloud_registered` callback 中发布
   `/lidar_odometry`；其 ROS stamp p99=`0.299990 s` 而 wall p99=`1.144617 s`，同时 `/clock` RTF
   p50=`0.331409`。证据优先支持检查 Gazebo 传感器/RTF、Point-LIO publisher cadence 和 DDS 接收边界，
@@ -232,8 +233,8 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   与 subscriber/drop 的独立计数。
 - **已验证（最终 revision P1 60 s baseline，2026-08-19）**：显式 `ENABLE_CAMERA_SENSORS=false` 的新
   domain `225` recorder 实际 `completed=yes`、`duration_s=60.010472`，启动前无残留进程，planning grid、
-  `/cmd_vel_mpc`、`/motion_control` 和 chassis command 均为单一 active publisher，所有速度链都曾非零；
-  terminal `emergency_stop=true`，`/cmd_vel_mpc` 与 `/motion_control` 采样均为零。此 final revision action
+  `/cmd_vel_mpc` 为单一 active publisher 且曾有非零导航速度输出；terminal `emergency_stop=true`，
+  `/cmd_vel_mpc` 采样为零。此 final revision action
   被接受但在 `90 s` 内未给出终态，runner 以 `nominal action did not succeed` 返回失败。action 不成功不被
   隐藏为环境条件，也不影响完整 60 s recorder 的有效性。
 - **未通过（最终 P1 freshness）**：domain `225` `/lidar_odometry` p99/max wall interval=
@@ -243,7 +244,7 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   `p1_admission_evidence=false`。domain `224` action 成功与 domain `225` action 超时共同表明当前 P1
   不具有可重复的 action 成功证据。
 - **未验证**：adapter ready=false 计数与持续 lease、publisher/subscriber/DDS 分层、重复 action 的统计
-  稳定性、camera true/false 等单因素 A/B、P2 red-box、HIL 和实车。P1 不得因单次 domain `224` 成功 action
+  稳定性、camera true/false 等单因素 A/B、P2 red-box 和实机导航。P1 不得因单次 domain `224` 成功 action
   标记通过。
 - **已验证（raw Gazebo LiDAR 分层，2026-08-20）**：recorder 已在独立 `60 s` domain 实际订阅
   `/<robot>/livox/lidar`、`/livox/lidar`、`/cloud_registered` 与 `/lidar_odometry`。domain `215` 的
@@ -277,9 +278,9 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   排除了“仅 Transport 诊断 observer 导致默认配置失效”的简单解释，但单次运行仍不能唯一归因 sensor、
   generic bridge 或 DDS。
 - **已验证（domain 208 安全行为）**：JPS/reference/MPC/轮关节和三段命令均曾非零，运行期 planning grid、
-  `/cmd_vel_mpc`、`/motion_control` 与 chassis command 仍各有唯一 active publisher；动作最终 `ABORTED`、
-  终态 `emergency_stop=true` 且两级速度为零。物理接触、连续 swept 与 MINCO 离散 footprint 冲突采样仍为
-  `未验证`，不得由此次 fail-closed 推导。
+  `/cmd_vel_mpc` 仍有唯一 active publisher；动作最终 `ABORTED`、终态 `emergency_stop=true` 且
+  `/cmd_vel_mpc` 为零。连续 swept 与 MINCO 离散 footprint 冲突采样仍为 `未验证`，不得由此次
+  fail-closed 推导。
 
 ### 修复原则
 
@@ -353,7 +354,7 @@ straight action。
 - [ ] 阈值进入唯一实际加载配置，并有参数范围校验；
 - [ ] 记录结构化首个拒绝原因；
 - [ ] quality 失败只回退到同 snapshot 上安全的 baseline；
-- [ ] baseline 也失败时不发布 reference，保持急停与两级零速度。
+- [ ] baseline 也失败时不发布 reference，保持急停与 `/cmd_vel_mpc=0`。
 
 ### 7.3 净空与连续性
 
@@ -395,8 +396,8 @@ straight action。
 - [ ] 场景不得依赖人工 RViz 点击；
 - [ ] 每个 goal 独立记录 accepted/result/cancel/preempt/timeout；
 - [ ] 保存 raw/preprocessed/refined/reference/predicted/executed；
-- [ ] 保存地图 identity、owner、clearance、collision/contact、v/a/j 和 terminal error；
-- [ ] 未验证 contact/clearance 不写默认通过值；
+- [ ] 保存地图 identity、owner、clearance、碰撞采样、v/a/j 和 terminal error；
+- [ ] 未验证 clearance 或碰撞采样不写默认通过值；
 - [ ] shell/Python/C++ 测试锁定 profile、yaw 和未知 profile 拒绝。
 
 ### DoD
@@ -423,8 +424,7 @@ straight action。
 - discrete/swept collision samples；
 - replan、fallback、repair、失败和恢复次数；
 - localization/map/reference/command age；
-- planning grid、`/cmd_vel_mpc`、`/motion_control` 唯一 owner；
-- Gazebo contact evaluator 结果或明确 `unverified`。
+- planning grid 与 `/cmd_vel_mpc` 唯一 owner；
 
 ### 当前 revision 故障矩阵
 
@@ -441,7 +441,6 @@ failure detected within configured deadline
 -> ready=false or planner failure
 -> emergency_stop=true
 -> /cmd_vel_mpc=0
--> /motion_control=0
 -> old reference cannot revive
 ```
 
@@ -478,29 +477,24 @@ failure detected within configured deadline
 
 在上述完成前只能写“Nav2-free 代码路径存在”，不能写“P3 已通过”。
 
-## 12. P7：P4 仿真安全与 HIL 前置
+## 12. P7：P4 仿真算法安全
 
 ### 仿真阶段
 
 - [ ] 将自适应 sampled sweep 升级为具有明确误差上界的连续 swept 契约；
 - [ ] 覆盖纯旋转、横移、对角、`+pi/-pi`、高曲率和 map 边界；
-- [ ] 增加独立 Gazebo physical contact evaluator；
-- [ ] 区分 planner collision、Gazebo contact 和 near-miss；
-- [ ] 测量急停到 `/motion_control=0`、wheel speed=0 的延迟；
-- [ ] 测量制动距离并纳入动态安全 margin；
-- [ ] 注入 saturation、steer/wheel rate、命令延迟和丢包；
-- [ ] 验证轮速过零、正反/横纵切换和舵角机械限位；
+- [ ] 验证 planner collision、footprint gate、Local Collision Repair 与 unsafe trajectory
+  都不会提交不安全 reference；
+- [ ] 注入 map stale、unknown、localization stale、无路、目标取消和 solver failure，验证
+  `emergency_stop=true -> /cmd_vel_mpc=0`；
+- [ ] 验证 map snapshot、generation、reference timestamp 和 goal identity 不会让旧轨迹复活；
 - [ ] 长时间运行无 queue/RSS/thread/generation 异常增长。
 
-### HIL Gate 3
+### 下位机边界
 
-- [ ] 抬轮或断开动力负载；
-- [ ] 四个 steer/drive 模块逐轴验证符号和单位；
-- [ ] 物理、遥控、软件急停和断电路径分别演练；
-- [ ] 停止 producer、断网、断传感器、杀进程并验证硬件 watchdog；
-- [ ] 测量 sensor-to-command、command-to-actuator p50/p95/p99；
-- [ ] 监控电流、电压、温度、CAN 和 actuator fault；
-- [ ] 形成回滚 commit 和安全观察员清单。
+CAN、电机、轮速、电流、电压、温度、底盘反馈、硬件 watchdog、接触和制动诊断由下位机/HIL
+链独立维护。本导航仓只保证向 `/cmd_vel` 下位机速度接口提交经过云台 yaw 变换的速度，不订阅、
+不记录、也不以这些硬件信号决定导航 action 成功或失败。
 
 ## 13. QP：Shadow 到受控主链
 
@@ -514,7 +508,7 @@ failure detected within configured deadline
 - [ ] 禁止提高 iteration、放宽 residual/time limit 或接受 `solved_inaccurate`；
 - [ ] 得到稳定 `solved`、residual、hard margin、slack 和 warm-start 分布；
 - [ ] 记录 complete phase、full callback、CPU/allocation p50/p95/p99；
-- [ ] 覆盖 nominal、yaw jump、速度阶跃、反向、横移、轮速过零和 fault matrix。
+- [ ] 覆盖 nominal、yaw jump、速度阶跃、反向、横移和 navigation fault matrix。
 
 ### QP-3 受控主链
 
@@ -524,7 +518,7 @@ failure detected within configured deadline
 - [ ] fallback 必须限定窗口并重新验证旧序列；
 - [ ] 不得无条件沿用 `last_control`；
 - [ ] 节点级覆盖 solved/infeasible/time-limit/solved-inaccurate/residual reject；
-- [ ] MuJoCo 完整通过后才允许 HIL QP；
+- [ ] MuJoCo navigation matrix 通过后才允许 QP 主链候选进入导航评审；
 - [ ] 默认切换需要单独评审和回滚点。
 
 ## 14. 长时间稳定性与性能
@@ -536,16 +530,16 @@ failure detected within configured deadline
 - [ ] 记录 control jitter、deadline miss、command age 和 tracking error；
 - [ ] 检查 generation、sequence、goal ID 和 telemetry ring 是否倒退或增长；
 - [ ] RViz、INFO logging、recorder 分别做 A/B/C 消融；
-- [ ] 性能结论附硬件、revision、配置、样本数和 artifact；
+- [ ] 性能结论附测试机、revision、配置、样本数和 artifact；
 - [ ] 未在目标机测量前禁止引用 `50 Hz`、`6 ms` 或报告内存数值。
 
-## 15. 实车前 Gate 0--4
+## 15. 导航侧 Gate 0--2
 
 ### Gate 0：静态与数学
 
 - [ ] frame/time/QoS/map/ESDF/generation/ownership 账本完整；
 - [ ] 状态、矩阵、参数和 finite 检查通过；
-- [ ] 速度、加速度、jerk、轮速、舵角速率和机械限位有物理来源；
+- [ ] 速度、加速度和 jerk 约束来自当前导航模型与固定配置，并保留可审计单位；
 - [ ] 启动、部分初始化、reset 和 shutdown 都输出安全状态。
 
 ### Gate 1：离线/回放
@@ -558,13 +552,9 @@ failure detected within configured deadline
 
 - [ ] P2/P3/P4 仿真条目通过；
 - [ ] Gazebo 与 MuJoCo 结论一致或差异已解释；
-- [ ] contact、clearance、tracking、deadline 和 recovery 无未知项。
+- [ ] clearance、tracking、deadline 和 recovery 有导航侧 artifact。
 
-### Gate 3：HIL
-
-- [ ] 抬轮 HIL、硬件 watchdog、急停、符号、延迟和热稳定通过。
-
-### Gate 4：低速实车
+### 受限低速实机导航观察
 
 - [ ] 独立物理急停与安全观察员就位；
 - [ ] 先直线停止，再横移、原地旋转、单拐角；
@@ -599,7 +589,7 @@ git diff --check
 - localization/map/reference/command age；
 - source generation、adapter publication、MINCO snapshot identity；
 - raw/preprocessed/refined/reference/predicted/executed payload；
-- clearance、collision/contact、v/a/j、tracking 和 terminal error；
+- clearance、碰撞采样、v/a/j、tracking 和 terminal error；
 - CPU/RSS/RTF、p50/p95/p99/max 和 deadline misses；
 - first failure、stop/recovery、旧 reference 拒绝和最终零速度；
 - 未执行项和不能得出的结论。

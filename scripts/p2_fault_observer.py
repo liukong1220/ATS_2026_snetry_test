@@ -16,10 +16,9 @@ Design constraints this script enforces:
 * A ``PlanningMapStatus`` is paired with the ``PlanningMapSnapshot`` that shares
   its ``publication_sequence``; an unpaired status is reported as unpaired
   rather than silently matched to the newest snapshot.
-* ``/cmd_vel_mpc`` and ``/motion_control`` are judged inside one *common* fixed
-  window.  Both stages are sampled concurrently by the same executor, so
-  "both zero within the same window" is an observed fact, not an artefact of
-  sampling them one after the other.
+* ``/cmd_vel_mpc`` is judged inside one fixed post-fault window.  It is the
+  navigation-domain speed authority; lower-controller and wheel diagnostics do
+  not participate in this algorithmic acceptance gate.
 * all-unknown is decided from the structured ``PlanningMapSnapshot`` numeric
   payload: ``ready=false``, non-empty occupancy with every cell ``== -1``,
   ``signed_distance_m`` / ``gradient_x`` / ``gradient_y`` of the same length and
@@ -56,12 +55,6 @@ from nav_msgs.msg import Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
-
-try:
-    from manda_can_control.msg import MotionCtrl
-except ImportError:  # pragma: no cover - the harness always has this built
-    MotionCtrl = None
-
 
 DEFAULT_ZERO_THRESHOLD = 1.0e-3
 
@@ -200,7 +193,6 @@ class Observation:
     snapshots: list[SnapshotSample] = field(default_factory=list)
     emergency_stop: list[tuple[float, bool]] = field(default_factory=list)
     cmd_vel: list[VelocitySample] = field(default_factory=list)
-    motion_control: list[VelocitySample] = field(default_factory=list)
     reference_path: list[tuple[float, int, int]] = field(default_factory=list)
 
 
@@ -229,14 +221,6 @@ class FaultObserver(Node):
             reference_path_qos(),
         )
         self.subscription_count = 5
-        if MotionCtrl is not None:
-            self.create_subscription(
-                MotionCtrl,
-                topics["motion_control"],
-                self._on_motion_control,
-                stream_qos(),
-            )
-            self.subscription_count += 1
 
     def _on_status(self, message: PlanningMapStatus) -> None:
         self.observation.status.append(
@@ -312,16 +296,6 @@ class FaultObserver(Node):
         )
         self.observation.cmd_vel.append(VelocitySample(time.monotonic(), magnitude))
 
-    def _on_motion_control(self, message) -> None:
-        magnitude = max(
-            abs(float(message.linear_x)),
-            abs(float(message.linear_y)),
-            abs(float(message.angular_z)),
-        )
-        self.observation.motion_control.append(
-            VelocitySample(time.monotonic(), magnitude)
-        )
-
     def _on_reference_path(self, message: Path) -> None:
         self.observation.reference_path.append(
             (time.monotonic(), len(message.poses), stamp_ns(message.header.stamp))
@@ -334,12 +308,7 @@ def sustained_zero_window(
     window_end: float,
     threshold: float,
 ) -> dict:
-    """Judge one stage inside the *given* window.
-
-    Both stages are evaluated against the identical ``window_start`` /
-    ``window_end`` pair, so a passing verdict means both were zero at the same
-    wall-clock time rather than in two consecutive windows.
-    """
+    """Judge the navigation speed authority inside the given wall-clock window."""
     in_window = [
         sample
         for sample in samples
@@ -413,7 +382,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--emergency-stop-topic", default="/planner/emergency_stop")
     parser.add_argument("--cmd-vel-topic", default="/cmd_vel_mpc")
-    parser.add_argument("--motion-control-topic", default="/motion_control")
     parser.add_argument("--reference-path-topic", default="/minco/reference_path")
     parser.add_argument("--fault-wait-sec", type=float, default=180.0)
     parser.add_argument(
@@ -426,14 +394,13 @@ def parse_args() -> argparse.Namespace:
         "--zero-window-sec",
         type=float,
         default=3.0,
-        help="Length of the single common window in which both velocity stages "
-        "must be zero.",
+        help="Length of the post-fault window in which /cmd_vel_mpc must be zero.",
     )
     parser.add_argument(
         "--post-window-sec",
         type=float,
         default=0.0,
-        help="Extra observation time after the common zero window closes.",
+        help="Extra observation time after the zero window closes.",
     )
     parser.add_argument("--zero-threshold", type=float, default=DEFAULT_ZERO_THRESHOLD)
     parser.add_argument(
@@ -455,8 +422,8 @@ def gate_verdict(report: dict) -> dict:
     checks["emergency_stop_asserted"] = (
         report["latency_sec"]["fault_to_emergency_stop_true"] is not None
     )
-    checks["both_velocity_stages_zero_in_common_window"] = bool(
-        report["common_zero_window"]["both_stages_zero_in_common_window"]
+    checks["cmd_vel_mpc_zero_in_window"] = bool(
+        report["cmd_vel_mpc_zero_window"]["sustained_zero"]
     )
     pairing = report.get("fault_status_snapshot_pairing")
     checks["fault_status_paired_with_snapshot"] = bool(pairing and pairing["paired"])
@@ -507,10 +474,8 @@ def gate_verdict(report: dict) -> dict:
             report.get("pre_fault_non_empty_reference_observed")
             and not recovery["non_empty_reference_after_recovery_without_new_goal"]
         )
-        checks["both_stages_stay_zero_without_a_new_goal"] = bool(
-            recovery["no_new_goal_common_zero_window"][
-                "both_stages_zero_in_common_window"
-            ]
+        checks["cmd_vel_mpc_stays_zero_without_a_new_goal"] = bool(
+            recovery["no_new_goal_cmd_vel_mpc_zero_window"]["sustained_zero"]
         )
     else:
         checks["recovery_publication_advanced_past_fault"] = False
@@ -519,7 +484,7 @@ def gate_verdict(report: dict) -> dict:
         checks["recovered_status_localization_epoch_consistent"] = False
         checks["recovered_snapshot_source_generation_matches_status"] = False
         checks["old_reference_did_not_revive"] = False
-        checks["both_stages_stay_zero_without_a_new_goal"] = False
+        checks["cmd_vel_mpc_stays_zero_without_a_new_goal"] = False
     return {"checks": checks, "passed": all(checks.values())}
 
 
@@ -560,11 +525,6 @@ def build_report(args: argparse.Namespace, observation: Observation,
         lambda s: s.magnitude <= args.zero_threshold,
         fault_monotonic,
     )
-    first_zero_motion = first_at_or_after(
-        observation.motion_control,
-        lambda s: s.magnitude <= args.zero_threshold,
-        fault_monotonic,
-    )
 
     fault_status = first_not_ready_status
     fault_generation = (
@@ -573,9 +533,6 @@ def build_report(args: argparse.Namespace, observation: Observation,
 
     cmd_vel_window = sustained_zero_window(
         observation.cmd_vel, window_start, window_end, args.zero_threshold
-    )
-    motion_window = sustained_zero_window(
-        observation.motion_control, window_start, window_end, args.zero_threshold
     )
 
     report = {
@@ -601,19 +558,12 @@ def build_report(args: argparse.Namespace, observation: Observation,
             "fault_to_first_zero_cmd_vel_mpc": latency(
                 first_zero_cmd_vel, fault_monotonic
             ),
-            "fault_to_first_zero_motion_control": latency(
-                first_zero_motion, fault_monotonic
-            ),
         },
-        "common_zero_window": {
+        "cmd_vel_mpc_zero_window": {
             "window_start_monotonic": window_start,
             "window_end_monotonic": window_end,
             "window_length_sec": window_end - window_start,
-            "cmd_vel_mpc": cmd_vel_window,
-            "motion_control": motion_window,
-            "both_stages_zero_in_common_window": bool(
-                cmd_vel_window["sustained_zero"] and motion_window["sustained_zero"]
-            ),
+            **cmd_vel_window,
         },
         "reference_path_after_fault": [
             {"monotonic": entry[0], "poses": entry[1], "stamp_ns": entry[2]}
@@ -624,7 +574,6 @@ def build_report(args: argparse.Namespace, observation: Observation,
             entry[0] < fault_monotonic and entry[1] > 0
             for entry in observation.reference_path
         ),
-        "motion_control_observed": MotionCtrl is not None,
     }
     return report
 
@@ -655,9 +604,6 @@ def build_recovery_report(
     cmd_vel_window = sustained_zero_window(
         observation.cmd_vel, window_start, window_end, args.zero_threshold
     )
-    motion_window = sustained_zero_window(
-        observation.motion_control, window_start, window_end, args.zero_threshold
-    )
     references = [
         {"monotonic": entry[0], "poses": entry[1], "stamp_ns": entry[2]}
         for entry in observation.reference_path
@@ -679,15 +625,11 @@ def build_recovery_report(
             if first_ready is not None
             else None
         ),
-        "no_new_goal_common_zero_window": {
+        "no_new_goal_cmd_vel_mpc_zero_window": {
             "window_start_monotonic": window_start,
             "window_end_monotonic": window_end,
             "window_length_sec": window_end - window_start,
-            "cmd_vel_mpc": cmd_vel_window,
-            "motion_control": motion_window,
-            "both_stages_zero_in_common_window": bool(
-                cmd_vel_window["sustained_zero"] and motion_window["sustained_zero"]
-            ),
+            **cmd_vel_window,
         },
         "reference_path_after_recovery": references,
         "non_empty_reference_after_recovery_without_new_goal": any(
@@ -705,7 +647,6 @@ def main() -> int:
             "snapshot": args.snapshot_topic,
             "emergency_stop": args.emergency_stop_topic,
             "cmd_vel": args.cmd_vel_topic,
-            "motion_control": args.motion_control_topic,
             "reference_path": args.reference_path_topic,
         }
     )
@@ -722,8 +663,7 @@ def main() -> int:
             print("fault trigger file never appeared", file=sys.stderr)
             return 2
 
-        # One settle interval, then a single common window that both velocity
-        # stages are judged against.
+        # One settle interval, then a navigation-speed zero window.
         spin_until(node, fault_monotonic + args.settle_sec)
         window_start = time.monotonic()
         window_end = window_start + max(0.1, args.zero_window_sec)
