@@ -1,7 +1,7 @@
 # ATS 导航剩余优化总 TODO
 
 > 状态：唯一活动导航优化清单
-> 更新时间：2026-08-20
+> 更新时间：2026-08-21
 > 适用范围：Gazebo、MuJoCo 与实机导航软件侧的 ATS 四驱四转哨兵导航链
 > 历史说明：旧阶段 TODO 已退役；历史实现与运行证据通过 Git 历史、
 > `docs/ats_swerve_mpc_ltv_qp_backend_admission.md` 和状态文档追溯。
@@ -19,7 +19,7 @@
 -> RC-ESDF 规划接口
 -> ATS Goal Manager -> JPS -> MINCO S3 + 独立 yaw
 -> footprint safety + Local Collision Repair
--> 全向 SE(2) MPC -> `/cmd_vel_mpc` -> 云台 yaw 速度变换 -> `/cmd_vel` 下位机速度接口
+-> 全向 SE(2) MPC -> 自主速度源 -> 云台 yaw 速度变换 -> 速度源仲裁 -> 下位机速度接口
 ```
 
 总体验收必须同时满足：
@@ -31,6 +31,22 @@
 - P2、P3、P4 和 QP 主链分别通过自己的门禁，不相互替代；
 - 仿真与实机导航侧分别保留独立 artifact；下位机/HIL 诊断不构成导航准入；
 - 性能结论来自固定 revision、配置、硬件和原始 artifact。
+
+### 1.1 2026-08-21 交接更新
+
+- MuJoCo 默认场景已切换为与 Gazebo 同源的 RMUC 2025 模型、world 几何与高度场；`red_box`
+  的最终目标固定为 map 坐标 `(10.45, 0.35)`，即原图像标注的中央高地位置；
+- RMUC 2025 profile 将 terrain 连续风险 `0..99` 与硬障碍 `100` 区分开。adapter 与 MINCO
+  的 `terrain_obstacle_value_threshold`/`obstacle_value_threshold` 均为 `100`，不再把风险值 `63`
+  误判为墙体；
+- 独立 physics/navigation launch、RMUC 场景契约测试与南侧通道分段回归已有组件或运行证据；
+  完整 `red_box`、默认单点和 P2 故障矩阵必须在本次提交 revision 的全新 ROS domain 重跑后才能验收；
+- 当前实机速度链仍是 `/cmd_vel_mpc -> fake_vel_transform -> chassis_vel_transform -> /cmd_vel`。
+  这尚不能支持无需 remap 的 `teleop_twist_keyboard` 与自主导航的确定性共存。下一阶段必须实现
+  单一 source arbiter：键鼠原始输入保留 `/cmd_vel`，自主链迁为 `/cmd_vel/autonomy`，arbiter 作为
+  `/cmd_vel/selected` 唯一发布者，串口只订阅 `/cmd_vel/selected`。自动源继续受
+  `ExecutionCommand` 约束；手动源不要求该授权，但 emergency stop、链路失效与各自 timeout 仍必须归零；
+- 上述仲裁、串口入口迁移和键鼠到下位机出口的闭环均未实现，禁止把 `/cmd_vel_mpc` 视为已删除。
 
 ## 2. 当前冻结基线
 
