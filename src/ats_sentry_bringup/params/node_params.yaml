@@ -940,7 +940,10 @@ ats_goal_manager:
     terminal_angular_velocity_tolerance: 0.10
     terminal_dwell_sec: 0.30
     require_planning_snapshot: true
-    planning_snapshot_timeout_sec: 1.0
+    # Adapter publishes at 0.5 Hz, so a 1 s snapshot lease expired between
+    # healthy publications and forced the Goal Manager into fail-stop. Keep the
+    # immutable snapshot lease aligned with the existing 5 s map heartbeat.
+    planning_snapshot_timeout_sec: 5.0
     progress_min_delta_m: 0.10
     replan_stall_timeout_sec: 4.0
     replan_min_interval_sec: 2.0

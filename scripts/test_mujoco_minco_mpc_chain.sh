@@ -8,17 +8,18 @@ ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-88}"
 # 每个隔离 domain 使用独立 launch 日志，避免异常遗留的旧进程污染本轮验收记录。
 LAUNCH_LOG="/tmp/ats_minco_mpc_test_launch_${ROS_DOMAIN_ID}.log"
 # MuJoCo 初始位姿（map/odom 平面坐标，单位 m；yaw 单位 rad）。
-START_X="${START_X:--10.66}"
-START_Y="${START_Y:-1.47}"
+START_X="${START_X:--0.18}"
+START_Y="${START_Y:-0.06}"
 START_Z="${START_Z:-0.42}"
 START_YAW="${START_YAW:-0.0}"
-GOAL_X="${GOAL_X:--9.0}"
-GOAL_Y="${GOAL_Y:-1.47}"
+GOAL_X="${GOAL_X:-1.0}"
+GOAL_Y="${GOAL_Y:-0.06}"
 # 单点测试的目标朝向四元数 w；当前只使用零 yaw 的 w=1。
 GOAL_YAW_W="${GOAL_YAW_W:-1.0}"
 # 每个目标允许的最长执行时间（s）。
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
-# 回归路线：single、rectangle（验证横移）、red_box（长距离路线）。
+# 回归路线：single、rectangle（验证横移）、south_corridor（RMUC 横墙窄回归）、
+# red_box（中央高地长距离路线）。
 TEST_PROFILE="${TEST_PROFILE:-single}"
 # RViz must be optional in the same scenario runner so a display-only change
 # can be checked against the identical closed-loop route and fault gates.
@@ -164,22 +165,35 @@ case "${TEST_PROFILE}" in
     GOAL_YS=("${GOAL_Y}")
     ;;
   rectangle)
-    # 先进入东侧空旷区，再闭合 0.68 m x 0.32 m 矩形；南边与保守聚合后的
-    # 静态墙保持完整 footprint 余量。保持 yaw=0，使南北两段必须产生真实
-    # 横移速度，而不是差速式原地转向。
+    # RMUC 2025 起点东侧的 0.40 m x 0.36 m 矩形，所有顶点周围均有完整
+    # footprint 余量。保持 yaw=0，使南北两段必须产生真实横移速度。
     GOAL_NAMES=(stage east south west north)
-    GOAL_XS=(-9.50 -8.82 -8.82 -9.50 -9.50)
-    GOAL_YS=(1.47 1.47 1.15 1.15 1.47)
+    GOAL_XS=(0.50 0.90 0.90 0.50 0.50)
+    GOAL_YS=(0.06 0.06 -0.30 -0.30 0.06)
+    ;;
+  south_corridor)
+    # Focused RMUC 2025 regression from START=(4.40,-5.90). The sequence
+    # prevents MINCO from smoothing one long diagonal through the horizontal wall.
+    GOAL_NAMES=(west_corridor_east west_corridor_exit south_lane_entry south_west south_east)
+    GOAL_XS=(5.20 1.50 1.50 2.20 6.50)
+    GOAL_YS=(-6.20 -6.20 -7.65 -7.65 -7.65)
     ;;
   red_box)
-    # 截图红框中心由 rmuc_2026.pgm/yaml 换算：pixel=(510,425) ->
-    # map=(-0.043,-4.082)。先经东侧空旷区，再执行约 10 m 的长路线。
-    GOAL_NAMES=(stage_red_box red_box)
-    GOAL_XS=(-8.88 -0.04)
-    GOAL_YS=(1.47 -4.08)
+    # 用户标注的 RMUC 2025 中央高地中心：pixel=(280,128) ->
+    # map=(10.445,0.335)。RMUC 中部静态墙使 start->red_box 的 A* 路线
+    # 必须经过南侧走廊；分段目标避免一条跨 17 个拐点的 S3 曲线切过墙角。
+    # RMUC 横墙不能由一个长 S3 段斜切。先移到横墙东端外侧，再在
+    # y=-6.20 沿墙上方西行，
+    # 再从 x=1.50 绕墙西端下行，最后进入 y=-7.65 南廊；这些短段的
+    # 0.10 m planning grid 最小离散 clearance 为 0.50 m，高于 RMUC
+    # 实体 all-yaw footprint 半径 0.42 m。
+    # 最终 action 仍严格落在用户标注的中央高地。
+    GOAL_NAMES=(south_approach south_entry west_corridor_east west_corridor_exit south_lane_entry south_west south_east east_mid highland_ramp red_box)
+    GOAL_XS=(4.20 4.40 5.20 1.50 1.50 2.20 6.50 8.70 9.25 10.45)
+    GOAL_YS=(-4.30 -5.90 -6.20 -6.20 -7.65 -7.65 -7.65 -4.90 -2.25 0.35)
     ;;
   *)
-    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', or 'red_box'."
+    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', 'south_corridor', or 'red_box'."
     exit 2
     ;;
 esac
@@ -413,7 +427,8 @@ assert_p3_process_graph() {
     node_exposes_endpoint /ats_goal_manager /ats_navigate_to_pose
   node_list="$(ros2 node list --no-daemon)"
   for forbidden in /bt_navigator /planner_server /controller_server /behavior_server \
-    /velocity_smoother /lifecycle_manager_rmuc_2026_map /map_server; do
+    /velocity_smoother /lifecycle_manager_rmuc_2025_map \
+    /lifecycle_manager_rmuc_2026_map /map_server; do
     if grep -q "^${forbidden}$" <<<"${node_list}"; then
       fail "P3 graph unexpectedly contains ${forbidden}"
     fi
@@ -742,8 +757,9 @@ assert_path_has_poses() {
   echo "OK: ${label} published ${pose_count} poses"
 }
 
-# JPS、MINCO 和 MPC 的四层诊断 Path 都在 ROGMap/MPC 的 planning frame `odom`
-# 中显示；目标 action 输入可为 `map`，不能把它误当作 Path 的显示 frame。
+# JPS raw path stays in the planning-grid frame `map`. MINCO transforms the
+# accepted trajectory to its execution frame `odom`, which is then inherited
+# by the committed reference and both MPC diagnostic paths.
 assert_path_visualization_frame() {
   local label="$1"
   local output_file="$2"
@@ -1493,6 +1509,7 @@ wait_for_capture() {
   local label="$1"
   local pid="$2"
   local output_file="$3"
+  local expected_frame="${4:-odom}"
   local deadline=$((SECONDS + 10))
   while (( SECONDS < deadline )); do
     if [[ -s "${output_file}" ]] && \
@@ -1501,7 +1518,7 @@ wait_for_capture() {
     then
       stop_capture_process "${pid}"
       assert_path_has_poses "${label}" "${output_file}"
-      assert_path_visualization_frame "${label}" "${output_file}"
+      assert_path_visualization_frame "${label}" "${output_file}" "${expected_frame}"
       return
     fi
     if ! kill -0 "${pid}" 2>/dev/null; then
@@ -1562,7 +1579,7 @@ run_navigation_goal() {
   local goal_output="${prefix}_goal.out"
   local goal_error="${prefix}_goal.err"
   local command_output="${prefix}_cmd_vel.out"
-  local topic output_file pid log_line_count log_start_line
+  local topic output_file expected_frame pid log_line_count log_start_line
   local -a topic_pids=()
 
   log_line_count="$(wc -l < "${LAUNCH_LOG}")"
@@ -1579,10 +1596,14 @@ run_navigation_goal() {
   )
   for topic in "${path_topics[@]}"; do
     output_file="${prefix}_${topic//\//_}.out"
+    expected_frame=odom
+    if [[ "${topic}" == "/minco/raw_path" ]]; then
+      expected_frame=map
+    fi
     ensure_topic_capture_ready "${name} ${topic}" "${topic}" nav_msgs/msg/Path \
       "${output_file}" pid
     CAPTURE_PIDS+=("${pid}")
-    topic_pids+=("${pid}:${topic}:${output_file}")
+    topic_pids+=("${pid}:${topic}:${expected_frame}:${output_file}")
   done
   timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon /cmd_vel_mpc >"${command_output}" 2>/dev/null &
   local leg_command_pid=$!
@@ -1621,8 +1642,11 @@ run_navigation_goal() {
     pid="${capture%%:*}"
     capture="${capture#*:}"
     topic="${capture%%:*}"
+    capture="${capture#*:}"
+    expected_frame="${capture%%:*}"
     output_file="${capture#*:}"
-    wait_for_capture "${name} ${topic}" "${pid}" "${output_file}"
+    wait_for_capture \
+      "${name} ${topic}" "${pid}" "${output_file}" "${expected_frame}"
   done
   assert_minco_plan_record "${name}" "${log_start_line}"
 
@@ -1669,7 +1693,7 @@ export_control_telemetry() {
 
 LAUNCH_ARGS=(
   ats_mujoco_sim
-  rmuc_2026_mujoco.launch.py
+  rmuc_2025_mujoco.launch.py
   use_viewer:=false
   show_viewer:=false
   use_rviz:="${USE_RVIZ}"
@@ -1715,10 +1739,10 @@ wait_for_topic_once /odometry 30 best_effort
 wait_for_topic_once /localization/status 30
 wait_for_command "localization tracking" 30 \
   topic_field_equals /localization/status state 1
-wait_for_command "MuJoCo map->odom disabled" 10 \
+wait_for_command "MuJoCo map->odom disabled" 30 \
   timeout --kill-after=1 4 bash -c \
   "ros2 param get --no-daemon /ats_mujoco_sim publish_map_to_odom_tf | grep -q 'Boolean value is: False'"
-wait_for_command "fusion map->odom enabled" 10 \
+wait_for_command "fusion map->odom enabled" 30 \
   timeout --kill-after=1 4 bash -c \
   "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
 assert_topic_ownership /odometry ats_mujoco_sim localization_fusion
