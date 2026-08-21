@@ -29,6 +29,30 @@ class NavigationRvizContractTest(unittest.TestCase):
     def test_full_navigation_configuration_contract_passes(self):
         VALIDATOR.main()
 
+    def test_snapshot_lease_must_cover_projection_period(self):
+        adapter = {"projection_rate_hz": 0.5}
+        goal_manager = {
+            "planning_snapshot_timeout_sec": 1.0,
+            "map_ready_timeout_sec": 1.0,
+        }
+
+        with self.assertRaisesRegex(AssertionError, "publication period"):
+            VALIDATOR.assert_planning_snapshot_lease_contract(
+                adapter, goal_manager
+            )
+
+    def test_snapshot_lease_matches_map_heartbeat(self):
+        adapter = {"projection_rate_hz": 0.5}
+        goal_manager = {
+            "planning_snapshot_timeout_sec": 3.0,
+            "map_ready_timeout_sec": 5.0,
+        }
+
+        with self.assertRaisesRegex(AssertionError, "must match"):
+            VALIDATOR.assert_planning_snapshot_lease_contract(
+                adapter, goal_manager
+            )
+
     def test_legacy_bounds_name_is_rejected(self):
         rviz = copy.deepcopy(self.load_default_rviz())
         bounds = VALIDATOR.single_display_for_topic(

@@ -100,6 +100,25 @@ def parameters(document, node_name: str):
     return node["ros__parameters"]
 
 
+def assert_planning_snapshot_lease_contract(adapter, goal_manager):
+    projection_rate_hz = float(adapter["projection_rate_hz"])
+    snapshot_timeout_sec = float(goal_manager["planning_snapshot_timeout_sec"])
+    map_ready_timeout_sec = float(goal_manager["map_ready_timeout_sec"])
+    if projection_rate_hz <= 0.0:
+        raise AssertionError("adapter projection_rate_hz must be positive")
+    publication_period_sec = 1.0 / projection_rate_hz
+    if snapshot_timeout_sec < publication_period_sec:
+        raise AssertionError(
+            "planning snapshot lease expires before the adapter publication period: "
+            f"{snapshot_timeout_sec:.3f} < {publication_period_sec:.3f} s"
+        )
+    if snapshot_timeout_sec != map_ready_timeout_sec:
+        raise AssertionError(
+            "planning_snapshot_timeout_sec must match map_ready_timeout_sec so "
+            "Goal Manager uses one adapter heartbeat lease"
+        )
+
+
 def launch_defaults(path: Path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     result = {}
@@ -359,6 +378,7 @@ def main():
     assert adapter["planning_grid_topic"] == "/rc_esdf/planning_grid"
     assert adapter["unknown_is_obstacle"] is True
     assert adapter["require_localization_status"] is True
+    assert_planning_snapshot_lease_contract(adapter, goal_manager)
     assert minco["goal_topic"] == ""
     assert "global_plan_topic" not in minco
     assert minco["goal_request_topic"] == "/ats_goal_manager/planner_goal"
