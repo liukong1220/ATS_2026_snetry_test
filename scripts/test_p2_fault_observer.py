@@ -32,7 +32,7 @@ def valid_report():
         "first_all_unknown_snapshot": {"all_unknown": True, "publication_sequence": 7},
         "fault_status_identity": {"ready": False},
         "latency_sec": {"fault_to_emergency_stop_true": 0.1},
-        "common_zero_window": {"both_stages_zero_in_common_window": True},
+        "cmd_vel_mpc_zero_window": {"sustained_zero": True},
         "fault_status_snapshot_pairing": {
             **pairing,
             "snapshot": {"all_unknown": True, "publication_sequence": 7},
@@ -43,8 +43,8 @@ def valid_report():
             "publication_advanced_past_fault": True,
             "recovered_status_snapshot_pairing": pairing,
             "non_empty_reference_after_recovery_without_new_goal": False,
-            "no_new_goal_common_zero_window": {
-                "both_stages_zero_in_common_window": True,
+            "no_new_goal_cmd_vel_mpc_zero_window": {
+                "sustained_zero": True,
             },
         },
     }

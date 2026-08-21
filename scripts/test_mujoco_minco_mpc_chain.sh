@@ -333,21 +333,6 @@ read_positive_topic_field() {
   return 1
 }
 
-read_swerve_telemetry_sequence() {
-  local attempt output
-  for attempt in 1 2 3; do
-    output="$(timeout 5 ros2 topic echo --no-daemon --once /swerve/telemetry \
-      ats_navigation_interfaces/msg/SwerveTelemetry 2>/dev/null || true)"
-    output="$(awk '$1 == "sequence:" {print $2; exit}' <<<"${output}")"
-    if [[ "${output}" =~ ^[0-9]+$ ]]; then
-      printf '%s\n' "${output}"
-      return 0
-    fi
-    sleep 0.5
-  done
-  return 1
-}
-
 wait_for_generation_advance() {
   local baseline="$1"
   local timeout_sec="$2"
@@ -419,96 +404,6 @@ node_exposes_endpoint() {
   local node_name="$1"
   local endpoint="$2"
   ros2 node info --no-daemon "${node_name}" 2>/dev/null | grep -Fq "${endpoint}"
-}
-
-assert_final_swerve_telemetry() {
-  local output_file="$1"
-  local minimum_sequence="$2"
-  local minimum_stamp_sec="$3"
-  local minimum_stamp_nanosec="$4"
-  local raw_file="${output_file}.raw"
-  local contact_count drive_count sequence stamp_sec stamp_nanosec
-
-  # A one-shot subscriber can consume a queued sample that predates the last
-  # action. Capture a short stream and keep only telemetry newer than both the
-  # pre-goal sequence and the wall-clock action submission time.
-  : >"${raw_file}"
-  timeout 4 ros2 topic echo --no-daemon /swerve/telemetry \
-    ats_navigation_interfaces/msg/SwerveTelemetry >"${raw_file}" 2>/dev/null || true
-  awk -v min_sequence="${minimum_sequence}" \
-    -v min_sec="${minimum_stamp_sec}" \
-    -v min_nanosec="${minimum_stamp_nanosec}" '
-    function reset_message() {
-      block = ""
-      sequence = -1
-      stamp_sec = -1
-      stamp_nanosec = -1
-      expect_stamp = 0
-    }
-    function keep_message() {
-      if (block == "" || sequence <= min_sequence || stamp_sec < 0 || stamp_nanosec < 0) {
-        return
-      }
-      if (stamp_sec > min_sec || (stamp_sec == min_sec && stamp_nanosec > min_nanosec)) {
-        latest = block
-      }
-    }
-    $0 == "---" {
-      keep_message()
-      reset_message()
-      next
-    }
-    {
-      block = block $0 ORS
-      if ($1 == "stamp:") {
-        expect_stamp = 1
-      } else if (expect_stamp && $1 == "sec:") {
-        stamp_sec = $2
-      } else if (expect_stamp && $1 == "nanosec:") {
-        stamp_nanosec = $2
-        expect_stamp = 0
-      } else if ($1 == "sequence:") {
-        sequence = $2
-      }
-    }
-    END {
-      keep_message()
-      printf "%s", latest
-    }
-  ' "${raw_file}" >"${output_file}"
-  [[ -s "${output_file}" ]] || fail "cannot capture post-action /swerve/telemetry"
-
-  sequence="$(awk '$1 == "sequence:" {print $2; exit}' "${output_file}")"
-  stamp_sec="$(awk '$1 == "sec:" {print $2; exit}' "${output_file}")"
-  stamp_nanosec="$(awk '$1 == "nanosec:" {print $2; exit}' "${output_file}")"
-  [[ "${sequence}" =~ ^[0-9]+$ ]] &&
-    awk -v current="${sequence}" -v baseline="${minimum_sequence}" \
-      'BEGIN {exit current > baseline ? 0 : 1}' ||
-    fail "final telemetry sequence did not advance after the last action"
-  [[ "${stamp_sec}" =~ ^[0-9]+$ && "${stamp_nanosec}" =~ ^[0-9]+$ ]] ||
-    fail "final telemetry has no valid header stamp"
-  contact_count="$(awk '$1 == "contact_violation_count:" {print $2}' "${output_file}")"
-  [[ "${contact_count}" =~ ^[0-9]+$ ]] || \
-    fail "final telemetry has no valid contact_violation_count"
-  [[ "${contact_count}" == "0" ]] || \
-    fail "MuJoCo contact evaluator reported ${contact_count} violation samples"
-  drive_count="$(awk '
-    /^drive_rpm:/ {in_drive=1; next}
-    in_drive && /^- / {
-      value=$2 + 0.0
-      if (value < 0.0) value=-value
-      if (value >= 2.0) exit 2
-      count++
-      next
-    }
-    in_drive {in_drive=0}
-    END {if (count != 4) exit 3; print count}
-  ' "${output_file}")" || fail "final four-wheel drive RPM did not settle below 2 rpm"
-  [[ "${drive_count}" == "4" ]] || fail "final telemetry did not contain four drive RPM values"
-  echo "RESULT: MuJoCo post-action telemetry sequence=${sequence} " \
-    "contact_violation_count=0 and final four-wheel drive RPM is below 2 rpm"
-  sed -n '/^drive_rpm:/,/^command_vx:/p; /^contact_violation_count:/,/^max_contact_force:/p' \
-    "${output_file}"
 }
 
 assert_p3_process_graph() {
@@ -695,7 +590,7 @@ start_fault_observer() {
   fail "fault observer did not report OBSERVER_READY"
 }
 
-# settle(25s) + 共同零速窗口(3s) 之后才允许改变系统状态。
+# settle(25s) + /cmd_vel_mpc 零速窗口(3s) 之后才允许改变系统状态。
 wait_fault_observer_window() {
   local epoch="$1"
   local span="$2"
@@ -948,14 +843,10 @@ stream_has_boolean_value() {
 capture_zero_outputs() {
   local label="$1"
   local cmd_file="/tmp/ats_p2_fault_${label}_cmd.out"
-  local motion_file="/tmp/ats_p2_fault_${label}_motion.out"
   sleep 0.5
   capture_numeric_stream /cmd_vel_mpc "${cmd_file}" || \
     fail "${label} did not publish /cmd_vel_mpc during stop"
-  capture_numeric_stream /motion_control "${motion_file}" || \
-    fail "${label} did not publish /motion_control during stop"
   assert_zero_stream "${label} /cmd_vel_mpc" "${cmd_file}"
-  assert_zero_stream "${label} /motion_control" "${motion_file}"
 }
 
 capture_numeric_stream() {
@@ -1244,9 +1135,8 @@ run_p2_fault_injection() {
       wait_for_command "unknown fault triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
       record_unknown_timeline emergency_stop_true_ns
-      # 两级零速度不再串行采样：观测器在一个共同的固定窗口内同时判定
-      # /cmd_vel_mpc 与 /motion_control，串行取样再声称同窗是不允许的。
-      # 恢复动作必须等到故障阶段的共同窗口关闭之后再执行，否则窗口内会混入
+      # 观测器在固定窗口内判定导航速度权威 /cmd_vel_mpc 持续为零。
+      # 恢复动作必须等到故障阶段的零速窗口关闭之后再执行，否则窗口内会混入
       # 恢复后的数据。
       wait_fault_observer_window "${FAULT_OBSERVER_FAULT_EPOCH}" 32
       : >"${recovery_trigger}"
@@ -1672,15 +1562,12 @@ run_navigation_goal() {
   local goal_output="${prefix}_goal.out"
   local goal_error="${prefix}_goal.err"
   local command_output="${prefix}_cmd_vel.out"
-  local topic output_file pid log_line_count log_start_line telemetry_sequence goal_send_stamp
+  local topic output_file pid log_line_count log_start_line
   local -a topic_pids=()
 
   log_line_count="$(wc -l < "${LAUNCH_LOG}")"
   log_start_line=$((log_line_count + 1))
   capture_pose "${before_pose}" || fail "cannot capture pose before ${name}"
-  telemetry_sequence="$(read_swerve_telemetry_sequence)"
-  [[ "${telemetry_sequence}" =~ ^[0-9]+$ ]] || \
-    fail "cannot capture /swerve/telemetry sequence before ${name}"
   # 每个 action 必须捕获四层可视化 Path：JPS 离散搜索、MINCO 局部参考、
   # 当前 MPC 跟随 horizon 与 iLQR 预测 rollout。这样证明它们在同一目标执行
   # 窗口中可观察，而不是仅在 launch 生命周期的某个时刻出现过一次。
@@ -1705,10 +1592,6 @@ run_navigation_goal() {
   # 避免目标触发后多个路径话题瞬时发布而被测试遗漏。
   sleep 2
 
-  goal_send_stamp="$(date +%s.%N)"
-  LAST_GOAL_SEND_EPOCH_SEC="${goal_send_stamp%%.*}"
-  LAST_GOAL_SEND_EPOCH_NANOSEC="${goal_send_stamp##*.}"
-  LAST_GOAL_TELEMETRY_SEQUENCE="${telemetry_sequence}"
   timeout "${GOAL_TIMEOUT}" ros2 action send_goal --feedback /ats_navigate_to_pose \
     ats_navigation_interfaces/action/NavigateToPose \
     "{goal_pose: {header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
@@ -1850,15 +1733,13 @@ verify_rog_map_planning_interface
 
 wait_for_command "minco_planner node" 30 node_is_present /minco_planner
 wait_for_command "ats_swerve_mpc node" 30 node_is_present /ats_swerve_mpc
-wait_for_command "twist bridge node" 30 node_is_present /twist_to_motion_ctrl
 NODE_LIST="$(ros2 node list --no-daemon)"
 if grep -q '^/fake_vel_transform$' <<<"${NODE_LIST}"; then
   fail "fake_vel_transform must be disabled in swerve MPC mode"
 fi
 echo "OK: MPC nodes present and fake_vel_transform absent"
 
-assert_topic_ownership /cmd_vel_mpc ats_swerve_mpc twist_to_motion_ctrl
-assert_topic_ownership /motion_control twist_to_motion_ctrl ats_mujoco_sim
+assert_topic_ownership /cmd_vel_mpc ats_swerve_mpc
 assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
 # RViz may observe the reference in the UI, but it must never gain execution
 # authority.  The assertion still accepts exactly one controller and one named
@@ -1869,11 +1750,10 @@ else
   assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
 fi
 assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mpc
-# MPC 清 tracker，MuJoCo 执行器做硬零速；安全信号允许多个 consumer，但只有
-# Goal Manager 可以发布最终急停权威。
+# MPC 清 tracker；安全信号允许多个 consumer，但只有 Goal Manager 可以发布
+# 最终急停权威。
 assert_topic_ownership /planner/emergency_stop ats_goal_manager
 wait_for_topic_once /gimbal/yaw_status 20
-wait_for_topic_once /swerve/telemetry 20
 
 declare -a DEBUG_TOPICS=(
   /ats_swerve_mpc/reference_horizon
@@ -1893,9 +1773,6 @@ done
 ensure_topic_capture_ready "MPC command stream" /cmd_vel_mpc geometry_msgs/msg/Twist \
   /tmp/ats_minco_mpc_cmd_vel_stream.out CMD_STREAM_PID
 CAPTURE_PIDS+=("${CMD_STREAM_PID}")
-ensure_topic_capture_ready "Motion control stream" /motion_control manda_can_control/msg/MotionCtrl \
-  /tmp/ats_minco_mpc_motion_stream.out MOTION_STREAM_PID
-CAPTURE_PIDS+=("${MOTION_STREAM_PID}")
 EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
 RVIZ_QOS_LOG="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz_qos.out"
 RVIZ_SCREENSHOT="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz.png"
@@ -1922,15 +1799,13 @@ if [[ "${ATS_PROFILE_SKIP_ACTION}" == "1" ]]; then
   wait_for_command "ROGMap adapter still ready after observation" 15 \
     topic_field_equals /rog_map_adapter/ready data true
   stop_capture_process "${CMD_STREAM_PID}"
-  stop_capture_process "${MOTION_STREAM_PID}"
   stop_capture_process "${EXECUTION_STREAM_PID}"
   for index in "${!DEBUG_TOPICS[@]}"; do
     stop_capture_process "${DEBUG_CAPTURE_PIDS[index]}"
   done
   assert_zero_stream "no-goal /cmd_vel_mpc" /tmp/ats_minco_mpc_cmd_vel_stream.out
-  assert_zero_stream "no-goal /motion_control" /tmp/ats_minco_mpc_motion_stream.out
   export_control_telemetry
-  echo "PASS: map-chain-only profile completed with both command stages held at zero."
+  echo "PASS: map-chain-only profile completed with /cmd_vel_mpc held at zero."
   exit 0
 fi
 
@@ -1942,7 +1817,6 @@ done
 
 sleep 1
 stop_capture_process "${CMD_STREAM_PID}"
-stop_capture_process "${MOTION_STREAM_PID}"
 stop_capture_process "${EXECUTION_STREAM_PID}"
 [[ -s "${EXECUTION_STREAM}" ]] || fail "ExecutionCommand did not publish during P3 run"
 assert_execution_yaw_authority "${EXECUTION_STREAM}" "${YAW_AUTHORITY_EXPECTED}"
@@ -1961,12 +1835,6 @@ for index in "${!DEBUG_TOPICS[@]}"; do
   assert_path_visualization_frame "${topic}" "${output_file}"
 done
 assert_nonzero_stream /cmd_vel_mpc /tmp/ats_minco_mpc_cmd_vel_stream.out
-assert_nonzero_stream /motion_control /tmp/ats_minco_mpc_motion_stream.out
-assert_final_swerve_telemetry \
-  "/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_final_swerve_telemetry.out" \
-  "${LAST_GOAL_TELEMETRY_SEQUENCE}" \
-  "${LAST_GOAL_SEND_EPOCH_SEC}" \
-  "${LAST_GOAL_SEND_EPOCH_NANOSEC}"
 
 export_control_telemetry
 

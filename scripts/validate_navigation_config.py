@@ -339,7 +339,8 @@ def main():
     minco = parameters(document, "minco_planner")
     goal_manager = parameters(document, "ats_goal_manager")
     mpc = parameters(document, "ats_swerve_mpc")
-    serial = parameters(document, "standard_robot_pp_ros2")
+    joint_state_publisher = parameters(document, "joint_state_publisher")
+    gimbal_yaw_status_bridge = parameters(document, "gimbal_yaw_status_bridge")
     behavior_server = parameters(document, "ats_sentry_behavior_server")
     behavior_client = parameters(document, "ats_sentry_behavior_client")
 
@@ -384,13 +385,19 @@ def main():
         == fake_transform["output_cmd_vel_topic"]
     )
     assert chassis_transform["output_cmd_vel_topic"] == "/cmd_vel"
+    assert joint_state_publisher["source_list"] == ["serial/gimbal_joint_state"]
+    assert chassis_transform["joint_state_topic"] == "serial/gimbal_joint_state"
+    assert (
+        gimbal_yaw_status_bridge["joint_state_topic"]
+        == "serial/gimbal_joint_state"
+    )
+    assert gimbal_yaw_status_bridge["gimbal_status_topic"] == "/gimbal/yaw_status"
+    assert (
+        gimbal_yaw_status_bridge["yaw_authority_request_topic"]
+        == "/gimbal/yaw_authority_request"
+    )
     assert mpc["max_vy"] > 0.0
     assert abs(mpc["dt"] - 1.0 / mpc["control_rate_hz"]) < 1e-9
-    assert serial["execution_command_timeout"] == mpc["execution_command_timeout"]
-    assert (
-        serial["cmd_vel_watchdog_timeout_ms"] / 1000.0
-        <= mpc["execution_command_timeout"]
-    )
     assert behavior_server["action_name"] == "ats_sentry_behavior"
     assert behavior_server["decision"]["inputs"]["planning_grid"]["topic"] == "/rc_esdf/planning_grid"
     assert behavior_server["decision"]["inputs"]["localization"]["topic"] == "/localization"

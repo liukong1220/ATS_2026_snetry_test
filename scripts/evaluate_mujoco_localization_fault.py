@@ -16,8 +16,6 @@ from ats_navigation_interfaces.msg import LocalizationStatus
 from ats_navigation_interfaces.msg import PlannerGoal
 from ats_navigation_interfaces.msg import PlanningMapStatus
 from ats_navigation_interfaces.msg import RelocalizationObservation
-from ats_navigation_interfaces.msg import SwerveTelemetry
-from manda_can_control.msg import MotionCtrl
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path as NavPath
 import rclpy
@@ -53,8 +51,6 @@ class LocalizationFaultEvaluator(Node):
         self.references = []
         self.stop_states = []
         self.latest_cmd = None
-        self.latest_motion = None
-        self.latest_telemetry = None
         self.maintenance_sequence = None
         self.maintenance_correction_x = 0.0
         self.fusion_pid = None
@@ -102,10 +98,6 @@ class LocalizationFaultEvaluator(Node):
             transient_qos,
         )
         self.create_subscription(Twist, "/cmd_vel_mpc", self._on_command, 20)
-        self.create_subscription(MotionCtrl, "/motion_control", self._on_motion, 20)
-        self.create_subscription(
-            SwerveTelemetry, "/swerve/telemetry", self._on_telemetry, 20
-        )
         self.action_client = ActionClient(self, NavigateToPose, "/ats_navigate_to_pose")
         self.create_timer(0.5, self._publish_maintenance_observation)
 
@@ -120,16 +112,6 @@ class LocalizationFaultEvaluator(Node):
             float(message.linear.y),
             float(message.angular.z),
         )
-
-    def _on_motion(self, message: MotionCtrl) -> None:
-        self.latest_motion = (
-            float(message.linear_x),
-            float(message.linear_y),
-            float(message.angular_z),
-        )
-
-    def _on_telemetry(self, message: SwerveTelemetry) -> None:
-        self.latest_telemetry = message
 
     def _publish_maintenance_observation(self) -> None:
         if self.maintenance_sequence is None or not self.raw_odometry:
@@ -219,17 +201,9 @@ class LocalizationFaultEvaluator(Node):
         return math.hypot(command[0], command[1]) + abs(command[2]) if command else 0.0
 
     def commands_are_zero(self) -> bool:
-        if self.latest_cmd is None or self.latest_motion is None:
+        if self.latest_cmd is None:
             return False
-        return (
-            self.command_norm(self.latest_cmd) < 1e-3
-            and self.command_norm(self.latest_motion) < 1e-3
-        )
-
-    def wheels_are_zero(self) -> bool:
-        return self.latest_telemetry is not None and all(
-            abs(float(value)) < 2.0 for value in self.latest_telemetry.drive_rpm
-        )
+        return self.command_norm(self.latest_cmd) < 1e-3
 
     def send_goal(self):
         self.wait_for(
@@ -352,8 +326,7 @@ class LocalizationFaultEvaluator(Node):
 
         handle, result_future = self.send_goal()
         self.wait_for(
-            lambda: self.command_norm(self.latest_cmd) > 0.02
-            and self.command_norm(self.latest_motion) > 0.02,
+            lambda: self.command_norm(self.latest_cmd) > 0.02,
             30.0,
             "initial non-zero control",
         )
@@ -401,9 +374,9 @@ class LocalizationFaultEvaluator(Node):
             "emergency stop",
         )
         self.wait_for(
-            lambda: self.commands_are_zero() and self.wheels_are_zero(),
+            self.commands_are_zero,
             3.0,
-            "double zero and wheel stop",
+            "/cmd_vel_mpc zero after localization fault",
         )
         stop_reference_count = len(self.references)
         hold_deadline = time.monotonic() + 0.4
@@ -461,8 +434,7 @@ class LocalizationFaultEvaluator(Node):
             "new reference after recovery",
         )
         self.wait_for(
-            lambda: self.command_norm(self.latest_cmd) > 0.02
-            and self.command_norm(self.latest_motion) > 0.02,
+            lambda: self.command_norm(self.latest_cmd) > 0.02,
             15.0,
             "motion after fresh reference",
         )
@@ -479,12 +451,10 @@ class LocalizationFaultEvaluator(Node):
                 f"code={result_code} message={result_message!r}"
             )
         self.wait_for(
-            lambda: self.commands_are_zero() and self.wheels_are_zero(),
+            self.commands_are_zero,
             3.0,
-            "goal completion double zero and wheel stop",
+            "goal completion /cmd_vel_mpc zero",
         )
-        if self.latest_telemetry.contact_violation_count != 0:
-            raise RuntimeError("physical contact violation detected")
 
         final_pose = wrapped.result.final_pose.pose.position
         return {
@@ -499,12 +469,6 @@ class LocalizationFaultEvaluator(Node):
             "references_after_recovery": len(self.references),
             "planner_goals_before_fault": planner_count_before,
             "planner_goals_after_recovery": len(self.planner_goals),
-            "final_drive_rpm": [
-                float(value) for value in self.latest_telemetry.drive_rpm
-            ],
-            "contact_violation_count": int(
-                self.latest_telemetry.contact_violation_count
-            ),
             "sequence_after_test": self.maintenance_sequence or sequence,
         }
 

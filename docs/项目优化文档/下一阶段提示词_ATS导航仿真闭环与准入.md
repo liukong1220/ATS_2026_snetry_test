@@ -29,8 +29,8 @@ P1 Gazebo localization freshness 开始。完整读取：
   adapter 反复 ready=false，action fail-closed。
 - `/lidar_odometry` 已是当前 recorder 链中的首个可见 freshness 违反者；仍不能直接归因 LiDAR、
   Point-LIO、DDS、Gazebo RTF、TF、localization_fusion 或 recorder 中的任一唯一行为 owner。
-- P1 的最终 60 s headless 已在 domain `225` 完成：`ENABLE_CAMERA_SENSORS=false`、终态急停与两级
-  零速均成立，但 action 在 90 s 内未终止；`/lidar_odometry` p99/max wall interval 为
+- P1 的最终 60 s headless 已在 domain `225` 完成：`ENABLE_CAMERA_SENSORS=false`、终态急停与
+  `/cmd_vel_mpc=0` 均成立，但 action 在 90 s 内未终止；`/lidar_odometry` p99/max wall interval 为
   `2.759540/2.942285 s`，因此 freshness 不通过，P1 和 P2 仍未通过。独立 domain `224` 曾 action 成功，
   但同样不满足 freshness。
 - recorder 已在新 `60 s` domain 实际覆盖 raw `/<robot>/livox/lidar`、bridge `/livox/lidar`、
@@ -105,8 +105,14 @@ P1 DoD：低负载 headless 连续至少 60 s，/localization p99 interval < 0.2
    narrow_corridor、nominal、red_box profile。
 3. P4：重跑当前 revision 的 nominal、unknown、stale、unreachable、lease、timeout、recovery、
    TF/localization epoch 与 runtime unsafe。
-4. 再推进 RViz 滑窗、P3 Nav2-free、P4 swept footprint/contact、MuJoCo 跨后端、HIL、
-   QP paired shadow 和受控实车门禁。不得跳级。
+4. 再推进 RViz 滑窗、P3 Nav2-free、P4 swept footprint、MuJoCo 跨后端、QP paired shadow 和
+   受限实机导航。不得跳级。
+
+仿真只验证定位、建图、规划、轨迹、MPC、云台协调和 `/cmd_vel_mpc` 导航安全链。不得新增或恢复
+CAN、电机、轮速、电流、电压、温度、底盘反馈、硬件 watchdog、`/motion_control` 或接触 telemetry
+作为仿真或 action 通过条件。下位机/HIL 诊断不属于该提示词的执行范围。必须保留
+`standard_robot_pp_ros2` 的决策/自瞄相关内容，以及 `serial/gimbal_joint_state`、`GimbalYawStatus` 和
+`YawAuthorityRequest` 的云台与速度变换契约。
 
 每次变更后按风险递增执行：
 
@@ -126,7 +132,7 @@ P1 DoD：低负载 headless 连续至少 60 s，/localization p99 interval < 0.2
 只 push 有改动的用户仓库。最终报告列出每仓 baseline/final SHA、push、测试、ROS domain、
 指标、first violation、未验证项和回滚 revision。
 
-## 2026-08-20 最新交接（优先于历史诊断条目）
+## 2026-08-21 最新交接（优先于历史诊断条目）
 
 当前源码 revision 在本次提交后以各仓库 `origin` 分支 HEAD 为准。最后一个完整 P1 默认基线为：
 
@@ -154,8 +160,20 @@ scripts/test_gazebo_minco_mpc_chain.sh
 `/livox/lidar`=`2.958803 s`、`/cloud_registered`=`3.327495 s`、`/lidar_odometry`=`3.327198 s`、
 `/localization`=`3.324217 s`。分类器首违仍为 `lidar_odometry`，status
 `TRACKING/non-TRACKING=362/210`，TF failure=`35/600`，故 `p1_admission_evidence=false`。
-动作有 JPS/MINCO/MPC/轮转动证据，但最终 `ABORTED`；terminal `emergency_stop=true` 且
-`/cmd_vel_mpc`、`/motion_control` 均为零。物理 contact、连续 swept 与离散 footprint 冲突未验证。
+动作有 JPS/MINCO/MPC 与 `/cmd_vel_mpc` 证据，但最终 `ABORTED`；terminal
+`emergency_stop=true` 且 `/cmd_vel_mpc` 为零。连续 swept 与离散 footprint 冲突未验证。
+
+本轮随后在新 domain `208` 重跑无 viewer/RViz 的 `TEST_PROFILE=nominal`，recorder 实际完成
+`90.007728 s`，JPS、MINCO、MPC、ROGMap adapter 与 `/cmd_vel_mpc` 单一发布者均有运行证据，但 action
+在 `90 s` 内未成功。`/lidar_odometry`、`/odometry`、`/localization` 的 wall interval p95/max 为
+`1.427/2.744 s`、`1.424/2.750 s`、`1.419/2.757 s`，`/clock` RTF p50/p95/p99 为
+`0.330/0.585/0.984`，结果仍是 `freshness_lidar_odometry`。artifact 位于
+`log/gazebo_minco_mpc_chain/20260821_101956_nominal_none_domain208/`；它是当前 revision 的失败证据，
+不是 P1/P2 通过记录。
+
+本轮 MuJoCo red_box 使用新 domain `207`；首个 action 目标已接受，ROGMap adapter generation 从
+`756` 前进至 `769`，但 Goal Manager 后续记录 `pose=(nan, nan)` 并 fail-stop，故首个目标未完成。
+无效 pose 的首次来源未定位，不得用仿真内部速度适配、轮速、接触、CAN 或底盘反馈替代该导航侧诊断。
 
 在性能更高的新电脑上必须先用**全新且合法的** `ROS_DOMAIN_ID`（`0..232`，不得复用旧 domain）和
 同一默认参数重跑上面的 60 秒 baseline。先运行 `bash -n scripts/test_gazebo_minco_mpc_chain.sh`、

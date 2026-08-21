@@ -43,7 +43,7 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
   -> ATS NavigateToPose action / Goal Manager
   -> JPS -> MINCO S3 + independent yaw + footprint safety / repair
   -> committed reference -> omnidirectional SE2 MPC
-  -> /cmd_vel_mpc -> velocity bridge -> /motion_control -> swerve chassis
+  -> /cmd_vel_mpc -> fake/chassis velocity transform -> /cmd_vel -> lower-controller velocity interface
 ```
 
 `point_lio` 持续提供 `/localization` 与 `/registered_scan`；ROGMap 不是定位器。
@@ -260,7 +260,7 @@ P3_FAULT_CASE: cancel | preempt | timeout | tf_failure
 故障验收至少要观察：
 
 ```text
-emergency_stop=true -> /cmd_vel_mpc=0 -> /motion_control=0
+emergency_stop=true -> /cmd_vel_mpc=0
 ```
 
 恢复时还要确认 generation 继续前进，且未提交新目标时旧 reference/执行授权不复活。详细的
@@ -274,13 +274,18 @@ MuJoCo 依赖、launch、资产和 telemetry 说明见
 | `/ats_navigate_to_pose` | `ats_goal_manager` action server | 行为树、测试客户端 | 目标生命周期与失败码 |
 | `/rc_esdf/planning_grid` | `ats_rog_map_adapter` | MINCO、行为层、RViz | 规划地图唯一 owner |
 | `/minco/reference_path` | Goal Manager 提交点 | MPC、RViz | 复核后统一重定时的 reference |
-| `/planner/emergency_stop` | Goal Manager | MPC、底盘安全链 | heartbeat 急停状态 |
-| `/cmd_vel_mpc` | `ats_swerve_mpc` | 唯一速度 bridge | 车体系 `[vx, vy, wz]` |
-| `/motion_control` | `twist_to_motion_ctrl` | MuJoCo/底盘 | 唯一最终底盘输入 |
+| `/planner/emergency_stop` | Goal Manager | MPC | heartbeat 急停状态 |
+| `/cmd_vel_mpc` | `ats_swerve_mpc` | 速度坐标变换 | 车体系 `[vx, vy, wz]` 的唯一导航速度输出 |
+| `/cmd_vel` | `chassis_vel_transform` | 下位机速度接口 | 经云台 yaw 坐标变换后的下位机速度边界 |
 
 `/planner/emergency_stop` 与 `/minco/reference_path` 是独立 DDS topic，不具备跨 topic
 原子顺序。Goal Manager 的提交点会重新校验地图 snapshot/heartbeat，并在同一临界区内先发布
 `emergency_stop=false`、再发布重定时 reference；MPC 必须拒绝急停前或无有效时间戳的旧轨迹。
+
+`/cmd_vel` 是导航到下位机的速度边界。下位机负责 CAN、电机、轮速、电流、电压、温度、底盘反馈、
+硬件 watchdog、制动和物理急停；这些信号不由导航 action、Gazebo/MuJoCo 回归或配置校验订阅和裁决。
+`standard_robot_pp_ros2` 的决策与自瞄内容保持不变，`serial/gimbal_joint_state` 仍提供云台 yaw、
+速度变换和自瞄-导航协调所需输入。
 
 ## ⚙️ 统一配置
 
@@ -291,7 +296,7 @@ src/ats_sentry_bringup/params/node_params.yaml
 ```
 
 正式 launch 将同一 `params_file` 传给定位、地图、规划、控制、串口与行为节点；launch 仅覆盖
-`use_sim_time`、资产/设备路径和明确的 HIL 开关。ROGMap 的正式 profile 不允许
+`use_sim_time` 与资产/设备路径。ROGMap 的正式 profile 不允许
 `map_config_file` 与显式 ROS 参数同时生效。`static_map_publisher.py` 必须保留 `/map` 的
 frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
@@ -303,19 +308,17 @@ frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 **已记录的运行证据（本次 README 更新未重新执行）：** 2026-08-02 的 S1 记录中，
 `planning_grid_owner=rog_map` 的 rectangle 场景在 domain `184`（RViz）和 `186`（headless）
 完成五段 action；最大终点误差分别为 `0.038681 m` 与 `0.041613 m`，generation 分别为
-`313 -> 1328` 与 `309 -> 1264`。两例均记录了 south/north 非零 `vy`、唯一速度/底盘 owner、
-MINCO 离散 footprint collision sample `0`、最终四轮 RPM 和两级命令为零；现有 MuJoCo
-evaluator 的 `contact_violation_count=0`。
+`313 -> 1328` 与 `309 -> 1264`。两例记录了 south/north 非零 `vy`、唯一导航速度 owner、
+MINCO 离散 footprint collision sample `0` 与终态 `/cmd_vel_mpc=0`。
 
 P2 的 adapter lease、projection timeout、Point-LIO input stale、unknown、unreachable，以及
-P3 的 cancel、preempt、timeout、TF failure 已有独立故障运行记录；它们均记录到急停和两级
-零速度。完整证据边界、P4 接口进度和实车门禁见
+P3 的 cancel、preempt、timeout、TF failure 已有独立故障运行记录；它们均记录到急停和
+`/cmd_vel_mpc=0`。完整证据边界、P4 接口进度和实机导航边界见
 [`docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`](docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)。
 
 以下仍是**未完成或未验证**项：连续 swept footprint、`PlanningMapSnapshot`/
-`PlannerCandidate` 原子契约的全链运行迁移、serial digest enforcement、HIL、实车动力学/制动
-标定与受限低速实车。离散 footprint sample 或 MuJoCo contact 计数为零不能推导为物理零碰撞，
-也不能替代实车性能数据。
+`PlannerCandidate` 原子契约的全链运行迁移，以及受限低速实机导航。仿真 footprint sample
+只用于导航算法复核，不能替代实机导航数据。
 
 ## 📂 目录结构
 

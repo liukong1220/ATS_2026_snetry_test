@@ -7,8 +7,7 @@
 #     -> sensor_scan_generation -> localization_fusion (/localization)
 #     -> ats_rog_map -> ats_rog_map_adapter (/rc_esdf/planning_grid)
 #     -> minco_planner (JPS + MINCO) -> ats_swerve_mpc (/cmd_vel_mpc)
-#     -> gz_chassis_cmd_adapter (/motion_control + <robot>/cmd_vel)
-#     -> Gazebo chassis -> odometry feedback
+#     -> velocity transform -> lower-controller velocity boundary
 #
 # The script records evidence; it does not decide "pass" from the mere presence
 # of a topic or from a successful launch. Every metric that could not be
@@ -667,10 +666,9 @@ topic_type() {
     /rog_map_adapter/planning_snapshot) echo ats_navigation_interfaces/msg/PlanningMapSnapshot ;;
     /rog_map/occ|/rog_map/inf_occ|/rog_map/unk|/rog_map/esdf|/traversability_grid|/rc_esdf/planning_grid) echo nav_msgs/msg/OccupancyGrid ;;
     /minco/raw_path|/minco/preprocessed_guide|/minco/esdf_refined_guide|/minco/reference_path|/ats_swerve_mpc/predicted_path|/ats_swerve_mpc/executed_path) echo nav_msgs/msg/Path ;;
-    /localization|/odometry|*/chassis_odometry_gt) echo nav_msgs/msg/Odometry ;;
+    /localization|/odometry) echo nav_msgs/msg/Odometry ;;
     /registered_scan|/livox/lidar|*/livox/lidar) echo sensor_msgs/msg/PointCloud2 ;;
     /livox/imu|*/livox/imu) echo sensor_msgs/msg/Imu ;;
-    /motion_control) echo manda_can_control/msg/MotionCtrl ;;
     /cmd_vel_mpc|*/cmd_vel) echo geometry_msgs/msg/Twist ;;
     *) echo "" ;;
   esac
@@ -817,7 +815,7 @@ capture_active_ownership() {
   {
     for attempt in $(seq "${ACTIVE_OWNER_ATTEMPTS:-3}"); do
       printf 'attempt=%s\n' "$attempt"
-      for topic in /cmd_vel_mpc /motion_control "/${ROBOT_NAME}/cmd_vel"; do
+      for topic in /cmd_vel_mpc; do
         printf 'topic=%s\n' "$topic"
         ros2 topic info --no-daemon --spin-time "$spin_time" "$topic" 2>&1 || true
       done
@@ -943,17 +941,6 @@ twist_is_zero() {
       fields++
     }
     END { exit !(fields == 6 && !nonzero) }
-  '
-}
-
-motion_control_is_zero() {
-  awk '
-    /^(linear_x|linear_y|angular_z):/ {
-      value = $2 + 0.0
-      if (value < -1e-9 || value > 1e-9) nonzero = 1
-      fields++
-    }
-    END { exit !(fields == 3 && !nonzero) }
   '
 }
 
@@ -1246,16 +1233,12 @@ if [ "$HEALTH_READY" != "yes" ]; then
   # leave Gazebo alive when an outer runner reaches its own deadline.
   HEALTH_ESTOP_DUMP="$(safety_echo_once)"
   HEALTH_CMD_DUMP="$(echo_once /cmd_vel_mpc)"
-  HEALTH_MOTION_DUMP="$(echo_once /motion_control)"
   HEALTH_ESTOP="$(printf '%s\n' "$HEALTH_ESTOP_DUMP" | awk '/data:/ {print $2; exit}')"
   metric "health_gate_emergency_stop" "${HEALTH_ESTOP:-unverified}"
   metric "health_gate_cmd_vel_mpc" "${HEALTH_CMD_DUMP//$'\n'/ }"
-  metric "health_gate_motion_control" "${HEALTH_MOTION_DUMP//$'\n'/ }"
   [ "$HEALTH_ESTOP" = "true" ] || fail "health gate failure did not observe planner emergency stop=true"
   printf '%s\n' "$HEALTH_CMD_DUMP" | twist_is_zero || \
     fail "health gate failure did not observe zero /cmd_vel_mpc"
-  printf '%s\n' "$HEALTH_MOTION_DUMP" | motion_control_is_zero || \
-    fail "health gate failure did not observe zero /motion_control"
   if [ "$P2_FAULT_CASE" = "all-unknown" ]; then
     [ "$HEALTH_MAP_READY" = "false" ] || \
       fail "all-unknown fault did not make the planning map unavailable"
@@ -1318,16 +1301,12 @@ else
     fail "ATS NavigateToPose action server unavailable"
     HEALTH_ESTOP_DUMP="$(safety_echo_once)"
     HEALTH_CMD_DUMP="$(echo_once /cmd_vel_mpc)"
-    HEALTH_MOTION_DUMP="$(echo_once /motion_control)"
     HEALTH_ESTOP="$(printf '%s\n' "$HEALTH_ESTOP_DUMP" | awk '/data:/ {print $2; exit}')"
     metric "action_gate_emergency_stop" "${HEALTH_ESTOP:-unverified}"
     metric "action_gate_cmd_vel_mpc" "${HEALTH_CMD_DUMP//$'\n'/ }"
-    metric "action_gate_motion_control" "${HEALTH_MOTION_DUMP//$'\n'/ }"
     [ "$HEALTH_ESTOP" = "true" ] || fail "action gate did not observe planner emergency stop=true"
     printf '%s\n' "$HEALTH_CMD_DUMP" | twist_is_zero || \
       fail "action gate did not observe zero /cmd_vel_mpc"
-    printf '%s\n' "$HEALTH_MOTION_DUMP" | motion_control_is_zero || \
-      fail "action gate did not observe zero /motion_control"
     metric "failure_count" "$FAILURE_COUNT"
     metric "first_failure_reason" "${FIRST_FAILURE:-none}"
     log "action server gate failed; skipping downstream sampling"
@@ -1397,9 +1376,6 @@ case "$P2_FAULT_CASE" in
     observe_zero_window "cancelled goal" /cmd_vel_mpc twist_is_zero "$ZERO_WINDOW_SAMPLES" \
       "$RUN_DIR/cancel_cmd_vel_mpc_window.log" || \
       fail "old reference resumed a non-zero /cmd_vel_mpc before a new goal"
-    observe_zero_window "cancelled goal" /motion_control motion_control_is_zero "$ZERO_WINDOW_SAMPLES" \
-      "$RUN_DIR/cancel_motion_control_window.log" || \
-      fail "old reference resumed a non-zero /motion_control before a new goal"
     metric "cancel_zero_command_window_samples" "$ZERO_WINDOW_SAMPLES"
     # Keep the post-cancel acceptance segment short.  It must still traverse a
     # fresh JPS/MINCO/MPC reference, but this fault test is not a long-duration
@@ -1481,14 +1457,6 @@ MINCO_POINTS="$(evidence_value minco_max_points)"
 MPC_PRED_POINTS="$(evidence_value mpc_predicted_max_points)"
 EXEC_POINTS="$(evidence_value mpc_executed_max_points)"
 CMD_NONZERO_OBSERVED="$(evidence_bool_as_int "$(evidence_value cmd_vel_nonzero)")"
-MOTION_NONZERO_OBSERVED="$(evidence_bool_as_int "$(evidence_value motion_control_nonzero)")"
-CHASSIS_NONZERO_OBSERVED="$(evidence_bool_as_int "$(evidence_value chassis_cmd_nonzero)")"
-WHEEL_ACTIVE_OBSERVED="$(evidence_bool_as_int "$(evidence_value wheel_active)")"
-SWERVE_JOINT_PEAKS="$(evidence_value wheel_peak_rad_s)"
-GT0="$(evidence_value gt_begin_xyz | tr ',' ' ')"
-GT1="$(evidence_value gt_end_xyz | tr ',' ' ')"
-if [ "$GT0" = "unverified" ]; then GT0=""; fi
-if [ "$GT1" = "unverified" ]; then GT1=""; fi
 metric "active_evidence" "${EVIDENCE_RESULT:-unverified}"
 metric "active_evidence_completed" "$(evidence_value completed)"
 metric "active_evidence_duration_s" "$(evidence_value duration_s)"
@@ -1564,20 +1532,12 @@ metric "minco_reference_path_points" "${MINCO_POINTS:-unverified}"
 metric "mpc_predicted_path_points" "${MPC_PRED_POINTS:-unverified}"
 metric "mpc_executed_path_points" "${EXEC_POINTS:-unverified}"
 metric "cmd_vel_mpc_nonzero_observed" "${CMD_NONZERO_OBSERVED:-unverified}"
-metric "motion_control_nonzero_observed" "${MOTION_NONZERO_OBSERVED:-unverified}"
-metric "gz_chassis_cmd_nonzero_observed" "${CHASSIS_NONZERO_OBSERVED:-unverified}"
-metric "swerve_wheel_active_observed" "${WHEEL_ACTIVE_OBSERVED:-unverified}"
-metric "swerve_joint_peak_rad_s" "${SWERVE_JOINT_PEAKS:-unverified}"
 
 # Ownership is sampled by the C++ recorder throughout the action lifetime.
 # The ros2cli snapshots remain in active_ownership.log for diagnostics only:
 # their final sample can race teardown and report a transient zero writer.
 CMD_ACTIVE_PUB="$(evidence_value cmd_vel_mpc_publisher_max)"
 CMD_ACTIVE_SUB="$(evidence_value cmd_vel_mpc_subscriber_max)"
-MOTION_ACTIVE_PUB="$(evidence_value motion_control_publisher_max)"
-MOTION_ACTIVE_SUB="$(evidence_value motion_control_subscriber_max)"
-CHASSIS_ACTIVE_PUB="$(evidence_value chassis_cmd_publisher_max)"
-CHASSIS_ACTIVE_SUB="$(evidence_value chassis_cmd_subscriber_max)"
 GRID_ACTIVE_PUB="$(evidence_value planning_grid_publisher_max)"
 GRID_ACTIVE_SUB="$(evidence_value planning_grid_subscriber_max)"
 GRID_ACTIVE_PUBLISHERS="$(evidence_value planning_grid_publisher_names)"
@@ -1585,8 +1545,6 @@ GRID_ADAPTER_SEEN="$(evidence_value planning_grid_adapter_seen)"
 GRID_NAMED_NON_ADAPTER_SEEN="$(evidence_value planning_grid_named_non_adapter_seen)"
 GRID_ANONYMOUS_ENDPOINT_SEEN="$(evidence_value planning_grid_anonymous_endpoint_seen)"
 metric "cmd_vel_mpc_pub/sub_active" "${CMD_ACTIVE_PUB:-unverified}/${CMD_ACTIVE_SUB:-unverified}"
-metric "motion_control_pub/sub_active" "${MOTION_ACTIVE_PUB:-unverified}/${MOTION_ACTIVE_SUB:-unverified}"
-metric "gz_chassis_cmd_pub/sub_active" "${CHASSIS_ACTIVE_PUB:-unverified}/${CHASSIS_ACTIVE_SUB:-unverified}"
 metric "planning_grid_pub/sub_active" "${GRID_ACTIVE_PUB:-unverified}/${GRID_ACTIVE_SUB:-unverified}"
 metric "planning_grid_publishers_active" "${GRID_ACTIVE_PUBLISHERS:-unverified}"
 metric "planning_grid_adapter_seen_active" "${GRID_ADAPTER_SEEN:-unverified}"
@@ -1599,21 +1557,14 @@ if [ "$P2_FAULT_CASE" = "none" ]; then
   [ "${GRID_NAMED_NON_ADAPTER_SEEN:-yes}" = "no" ] || \
     fail "/rc_esdf/planning_grid identified a named non-adapter publisher: ${GRID_ACTIVE_PUBLISHERS:-unverified}"
   [ "${CMD_ACTIVE_PUB:-0}" = "1" ] || fail "/cmd_vel_mpc must have exactly one active publisher, got ${CMD_ACTIVE_PUB:-unverified}"
-  [ "${MOTION_ACTIVE_PUB:-0}" = "1" ] || fail "/motion_control must have exactly one active publisher, got ${MOTION_ACTIVE_PUB:-unverified}"
-  [ "${CHASSIS_ACTIVE_PUB:-0}" = "1" ] || fail "/${ROBOT_NAME}/cmd_vel must have exactly one active publisher, got ${CHASSIS_ACTIVE_PUB:-unverified}"
 else
   metric "fault_owner_snapshot" "informational_only; nominal action lifetime enforces unique publishers"
 fi
 
 read -r CMD_PUB CMD_SUB <<<"$(topic_counts /cmd_vel_mpc)"
-read -r MOTION_PUB MOTION_SUB <<<"$(topic_counts /motion_control)"
-read -r CHASSIS_PUB CHASSIS_SUB <<<"$(topic_counts "/${ROBOT_NAME}/cmd_vel")"
 metric "cmd_vel_mpc_pub/sub_terminal" "${CMD_PUB:-?}/${CMD_SUB:-?}"
-metric "motion_control_pub/sub_terminal" "${MOTION_PUB:-?}/${MOTION_SUB:-?}"
-metric "gz_chassis_cmd_pub/sub_terminal" "${CHASSIS_PUB:-?}/${CHASSIS_SUB:-?}"
 
 metric "cmd_vel_mpc_hz" "$(topic_hz /cmd_vel_mpc)"
-metric "motion_control_hz" "$(topic_hz /motion_control)"
 
 ESTOP="$(echo_once /planner/emergency_stop | awk '/data:/ {print $2; exit}')"
 metric "planner_emergency_stop" "${ESTOP:-unverified}"
@@ -1629,39 +1580,8 @@ twist_is_nonzero() {
   '
 }
 
-motion_control_is_nonzero() {
-  awk '
-    /^(linear_x|linear_y|angular_z):/ {
-      value = $2 + 0.0
-      if (value < -1e-9 || value > 1e-9) nonzero = 1
-      fields++
-    }
-    END { exit !(fields == 3 && nonzero) }
-  '
-}
-
 CMD_DUMP="$(echo_once /cmd_vel_mpc)"
-MOTION_DUMP="$(echo_once /motion_control)"
 metric "cmd_vel_mpc_sample" "${CMD_DUMP//$'\n'/ }"
-metric "motion_control_sample" "${MOTION_DUMP//$'\n'/ }"
-
-# ---------------------------------------------------------------------------
-# Motion evidence from the chassis, not from the command
-# ---------------------------------------------------------------------------
-
-metric "chassis_gt_pose_begin" "${GT0:-unverified}"
-metric "chassis_gt_pose_end" "${GT1:-unverified}"
-
-if [ -n "$GT0" ] && [ -n "$GT1" ]; then
-  MOVED="$(python3 -c "
-import math,sys
-a='''$GT0'''.split(); b='''$GT1'''.split()
-print(round(math.hypot(float(b[0])-float(a[0]), float(b[1])-float(a[1])), 4))
-" 2>/dev/null || echo unverified)"
-else
-  MOVED="unverified"
-fi
-metric "chassis_displacement_m" "$MOVED"
 
 TERMINAL_LOCALIZATION_POSE="$(echo_once /localization \
   | awk '/position:/{f=1} f&&/x:/{x=$2} f&&/y:/{y=$2} f&&/z:/{print x" "y; exit}')"
@@ -1723,19 +1643,6 @@ if [ "$P2_FAULT_CASE" = "none" ]; then
   [ "${MPC_PRED_POINTS:-0}" -gt 1 ] 2>/dev/null || fail "nominal MPC predicted path is empty"
   [ "${EXEC_POINTS:-0}" -gt 1 ] 2>/dev/null || fail "nominal executed path is empty"
   [ "${CMD_NONZERO_OBSERVED:-0}" = "1" ] || fail "nominal /cmd_vel_mpc stayed zero"
-  [ "${MOTION_NONZERO_OBSERVED:-0}" = "1" ] || fail "nominal /motion_control stayed zero"
-  [ "${CHASSIS_NONZERO_OBSERVED:-0}" = "1" ] || fail "nominal Gazebo chassis command stayed zero"
-  [ "${WHEEL_ACTIVE_OBSERVED:-0}" = "1" ] || fail "nominal Gazebo wheel joints never rotated"
-  if [ "$MOVED" = "unverified" ]; then
-    fail "nominal chassis displacement is unverified"
-  else
-    python3 - "$MOVED" <<'PY'
-import sys
-if float(sys.argv[1]) <= 0.02:
-    raise SystemExit(1)
-PY
-    [ "$?" -eq 0 ] || fail "nominal chassis displacement did not exceed 0.02 m"
-  fi
 fi
 if [ "$P2_FAULT_CASE" = "emergency-stop-recovery" ]; then
   RECOVERY_ACCEPTED=0
@@ -1788,16 +1695,11 @@ if [ "$P2_FAULT_CASE" != "none" ]; then
   [ "$FAULT_ESTOP" = "true" ] || \
     fail "fault case did not observe planner emergency stop=true"
   CMD_DUMP_RAW="$(echo_once /cmd_vel_mpc)"
-  MOTION_DUMP_RAW="$(echo_once /motion_control)"
   CMD_DUMP="$(printf '%s\n' "$CMD_DUMP_RAW" | tr '\n' ' ')"
-  MOTION_DUMP="$(printf '%s\n' "$MOTION_DUMP_RAW" | tr '\n' ' ')"
   metric "fault_cmd_vel_mpc" "${CMD_DUMP:-unverified}"
-  metric "fault_motion_control" "${MOTION_DUMP:-unverified}"
   metric "fault_note" "$FAULT_NOTE"
   printf '%s\n' "$CMD_DUMP_RAW" | twist_is_zero || \
     fail "fault case did not observe zero /cmd_vel_mpc"
-  printf '%s\n' "$MOTION_DUMP_RAW" | motion_control_is_zero || \
-    fail "fault case did not observe zero /motion_control"
   case "$P2_FAULT_CASE" in
     input-stale|map-stale|projection-timeout|all-unknown)
       FAULT_MAP_READY="$(echo_once /rog_map_adapter/ready | awk '/data:/ {print $2; exit}')"
