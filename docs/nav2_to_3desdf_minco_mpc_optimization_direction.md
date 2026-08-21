@@ -35,6 +35,27 @@ ICR 或 `vy=0`。
 云台 yaw、速度坐标变换和自瞄-导航协调的输入，`GimbalYawStatus` 与
 `YawAuthorityRequest` 也继续属于导航协调契约，而非底盘硬件健康门禁。
 
+当前自主速度链仍为 `/cmd_vel_mpc -> fake_vel_transform -> chassis_vel_transform -> /cmd_vel`。
+下一阶段会把 `_mpc` 对外入口替换为明确的 source ownership：MPC 使用
+`/cmd_vel/autonomy_raw`，两层 yaw 速度变换后到 `/cmd_vel/autonomy`；键鼠保持 ROS 默认
+`/cmd_vel`；arbiter 只发布 `/cmd_vel/selected`，串口只订阅该 selected 输出。这样既不要求
+`teleop_twist_keyboard` remap，也不会让键鼠和自主控制器无仲裁地同时发布底盘话题。此设计尚未落地，
+现有 `/cmd_vel_mpc` 仍是实际运行接口。
+
+### 2026-08-21 MuJoCo 交接证据
+
+- **已验证（组件/场景）**：`ats_mujoco_sim` 的 `test_rmuc_2025_scene.py` 为 `9 passed`；
+  `ats_goal_manager` 的 `test_goal_manager_epoch` 和 `minco_planner` 的
+  `test_minco_trajectory_optimizer` 均为 `1/1 passed`；三包定向构建通过。
+- **已验证（历史隔离运行）**：在 `ROS_DOMAIN_ID=222`、`planning_grid_owner=rog_map` 的
+  `south_corridor` 五段路线完成，末段终点 `(6.54853, -7.65519)` 对 `(6.50, -7.65)` 的误差为
+  `0.04881 m`，离散 footprint 冲突数为 `0`。ROGMap adapter generation 从 `788` 增至 `3641`。
+- **未验证**：本提交 revision 的默认单点、完整十段 `red_box`、adapter lease/service timeout/
+  input stale/unknown/unreachable P2 故障矩阵、`/cmd_vel` 仲裁与键鼠-串口闭环、MuJoCo 物理接触。
+  `footprint_collisions=0` 只表示规划器离散采样无冲突；**MuJoCo 物理接触未验证**。
+- **测试基础设施限制**：`minco_planner` 整包历史 `clang_format`、`copyright` 与 `cpplint` 检查
+  仍有大量既存失败；本轮未格式化或改写无关文件，不能称整包 lint 通过。
+
 ## 2. 当前准入结论
 
 | 阶段 | 已完成 | 当前缺口 | 状态 |
@@ -200,7 +221,7 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 详细任务、DoD、验证命令和停止条件见：
 
 - [ATS 导航剩余优化总 TODO](项目优化文档/ATS导航剩余优化总TODO.md)
-- [下一阶段新对话提示词](项目优化文档/下一阶段提示词_ATS导航仿真闭环与准入.md)
+- [下一阶段新对话提示词](项目优化文档/下一阶段提示词_ATS单雷达导航闭环与速度仲裁.md)
 - [LTV-QP 后端准入记录](ats_swerve_mpc_ltv_qp_backend_admission.md)
 
 ## 6. 文档职责
