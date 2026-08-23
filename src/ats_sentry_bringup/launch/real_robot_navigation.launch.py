@@ -50,6 +50,7 @@ def generate_launch_description():
             "use_sim_time": "False",
             "launch_fake_vel_transform": launch_fake_vel_transform,
             "launch_chassis_vel_transform": launch_chassis_vel_transform,
+            "require_serial_link": "True",
             "require_gimbal_status": require_gimbal_status,
             "launch_behavior": launch_behavior,
             "launch_small_gicp_relocalization": "True",

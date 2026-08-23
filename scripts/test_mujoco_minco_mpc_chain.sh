@@ -52,6 +52,9 @@ YAW_AUTHORITY_EXPECTED="${YAW_AUTHORITY_EXPECTED:-auto}"
 # MPC solver mode; default preserves the production iLQR chain. qp_shadow only
 # records OSQP diagnostics and never becomes the command publisher.
 SOLVER_MODE="${SOLVER_MODE:-ilqr}"
+# MPC 只发布 autonomy_raw；键鼠走默认 /cmd_vel；仿真底盘只吃 arbiter 的 selected。
+MPC_CMD_VEL_TOPIC="${MPC_CMD_VEL_TOPIC:-/cmd_vel/autonomy_raw}"
+SELECTED_CMD_VEL_TOPIC="${SELECTED_CMD_VEL_TOPIC:-/cmd_vel/selected}"
 # 默认仍为 warn；qp_shadow 观察可显式传 LOG_LEVEL=info 以保存有界 telemetry。
 LOG_LEVEL="${LOG_LEVEL:-warn}"
 # 仅在回归调用方显式给出路径时导出控制遥测。文件 I/O 由独立 Python 客户端执行，绝不进入
@@ -584,6 +587,7 @@ start_fault_observer() {
     --fault-trigger-file "${trigger}" \
     --recovery-trigger-file "${recovery_trigger}" \
     --ready-file "${ready_file}" \
+    --cmd-vel-topic "${SELECTED_CMD_VEL_TOPIC}" \
     --settle-sec 25 \
     --zero-window-sec 3 \
     --require-gate >"${log}" 2>&1 &
@@ -605,7 +609,7 @@ start_fault_observer() {
   fail "fault observer did not report OBSERVER_READY"
 }
 
-# settle(25s) + /cmd_vel_mpc 零速窗口(3s) 之后才允许改变系统状态。
+# settle(25s) + /cmd_vel/selected 零速窗口(3s) 之后才允许改变系统状态。
 wait_fault_observer_window() {
   local epoch="$1"
   local span="$2"
@@ -860,9 +864,9 @@ capture_zero_outputs() {
   local label="$1"
   local cmd_file="/tmp/ats_p2_fault_${label}_cmd.out"
   sleep 0.5
-  capture_numeric_stream /cmd_vel_mpc "${cmd_file}" || \
-    fail "${label} did not publish /cmd_vel_mpc during stop"
-  assert_zero_stream "${label} /cmd_vel_mpc" "${cmd_file}"
+  capture_numeric_stream "${SELECTED_CMD_VEL_TOPIC}" "${cmd_file}" || \
+    fail "${label} did not publish ${SELECTED_CMD_VEL_TOPIC} during stop"
+  assert_zero_stream "${label} ${SELECTED_CMD_VEL_TOPIC}" "${cmd_file}"
 }
 
 capture_numeric_stream() {
@@ -916,7 +920,7 @@ publish_fault_goal_with_motion_gate() {
   : >"${command_file}"
   # 重定向到文件时 ros2 Python CLI 会块缓冲；强制无缓冲才能在 tracking 期间
   # 立即观察到非零控制量，而不是等采样 timeout 后才注入故障。
-  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon /cmd_vel_mpc >"${command_file}" 2>/dev/null &
+  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon "${SELECTED_CMD_VEL_TOPIC}" >"${command_file}" 2>/dev/null &
   monitor_pid=$!
   CAPTURE_PIDS+=("${monitor_pid}")
   : >"${emergency_file}"
@@ -1151,7 +1155,7 @@ run_p2_fault_injection() {
       wait_for_command "unknown fault triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
       record_unknown_timeline emergency_stop_true_ns
-      # 观测器在固定窗口内判定导航速度权威 /cmd_vel_mpc 持续为零。
+      # 观测器在固定窗口内判定导航速度权威 /cmd_vel/selected 持续为零。
       # 恢复动作必须等到故障阶段的零速窗口关闭之后再执行，否则窗口内会混入
       # 恢复后的数据。
       wait_fault_observer_window "${FAULT_OBSERVER_FAULT_EPOCH}" 32
@@ -1605,7 +1609,7 @@ run_navigation_goal() {
     CAPTURE_PIDS+=("${pid}")
     topic_pids+=("${pid}:${topic}:${expected_frame}:${output_file}")
   done
-  timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon /cmd_vel_mpc >"${command_output}" 2>/dev/null &
+  timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon "${SELECTED_CMD_VEL_TOPIC}" >"${command_output}" 2>/dev/null &
   local leg_command_pid=$!
   CAPTURE_PIDS+=("${leg_command_pid}")
 
@@ -1763,7 +1767,9 @@ if grep -q '^/fake_vel_transform$' <<<"${NODE_LIST}"; then
 fi
 echo "OK: MPC nodes present and fake_vel_transform absent"
 
-assert_topic_ownership /cmd_vel_mpc ats_swerve_mpc
+wait_for_command "cmd_vel_arbiter node" 30 node_is_present /cmd_vel_arbiter
+assert_topic_ownership "${MPC_CMD_VEL_TOPIC}" ats_swerve_mpc cmd_vel_arbiter
+assert_topic_ownership "${SELECTED_CMD_VEL_TOPIC}" cmd_vel_arbiter twist_to_motion_ctrl
 assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
 # RViz may observe the reference in the UI, but it must never gain execution
 # authority.  The assertion still accepts exactly one controller and one named
@@ -1794,7 +1800,7 @@ for topic in "${DEBUG_TOPICS[@]}"; do
   DEBUG_CAPTURE_PIDS+=("${debug_pid}")
   CAPTURE_PIDS+=("${debug_pid}")
 done
-ensure_topic_capture_ready "MPC command stream" /cmd_vel_mpc geometry_msgs/msg/Twist \
+ensure_topic_capture_ready "selected command stream" "${SELECTED_CMD_VEL_TOPIC}" geometry_msgs/msg/Twist \
   /tmp/ats_minco_mpc_cmd_vel_stream.out CMD_STREAM_PID
 CAPTURE_PIDS+=("${CMD_STREAM_PID}")
 EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
@@ -1827,9 +1833,9 @@ if [[ "${ATS_PROFILE_SKIP_ACTION}" == "1" ]]; then
   for index in "${!DEBUG_TOPICS[@]}"; do
     stop_capture_process "${DEBUG_CAPTURE_PIDS[index]}"
   done
-  assert_zero_stream "no-goal /cmd_vel_mpc" /tmp/ats_minco_mpc_cmd_vel_stream.out
+  assert_zero_stream "no-goal ${SELECTED_CMD_VEL_TOPIC}" /tmp/ats_minco_mpc_cmd_vel_stream.out
   export_control_telemetry
-  echo "PASS: map-chain-only profile completed with /cmd_vel_mpc held at zero."
+  echo "PASS: map-chain-only profile completed with ${SELECTED_CMD_VEL_TOPIC} held at zero."
   exit 0
 fi
 
@@ -1858,7 +1864,7 @@ for index in "${!DEBUG_TOPICS[@]}"; do
   assert_path_has_poses "${topic}" "${output_file}"
   assert_path_visualization_frame "${topic}" "${output_file}"
 done
-assert_nonzero_stream /cmd_vel_mpc /tmp/ats_minco_mpc_cmd_vel_stream.out
+assert_nonzero_stream "${SELECTED_CMD_VEL_TOPIC}" /tmp/ats_minco_mpc_cmd_vel_stream.out
 
 export_control_telemetry
 

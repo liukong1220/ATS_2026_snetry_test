@@ -77,7 +77,7 @@ class UnsafeTrajectoryEvaluator(Node):
             lambda message: self.stop_states.append(message.data),
             self.transient_qos,
         )
-        self.create_subscription(Twist, "/cmd_vel_mpc", self._on_command, 20)
+        self.create_subscription(Twist, "/cmd_vel/selected", self._on_command, 20)
         self.action_client = ActionClient(self, NavigateToPose, "/ats_navigate_to_pose")
         self.adapter_parameters = self.create_client(
             SetParameters, "/ats_rog_map_adapter/set_parameters"
@@ -226,7 +226,7 @@ class UnsafeTrajectoryEvaluator(Node):
         self.wait_for(
             self.commands_are_zero,
             5.0,
-            "outside-map /cmd_vel_mpc zero",
+            "outside-map /cmd_vel/selected zero",
         )
         return {
             "fault": self.fault,
@@ -274,7 +274,7 @@ class UnsafeTrajectoryEvaluator(Node):
         self.wait_for(
             self.commands_are_zero,
             5.0,
-            "/cmd_vel_mpc zero after unsafe trajectory",
+            "/cmd_vel/selected zero after unsafe trajectory",
         )
         self.wait_for(
             lambda: any(

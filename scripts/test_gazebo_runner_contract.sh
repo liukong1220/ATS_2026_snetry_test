@@ -40,6 +40,7 @@ contains 'HEADLESS_RENDERING' "$RUNNER" || fail "Gazebo headless rendering entry
 contains 'LIVOX_UPDATE_RATE_HZ' "$RUNNER" || fail "LiDAR timing A/B entry point is missing"
 contains 'LIVOX_HORIZONTAL_SAMPLES' "$RUNNER" || fail "LiDAR density A/B entry point is missing"
 contains 'OBSERVE_GAZEBO_TRANSPORT_LIDAR' "$RUNNER" || fail "Gazebo Transport LiDAR diagnostic entry point is missing"
+contains 'ats_swerve_mpc' "$RUNNER" || fail "MPC runtime freshness preflight is missing"
 contains 'USE_DIRECT_GAZEBO_LIDAR_BRIDGE' "$RUNNER" || fail "direct Gazebo LiDAR bridge entry point is missing"
 contains 'LIDAR_BRIDGE_PUBLISHER_DEPTH' "$RUNNER" || fail "generic LiDAR publisher depth entry point is missing"
 contains 'LIDAR_BRIDGE_PUBLISHER_RELIABILITY' "$RUNNER" || fail "generic LiDAR publisher reliability entry point is missing"

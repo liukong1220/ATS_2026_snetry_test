@@ -51,12 +51,12 @@ standard_robot_pp_ros2:
     # 必须满足 T_hold < T_wd <= T_lease。底盘看门狗宽于上游租约时，
     # 「上游租约超时 -> 全链归零」的时间上界在出口这一级不再成立。
     cmd_vel_watchdog_timeout_ms: 300
-    # 实车 ATS 正式 profile 的核心安全项：没有 ExecutionCommand 授权时，
-    # 出口恒为零速度且 speed_vector.stop = true。
-    # 单独的 emergency_stop=false、裸 Twist、行为树直发都不能恢复运动；
-    # 串口重连后也必须由 command_sequence 严格更大的新 EXECUTE 重新授权。
-    require_execution_authorization: true
-    execution_command_topic: /planner/execution_command
+    # 速度入口改为 arbiter 的 `/cmd_vel/selected`。自动源授权改由 arbiter 执行；
+    # 手动源不要求 ExecutionCommand。串口仍对 selected 做急停、看门狗和断连归零。
+    # 串口不得订阅空闲 MODE_STOP：否则它会把手动输入也误判为需要归零。
+    cmd_vel_topic: /cmd_vel/selected
+    require_execution_authorization: false
+    execution_command_topic: ""
     emergency_stop_topic: /planner/emergency_stop
     # 授权样本可接受的最大时间戳年龄（s），与 MPC 的 execution_command_timeout 一致。
     # transient_local 会把重启前的旧样本重投给新订阅者，超龄样本必须拒绝。
@@ -420,8 +420,8 @@ fake_vel_transform:
     robot_base_frame: "gimbal_yaw_odom"
     fake_robot_base_frame: "gimbal_yaw_fake"
     # MPC 的车体系速度输入；该节点只根据最新 odom yaw 作坐标变换。
-    input_cmd_vel_topic: "/cmd_vel_mpc"
-    output_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
+    input_cmd_vel_topic: "/cmd_vel/autonomy_raw"
+    output_cmd_vel_topic: "/cmd_vel/autonomy_gimbal"
     cmd_spin_topic: "cmd_spin"
     # cmd_spin 会在本节点输出上直接叠加车体 wz
     # （`fake_vel_transform.cpp` 的 `aft_tf_vel.angular.z = twist->angular.z + spin_speed_`）。
@@ -436,8 +436,8 @@ chassis_vel_transform:
   ros__parameters:
     use_sim_time: false
     joint_state_topic: "serial/gimbal_joint_state"
-    input_cmd_vel_topic: "cmd_vel_gimbal_yaw_odom"
-    output_cmd_vel_topic: "/cmd_vel"
+    input_cmd_vel_topic: "/cmd_vel/autonomy_gimbal"
+    output_cmd_vel_topic: "/cmd_vel/autonomy"
     big_yaw_joint_name: "gimbal_yaw_odom_joint"
     # 出口节点只做坐标转换和保护，禁止任何放大：增益恒为 1.0。
     linear_gain: 1.0
@@ -448,7 +448,7 @@ chassis_vel_transform:
     #      = 1.6689711\ \mathrm{m/s}$，
     #    原 max_linear_speed=4.6 高出物理能力 2.75 倍，是不可达的假限幅。
     # 2. 判据一致性。若出口比 MPC 松，则"MPC 限幅 = 底盘实际收到的限幅"不成立，
-    #    统一判据 `/cmd_vel_mpc=0 -> /motion_control=0` 的上界推导失去依据。
+    #    统一判据 `/cmd_vel/selected=0 -> /motion_control=0` 的上界推导失去依据。
     # 这里取 MPC 可行域数值：max_vx/vy=1.5、max_ax/ay=2.0、max_wz=2.0、max_awz=3.0。
     # ATS 正式 profile 也经过本节点；出口限幅不得宽于 MPC 可行域。
     max_linear_speed: 1.5
@@ -952,6 +952,23 @@ ats_goal_manager:
     footprint_width: 0.55
     footprint_safety_margin: 0.05
 
+
+cmd_vel_arbiter:
+  ros__parameters:
+    use_sim_time: false
+    manual_cmd_vel_topic: /cmd_vel
+    autonomy_cmd_vel_topic: /cmd_vel/autonomy
+    selected_cmd_vel_topic: /cmd_vel/selected
+    execution_command_topic: /planner/execution_command
+    emergency_stop_topic: /planner/emergency_stop
+    link_health_topic: /serial/link_up
+    require_serial_link: true
+    manual_timeout_ms: 300
+    auto_timeout_ms: 300
+    link_timeout_ms: 300
+    execution_command_timeout: 0.5
+    control_rate_hz: 20.0
+
 ats_swerve_mpc:
   ros__parameters:
     use_sim_time: false
@@ -962,7 +979,7 @@ ats_swerve_mpc:
     gimbal_status_topic: /gimbal/yaw_status
     require_gimbal_status: true
     gimbal_status_timeout: 0.5
-    command_topic: /cmd_vel_mpc
+    command_topic: /cmd_vel/autonomy_raw
     emergency_stop_topic: /planner/emergency_stop
     localization_status_topic: /localization/status
     require_localization_status: true

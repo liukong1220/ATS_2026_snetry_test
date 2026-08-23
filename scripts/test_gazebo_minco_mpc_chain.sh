@@ -6,8 +6,8 @@
 #     -> ros_gz_bridge -> gz_livox_bridge -> point_lio -> loam_interface
 #     -> sensor_scan_generation -> localization_fusion (/localization)
 #     -> ats_rog_map -> ats_rog_map_adapter (/rc_esdf/planning_grid)
-#     -> minco_planner (JPS + MINCO) -> ats_swerve_mpc (/cmd_vel_mpc)
-#     -> velocity transform -> lower-controller velocity boundary
+#     -> minco_planner (JPS + MINCO) -> ats_swerve_mpc (/cmd_vel/autonomy_raw)
+#     -> cmd_vel_arbiter (/cmd_vel/selected) -> Gazebo chassis adapter
 #
 # The script records evidence; it does not decide "pass" from the mere presence
 # of a topic or from a successful launch. Every metric that could not be
@@ -140,8 +140,33 @@ fail() {
   log "FAIL: $1"
 }
 
+runtime_binary_is_fresh() {
+  local package_name="$1" executable_path="$2" source_dir="$3"
+  local newer_source
+
+  if [ ! -x "$executable_path" ]; then
+    printf '%s executable_missing path=%s\n' "$package_name" "$executable_path"
+    return 1
+  fi
+  newer_source="$(find "$source_dir" -type f \
+    \( \
+      \( \
+        \( -path "$source_dir/src/*" -o -path "$source_dir/include/*" \) \
+        -a \( -name '*.cpp' -o -name '*.hpp' \) \
+      \) \
+      -o -name 'CMakeLists.txt' -o -name 'package.xml' \
+    \) \
+    -newer "$executable_path" -print -quit)"
+  if [ -n "$newer_source" ]; then
+    printf '%s stale_binary source=%s binary=%s\n' \
+      "$package_name" "$newer_source" "$executable_path"
+    return 1
+  fi
+  printf '%s fresh binary=%s\n' "$package_name" "$executable_path"
+}
+
 run_runtime_preflight() {
-  local residual_processes
+  local residual_processes binary_freshness
   if ! [[ "$ROS_DOMAIN_ID" =~ ^[0-9]+$ ]] || [ "$ROS_DOMAIN_ID" -gt 232 ]; then
     fail "runtime_invalid_ros_domain_${ROS_DOMAIN_ID}"
     return 1
@@ -149,11 +174,34 @@ run_runtime_preflight() {
   residual_processes="$(ps -eo pid=,comm=,args= | awk '
     $2 ~ /^(ign|gazebo|gzserver|gzclient|mujoco|pointlio|loam_interface|sensor_scan_gene|localization_fu|ats_rog_map|ats_navigation|gz_livox_bridge|gz_clock_relay|gz_chassis_cmd)/ {print}
   ')"
+  binary_freshness="$({
+    runtime_binary_is_fresh \
+      ats_cmd_vel_arbiter \
+      "$WORKSPACE_ROOT/build/ats_cmd_vel_arbiter/cmd_vel_arbiter_node" \
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/ats_cmd_vel_arbiter"
+    runtime_binary_is_fresh \
+      ats_swerve_mpc \
+      "$WORKSPACE_ROOT/build/ats_swerve_mpc/ats_swerve_mpc_node" \
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/ats_swerve_mpc"
+    runtime_binary_is_fresh \
+      sensor_scan_generation \
+      "$WORKSPACE_ROOT/build/sensor_scan_generation/sensor_scan_generation_node" \
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/sensor_scan_generation"
+    runtime_binary_is_fresh \
+      small_gicp_relocalization \
+      "$WORKSPACE_ROOT/build/small_gicp_relocalization/localization_fusion_node" \
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/small_gicp_relocalization"
+    runtime_binary_is_fresh \
+      rmu_gazebo_simulator \
+      "$WORKSPACE_ROOT/build/rmu_gazebo_simulator/ats_navigation_evidence_recorder" \
+      "$WORKSPACE_ROOT/src/sim/gazebo_simulator/rmu_gazebo_simulator"
+  } 2>&1)"
   {
     date --iso-8601=seconds
     printf 'ros_domain=%s\n' "$ROS_DOMAIN_ID"
     printf 'root_head=%s\n' "$(git rev-parse HEAD)"
     printf 'gazebo_head=%s\n' "$(git -C src/sim/gazebo_simulator rev-parse HEAD)"
+    printf 'critical_runtime_binary_freshness:\n%s\n' "$binary_freshness"
     if [ -n "$residual_processes" ]; then
       printf 'residual_navigation_or_simulator_processes=detected\n'
       printf '%s\n' "$residual_processes"
@@ -164,6 +212,10 @@ run_runtime_preflight() {
   metric "runtime_preflight_artifact" "$RUNTIME_PREFLIGHT_LOG"
   metric "runtime_preflight_residual_processes" \
     "$( [ -n "$residual_processes" ] && printf detected || printf none_detected )"
+  if printf '%s\n' "$binary_freshness" | grep -qE ' (stale_binary|executable_missing) '; then
+    fail "runtime_stale_critical_binary"
+    return 1
+  fi
   if [ -n "$residual_processes" ]; then
     fail "runtime_residual_navigation_or_simulator_process"
     return 1
@@ -669,7 +721,7 @@ topic_type() {
     /localization|/odometry) echo nav_msgs/msg/Odometry ;;
     /registered_scan|/livox/lidar|*/livox/lidar) echo sensor_msgs/msg/PointCloud2 ;;
     /livox/imu|*/livox/imu) echo sensor_msgs/msg/Imu ;;
-    /cmd_vel_mpc|*/cmd_vel) echo geometry_msgs/msg/Twist ;;
+    /cmd_vel/selected|*/cmd_vel) echo geometry_msgs/msg/Twist ;;
     *) echo "" ;;
   esac
 }
@@ -815,7 +867,7 @@ capture_active_ownership() {
   {
     for attempt in $(seq "${ACTIVE_OWNER_ATTEMPTS:-3}"); do
       printf 'attempt=%s\n' "$attempt"
-      for topic in /cmd_vel_mpc; do
+      for topic in /cmd_vel/selected; do
         printf 'topic=%s\n' "$topic"
         ros2 topic info --no-daemon --spin-time "$spin_time" "$topic" 2>&1 || true
       done
@@ -1232,13 +1284,13 @@ if [ "$HEALTH_READY" != "yes" ]; then
   # this session before long path/action sampling can mask the first cause or
   # leave Gazebo alive when an outer runner reaches its own deadline.
   HEALTH_ESTOP_DUMP="$(safety_echo_once)"
-  HEALTH_CMD_DUMP="$(echo_once /cmd_vel_mpc)"
+  HEALTH_CMD_DUMP="$(echo_once /cmd_vel/selected)"
   HEALTH_ESTOP="$(printf '%s\n' "$HEALTH_ESTOP_DUMP" | awk '/data:/ {print $2; exit}')"
   metric "health_gate_emergency_stop" "${HEALTH_ESTOP:-unverified}"
-  metric "health_gate_cmd_vel_mpc" "${HEALTH_CMD_DUMP//$'\n'/ }"
+  metric "health_gate_cmd_vel_selected" "${HEALTH_CMD_DUMP//$'\n'/ }"
   [ "$HEALTH_ESTOP" = "true" ] || fail "health gate failure did not observe planner emergency stop=true"
   printf '%s\n' "$HEALTH_CMD_DUMP" | twist_is_zero || \
-    fail "health gate failure did not observe zero /cmd_vel_mpc"
+    fail "health gate failure did not observe zero /cmd_vel/selected"
   if [ "$P2_FAULT_CASE" = "all-unknown" ]; then
     [ "$HEALTH_MAP_READY" = "false" ] || \
       fail "all-unknown fault did not make the planning map unavailable"
@@ -1278,7 +1330,7 @@ if [ "$ACTION_READY" = "yes" ] && [ "$HEALTH_READY" = "yes" ]; then
     metric "recovery_publication_sequence_before_cancel" "${RECOVERY_PUBLICATION_SEQUENCE_BEFORE:-unverified}"
     log "dispatching and canceling an owned ATS NavigateToPose action after first MPC command"
     if ! run_recovery_cancel_on_command; then
-      fail "owned recovery action was not canceled after its first non-zero /cmd_vel_mpc"
+      fail "owned recovery action was not canceled after its first non-zero /cmd_vel/selected"
     fi
     RECOVERY_CANCEL_RESULT="$(awk '/^ATS_CANCEL_ON_COMMAND_RESULT / {line=$0} END {print line}' "$RECOVERY_CANCEL_LOG")"
     metric "goal_dispatch" "cancel_on_command_client ${RECOVERY_CANCEL_RESULT:-unverified}"
@@ -1300,13 +1352,13 @@ else
   if [ "$ACTION_READY" != "yes" ]; then
     fail "ATS NavigateToPose action server unavailable"
     HEALTH_ESTOP_DUMP="$(safety_echo_once)"
-    HEALTH_CMD_DUMP="$(echo_once /cmd_vel_mpc)"
+    HEALTH_CMD_DUMP="$(echo_once /cmd_vel/selected)"
     HEALTH_ESTOP="$(printf '%s\n' "$HEALTH_ESTOP_DUMP" | awk '/data:/ {print $2; exit}')"
     metric "action_gate_emergency_stop" "${HEALTH_ESTOP:-unverified}"
-    metric "action_gate_cmd_vel_mpc" "${HEALTH_CMD_DUMP//$'\n'/ }"
+    metric "action_gate_cmd_vel_selected" "${HEALTH_CMD_DUMP//$'\n'/ }"
     [ "$HEALTH_ESTOP" = "true" ] || fail "action gate did not observe planner emergency stop=true"
     printf '%s\n' "$HEALTH_CMD_DUMP" | twist_is_zero || \
-      fail "action gate did not observe zero /cmd_vel_mpc"
+      fail "action gate did not observe zero /cmd_vel/selected"
     metric "failure_count" "$FAILURE_COUNT"
     metric "first_failure_reason" "${FIRST_FAILURE:-none}"
     log "action server gate failed; skipping downstream sampling"
@@ -1359,8 +1411,8 @@ case "$P2_FAULT_CASE" in
       fail "recovery cancel client produced no structured result"
     printf '%s\n' "$RECOVERY_CANCEL_RESULT" | grep -q 'goal_accepted=yes' || \
       fail "recovery cancel client goal was not accepted"
-    printf '%s\n' "$RECOVERY_CANCEL_RESULT" | grep -q 'cmd_vel_nonzero=yes' || \
-      fail "recovery cancel client did not observe a real non-zero /cmd_vel_mpc"
+    printf '%s\n' "$RECOVERY_CANCEL_RESULT" | grep -q 'selected_cmd_vel_nonzero=yes' || \
+      fail "recovery cancel client did not observe a real non-zero /cmd_vel/selected"
     printf '%s\n' "$RECOVERY_CANCEL_RESULT" | grep -q 'cancel_accepted=yes' || \
       fail "goal manager did not accept the owned action cancellation"
     printf '%s\n' "$RECOVERY_CANCEL_RESULT" | grep -q 'action_result=CANCELED' || \
@@ -1373,9 +1425,9 @@ case "$P2_FAULT_CASE" in
     [ "$RECOVERY_ESTOP" = "true" ] || \
       fail "action cancellation did not latch planner emergency stop"
     ZERO_WINDOW_SAMPLES="${ZERO_WINDOW_SAMPLES:-3}"
-    observe_zero_window "cancelled goal" /cmd_vel_mpc twist_is_zero "$ZERO_WINDOW_SAMPLES" \
-      "$RUN_DIR/cancel_cmd_vel_mpc_window.log" || \
-      fail "old reference resumed a non-zero /cmd_vel_mpc before a new goal"
+    observe_zero_window "cancelled goal" /cmd_vel/selected twist_is_zero "$ZERO_WINDOW_SAMPLES" \
+      "$RUN_DIR/cancel_cmd_vel_selected_window.log" || \
+      fail "old reference resumed a non-zero /cmd_vel/selected before a new goal"
     metric "cancel_zero_command_window_samples" "$ZERO_WINDOW_SAMPLES"
     # Keep the post-cancel acceptance segment short.  It must still traverse a
     # fresh JPS/MINCO/MPC reference, but this fault test is not a long-duration
@@ -1456,7 +1508,7 @@ JPS_POINTS="$(evidence_value jps_max_points)"
 MINCO_POINTS="$(evidence_value minco_max_points)"
 MPC_PRED_POINTS="$(evidence_value mpc_predicted_max_points)"
 EXEC_POINTS="$(evidence_value mpc_executed_max_points)"
-CMD_NONZERO_OBSERVED="$(evidence_bool_as_int "$(evidence_value cmd_vel_nonzero)")"
+CMD_NONZERO_OBSERVED="$(evidence_bool_as_int "$(evidence_value selected_cmd_vel_nonzero)")"
 metric "active_evidence" "${EVIDENCE_RESULT:-unverified}"
 metric "active_evidence_completed" "$(evidence_value completed)"
 metric "active_evidence_duration_s" "$(evidence_value duration_s)"
@@ -1531,20 +1583,20 @@ metric "minco_esdf_refined_guide_points" "$(evidence_value esdf_refined_guide_ma
 metric "minco_reference_path_points" "${MINCO_POINTS:-unverified}"
 metric "mpc_predicted_path_points" "${MPC_PRED_POINTS:-unverified}"
 metric "mpc_executed_path_points" "${EXEC_POINTS:-unverified}"
-metric "cmd_vel_mpc_nonzero_observed" "${CMD_NONZERO_OBSERVED:-unverified}"
+metric "cmd_vel_selected_nonzero_observed" "${CMD_NONZERO_OBSERVED:-unverified}"
 
 # Ownership is sampled by the C++ recorder throughout the action lifetime.
 # The ros2cli snapshots remain in active_ownership.log for diagnostics only:
 # their final sample can race teardown and report a transient zero writer.
-CMD_ACTIVE_PUB="$(evidence_value cmd_vel_mpc_publisher_max)"
-CMD_ACTIVE_SUB="$(evidence_value cmd_vel_mpc_subscriber_max)"
+CMD_ACTIVE_PUB="$(evidence_value selected_cmd_vel_publisher_max)"
+CMD_ACTIVE_SUB="$(evidence_value selected_cmd_vel_subscriber_max)"
 GRID_ACTIVE_PUB="$(evidence_value planning_grid_publisher_max)"
 GRID_ACTIVE_SUB="$(evidence_value planning_grid_subscriber_max)"
 GRID_ACTIVE_PUBLISHERS="$(evidence_value planning_grid_publisher_names)"
 GRID_ADAPTER_SEEN="$(evidence_value planning_grid_adapter_seen)"
 GRID_NAMED_NON_ADAPTER_SEEN="$(evidence_value planning_grid_named_non_adapter_seen)"
 GRID_ANONYMOUS_ENDPOINT_SEEN="$(evidence_value planning_grid_anonymous_endpoint_seen)"
-metric "cmd_vel_mpc_pub/sub_active" "${CMD_ACTIVE_PUB:-unverified}/${CMD_ACTIVE_SUB:-unverified}"
+metric "cmd_vel_selected_pub/sub_active" "${CMD_ACTIVE_PUB:-unverified}/${CMD_ACTIVE_SUB:-unverified}"
 metric "planning_grid_pub/sub_active" "${GRID_ACTIVE_PUB:-unverified}/${GRID_ACTIVE_SUB:-unverified}"
 metric "planning_grid_publishers_active" "${GRID_ACTIVE_PUBLISHERS:-unverified}"
 metric "planning_grid_adapter_seen_active" "${GRID_ADAPTER_SEEN:-unverified}"
@@ -1556,15 +1608,15 @@ if [ "$P2_FAULT_CASE" = "none" ]; then
     fail "/rc_esdf/planning_grid never identified /ats_rog_map_adapter as its active publisher"
   [ "${GRID_NAMED_NON_ADAPTER_SEEN:-yes}" = "no" ] || \
     fail "/rc_esdf/planning_grid identified a named non-adapter publisher: ${GRID_ACTIVE_PUBLISHERS:-unverified}"
-  [ "${CMD_ACTIVE_PUB:-0}" = "1" ] || fail "/cmd_vel_mpc must have exactly one active publisher, got ${CMD_ACTIVE_PUB:-unverified}"
+  [ "${CMD_ACTIVE_PUB:-0}" = "1" ] || fail "/cmd_vel/selected must have exactly one active publisher, got ${CMD_ACTIVE_PUB:-unverified}"
 else
   metric "fault_owner_snapshot" "informational_only; nominal action lifetime enforces unique publishers"
 fi
 
-read -r CMD_PUB CMD_SUB <<<"$(topic_counts /cmd_vel_mpc)"
-metric "cmd_vel_mpc_pub/sub_terminal" "${CMD_PUB:-?}/${CMD_SUB:-?}"
+read -r CMD_PUB CMD_SUB <<<"$(topic_counts /cmd_vel/selected)"
+metric "cmd_vel_selected_pub/sub_terminal" "${CMD_PUB:-?}/${CMD_SUB:-?}"
 
-metric "cmd_vel_mpc_hz" "$(topic_hz /cmd_vel_mpc)"
+metric "cmd_vel_selected_hz" "$(topic_hz /cmd_vel/selected)"
 
 ESTOP="$(echo_once /planner/emergency_stop | awk '/data:/ {print $2; exit}')"
 metric "planner_emergency_stop" "${ESTOP:-unverified}"
@@ -1580,8 +1632,8 @@ twist_is_nonzero() {
   '
 }
 
-CMD_DUMP="$(echo_once /cmd_vel_mpc)"
-metric "cmd_vel_mpc_sample" "${CMD_DUMP//$'\n'/ }"
+CMD_DUMP="$(echo_once /cmd_vel/selected)"
+metric "cmd_vel_selected_sample" "${CMD_DUMP//$'\n'/ }"
 
 TERMINAL_LOCALIZATION_POSE="$(echo_once /localization \
   | awk '/position:/{f=1} f&&/x:/{x=$2} f&&/y:/{y=$2} f&&/z:/{print x" "y; exit}')"
@@ -1642,7 +1694,7 @@ if [ "$P2_FAULT_CASE" = "none" ]; then
   [ "${MINCO_POINTS:-0}" -gt 1 ] 2>/dev/null || fail "nominal MINCO reference is empty"
   [ "${MPC_PRED_POINTS:-0}" -gt 1 ] 2>/dev/null || fail "nominal MPC predicted path is empty"
   [ "${EXEC_POINTS:-0}" -gt 1 ] 2>/dev/null || fail "nominal executed path is empty"
-  [ "${CMD_NONZERO_OBSERVED:-0}" = "1" ] || fail "nominal /cmd_vel_mpc stayed zero"
+  [ "${CMD_NONZERO_OBSERVED:-0}" = "1" ] || fail "nominal /cmd_vel/selected stayed zero"
 fi
 if [ "$P2_FAULT_CASE" = "emergency-stop-recovery" ]; then
   RECOVERY_ACCEPTED=0
@@ -1694,12 +1746,12 @@ if [ "$P2_FAULT_CASE" != "none" ]; then
   metric "fault_planner_emergency_stop" "${FAULT_ESTOP:-unverified}"
   [ "$FAULT_ESTOP" = "true" ] || \
     fail "fault case did not observe planner emergency stop=true"
-  CMD_DUMP_RAW="$(echo_once /cmd_vel_mpc)"
+  CMD_DUMP_RAW="$(echo_once /cmd_vel/selected)"
   CMD_DUMP="$(printf '%s\n' "$CMD_DUMP_RAW" | tr '\n' ' ')"
-  metric "fault_cmd_vel_mpc" "${CMD_DUMP:-unverified}"
+  metric "fault_cmd_vel_selected" "${CMD_DUMP:-unverified}"
   metric "fault_note" "$FAULT_NOTE"
   printf '%s\n' "$CMD_DUMP_RAW" | twist_is_zero || \
-    fail "fault case did not observe zero /cmd_vel_mpc"
+    fail "fault case did not observe zero /cmd_vel/selected"
   case "$P2_FAULT_CASE" in
     input-stale|map-stale|projection-timeout|all-unknown)
       FAULT_MAP_READY="$(echo_once /rog_map_adapter/ready | awk '/data:/ {print $2; exit}')"
