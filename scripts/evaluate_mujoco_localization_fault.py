@@ -97,7 +97,7 @@ class LocalizationFaultEvaluator(Node):
             lambda message: self.stop_states.append(message.data),
             transient_qos,
         )
-        self.create_subscription(Twist, "/cmd_vel_mpc", self._on_command, 20)
+        self.create_subscription(Twist, "/cmd_vel/selected", self._on_command, 20)
         self.action_client = ActionClient(self, NavigateToPose, "/ats_navigate_to_pose")
         self.create_timer(0.5, self._publish_maintenance_observation)
 
@@ -376,7 +376,7 @@ class LocalizationFaultEvaluator(Node):
         self.wait_for(
             self.commands_are_zero,
             3.0,
-            "/cmd_vel_mpc zero after localization fault",
+            "/cmd_vel/selected zero after localization fault",
         )
         stop_reference_count = len(self.references)
         hold_deadline = time.monotonic() + 0.4
@@ -453,7 +453,7 @@ class LocalizationFaultEvaluator(Node):
         self.wait_for(
             self.commands_are_zero,
             3.0,
-            "goal completion /cmd_vel_mpc zero",
+            "goal completion /cmd_vel/selected zero",
         )
 
         final_pose = wrapped.result.final_pose.pose.position

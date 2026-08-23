@@ -397,14 +397,47 @@ def main():
     assert mpc["frame_id"] == rog_map["map_frame"]
     fake_transform = parameters(document, "fake_vel_transform")
     chassis_transform = parameters(document, "chassis_vel_transform")
-    assert mpc["command_topic"] == "/cmd_vel_mpc"
+    serial = parameters(document, "standard_robot_pp_ros2")
+    arbiter = parameters(document, "cmd_vel_arbiter")
+    assert mpc["command_topic"] == "/cmd_vel/autonomy_raw"
     assert fake_transform["input_cmd_vel_topic"] == mpc["command_topic"]
-    assert fake_transform["output_cmd_vel_topic"] == "cmd_vel_gimbal_yaw_odom"
+    assert fake_transform["output_cmd_vel_topic"] == "/cmd_vel/autonomy_gimbal"
     assert (
         chassis_transform["input_cmd_vel_topic"]
         == fake_transform["output_cmd_vel_topic"]
     )
-    assert chassis_transform["output_cmd_vel_topic"] == "/cmd_vel"
+    assert chassis_transform["output_cmd_vel_topic"] == "/cmd_vel/autonomy"
+    assert arbiter["manual_cmd_vel_topic"] == "/cmd_vel"
+    assert arbiter["autonomy_cmd_vel_topic"] == chassis_transform["output_cmd_vel_topic"]
+    assert arbiter["selected_cmd_vel_topic"] == "/cmd_vel/selected"
+    assert arbiter["link_health_topic"] == "/serial/link_up"
+    assert arbiter["require_serial_link"] is True
+    assert arbiter["link_timeout_ms"] == 300
+    assert arbiter["manual_timeout_ms"] == serial["cmd_vel_watchdog_timeout_ms"]
+    assert serial["cmd_vel_topic"] == arbiter["selected_cmd_vel_topic"]
+    assert serial["require_execution_authorization"] is False
+    assert serial["execution_command_topic"] == ""
+    serial_default_config = parameters(
+        load_yaml(
+            workspace
+            / "src/standard_robot_pp_ros2/config/standard_robot_pp_ros2.yaml"
+        ),
+        "standard_robot_pp_ros2",
+    )
+    assert serial_default_config["cmd_vel_topic"] == arbiter["selected_cmd_vel_topic"]
+    assert serial_default_config["require_execution_authorization"] is False
+    assert serial_default_config["execution_command_topic"] == ""
+    serial_node_source = (
+        workspace / "src/standard_robot_pp_ros2/src/standard_robot_pp_ros2.cpp"
+    ).read_text(encoding="utf-8")
+    serial_node_header = (
+        workspace
+        / "src/standard_robot_pp_ros2/include/standard_robot_pp_ros2/standard_robot_pp_ros2.hpp"
+    ).read_text(encoding="utf-8")
+    assert 'declare_parameter("cmd_vel_topic", std::string("/cmd_vel/selected"))' in serial_node_source
+    assert 'declare_parameter("execution_command_topic", std::string(""))' in serial_node_source
+    assert 'std::string cmd_vel_topic_{ "/cmd_vel/selected" };' in serial_node_header
+    assert "if (!execution_command_topic_.empty())" in serial_node_source
     assert joint_state_publisher["source_list"] == ["serial/gimbal_joint_state"]
     assert chassis_transform["joint_state_topic"] == "serial/gimbal_joint_state"
     assert (
@@ -508,18 +541,157 @@ def main():
         assert not removed_path.exists(), f"Nav2-only resource still exists: {removed_path}"
 
     mpc_topic_default = (
-        "IfElseSubstitution(launch_fake_vel_transform, '/cmd_vel_mpc', "
+        "IfElseSubstitution(launch_fake_vel_transform, '/cmd_vel/autonomy_raw', "
         "IfElseSubstitution(launch_chassis_vel_transform, "
-        "'cmd_vel_gimbal_yaw_odom', '/cmd_vel'))"
+        "'/cmd_vel/autonomy_gimbal', '/cmd_vel/autonomy'))"
     )
+    mpc_package_dir = workspace / "src/ats_sentry_nav/ats_swerve_mpc"
+    for relative_path in (
+        "config/ats_swerve_mpc.yaml",
+        "config/ats_swerve_mpc_reality.yaml",
+        "include/ats_swerve_mpc/ats_swerve_mpc_node.hpp",
+        "include/ats_swerve_mpc/qp/control_cycle_snapshot.hpp",
+        "src/main.cpp",
+        "src/ats_swerve_mpc_node.cpp",
+        "src/se2_mpc_controller.cpp",
+    ):
+        mpc_source = (mpc_package_dir / relative_path).read_text(encoding="utf-8")
+        assert "/cmd_vel_mpc" not in mpc_source
+    for config_name in ("ats_swerve_mpc.yaml", "ats_swerve_mpc_reality.yaml"):
+        assert parameters(
+            load_yaml(mpc_package_dir / "config" / config_name), "ats_swerve_mpc"
+        )["command_topic"] == "/cmd_vel/autonomy_raw"
+    assert '"/cmd_vel/autonomy_raw"' in (
+        mpc_package_dir / "src/ats_swerve_mpc_node.cpp"
+    ).read_text(encoding="utf-8")
     chassis_input_default = (
         "IfElseSubstitution(launch_fake_vel_transform, "
-        "'cmd_vel_gimbal_yaw_odom', mpc_cmd_vel_topic)"
+        "'/cmd_vel/autonomy_gimbal', mpc_cmd_vel_topic)"
     )
     for launch_path in (root_launch, nav_real, nav_launch):
         assert_default_expression(launch_path, "mpc_cmd_vel_topic", mpc_topic_default)
     for launch_path in (root_launch, nav_real, nav_launch):
         assert_default_expression(launch_path, "chassis_vel_input_topic", chassis_input_default)
+    serial_link_default = (
+        "IfElseSubstitution(use_robot_state_pub, 'False', 'True')"
+    )
+    for launch_path in (root_launch, nav_real, nav_bringup, nav_launch):
+        assert_default_expression(launch_path, "require_serial_link", serial_link_default)
+    assert '"require_serial_link": require_serial_link' in nav_launch.read_text(
+        encoding="utf-8"
+    )
+    nav_launch_text = nav_launch.read_text(encoding="utf-8")
+    assert 'executable="cmd_vel_arbiter_node"' in nav_launch_text
+    assert 'name="cmd_vel_arbiter"' in nav_launch_text
+
+    mujoco_launch = workspace / "src/sim/ats_mujoco_sim/launch/rmuc_2025_mujoco.launch.py"
+    mujoco_launch_text = mujoco_launch.read_text(encoding="utf-8")
+    assert '"command_topic": "/cmd_vel/autonomy_raw"' in mujoco_launch_text
+    assert '"input_topic": "/cmd_vel/selected"' in mujoco_launch_text
+    assert 'executable="cmd_vel_arbiter_node"' in mujoco_launch_text
+    assert '"require_serial_link": False' in mujoco_launch_text
+    assert '"autonomy_cmd_vel_topic": "/cmd_vel/autonomy_raw"' in mujoco_launch_text
+    assert '"manual_cmd_vel_topic": "/cmd_vel"' in mujoco_launch_text
+
+    gazebo_dir = workspace / "src/sim/gazebo_simulator/rmu_gazebo_simulator"
+    gazebo_launch_text = (gazebo_dir / "launch/ats_gazebo_nav.launch.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"command_topic": "/cmd_vel/autonomy_raw"' in gazebo_launch_text
+    assert 'executable="cmd_vel_arbiter_node"' in gazebo_launch_text
+    assert '"manual_cmd_vel_topic": "/cmd_vel"' in gazebo_launch_text
+    assert '"autonomy_cmd_vel_topic": "/cmd_vel/autonomy_raw"' in gazebo_launch_text
+    assert '"selected_cmd_vel_topic": "/cmd_vel/selected"' in gazebo_launch_text
+    assert '"require_serial_link": False' in gazebo_launch_text
+    assert '"input_topic": "/cmd_vel/selected"' in gazebo_launch_text
+    assert '"lidar_frame": "front_mid360"' in gazebo_launch_text
+    assert '"robot_base_frame": "gimbal_yaw_odom"' in gazebo_launch_text
+    assert '"/cmd_vel_mpc"' not in gazebo_launch_text
+    gazebo_package = (gazebo_dir / "package.xml").read_text(encoding="utf-8")
+    assert "<exec_depend>ats_cmd_vel_arbiter</exec_depend>" in gazebo_package
+    gazebo_adapter = (gazebo_dir / "scripts/ats_bridge/chassis_cmd_adapter.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'self.declare_parameter("input_topic", "/cmd_vel/selected")' in gazebo_adapter
+    assert "from chassis_command_logic import transform_command" in gazebo_adapter
+    assert "output = transform_command(" in gazebo_adapter
+    assert "/cmd_vel_mpc" not in gazebo_adapter
+    recorder_source = (gazebo_dir / "src/ats_navigation_evidence_recorder.cpp").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        '"/cmd_vel/selected"',
+        "selected_cmd_vel_nonzero",
+        "selected_cmd_vel_publisher_max",
+        "selected_cmd_vel_subscriber_max",
+        "observeGazeboLidarPublicationSequence",
+        "gazebo_lidar_dds_publication_sequence_missing_count",
+    ):
+        assert required in recorder_source
+    assert "/cmd_vel_mpc" not in recorder_source
+    cancel_source = (gazebo_dir / "src/ats_navigation_cancel_on_command_client.cpp").read_text(
+        encoding="utf-8"
+    )
+    assert '"/cmd_vel/selected"' in cancel_source
+    assert "/cmd_vel_mpc" not in cancel_source
+    gazebo_bridge = (gazebo_dir / "config/ros_gz_bridge.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "/cmd_vel/selected" in gazebo_bridge
+    assert "/cmd_vel_mpc" not in gazebo_bridge
+    gazebo_runner = workspace / "scripts/test_gazebo_minco_mpc_chain.sh"
+    gazebo_runner_text = gazebo_runner.read_text(encoding="utf-8")
+    assert "/cmd_vel_mpc" not in gazebo_runner_text
+    assert "selected_cmd_vel_publisher_max" in gazebo_runner_text
+    assert "selected_cmd_vel_subscriber_max" in gazebo_runner_text
+    # Gazebo launches executables from the overlay. A source tree newer than
+    # that executable invalidates the runtime evidence, so the regression
+    # runner must reject it before starting a nominal P1 run.
+    for required in (
+        "runtime_binary_is_fresh",
+        "runtime_stale_critical_binary",
+        "ats_cmd_vel_arbiter",
+        "ats_swerve_mpc",
+        "sensor_scan_generation",
+        "small_gicp_relocalization",
+        "rmu_gazebo_simulator",
+    ):
+        assert required in gazebo_runner_text
+
+    loopback_launch = workspace / "src/sim/loopback_sim/launch/loopback_simulation.launch.py"
+    loopback_node = workspace / "src/sim/loopback_sim/nav2_loopback_sim/loopback_simulator.py"
+    loopback_launch_text = loopback_launch.read_text(
+        encoding="utf-8"
+    )
+    assert "'command_topic': '/cmd_vel/selected'" in loopback_launch_text
+    assert "package='ats_cmd_vel_arbiter'" in loopback_launch_text
+    assert "executable='cmd_vel_arbiter_node'" in loopback_launch_text
+    assert "'manual_cmd_vel_topic': '/cmd_vel'" in loopback_launch_text
+    assert "'autonomy_cmd_vel_topic': '/cmd_vel/autonomy_raw'" in loopback_launch_text
+    assert "'selected_cmd_vel_topic': '/cmd_vel/selected'" in loopback_launch_text
+    assert "'require_serial_link': False" in loopback_launch_text
+    assert "self.declare_parameter('command_topic', '/cmd_vel/selected')" in (
+        loopback_node.read_text(encoding="utf-8")
+    )
+    assert "'enable_stamped_cmd_vel': False" in loopback_launch.read_text(
+        encoding="utf-8"
+    )
+    assert "self.declare_parameter('enable_stamped_cmd_vel', False)" in (
+        loopback_node.read_text(encoding="utf-8")
+    )
+    loopback_setup = workspace / "src/sim/loopback_sim/setup.py"
+    assert "os.path.join('share', package_name, 'maps'), glob('maps/*')" in (
+        loopback_setup.read_text(encoding="utf-8")
+    )
+    loopback_package = workspace / "src/sim/loopback_sim/package.xml"
+    assert "<exec_depend>ats_cmd_vel_arbiter</exec_depend>" in loopback_package.read_text(
+        encoding="utf-8"
+    )
+
+    mujoco_twist_bridge = workspace / "src/sim/ats_mujoco_sim/ats_mujoco_sim/twist_to_motion_ctrl.py"
+    assert 'self.declare_parameter("input_topic", "/cmd_vel/selected")' in (
+        mujoco_twist_bridge.read_text(encoding="utf-8")
+    )
 
     real_robot_navigation = (
         workspace / "src/ats_sentry_bringup/launch/real_robot_navigation.launch.py"
@@ -536,6 +708,7 @@ def main():
     assert (
         '"launch_chassis_vel_transform": launch_chassis_vel_transform' in real_robot_text
     )
+    assert '"require_serial_link": "True"' in real_robot_text
     real_robot_defaults = launch_defaults(real_robot_navigation)
     assert isinstance(real_robot_defaults["launch_fake_vel_transform"], ast.Constant)
     assert real_robot_defaults["launch_fake_vel_transform"].value == "True"

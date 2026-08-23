@@ -16,7 +16,7 @@ Design constraints this script enforces:
 * A ``PlanningMapStatus`` is paired with the ``PlanningMapSnapshot`` that shares
   its ``publication_sequence``; an unpaired status is reported as unpaired
   rather than silently matched to the newest snapshot.
-* ``/cmd_vel_mpc`` is judged inside one fixed post-fault window.  It is the
+* ``/cmd_vel/selected`` is judged inside one fixed post-fault window.  It is the
   navigation-domain speed authority; lower-controller and wheel diagnostics do
   not participate in this algorithmic acceptance gate.
 * all-unknown is decided from the structured ``PlanningMapSnapshot`` numeric
@@ -381,7 +381,7 @@ def parse_args() -> argparse.Namespace:
         "--snapshot-topic", default="/rog_map_adapter/planning_snapshot"
     )
     parser.add_argument("--emergency-stop-topic", default="/planner/emergency_stop")
-    parser.add_argument("--cmd-vel-topic", default="/cmd_vel_mpc")
+    parser.add_argument("--cmd-vel-topic", default="/cmd_vel/selected")
     parser.add_argument("--reference-path-topic", default="/minco/reference_path")
     parser.add_argument("--fault-wait-sec", type=float, default=180.0)
     parser.add_argument(
@@ -394,7 +394,7 @@ def parse_args() -> argparse.Namespace:
         "--zero-window-sec",
         type=float,
         default=3.0,
-        help="Length of the post-fault window in which /cmd_vel_mpc must be zero.",
+        help="Length of the post-fault window in which /cmd_vel/selected must be zero.",
     )
     parser.add_argument(
         "--post-window-sec",

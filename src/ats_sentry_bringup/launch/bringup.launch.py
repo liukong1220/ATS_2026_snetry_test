@@ -33,6 +33,9 @@ def generate_launch_description():
     fake_vel_output_topic = LaunchConfiguration("fake_vel_output_topic")
     chassis_vel_input_topic = LaunchConfiguration("chassis_vel_input_topic")
     mpc_cmd_vel_topic = LaunchConfiguration("mpc_cmd_vel_topic")
+    chassis_vel_output_topic = LaunchConfiguration("chassis_vel_output_topic")
+    launch_cmd_vel_arbiter = LaunchConfiguration("launch_cmd_vel_arbiter")
+    require_serial_link = LaunchConfiguration("require_serial_link")
     require_gimbal_status = LaunchConfiguration("require_gimbal_status")
     launch_behavior = LaunchConfiguration("launch_behavior")
     launch_lidar_static_tf = LaunchConfiguration("launch_lidar_static_tf")
@@ -80,19 +83,25 @@ def generate_launch_description():
         DeclareLaunchArgument("launch_chassis_vel_transform", default_value="True"),
         DeclareLaunchArgument(
             "fake_vel_output_topic",
-            default_value=IfElseSubstitution(launch_chassis_vel_transform, "cmd_vel_gimbal_yaw_odom", "/cmd_vel"),
+            default_value=IfElseSubstitution(launch_chassis_vel_transform, "/cmd_vel/autonomy_gimbal", "/cmd_vel/autonomy"),
         ),
         DeclareLaunchArgument(
             "chassis_vel_input_topic",
-            default_value=IfElseSubstitution(launch_fake_vel_transform, "cmd_vel_gimbal_yaw_odom", mpc_cmd_vel_topic),
+            default_value=IfElseSubstitution(launch_fake_vel_transform, "/cmd_vel/autonomy_gimbal", mpc_cmd_vel_topic),
         ),
         DeclareLaunchArgument(
             "mpc_cmd_vel_topic",
             default_value=IfElseSubstitution(
                 launch_fake_vel_transform,
-                "/cmd_vel_mpc",
-                IfElseSubstitution(launch_chassis_vel_transform, "cmd_vel_gimbal_yaw_odom", "/cmd_vel"),
+                "/cmd_vel/autonomy_raw",
+                IfElseSubstitution(launch_chassis_vel_transform, "/cmd_vel/autonomy_gimbal", "/cmd_vel/autonomy"),
             ),
+        ),
+        DeclareLaunchArgument("chassis_vel_output_topic", default_value="/cmd_vel/autonomy"),
+        DeclareLaunchArgument("launch_cmd_vel_arbiter", default_value="True"),
+        DeclareLaunchArgument(
+            "require_serial_link",
+            default_value=IfElseSubstitution(use_robot_state_pub, "False", "True"),
         ),
         DeclareLaunchArgument("require_gimbal_status", default_value="True"),
         DeclareLaunchArgument("launch_behavior", default_value="True"),
@@ -159,7 +168,10 @@ def generate_launch_description():
             "launch_chassis_vel_transform": launch_chassis_vel_transform,
             "fake_vel_output_topic": fake_vel_output_topic,
             "chassis_vel_input_topic": chassis_vel_input_topic,
+            "chassis_vel_output_topic": chassis_vel_output_topic,
             "mpc_cmd_vel_topic": mpc_cmd_vel_topic,
+            "launch_cmd_vel_arbiter": launch_cmd_vel_arbiter,
+            "require_serial_link": require_serial_link,
             "require_gimbal_status": require_gimbal_status, "use_respawn": use_respawn,
             "log_level": log_level,
         }.items(),
