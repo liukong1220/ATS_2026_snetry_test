@@ -3,6 +3,10 @@
 更新时间：2026-08-09。本文是 `ats_swerve_mpc` LTV-QP 后端的准入记录，不是 QP 控制链、
 `qp_shadow`、P2 或 P3 的验收声明。
 
+> 2026-08-23 迁移注记：本文所有 `/cmd_vel_mpc` 描述和运行 artifact 都早于速度仲裁迁移，
+> 仅保留其历史 QP 证据含义。当前接口是 `ats_swerve_mpc -> /cmd_vel/autonomy_raw ->
+> cmd_vel_arbiter -> /cmd_vel/selected`；不得把本文旧话题名作为当前 owner 或运行通过证据。
+
 ## 当前结论
 
 已批准并纳入导航仓 vendor 的活动后端为 **OSQP v1.0.0**。本记录批准的是可审计的
