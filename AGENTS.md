@@ -304,7 +304,7 @@ Keep `agentMessage` for high-value communication only.
 
 ### Git operations — Codex 可提交，Claude 禁止写入
 
-- **Codex**：用户明确授权后，可以执行 `add`、`commit` 和普通 `push`，并负责分仓提交与远端一致性复核。只允许显式暂存本轮文件；提交前必须检查 `git diff --cached --stat` 与 `git diff --cached --check`，提交作者只能使用用户现有个人 Git 身份，禁止添加其他作者或 `Co-authored-by`。
+- **Codex**：在本项目中已获用户持续授权，无需逐轮重复确认，可以执行 `add`、`commit` 和普通 `push`，并负责分仓提交与远端一致性复核。只允许显式暂存本轮文件；提交前必须检查 `git diff --cached --stat` 与 `git diff --cached --check`，提交作者只能使用用户现有个人 Git 身份，禁止添加其他作者或 `Co-authored-by`。
 - **Claude**：禁止执行任何 Git 写操作，包括 `add`、`commit`、`push`、`pull`、`fetch`、建分支、`merge`、`rebase`、`cherry-pick`、`tag` 和 `stash`；只能执行 `status`、`log`、`diff`、`show`、`rev-parse` 等只读检查，并把修改文件与验证结论交给 Codex review、提交和 push。
 - 两者均禁止 `git add .`、`git add -A`、force push 和破坏性恢复；未知改动继续视为用户内容。
 

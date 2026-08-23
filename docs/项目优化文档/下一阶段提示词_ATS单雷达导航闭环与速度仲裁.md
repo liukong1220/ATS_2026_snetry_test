@@ -98,7 +98,7 @@ CAN、电机、轮速、温度、电压、底盘反馈、硬件 watchdog、HIL �
   **[Confidence: Medium]**。
 
 Claude 只实施、测试和报告修改，禁止任何 Git 写操作（包括 `add`、`commit`、`push`、`pull`、
-`stash`、分支或 rebase）。Codex 负责独立 review，并可在用户明确授权后显式暂存、分仓提交和普通 push；
+`stash`、分支或 rebase）。Codex 负责独立 review，并已获本项目持续授权，无需逐轮重复确认即可显式暂存、分仓提交和普通 push；
 文档由 Codex 按已验证证据维护。提交只使用用户既有个人身份，不得加入其他作者或 `Co-authored-by`。
 
 P3 尚未验收，不得声称 Nav2-free；目标/action 现有功能不等于 P3 已通过。
@@ -244,7 +244,7 @@ reference 恢复运动。成功路线必须记录最终坐标、误差、raw/ref
 - 下一阶段提示词文档。
 
 最后分别检查根仓、导航仓、MuJoCo 仓的 `git diff --check`。Claude 不得暂存、提交或推送，只向 Codex
-报告精确文件、diff 要点和原始测试输出；Codex 经用户授权后按接口/算法/仿真/文档拆分中文提交并普通 push。
+报告精确文件、diff 要点和原始测试输出；Codex 已获本项目持续授权，无需逐轮重复确认，按接口/算法/仿真/文档拆分中文提交并普通 push。
 Codex 提交前需核对 `git diff --cached --stat` 与 `git diff --cached --check`，仅显式暂存本轮文件，不使用
 `git add .`、`git add -A`、force push，且不添加其他作者。最终报告必须区分“已验证”“已实现未运行”“推断”“未实现”，
 列出命令、终点结果、唯一 publisher/subscriber、故障矩阵、MuJoCo 物理接触状态、未运行测试与建议提交拆分。

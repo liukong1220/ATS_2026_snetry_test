@@ -14,7 +14,7 @@ P1 Gazebo localization freshness 开始。完整读取：
 5. dependencies.repos 与 dependencies.lock.repos
 
 按门禁持续执行：定位 -> 最小修改 -> 构建 -> 聚焦单测 -> 隔离 Gazebo 闭环 -> 文档。停止条件触发后保存
-raw artifact 和 first violation，停止后续高风险阶段。Codex 经用户明确授权后可以分仓提交并普通 push；
+raw artifact 和 first violation，停止后续高风险阶段。Codex 已获本项目持续授权，无需逐轮重复确认，可以分仓提交并普通 push；
 Claude 禁止任何 Git 写操作。提交只使用用户既有个人身份，不得添加其他作者或 `Co-authored-by`。
 
 当前已验证基线：
@@ -110,7 +110,7 @@ MuJoCo、Gazebo fork、机器人描述仓的 branch/HEAD/upstream/remote/status�
 - src/ats_sentry_nav/ats_swerve_mpc/求解器.md
 - src/sim/gazebo_simulator/rmu_gazebo_simulator/scripts/ats_bridge/gz_livox_bridge.py
 
-Codex 经用户明确授权后可执行显式 `add`、分仓 commit 与普通 push；Claude 禁止所有 Git 写操作。
+Codex 已获本项目持续授权，无需逐轮重复确认，可执行显式 `add`、分仓 commit 与普通 push；Claude 禁止所有 Git 写操作。
 两者均禁止 `git add .`、`git add -A`、破坏性恢复和 force push。Gazebo fork 只允许 Codex 将当前 `main`
 普通 push 到用户 `origin/main`，禁止写 upstream；未知改动均视为用户内容，若与必要 owner 重叠，停止并报告。
 
@@ -174,7 +174,7 @@ CAN、电机、轮速、电流、电压、温度、底盘反馈、硬件 watchdo
 `standard_robot_pp_ros2` 的决策/自瞄相关内容，以及 `serial/gimbal_joint_state`、`GimbalYawStatus` 和
 `YawAuthorityRequest` 的云台与速度变换契约。
 
-当前会话直接实施、验证并依据实际 artifact 更新 `docs/`。Codex 经用户授权后负责 review、显式暂存、
+当前会话直接实施、验证并依据实际 artifact 更新 `docs/`。Codex 已获本项目持续授权，无需逐轮重复确认，负责 review、显式暂存、
 分仓提交和普通 push；Claude 不得执行 Git 写操作。提交只使用用户本机既有 Git 身份，不添加任何其他作者或
 `Co-authored-by`。Gazebo 的
 `gz_chassis_cmd_adapter` 保留 big-yaw 变换、`/motion_control` 与 Gazebo chassis 的唯一发布，只将它的
