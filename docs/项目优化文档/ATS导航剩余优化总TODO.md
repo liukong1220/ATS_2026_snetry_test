@@ -1,7 +1,7 @@
 # ATS 导航剩余优化总 TODO
 
 > 状态：唯一活动导航优化清单
-> 更新时间：2026-08-21
+> 更新时间：2026-08-24
 > 适用范围：Gazebo、MuJoCo 与实机导航软件侧的 ATS 四驱四转哨兵导航链
 > 历史说明：旧阶段 TODO 已退役；历史实现与运行证据通过 Git 历史、
 > `docs/ats_swerve_mpc_ltv_qp_backend_admission.md` 和状态文档追溯。
@@ -41,12 +41,45 @@
   误判为墙体；
 - 独立 physics/navigation launch、RMUC 场景契约测试与南侧通道分段回归已有组件或运行证据；
   完整 `red_box`、默认单点和 P2 故障矩阵必须在本次提交 revision 的全新 ROS domain 重跑后才能验收；
-- 当前实机速度链仍是 `/cmd_vel_mpc -> fake_vel_transform -> chassis_vel_transform -> /cmd_vel`。
-  这尚不能支持无需 remap 的 `teleop_twist_keyboard` 与自主导航的确定性共存。下一阶段必须实现
-  单一 source arbiter：键鼠原始输入保留 `/cmd_vel`，自主链迁为 `/cmd_vel/autonomy`，arbiter 作为
-  `/cmd_vel/selected` 唯一发布者，串口只订阅 `/cmd_vel/selected`。自动源继续受
-  `ExecutionCommand` 约束；手动源不要求该授权，但 emergency stop、链路失效与各自 timeout 仍必须归零；
-- 上述仲裁、串口入口迁移和键鼠到下位机出口的闭环均未实现，禁止把 `/cmd_vel_mpc` 视为已删除。
+- **已实现并经静态验收**：实机、MuJoCo 与 Gazebo 的自主源均为
+  `/cmd_vel/autonomy_raw`；实机经既有 fake/chassis 变换到 `/cmd_vel/autonomy`，四端的最终执行速度
+  都以 `/cmd_vel/selected` 为唯一允许 Twist 输入。`cmd_vel_arbiter` 是 selected 的唯一 publisher；自动源
+  由新鲜 `ExecutionCommand` 租约放行，手动源不要求该授权，但两源均受 emergency stop、链路失效和各自
+  timeout 归零。Gazebo adapter 保留 big-yaw frame 变换和 `/motion_control`/Gazebo chassis 的唯一 owner；
+  loopback 不再以 `/motion_control` 绕过仲裁。
+- **已验证（loopback arbiter 出口，2026-08-23 domain `222`）**：重装当前 launch 后实际启动 arbiter，
+  `/cmd_vel -> /cmd_vel/selected -> loopback_simulator` 有非零 `vx=0.3` 输出，selected 的
+  publisher/subscriber 为 `cmd_vel_arbiter/loopback_simulator=1/1`，`/odom.x=0.825`（artifact：
+  `/tmp/ats_loopback_arbiter_domain222.fEjFyT`）。该试验仅验证
+  手动源仲裁出口，不覆盖 MPC 授权、完整导航或物理仿真。
+- **未验证**：无需 remap 的键鼠到串口或 `/motion_control`、MuJoCo nominal/red_box/P2 fault matrix 和物理
+  接触。历史 `/cmd_vel_mpc` artifact 只用于迁移前的 freshness 诊断；当前 selected 链最新默认 P1 基线
+  为 domain `228`，仍未通过。
+- **未通过（Gazebo P1，2026-08-23 domain `218`）**：默认 `10 Hz / 625`、headless、`rog_map` owner 的
+  recorder 正常完成 `60.008622 s`。`/lidar_odometry` 是 first violation，wall p99/max=
+  `0.818336/0.877152 s`；`/localization`=`0.818289/0.877242 s`，status
+  `TRACKING/non-TRACKING=575/25`、TF failure=`4/601`，action `ABORTED`。运行期
+  `/cmd_vel/selected` owner=`1/2`、terminal=`1/1` 且零速；定位/地图 fail-closed 后没有 JPS/MINCO/MPC
+  path 或非零 selected。这不构成速度仲裁回归，也不满足 P1/P2。
+- **未通过（最新 Gazebo P1，2026-08-23 domain `228`）**：默认 `10 Hz / 625`、headless、`rog_map` owner、
+  关闭 Transport observer/Direct bridge 的 recorder 正常完成 `60.001345 s`。`/lidar_odometry` 是 first
+  violation，wall p99/max=`0.650163/0.743549 s`；`/localization`=`0.650164/0.743591 s`，raw Gazebo LiDAR
+  wall p99/max=`0.708598/0.714906 s`，`/clock` p99=`0.010387 s`、RTF p99=`1.032094`，status
+  `TRACKING/non-TRACKING=585/15`、TF failure=`7/600`。active `/cmd_vel/selected` owner=`1/2`，无非零
+  selected，JPS/MINCO/MPC path 为空，故 `p1_admission_evidence=false`、原因为
+  `freshness_lidar_odometry`。这是定位/地图 fail-closed，不是仲裁回归；artifact：
+  `log/gazebo_minco_mpc_chain/20260823_211350_nominal_none_domain228/`。
+- **已修复（P1 预检）**：domain `217` 暴露 install executable 早于
+  `sensor_scan_generation`/`small_gicp_relocalization` 源码。Gazebo runner 现检查 arbiter、MPC、两定位节点与
+  Gazebo recorder 的源码/可执行文件新旧，失配时写入 `runtime_preflight.txt` 并 fail-fast；217 artifact
+  不作为算法验收。
+- **未通过（P1 上游分层，2026-08-23 domain `219/220`）**：两个 60 s 窗口内 Gazebo Transport
+  PointCloudPacked 分别记录 `599/600` 个样本，wall p99=`0.108672/0.105195 s`；ROS raw
+  `/<robot>/livox/lidar` 仅 `168/150` 个样本，wall p99=`0.639515/0.802505 s`，下游
+  `/lidar_odometry` p99=`0.662703/0.881395 s`。domain `220` 还确认 Fast DDS RMW 不支持
+  reception publication sequence（`supported=no`），sequence 计数 `0` 不能解释为零丢包。两次均
+  `freshness_lidar_odometry`、action `ABORTED`、`p1_admission_evidence=false`；Transport observer 为额外
+  subscriber，对默认链的因果归因仍是 **[Confidence: Medium]**。
 
 ## 2. 当前冻结基线
 
@@ -96,7 +129,10 @@
 - unknown、occupied、outside-map、signed-distance 正负号和 gradient 语义不得放宽；
 - JPS、MINCO S3、独立 yaw、footprint gate、Local Collision Repair 和 SE(2) MPC 必须保留；
 - 四舵轮控制保持车体系 `[vx,vy,wz]`，禁止差速、Ackermann、ICR 或 `vy=0`；
-- `/cmd_vel_mpc` 必须只有 `ats_swerve_mpc` 一个发布 owner；
+- 实机/MuJoCo 中 `/cmd_vel/autonomy_raw` 必须只有 `ats_swerve_mpc` 一个 publisher，
+  `/cmd_vel/selected` 必须只有 `cmd_vel_arbiter` 一个 publisher，且最终出口只能订阅 selected；
+  Gazebo、MuJoCo、loopback 与实机均适用该判据；历史 Gazebo `/cmd_vel_mpc` 记录不得误作当前
+  owner 证据；
 - 急停必须清空 tracker，急停前 reference 不得在恢复后复活；
 - 不能通过增大 freshness timeout、QP iteration、residual 或 deadline 掩盖失败；
 - `solver_mode=qp` 在 QP-3 门禁通过前继续拒绝启动。
@@ -196,9 +232,19 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   与 adapter 写入 CPU tick、RSS、线程和 voluntary/nonvoluntary context-switch 两次原始快照；
 - [x] DDS queue/drop 无可移植 RMW counter 时显式写入
   `unverified_no_portable_rmw_counter`，不得当作零丢包；
+- [x] 可选 Gazebo Transport observer 实际记录 source cadence；domain `219/220` 分别为
+  `599/600` 个样本且 wall p99 `0.108672/0.105195 s`；
+- [x] 原始 ROS PointCloud2 reception publication-sequence 字段在当前 Fast DDS 实际探测为
+  `supported=no`；不以零值推断零丢包；
 - [x] runner 按 `/clock -> /lidar_odometry -> /odometry -> /localization -> status` 顺序输出
   `p1_first_freshness_violation`；分类器只消费单行 recorder witness，不修改运行时 timeout；
-- [ ] 区分 publisher 慢、subscriber 丢包、sim 慢和 wall-time deadline 四类根因；
+- [x] 审计 generic `ros_gz_bridge` 的实际部署 owner：活动 `parameter_bridge` 来自系统安装包
+  `ros-humble-ros-gz-bridge 0.244.25-1jammy.20260608.160002`，workspace 没有该包源码；项目只拥有
+  topic/YAML 与 ROS publisher QoS 配置面。对应 upstream `0.244.25` 的 GZ-to-ROS 回调同步完成
+  `PointCloudPacked -> PointCloud2 -> publish()`，且 `create_gz_subscriber()` 未使用传入的
+  `subscriber_queue_size`；`rmoss_gz_bridge` 只构建 pose/RFID bridge，不是该 LiDAR owner；
+- [ ] 以 generic bridge 内部发布计数或本机 Fast DDS Statistics 区分 publisher 未发布与 DDS
+  subscriber 丢样；当前 RMW sequence 字段不足以完成此归因；
 - [ ] A/B 每次只改变一个因素：headless、recorder、RViz、相机、LiDAR profile、日志；
 - [ ] 所有 profile 使用新 domain、相同 revision、相同起点和固定窗口。
 
@@ -297,6 +343,25 @@ P1/P4 通过 -> QP-2 Shadow 可配对复核 -> QP-3 受控主链切换
   `/cmd_vel_mpc` 仍有唯一 active publisher；动作最终 `ABORTED`、终态 `emergency_stop=true` 且
   `/cmd_vel_mpc` 为零。连续 swept 与 MINCO 离散 footprint 冲突采样仍为 `未验证`，不得由此次
   fail-closed 推导。
+- **未通过（最新默认 P1，2026-08-23 domain `228`）**：在默认 `10 Hz / 625`、headless、
+  `planning_grid_owner=rog_map`、`OBSERVE_GAZEBO_TRANSPORT_LIDAR=false`、
+  `USE_DIRECT_GAZEBO_LIDAR_BRIDGE=false` 与 generic `RELIABLE/KeepLast(10)` 下，recorder 实际完成
+  `60.001345 s`。`/clock` wall p99=`0.010387 s`、RTF p99=`1.032094`，但 raw Gazebo LiDAR、
+  `/lidar_odometry`、`/localization` 的 wall p99/max 分别为 `0.708598/0.714906 s`、
+  `0.650163/0.743549 s`、`0.650164/0.743591 s`。首违仍是 `lidar_odometry`，status
+  `TRACKING/non-TRACKING=585/15`、TF failure=`7/600`，`p1_admission_evidence=false`。JPS/MINCO/MPC
+  path 为空且 selected 没有非零样本，是定位/地图 fail-closed；不支持将根因唯一归为 Gazebo sensor、
+  generic bridge、DDS 或 Point-LIO。下一步仅审计 generic bridge 的可修改 owner，或增加不改变默认链的
+  publisher/DDS 分层计数。
+- **已验证（P1 owner 审计，2026-08-24；部署 + upstream 源码）**：domain `228` 的第一个已测 ROS
+  边界 `/<robot>/livox/lidar` 由 `/opt/ros/humble/lib/ros_gz_bridge/parameter_bridge` 发布；其
+  转换回调、Gazebo Transport 接收线程和内部发布计数均不在四个项目仓库的可修改源码内。
+  `ros_gz_bridge.yaml`/launch 可配置 topic、方向和 ROS publisher `RELIABLE/KeepLast(10)`，但不能在
+  当前 workspace 内修改或观测 generic bridge 的实际 GZ 接收回调；`rmoss_gz_bridge` 也不拥有这条映射。
+  因此触发“owner 不在项目可修改范围”的停止条件，本轮没有修改源码、没有新增计数，也没有占用新
+  `ROS_DOMAIN_ID`。最新运行证据仍仅为上述 domain `228` 原始 artifact，P1 DoD 仍未通过；在显式纳入并
+  授权维护 `ros_gz_bridge` 对应源码，或批准项目外 trace 方案前，不得继续用下游 timeout/QoS/Point-LIO
+  改动替代该边界诊断。
 
 ### 修复原则
 
@@ -370,7 +435,7 @@ straight action。
 - [ ] 阈值进入唯一实际加载配置，并有参数范围校验；
 - [ ] 记录结构化首个拒绝原因；
 - [ ] quality 失败只回退到同 snapshot 上安全的 baseline；
-- [ ] baseline 也失败时不发布 reference，保持急停与 `/cmd_vel_mpc=0`。
+- [ ] baseline 也失败时不发布 reference，保持急停、`/cmd_vel/selected=0` 与最终执行端为零。
 
 ### 7.3 净空与连续性
 
@@ -440,7 +505,7 @@ straight action。
 - discrete/swept collision samples；
 - replan、fallback、repair、失败和恢复次数；
 - localization/map/reference/command age；
-- planning grid 与 `/cmd_vel_mpc` 唯一 owner；
+- planning grid、`/cmd_vel/autonomy_raw` 与 `/cmd_vel/selected` 唯一 owner；
 
 ### 当前 revision 故障矩阵
 
@@ -456,7 +521,8 @@ straight action。
 failure detected within configured deadline
 -> ready=false or planner failure
 -> emergency_stop=true
--> /cmd_vel_mpc=0
+-> /cmd_vel/selected=0
+-> final actuator input=0
 -> old reference cannot revive
 ```
 
@@ -502,7 +568,7 @@ failure detected within configured deadline
 - [ ] 验证 planner collision、footprint gate、Local Collision Repair 与 unsafe trajectory
   都不会提交不安全 reference；
 - [ ] 注入 map stale、unknown、localization stale、无路、目标取消和 solver failure，验证
-  `emergency_stop=true -> /cmd_vel_mpc=0`；
+  `emergency_stop=true -> /cmd_vel/selected=0 -> final actuator input=0`；
 - [ ] 验证 map snapshot、generation、reference timestamp 和 goal identity 不会让旧轨迹复活；
 - [ ] 长时间运行无 queue/RSS/thread/generation 异常增长。
 
