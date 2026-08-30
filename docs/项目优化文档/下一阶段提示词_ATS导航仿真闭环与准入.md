@@ -108,6 +108,10 @@ Claude 的交付范围为实现、测试与结果报告，不包含 Git 写操�
 - TEST_PROFILE 尚未真正控制 straight/corner/S/narrow/red-box 场景，GOAL_YAW 未进入 action payload。
 - 默认保持 solver_mode=ilqr；qp_shadow 只诊断，solver_mode=qp 继续拒绝。
 - runner 在启动前审计合法 ROS domain、残留导航/仿真进程及关键运行二进制新鲜度。
+- 当前 runner 的二进制新鲜度审计范围有限：仅覆盖六个 C++ 导航包和 `*.cpp/*.hpp` 输入；
+  `localization_fusion`、`sensor_scan_generation`、Python 仿真入口及 `*.h` 等输入仍需单独核对。
+- 仲裁器仍存在 ROS/sim clock 与 steady lease 混用的残留风险；低 RTF 场景先按未收敛处理，直到消息年龄和租约
+  采用同一时钟契约或完成节点级回归。
 
 开始前先报告 DoD、精确文件范围、验证清单、假设/未验证项/风险转入条件，并核对根仓、导航仓、
 MuJoCo、Gazebo fork、机器人描述仓的 branch/HEAD/upstream/remote/status。

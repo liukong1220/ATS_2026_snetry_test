@@ -87,6 +87,10 @@ CAN、电机、轮速、温度、电压、底盘反馈、硬件 watchdog、HIL �
   `adapter_lease/service_timeout/input_stale` 各自独立 domain 的 fail-closed 链路通过。`red_box` 目标 4
   因 footprint/JPS/unsafe trajectory 失败，`unknown` 注入晚于目标完成，`unreachable` 的 A* fallback
   使故障前提未成立；这些结果不能合并成 P2 总体通过。MuJoCo 物理接触仍未验证。
+- **审查残留风险（P1 入口前优先处理）**：`cmd_vel_arbiter_node.cpp` 用 ROS/sim clock 计算
+  `ExecutionCommand` age，再用 steady clock 维护租约；当仿真 RTF 低于 1 时，壁钟上已过期的授权可能被
+  当作新鲜样本。另一个范围限制是 MuJoCo runner 目前只检查六个 C++ 包和 `*.cpp/*.hpp`，未覆盖运行图中
+  的定位、传感器及 Python 入口，也未覆盖 `*.h` 等头文件；该检查应视作有限的构建产物提示。
 - **已验证（loopback arbiter 闭环，2026-08-23 domain `222`）**：重装当前 launch 后正式入口启动
   `cmd_vel_arbiter`，`/cmd_vel -> /cmd_vel/selected -> loopback_simulator` 实际观察到非零
   `vx=0.3`；selected publisher/subscriber 为 `cmd_vel_arbiter/loopback_simulator=1/1`，`/odom.x=0.825`
