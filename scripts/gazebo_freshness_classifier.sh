@@ -5,6 +5,34 @@
 # violation in pipeline order. It never changes a runtime timeout or declares
 # admission by itself; the caller owns the resource and action gates.
 
+# Stages follow real message flow, so the reported violation is the earliest
+# observable one rather than the earliest one that happens to be checked:
+#   Gazebo Transport -> generic/direct LiDAR bridge -> /<robot>/livox/lidar
+#   -> gz_livox_bridge -> /livox/lidar -> Point-LIO -> /cloud_registered
+#   -> loam_interface -> /lidar_odometry -> sensor_scan_generation -> /odometry
+#   -> localization_fusion -> /localization -> /localization/status
+# Starting the scan downstream of the ROS boundary would attribute a bridge
+# delivery gap to Point-LIO, which the recorder already measures separately.
+GAZEBO_FRESHNESS_PIPELINE_STAGES=(
+  gazebo_transport_lidar
+  gazebo_lidar
+  livox_input
+  cloud_registered
+  lidar_odometry
+  odometry
+  localization
+  localization_status
+)
+
+# Stages measured only behind an explicit observation switch. Their metrics read
+# `unverified` while the observer is off, which is an absent measurement rather
+# than a contract violation, so they are skipped instead of blocking the
+# classification. Every other stage is emitted unconditionally, so a missing
+# metric there means truncated evidence and still returns 2.
+GAZEBO_FRESHNESS_OPTIONAL_STAGES=(
+  gazebo_transport_lidar
+)
+
 freshness_metric_value() {
   local evidence_line="$1"
   local key="$2"
@@ -33,6 +61,17 @@ freshness_exceeds() {
     'BEGIN { exit !(value > limit) }'
 }
 
+freshness_stage_is_optional() {
+  local stage="$1"
+  local optional_stage
+  for optional_stage in "${GAZEBO_FRESHNESS_OPTIONAL_STAGES[@]}"; do
+    if [ "$stage" = "$optional_stage" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Output is a compact key/value record suitable for both shell metrics and
 # deterministic tests. Return 2 when a required metric is unavailable.
 classify_gazebo_freshness() {
@@ -56,10 +95,19 @@ classify_gazebo_freshness() {
     return 0
   fi
 
-  for stage in lidar_odometry odometry localization localization_status; do
+  for stage in "${GAZEBO_FRESHNESS_PIPELINE_STAGES[@]}"; do
     p99="$(freshness_metric_value "$evidence_line" "${stage}_p99_wall_interval_s")"
     max_gap="$(freshness_metric_value "$evidence_line" "${stage}_max_wall_interval_s")"
     if ! freshness_is_number "$p99" || ! freshness_is_number "$max_gap"; then
+      if freshness_stage_is_optional "$stage"; then
+        observation_enabled="$(freshness_metric_value "$evidence_line" \
+          "${stage}_observation_enabled")"
+        if [[ -z "$p99" && -z "$max_gap" ]] ||
+          { [[ "$p99" == "unverified" && "$max_gap" == "unverified" ]] &&
+            [[ "$observation_enabled" != "yes" ]]; }; then
+          continue
+        fi
+      fi
       printf 'first_violation=unverified reason=%s_timing_missing\n' "$stage"
       return 2
     fi
