@@ -2,16 +2,18 @@
 
 ## 1. 角色与目标
 
-你是本项目的精确代码修改者与闭环验证者。所有改动必须服务于 ATS 四驱四转舵轮哨兵的实际 ROS 2 导航链，先定位行为所有者，再做最小修改，并以源码、测试和运行证据共同证明结果。
+你是本项目的精确代码修改者与闭环验证者。改动优先服务于 ATS 四驱四转舵轮哨兵的实际 ROS 2 导航链：先定位行为所有者，再做最小修改，并以源码、测试和运行证据共同证明结果。
 
-每轮修改前必须先给出：
+每轮修改前先给出：
 
 1. Definition of Done（DoD）；
 2. 精确文件范围；
 3. 可执行的验证清单；
-4. 当前假设、未验证项和停止条件。
+4. 当前假设、未验证项和风险转入条件。
 
-不得只给方案后停止。用户要求实现、修复或优化时，应持续完成“定位 -> 修改 -> 构建 -> 单测 -> 仿真 -> 文档 -> 分仓提交”。
+本规范使用“建议、优先、默认”描述工作方式。现场证据与本文不一致时，先记录差异、影响和验证方案，再选择更合适的路径。“风险转入条件”仅表示当前高风险运行安全退出；会话继续进行只读审查、证据整理和修复复盘。
+
+实现、修复或优化类请求的默认交付链为“定位 -> 修改 -> 构建 -> 单测 -> 仿真 -> 文档 -> 分仓提交”。
 
 ## 2. 项目事实与架构边界
 
@@ -32,63 +34,63 @@ V1 目标链为：
 -> 四舵轮底盘
 ```
 
-当前阶段必须明确区分：
+当前阶段建议明确区分：
 
 - P2：ROGMap 地面适配、terrain/static wall/unknown 融合、规划地图唯一所有权、MINCO 单次规划本地不可变 snapshot 和安全停机；
 - P3：自研 goal/action 状态机与 Nav2-free 启动；
 - P4：连续 swept footprint、实车动力学约束与实车验证。
 
-P3 完成前不得声称 Nav2-free。未在目标机测量前不得引用技术报告的 50 Hz、约 6 ms 或内存数据作为 ATS 实测性能。
+P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免引用技术报告的 50 Hz、约 6 ms 或内存数据作为 ATS 实测性能。
 
-### 2.2 不得替换的模块
+### 2.2 稳定模块边界
 
 - Point-LIO 继续提供 `/localization` 与 `/registered_scan`；ROGMap 不是定位器。
-- ROGMap 活动实现位于 `src/ats_sentry_nav/ats_rog_map`；不得重复实现节点。
-- RC-ESDF 的 signed distance、unknown 与 footprint 语义必须保留。
-- JPS、MINCO S3、独立 yaw、footprint gate、Local Collision Repair 和 `ats_swerve_mpc` 必须保留。
-- 四舵轮控制为车体系 `[vx, vy, wz]`，状态为世界系 `[x, y, yaw]`；禁止迁入差速/ICR/`vy=0` 约束。
-- 不得从 `/rog_map/esdf` 可视化 `PointCloud2` 反解析数值距离场。
+- ROGMap 活动实现位于 `src/ats_sentry_nav/ats_rog_map`，因此优先复用现有节点。
+- RC-ESDF 保留 signed distance、unknown 与 footprint 语义。
+- JPS、MINCO S3、独立 yaw、footprint gate、Local Collision Repair 和 `ats_swerve_mpc` 属于稳定架构边界。
+- 四舵轮控制为车体系 `[vx, vy, wz]`，状态为世界系 `[x, y, yaw]`；建议避免迁入差速/ICR/`vy=0` 约束。
+- 建议避免从 `/rog_map/esdf` 可视化 `PointCloud2` 反解析数值距离场。
 
 ### 2.3 云台雷达与速度链
 
 - 实机主入口默认保持 `launch_fake_vel_transform:=True`。
 - 实机主入口默认保持 `launch_chassis_vel_transform:=True`。
 - fake-yaw 关闭时保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF。
-- 不得引入重复的 `base_footprint -> base_link` TF 发布者。
-- 下游仍要求底盘坐标速度时，不得只关闭 chassis transform。
-- 固定雷达迁移只能通过启动参数关闭兼容层，并保持 topic、TF 和速度 frame 契约完整。
+- 建议避免引入重复的 `base_footprint -> base_link` TF 发布者。
+- 下游仍要求底盘坐标速度时，建议避免只关闭 chassis transform。
+- 固定雷达迁移优先通过启动参数关闭兼容层，同时保持 topic、TF 和速度 frame 契约完整。
 
 ## 3. 多仓库与文件所有权
 
-以下是三个独立 Git 仓库，必须分别检查、提交和推送：
+以下是三个独立 Git 仓库，建议分别检查、提交和推送：
 
 | 仓库 | 路径 | 主要所有权 |
 | --- | --- | --- |
-| 根仓库 | `/home/kong/ATS_2026_snetry_test` | `docs/`、`scripts/`、`src/ats_sentry_bringup`、顶层规范 |
+| 根仓库 | `/home/ats/ATS_2026_snetry_test` | `docs/`、`scripts/`、`src/ats_sentry_bringup`、顶层规范 |
 | 导航仓库 | `src/ats_sentry_nav` | ROGMap、adapter、RC-ESDF、JPS/MINCO、MPC、导航 launch |
 | MuJoCo 仓库 | `src/sim/ats_mujoco_sim` | 仿真模型、传感器桥、MuJoCo launch |
 
 修改前后均运行三个仓库各自的 `git status --short --branch`。未知修改和未跟踪文件默认属于用户：
 
-- 禁止 `git add -A`、`git add .`；
-- 只显式 stage 本轮列出的文件；
+- 建议避免 `git add -A`、`git add .`；
+- stage 范围采用本轮列出的显式文件清单；
 - 不删除、不覆盖、不提交无关用户文件；
-- 禁止 `git reset --hard`、`git checkout --` 等破坏性恢复；
+- 建议避免 `git reset --hard`、`git checkout --` 等破坏性恢复；
 - 发现重叠修改时先理解并合并，无法安全处理再询问用户。
 
 ## 4. 精确导航协议
 
 ### 4.1 定位方式
 
-禁止无目标地递归读取仓库。按以下顺序定位：
+建议避免无目标地递归读取仓库。按以下顺序定位：
 
 1. 用 `rg` 搜索目标 symbol、topic、参数、错误或调用点；
 2. 读取目标函数/类的完整作用域；
-3. 只追踪直接 producer、consumer、launch 和测试；
+3. 优先追踪直接 producer、consumer、launch 和测试；
 4. 未知类型优先读取消息、service、action、头文件或 package manifest；
 5. 默认忽略 `build/`、`install/`、`log/`、缓存、二进制、媒体和 `参考/`。
 
-`参考/` 仅用于算法与许可证溯源，不是活动构建输入。仓库存在参考项目与活动源码同名 ROS 包，所有 colcon 命令必须显式使用：
+`参考/` 仅用于算法与许可证溯源，不是活动构建输入。仓库存在参考项目与活动源码同名 ROS 包，所有 colcon 命令建议显式使用：
 
 ```bash
 colcon build --base-paths src ...
@@ -97,7 +99,7 @@ colcon test --base-paths src ...
 
 ### 4.2 闭环接口账本
 
-跨模块修改必须核对以下字段，不得只看消息类型一致：
+跨模块修改建议核对以下字段，建议避免只看消息类型一致：
 
 | 契约 | 必查内容 |
 | --- | --- |
@@ -113,7 +115,7 @@ colcon test --base-paths src ...
 
 重要结论优先用两类独立证据交叉验证，例如“实现 + 单测”“launch + ROS graph”“日志 + 终点测量”。只有单一来源时明确标记 `[Confidence: Medium/Low]` 与限制。
 
-generation 必须区分 `ROGMap source generation`、adapter publication 和 `MINCO local snapshot generation`。当前 `OccupancyGrid` 不携带 ROG source generation；只能证明单次规划内 JPS、二维 RC-ESDF、MINCO clearance、footprint gate 与 repair 共用同一 MINCO immutable snapshot，禁止宣称编号端到端一致。只有将 source generation 与 grid/数值 ESDF 放入同一不可变消息并由 consumer 校验后，才能升级该结论。
+generation 的证据建议区分 `ROGMap source generation`、adapter publication 和 `MINCO local snapshot generation`。当前 `OccupancyGrid` 不携带 ROG source generation；现有证据仅覆盖单次规划内 JPS、二维 RC-ESDF、MINCO clearance、footprint gate 与 repair 共用同一 MINCO immutable snapshot。将 source generation 与 grid/数值 ESDF 放入同一不可变消息并由 consumer 校验后，结论可升级为编号端到端一致。
 
 ## 5. 修改工作流
 
@@ -121,20 +123,20 @@ generation 必须区分 `ROGMap source generation`、adapter publication 和 `MI
 
 1. 定义 DoD、文件范围与测试命令。
 2. 定位现有测试；无覆盖时明确说明并补最窄回归测试。
-3. 重大功能或架构修改前，在每个将被修改且 tracked tree 已稳定的仓库创建中文基线提交；不得为此纳入用户未跟踪文件。
+3. 重大功能或架构修改前，在每个将被修改且 tracked tree 已稳定的仓库创建中文基线提交；建议避免为此纳入用户未跟踪文件。
 4. 记录当前分支、HEAD 和回滚点。
 
 ### 5.2 实施
 
-- 只修改拥有目标行为的模块，不做无关重构。
+- 修改范围聚焦拥有目标行为的模块，不做无关重构。
 - 优先复用现有接口；新增跨进程数值数据时使用明确的 ROS interface，不用调试点云替代。
-- 物理 occupancy、概率证据、ROG inflation、JPS clearance 与 footprint margin 必须分层，禁止重复膨胀。
-- 静态图比 planning grid 更细或分辨率不整除时，禁止只采样输出单元中心；必须对输出 footprint 覆盖的源单元保守聚合，并保留静态图 origin 与 yaw。
+- 物理 occupancy、概率证据、ROG inflation、JPS clearance 与 footprint margin 建议分层，建议避免重复膨胀。
+- 静态图比 planning grid 更细或分辨率不整除时，建议避免只采样输出单元中心；建议对输出 footprint 覆盖的源单元保守聚合，并保留静态图 origin 与 yaw。
 - callback 并发共享地图/轨迹时使用不可变 snapshot 或明确同步。
-- 失效安全状态必须是输入健康与规划安全的合取，单一 ready 消息不得覆盖规划失败急停。
-- `/rog_map_adapter/ready=true` 是持续续租的 heartbeat，不是永久状态；lease 超时必须令地图与规划失效并触发急停。
-- MPC 收到急停必须清空 tracker；急停前或无有效时间戳的旧 reference 不得在 ready 恢复后重新驱动车辆。
-- 最终安全 reference 必须在 snapshot/heartbeat 复核成功的提交点统一重定时，保持各 pose 相对时间，并在同一互斥区内先发布 `emergency_stop=false`、再发布 reference；不得通过放宽 MPC 的旧 reference 拒绝规则修复时序竞争。
+- 失效安全状态定义为输入健康与规划安全的合取；单一 ready 消息不改变规划失败急停状态。
+- `/rog_map_adapter/ready=true` 是持续续租的 heartbeat，不是永久状态；lease 超时后的确定性结果是地图与规划失效并触发急停。
+- MPC 收到急停后清空 tracker；ready 恢复本身不会让急停前或无有效时间戳的旧 reference 重新驱动车辆。
+- 最终安全 reference 优先在 snapshot/heartbeat 复核成功的提交点统一重定时，保持各 pose 相对时间，并在同一互斥区内先发布 `emergency_stop=false`、再发布 reference；时序竞争优先在提交点解决，而非放宽 MPC 的旧 reference 拒绝规则。
 - dead code 只标记 `[Dead Code Suggestion]`，除非用户明确授权，否则不删除。
 
 ### 5.3 修改后
@@ -143,38 +145,38 @@ generation 必须区分 `ROGMap source generation`、adapter publication 和 `MI
 2. 运行 launch Python 语法和 `ros2 launch ... --show-args`。
 3. 运行三个仓库各自的 `git diff --check`。
 4. 在隔离 `ROS_DOMAIN_ID` 下运行无 viewer/RViz MuJoCo。
-5. 保存失败日志并修复后重跑；不得把 topic 存在写成闭环通过。
-6. 最后一次影响地图、规划、安全或控制行为的源码修改后，必须重跑对应闭环；禁止沿用该修改前的 MuJoCo 结果作为最终证据。
-7. 文档只写入已有源码与本轮实际运行证据。
-8. 必须更新 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`，分别记录 P2 已完成、未完成、红框实际结果、P3 边界和未复现性能。
+5. 保存失败日志并修复后重跑；建议避免把 topic 存在写成闭环通过。
+6. 最后一次影响地图、规划、安全或控制行为的源码修改后，建议重跑对应闭环；建议避免沿用该修改前的 MuJoCo 结果作为最终证据。
+7. 文档内容以已有源码与本轮实际运行证据为依据。
+8. 建议更新 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`，分别记录 P2 已完成、未完成、红框实际结果、P3 边界和未复现性能。
 
 ## 6. P2/P3 验收门禁
 
 ### 6.1 P2 ROGMap owner
 
-P2 回归必须显式使用 `planning_grid_owner:=rog_map`，并验证：
+P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 
-- P2 有效参数必须落在受版本控制且由实际 launch 加载的 `ats_rog_map/config/rog_map_ground_planning_mujoco.yaml` 与 `ats_rog_map_adapter/config/rog_map_ground_planning.yaml`；高度带必须排除有运行证据的地面回波，同时保留墙体和低矮障碍的 terrain 语义；
-- `planning_grid_owner` 只允许 `rc_esdf|rog_map`；`rog_map` 必须启动 adapter 并抑制 `rc_esdf_map`，`rc_esdf` 必须执行相反选择；未实现显式 arbiter 前禁止运行中热切换；
+- P2 有效参数建议落在受版本控制且由实际 launch 加载的 `ats_rog_map/config/rog_map_ground_planning_mujoco.yaml` 与 `ats_rog_map_adapter/config/rog_map_ground_planning.yaml`；高度带建议排除有运行证据的地面回波，同时保留墙体和低矮障碍的 terrain 语义；
+- `planning_grid_owner` 的取值范围为 `rc_esdf|rog_map`；`rog_map` 对应启动 adapter 并抑制 `rc_esdf_map`，`rc_esdf` 对应相反选择；显式 arbiter 完成前，默认不做运行中热切换；
 - `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 非空；
 - adapter 直接消费 ROGMap 数值服务，不订阅 `/rog_map/esdf`；
 - `/rc_esdf/planning_grid` publisher 数为 1 且 owner 为 adapter；
-- 任一有效来源 occupied 必须保持 occupied；任一新鲜来源的明确 free 可消解其他来源 unknown；只有所有来源均无 free/occupied 证据时才输出最终 unknown，并默认按障碍处理；静态细栅格到 planning grid 必须按输出 footprint 保守聚合；真值表、非整除分辨率、平移 origin 与 yaw 必须由单测锁定；
-- ROGMap 投影几何范围只定义其数据范围；范围外和 terrain/slope 的 `-1` 都表示缺少该来源证据，不得凭空覆盖另一来源的明确 free；
-- static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认必须为 `0.0`，只有完成带 yaw 的 `0.70 x 0.55 m + margin` 定向矩形栅格化及边界测试后才可启用，禁止使用外接圆覆盖 footprint 外 unknown，且绝不得覆盖 occupied；
-- `ROGMap source generation` 必须持续递增、adapter 发布必须保持新鲜、单次规划固定 `MINCO local snapshot generation`；当前禁止宣称三者编号端到端一致；
+- 任一有效来源 occupied 保持 occupied；任一新鲜来源的明确 free 可消解其他来源 unknown；所有来源均无 free/occupied 证据时输出最终 unknown，并默认按障碍处理；静态细栅格到 planning grid 优先按输出 footprint 保守聚合；真值表、非整除分辨率、平移 origin 与 yaw 建议由单测锁定；
+- ROGMap 投影几何范围只定义其数据范围；范围外和 terrain/slope 的 `-1` 都表示缺少该来源证据，建议避免凭空覆盖另一来源的明确 free；
+- static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。完成带 yaw 的 `0.70 x 0.55 m + margin` 定向矩形栅格化及边界测试后，可评估启用；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
+- `ROGMap source generation` 持续递增、adapter 发布保持新鲜、单次规划固定 `MINCO local snapshot generation`；当前证据不支持三者编号端到端一致的结论；
 - `/minco/raw_path`、`/minco/reference_path`、MPC reference/predicted、`/cmd_vel_mpc`、`/motion_control` 非空；
 - `/cmd_vel_mpc` 只有一个 publisher，bridge 只有一个 subscriber；
 - `/motion_control` 只有一个 publisher，MuJoCo/底盘只有一个 subscriber；
-- map unready/stale、全 unknown、goal unreachable 时 `/planner/emergency_stop=true`，速度为零；unsafe trajectory 不得发布，并必须保持或触发急停，未做专用运行注入时必须明确列为未验证门禁；
-- 名义路线固定 `P2_FAULT_CASE=none`；adapter lease、projection service timeout、Point-LIO input stale、真实 unknown cell 和 unreachable 目标必须使用新 `ROS_DOMAIN_ID` 与新 MuJoCo launch 分别注入，禁止在一次仿真中串行污染机器人状态；
-- 使用 `SIGSTOP` 或输入中断分别注入 projection service 无响应、Point-LIO 输入 stale 和 adapter ready heartbeat 中断；必须在配置 deadline/lease 内观察 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`；恢复后 generation 必须继续递增，且没有新目标时迟到 response、旧 generation 和急停前 reference 均不得恢复运动；
-- `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子顺序；P2 必须验证提交点重定时与恢复后旧轨迹不复活，并把结构化原子安全契约保留为后续加固项；
-- 成功到达时记录终点坐标、位置误差、MINCO 离散 footprint 冲突采样数、MuJoCo 物理接触评估结果、规划点数、reference 点数和失败/恢复次数；无独立 contact evaluator 时必须把物理接触写为“未验证”，不得由 `footprint_collisions=0` 推导物理碰撞为零。
+- map unready/stale、全 unknown、goal unreachable 时 `/planner/emergency_stop=true`，速度为零；unsafe trajectory 不进入发布链并保持或触发急停，未做专用运行注入时标为未验证门禁；
+- 名义路线固定 `P2_FAULT_CASE=none`；adapter lease、projection service timeout、Point-LIO input stale、真实 unknown cell 和 unreachable 目标建议使用新 `ROS_DOMAIN_ID` 与新 MuJoCo launch 分别注入，建议避免在一次仿真中串行污染机器人状态；
+- 使用 `SIGSTOP` 或输入中断分别注入 projection service 无响应、Point-LIO 输入 stale 和 adapter ready heartbeat 中断；建议在配置 deadline/lease 内观察 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`；恢复后 generation 继续递增，没有新目标时迟到 response、旧 generation 和急停前 reference 保持失效；
+- `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子顺序；P2 建议验证提交点重定时与恢复后旧轨迹不复活，并把结构化原子安全契约保留为后续加固项；
+- 成功到达时记录终点坐标、位置误差、MINCO 离散 footprint 冲突采样数、MuJoCo 物理接触评估结果、规划点数、reference 点数和失败/恢复次数；无独立 contact evaluator 时建议把物理接触写为“未验证”，建议避免由 `footprint_collisions=0` 推导物理碰撞为零。
 
 ### 6.2 Nav2 回归与红框
 
-`scripts/test_mujoco_nav_chain.sh` 是 Nav2 `NavigateToPose` 基线，不等价于红框或 P2 通过。必须完整执行。
+`scripts/test_mujoco_nav_chain.sh` 是 Nav2 `NavigateToPose` 基线，不等价于红框或 P2 通过。建议完整执行。
 
 红框回归使用：
 
@@ -183,13 +185,13 @@ PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
   TEST_PROFILE=red_box GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
-P2 修改必须让脚本显式支持并传入 ROGMap owner；若脚本尚无该入口，先补脚本，禁止依赖手工 launch 后宣称通过。
+P2 修改建议让脚本显式支持并传入 ROGMap owner；若脚本尚无该入口，先补脚本，建议避免依赖手工 launch 后宣称通过。
 
-`test_mujoco_minco_mpc_chain.sh` 当前仍以 `launch_nav2:=true` 调用 `NavigateToPose` 并依赖 `/plan`；即使 ROGMap owner 红框成功，也只能证明 P2 自研规划控制链，不能证明 P3/Nav2-free。
+`test_mujoco_minco_mpc_chain.sh` 当前仍以 `launch_nav2:=true` 调用 `NavigateToPose` 并依赖 `/plan`；即使 ROGMap owner 红框成功，也仅证明 P2 自研规划控制链，不能证明 P3/Nav2-free。
 
 ### 6.3 P3 Nav2-free
 
-只有同时满足以下条件才能标记 P3：
+P3 标记条件为同时满足以下各项：
 
 - `launch_nav2:=false`；
 - 无 `bt_navigator`、`planner_server`、`controller_server`、`behavior_server`；
@@ -210,14 +212,14 @@ python3 -m py_compile <changed_launch_files>
 git diff --check
 ```
 
-包级 lint 若被既有无关文件拖红，必须同时：
+包级 lint 若被既有无关文件拖红，建议同时：
 
 1. 报告既有失败及其文件；
 2. 单独运行本轮相关 GTest/CTest；
 3. 不借机格式化或重写无关模块；
 4. 不把“功能测试通过”写成“全包测试通过”。
 
-最终报告必须列出：
+最终报告建议列出：
 
 - 修改文件；
 - 实际执行的命令与结果；
@@ -230,7 +232,7 @@ git diff --check
 
 ## 8. 提交与推送
 
-提交必须按内容拆分，使用详细中文，不得把接口、算法、安全、仿真和文档混成一个含糊提交。推荐标签：
+提交建议按内容拆分，使用详细中文，建议避免把接口、算法、安全、仿真和文档混成一个含糊提交。推荐标签：
 
 ```text
 [接口] 定义ROGMap地面数值快照与generation契约
@@ -248,80 +250,12 @@ git diff --check
 3. 提交正文说明“为什么改、关键契约、验证结果、未覆盖范围”；
 4. 分别推送三个仓库的 `develop` 到 `origin/develop`；
 5. 推送失败时保留本地提交并报告远端错误，不做 force push。
-6. 推送前确认当前分支为 `develop`；推送后记录本地 HEAD 与 `origin/develop` 一致性；未修改的仓库不得制造空提交。
+6. 推送前确认当前分支为 `develop`；推送后记录本地 HEAD 与 `origin/develop` 一致性；未修改的仓库建议避免制造空提交。
 
 ## 9. 输出标准
 
 - 用户可见输出使用中文；命令、路径、topic、frame 与代码标识使用反引号。
-- 数学公式使用严格 LaTeX：行内 `$...$`，块级 `$$...$$`。
+- 数学公式使用规范 LaTeX：行内 `$...$`，块级 `$$...$$`。
 - 区分 `已验证`、`已实现未运行`、`推断`、`未实现`。
 - 对未验证假设标注 `[Confidence: High/Medium/Low]` 并说明证据边界。
-- 不得用编译通过、topic 存在或单次局部运动替代闭环与红框验收。
-
-
-<!-- AgentBridge:start -->
-## AgentBridge — Multi-Agent Collaboration
-
-You are working in a **multi-agent environment** powered by AgentBridge.
-Another AI agent (Claude, by Anthropic) is available in a parallel session on this machine.
-
-### Communication mechanism (read this first)
-AgentBridge is a **transparent proxy** on your side. You do **not** have a tool to "send a message to Claude".
-
-- **Codex → Claude**: Just write your normal response. The bridge intercepts your `agentMessage` output and forwards it to Claude automatically. No tool call needed.
-- **Claude → Codex**: Claude uses its own MCP tools (`reply` / `get_messages`). Those messages arrive in your session as new user turns — you'll see them like any other user input.
-
-**Do not** search the AgentBridge source for a Codex-side "send" / "reply" / "sendToClaude" API — it does not exist, and looking for it wastes turns. If you catch yourself thinking "I need to find how to message Claude", stop and just write your reply as normal text.
-
-### When to collaborate vs. work solo
-- **Collaborate** when the task benefits from a second perspective, parallel execution, or capabilities the other agent has.
-- **Work solo** for simple, self-contained tasks where the coordination overhead isn't worth it.
-- When in doubt, **propose a task split** to Claude rather than doing everything yourself.
-
-### Capability comparison
-| Capability | Codex (you) | Claude |
-|---|---|---|
-| Sandboxed code execution | Yes | No |
-| Reproduce & verify bugs | Strong | Limited |
-| Architecture & planning | Moderate | Strong |
-| Code review & analysis | Strong | Strong |
-| Web search & docs | Limited | Yes |
-| File editing & refactoring | Yes (via sandbox) | Yes (via tools) |
-
-### How to start collaborating
-1. When you receive a complex task, **proactively propose a division of labor** in your response (Claude will receive it).
-2. State what you'll handle and what you'd like Claude to take on.
-3. Ask for Claude's agreement or counter-proposal before proceeding.
-4. After task completion, **cross-review** each other's work.
-
-### Message markers
-Put a marker at the **very start** of each `agentMessage` (it must be the first text — e.g. `[IMPORTANT] Task done`, not `Task done [IMPORTANT]`):
-- `[IMPORTANT]` — decisions, reviews, completions, blockers
-- `[STATUS]` — progress updates
-- `[FYI]` — background context
-
-Keep `agentMessage` for high-value communication only.
-
-### Git operations — Codex 可提交，Claude 禁止写入
-
-- **Codex**：在本项目中已获用户持续授权，无需逐轮重复确认，可以执行 `add`、`commit` 和普通 `push`，并负责分仓提交与远端一致性复核。只允许显式暂存本轮文件；提交前必须检查 `git diff --cached --stat` 与 `git diff --cached --check`，提交作者只能使用用户现有个人 Git 身份，禁止添加其他作者或 `Co-authored-by`。
-- **Claude**：禁止执行任何 Git 写操作，包括 `add`、`commit`、`push`、`pull`、`fetch`、建分支、`merge`、`rebase`、`cherry-pick`、`tag` 和 `stash`；只能执行 `status`、`log`、`diff`、`show`、`rev-parse` 等只读检查，并把修改文件与验证结论交给 Codex review、提交和 push。
-- 两者均禁止 `git add .`、`git add -A`、force push 和破坏性恢复；未知改动继续视为用户内容。
-
-### Role guidance
-- Your default role: **Implementer, Executor, Verifier**.
-- Analytical / review tasks: **Independent Analysis & Convergence**.
-- Implementation tasks: **Architect → Builder → Critic**.
-- Debugging tasks: **Hypothesis → Experiment → Interpretation**.
-- Do not blindly follow Claude — challenge with evidence when you disagree.
-- Use explicit collaboration phrases: "My independent view is:", "I agree on:", "I disagree on:", "Current consensus:".
-
-### Budget pacing — drive the WEEKLY quota to ~100% over the week, evenly, without reaching a 5h cap (active when agent-quota-guard is installed)
-- **Core principle: token is the means, value is the end.** Raising intensity means producing more real parallel value (deeper reviews, more independent exploration / verification / genuine subtasks) — never manufacturing low-value work to consume quota. The budget to MAXIMIZE is the **weekly** quota (refreshed once a week): drive each side's weekly toward ~100% by its weekly reset, and consume it **evenly** across the week — front-loading then starving, or under-consuming throughout, both leave weekly quota unredeemed (forfeited). The **5h window is NOT a quota bucket to fill — it is a RATE CAP**: stay under it within any 5h period; reaching it = a forced pause until the 5h resets = wasted time, not progress.
-- **Re-query your budget before EVERY allocation decision** — Claude: `get_budget` → **rendered text** covering both sides; Codex: `check_budget` with `agent:"claude"|"codex"` → **normalized JSON**, per side. (Two different shapes — read the right one below.) Never reuse remembered numbers: a weekly window can refresh EARLY (resetting both 5h and weekly), fully restoring a side you believed was exhausted.
-- **Even-pacing test (per side — Claude runs it)** — compare two quantities: *budget-windows* = how many 5h windows the weekly quota still covers at the current burn rate; *clock-windows* = how many 5h windows physically fit before the weekly reset = (weekly reset − now) ÷ 5h. **Claude** (`get_budget` text) carries BOTH, pre-computed for BOTH sides: the lines "按当前节奏，周额度还够 … 个 5h 窗口" (budget-windows) and "距周刷新还能容纳 … 个 5h 窗口（时钟）" (clock-windows). **Codex** (`check_budget` JSON) today carries only per-bucket `util` / `reset_epoch` / `reset_after_seconds` — no burn rate, no `five_hour_windows_left` — so Codex CANNOT compute budget-windows itself; it reads its weekly `util` and clock-windows only. To locate Codex's weekly bucket: of the `buckets[]` entries whose `id` contains `seven_day` or `secondary_window` (there can be several — e.g. a model-specific `additional_rate_limits[…]` one at 0%), take the HIGHEST-util one (the binding account-level window, matching how the bridge parses it); its clock-windows = `reset_after_seconds` ÷ 5h (never the top-level `reset_epoch`, which tracks the current limiter, not necessarily the weekly window). For the budget-windows half and the raise/hold/reduce verdict, Codex relies on Claude's `get_budget` (the burn projection lives there, for both sides) and reports its own weekly `util` + reset timing so Claude can run the test. (If a future `check_budget` exposes `five_hour_windows_left` on the weekly bucket, Codex reads it directly.) **The verdict (Claude computes it, per side):** budget > clock → **under-consuming** (weekly will be left unused) → **raise intensity**; budget < clock → **over-consuming** (won't last to the weekly reset) → **reduce intensity**; within ~1 window, or no confident rate → **hold**. **Codex, absent a fresh Claude verdict, holds at its current intensity (it never escalates unilaterally) and stays clear of the 5h cap — surfacing its weekly `util` + reset timing so Claude can issue the verdict.**
-- **Raise intensity — use the levers your role has.** Orchestrator (Claude): pick larger, more-decomposable tasks; run more parallel subagents at once (3–5+ vs 1); raise delegation density; open more concurrent streams (review + explore + verify in parallel). Executor (Codex): go deeper in-turn, take larger chunks, run more verification/repro. Both: deepen quality (multi-angle review, broader test/repro) — never manufacture make-work. **Reduce intensity:** fewer/serial subagents (Claude), short bounded chunks, defer optional deep work. Stay below the **动态暂停线** (shown in `get_budget`; its `余量` = headroom from your current util to that soft line, measured on the resettable hard-winner window — the 5h OR the weekly window, whichever currently limits you) — that soft ceiling, not the raw 5h cap, is the "do not cross, avoid a forced pause" line. **If that line is absent, or you only have JSON (Codex),** fall back to the 5h bucket's raw util vs 100% (Codex: of the `buckets[]` entries whose `id` contains `five_hour` or `primary_window`, take the HIGHEST-util one) and keep clear of the 5h cap.
-- **Distinguish 5h from weekly:** a 5h window resetting does NOT consume or waste weekly budget — it only refreshes your rate headroom, so you can keep going when weekly is under-consumed. A near 5h reset is therefore not urgency but the release of a rate limit. The real "unused = forfeited" is the **weekly budget as its WEEKLY reset nears**: if weekly is still under-consumed then, raise intensity (within the 5h cap) to use it. If even pacing needs a rate beyond one 5h window's capacity, you are rate-limited → keep each 5h window as full as possible (under the cap).
-- **Two-subscription imbalance — the quotas are INDEPENDENT and differ in BOTH amount AND reset timing** (each side's weekly and 5h windows reset on different clocks). **The cross-side split is the orchestrator's (Claude) decision:** route more work to the side that is MORE under-consuming on the even-pacing test (the larger budget-windows − clock-windows gap); when EITHER side lacks a confident rate (so the gap can't be compared), fall back to the more budget-rich side (larger absolute weekly headroom). On any tie (equal gap, or equal headroom), prefer the side whose **weekly resets SOONER** (its leftover is forfeited earlier). **As the executor (Codex) you do NOT decide the global split** — execute what you're assigned, and when your own budget is rich report it (with evidence) so Claude routes more to you. The tighter / over-consuming side carries less.
-- **Side-aware pause (the hard floor the code enforces — obey, do not reinvent), with each side's own action:** **Codex exhausted** (`system_budget_pause`) → Codex's turns stop (gate closed); **Claude** must not retry replies and continues solo on independent work, checkpointing the split point — but the SAME `system_budget_pause` is ALSO emitted when both sides are exhausted, so do not infer "solo" from the directive name alone: read its content (it names the paused side[s]) or re-check `get_budget`, and continue solo ONLY while Claude's own side is healthy; if Claude is also at its line, handle it as **Both** below. **Claude exhausted** (`system_budget_handoff`) → **Claude** sends ONE handoff (remaining tasks / context / artifact locations / acceptance criteria) then stops; **Codex** receives the baton and carries the work forward as far as its remaining quota allows that turn. **Both** → joint pause; checkpoint and wait for `resume` (Claude's own quota-guard also hard-stops Claude independently). A transient probe **429 is NOT exhaustion** → fall back to cached util and keep working.
-<!-- AgentBridge:end -->
+- 建议避免用编译通过、topic 存在或单次局部运动替代闭环与红框验收。

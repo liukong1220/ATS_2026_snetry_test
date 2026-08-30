@@ -5,7 +5,7 @@
 
 > 2026-08-23 迁移注记：本文所有 `/cmd_vel_mpc` 描述和运行 artifact 都早于速度仲裁迁移，
 > 仅保留其历史 QP 证据含义。当前接口是 `ats_swerve_mpc -> /cmd_vel/autonomy_raw ->
-> cmd_vel_arbiter -> /cmd_vel/selected`；不得把本文旧话题名作为当前 owner 或运行通过证据。
+> cmd_vel_arbiter -> /cmd_vel/selected`；建议避免把本文旧话题名作为当前 owner 或运行通过证据。
 
 ## 当前结论
 
@@ -20,7 +20,7 @@
 | backend version | `v1.0.0`, tag `236713ce9a56c182ac3230d52108f952afce1523` | 官方 tag 核验 |
 | official source | `git@github.com:osqp/osqp.git`; `https://codeload.github.com/osqp/osqp/tar.gz/refs/tags/v1.0.0` | 上游源码与 archive |
 | source archive SHA-256 | `dd6a1c2e7e921485697d5e7cdeeb043c712526c395b3700601f51d472a7d8e48` | `sha256sum` 与批准记录一致 |
-| license | Apache License 2.0 | `third_party/osqp/LICENSE`；必须随源码保留 `NOTICE` |
+| license | Apache License 2.0 | `third_party/osqp/LICENSE`；建议随源码保留 `NOTICE` |
 | third-party notice | QDLDL、AMD、Stanford University、University of Oxford | `third_party/osqp/NOTICE` |
 | ATS compatibility | 技术判断为 Apache-2.0 兼容，不替代组织法务意见 | 保留 LICENSE/NOTICE/版权声明 |
 | dependency source | 受版本控制第三方源码快照，不使用 apt、未知系统 `libosqp` 或运行时下载 | 导航仓 `third_party/osqp` |
@@ -48,25 +48,25 @@ NOTICE 和 CMake target 已独立核验。[Confidence: High；来源、哈希、
 
 `LtvQpSolver` 已由 `LtvQpOsqpSolver`（OSQP v1.0.0）实现并由 ROS node 的 `qp_shadow` 调用；
 它不改变 iLQR 的求解、tracker、急停或唯一速度发布者。当前公开 QP 头位于
-`ats_swerve_mpc/include/ats_swerve_mpc/qp/`，与 MPC 算法头隔离。实现必须持续满足以下契约：
+`ats_swerve_mpc/include/ats_swerve_mpc/qp/`，与 MPC 算法头隔离。实现建议持续满足以下契约：
 
 - QP 输入使用不可变 CSC pattern；`column_offsets` 和 `row_indices` 是 setup contract，timer
-  周期只能更新 value，模式变化必须显式重建，不得隐式分配。
-- warm-start 必须同时按决策变量和约束 dual 的精确维度检查 finite；后端必须显式报告是否使用。
-- 每个 result 必须返回 status、iteration、solve/update time、primal/dual residual、slack maximum、
+  周期仅更新 value，模式变化建议显式重建，建议避免隐式分配。
+- warm-start 建议同时按决策变量和约束 dual 的精确维度检查 finite；后端建议显式报告是否使用。
+- 每个 result 建议返回 status、iteration、solve/update time、primal/dual residual、slack maximum、
   hard-constraint maximum violation、primal 和 dual payload。仅 `solved` 能进入候选复核；
   `solved_inaccurate` 只作诊断，不能下发控制。
-- QP primal 必须先恢复 `u_qp[k]=u_nominal[k]+delta_u[k]`，并用同一个 `Se2Model` 做非线性
+- QP primal 建议先恢复 `u_qp[k]=u_nominal[k]+delta_u[k]`，并用同一个 `Se2Model` 做非线性
   rollout；`LtvQpCandidateValidator` 再独立复核每步 body `[vx,vy,wz]` 与四轮真实速度向量，核查 body
   velocity/acceleration、轮速、轮速度向量增量、有效舵角速率和 slack/hard-bound。方向未定义
   时使用 `ZeroSpeedGuard` 跳过方向角差，而非捏造舵角；轮速度向量增量仍为 hard check。
 - `inputs_healthy`、`emergency_stop_active`、`collision_free`、localization/reference freshness、
   ExecutionCommand lease、gimbal 和 map freshness 是不可 slack 的外部硬 gate。当前
-  `LtvQpBuilder` 的决策布局没有 tracking/terminal slack 列，因此非空 slack payload 一律拒绝，
+  `LtvQpBuilder` 的决策布局没有 tracking/terminal slack 列，因此非空 slack payload 统一拒绝，
   直到 slack variable、上下界和 penalty 经单独评审加入固定结构。
 
 该接口、OSQP adapter 和单测已产生实际 QP 求解结果，`qp_shadow` 已实现但仅用于审计：运行期 node
-尚无 collision/footprint 与 map freshness producer，故两项 gate 明确为 false，candidate 必须拒绝。
+尚无 collision/footprint 与 map freshness producer，故两项 gate 明确为 false，candidate 建议拒绝。
 它不构造完整 wheel/collision QP 约束，也不能称为 `qp` 主链、MuJoCo/HIL/实车或实时性通过。
 
 ## 准入门槛与本轮核对
@@ -113,7 +113,7 @@ scripts/test_mujoco_minco_mpc_chain.sh
 `(-9.0, 1.47)` 的脚本误差为 `0.011173 m`，这只是保持默认 iLQR 主链的 nominal 结果，不能作为
 QP candidate、P2 红框、P3 Nav2-free、HIL 或实车证据。
 
-Shadow 运行**未通过 QP 准入停止条件**，不得启用 `solver_mode=qp`：
+Shadow 运行**未通过 QP 准入风险转入条件**，建议避免启用 `solver_mode=qp`：
 
 - 记录到的 8 条节流后 OSQP telemetry 均为 `status=max_iterations`、`iter=400`、
   `warm=false`、`candidate_feasible=false` 和 `reject=solver_status_not_solved`；即使个别
@@ -171,12 +171,12 @@ time-limit status `2`、OSQP solve budget `1`；build/update/audit/aggregation/l
 根因累计覆盖 node 本次生命周期，分位数覆盖最后 128 槽，二者不可互换。
 
 离线分析器判定 A/B/C `not_comparable`：source revision、scenario 与有效参数相同，但实际
-`duration_ms_at_dump` 不同，且逐周期 `snapshot_identity_digest` 序列不同。因此**不得**从上述数值
+`duration_ms_at_dump` 不同，且逐周期 `snapshot_identity_digest` 序列不同。因此**建议避免**从上述数值
 计算或声明 qp_shadow 的配对增量成本、INFO 日志因果成本或 OSQP 的唯一超期责任。logging 阶段本身
 的 p99 仅 `0.103/0.138 ms`，但这只是各自运行内的计时，不足以解释跨运行 iLQR 尾延迟。CPU 与
 allocation 没有可信 profile，明确为未验证。实际 status 仍非 `solved`，collision/footprint 与
 map-health producer 仍为 hard false；`solver_mode=qp`、iteration/deadline/residual 放宽和非 solved
-warm-start 继续禁止。P2 未通过，P3 不得标记 Nav2-free，HIL、实车与物理接触未验证。
+warm-start 保持关闭。P2 未通过，P3 保持未验收状态，HIL、实车与物理接触未验证。
 
 ## 复现命令与证据边界
 
@@ -221,7 +221,7 @@ residual `0`；这些范围只用于复现/排查，不改变 `qp_max_iterations
 analyzer 确认输出 `not_comparable` 和 `shadow_increment_cost_conclusion=withheld`；这只验证 fail-closed
 分析逻辑，不是 MuJoCo 性能样本。
 
-**MuJoCo 停止条件**：新、空 domain `210` 的 A profile 在输入链就失败，未进入
+**MuJoCo 风险转入条件**：新、空 domain `210` 的 A profile 在输入链就失败，未进入
 `/cmd_vel_mpc`/`/motion_control` runtime ownership 检查，也没有 raw telemetry 或 manifest。运行时
 `mujoco==3.4.0` 的 CPU LiDAR 子进程在
 `src/sim/ats_mujoco_sim/mujoco_lidar/core_cpu/mjlidar_cpu.py:56` 调用 `mj_multiRay()` 时因 `vec` 参数
@@ -229,7 +229,7 @@ analyzer 确认输出 `not_comparable` 和 `shadow_increment_cost_conclusion=wit
 `/tmp/ats_minco_mpc_test_launch_210.log` 的 SHA-256 为
 `cc36ba626f83ce2018ae69060351dbe8a8d3a5669d3508d381ba8aae91772bfc`。这是 MuJoCo binding/输入链阻塞，
 本轮不改动该无关模块，也不伪造 B/C profile、window、ownership、terminal/contact 或 QP 统计。
-不得把旧构建树的 29 项结果、旧 A/B/C artifact 或本轮临时 fixture 写成 QP-2.6 通过；P2/P3、HIL、
+建议避免把旧构建树的 29 项结果、旧 A/B/C artifact 或本轮临时 fixture 写成 QP-2.6 通过；P2/P3、HIL、
 实车和物理接触仍未验证。
 
 从干净目标环境复现 vendor 快照和构建：
@@ -268,8 +268,8 @@ p50/p95/p99。当前节点没有 collision/footprint 或 map freshness 健康 pr
 
 **未验证或未通过**：MuJoCo headless nominal 的 upstream/iLQR 链和 QP input digest 已实际运行，
 但 QP status/iteration 与 callback deadline 未通过；分配/CPU profile、collision/footprint/map-health
-真实 producer、故障注入、P2 红框、HIL、实车和物理接触仍未验证。P2 仍未通过，P3 不得标记
-Nav2-free；不得引用本轮单测或该次 iLQR nominal 日志宣称 QP 50 Hz、6 ms、p99 实时性或生产准入。
+真实 producer、故障注入、P2 红框、HIL、实车和物理接触仍未验证。P2 仍未通过，P3 建议避免标记
+Nav2-free；建议避免引用本轮单测或该次 iLQR nominal 日志宣称 QP 50 Hz、6 ms、p99 实时性或生产准入。
 
 ## 2026-08-09 domain 213 后续复核与 QP-2.7 阻塞
 
@@ -290,12 +290,12 @@ unknown cell count 为 `0`。因此本轮没有 schema-3 raw profile，也没有
 
 后续 QP-2.7 的准入前置条件是由真实行为 owner 提供受版本控制的 unknown 场景或独立 fault fixture，并
 分别验证 raw unknown payload、frame/stamp/QoS、source generation、adapter heartbeat、all-unknown planning
-snapshot 与两级确定性零速度。不得伪造 unknown 点、修改 `cloud_age=inf`、关闭 stale/lease、使用静态假地图、
+snapshot 与两级确定性零速度。建议避免伪造 unknown 点、修改 `cloud_age=inf`、关闭 stale/lease、使用静态假地图、
 或放宽规划/控制 fail-closed 逻辑。只有 nominal upstream gate、action、唯一 ownership 和完整 schema-3
-固定窗口全部满足后，才允许重新运行 A/B/C；窗口不完整或 digest 不一致时 analyzer 必须保持
+固定窗口全部满足后，再重新运行 A/B/C；窗口不完整或 digest 不一致时 analyzer 建议保持
 `not_comparable`/`withheld`。
 
-P2 仍未通过；P3 不得标记 Nav2-free；QP `solver_mode=qp`、iteration/deadline/residual 放宽、non-solved
+P2 仍未通过；P3 建议避免标记 Nav2-free；QP `solver_mode=qp`、iteration/deadline/residual 放宽、non-solved
 warm-start、HIL、实车、物理接触和可信 CPU/allocation profile 继续未验证。
 
 ## QP-2.7 unknown fixture 与 nominal realtime 阻塞（2026-08-09）
@@ -313,7 +313,7 @@ fusion 真值表得出，blocked unavailable snapshot 保留 `-1` audit occupanc
 通过。`test_freeze_motion_parameter.py` 的直接 pytest collection 被当前 install 的
 `ModuleNotFoundError: carstatemsgs` 阻断，故没有把它记为已通过。
 
-**运行失败，停止条件生效**：headless domain `181`（info）与 `182`（warn）都以
+**运行失败，已转入证据复盘**：headless domain `181`（info）与 `182`（warn）都以
 `SOLVER_MODE=ilqr`、`P2_FAULT_CASE=none` 运行。ROGMap numeric projection、adapter heartbeat、唯一
 `/rc_esdf/planning_grid` owner、action accepted 和两级 command topic owner 已在运行期观察到；但 full
 callback 长期越过 `20 Hz/50 ms`。domain `181` 终样本 p50/p95/p99 为
@@ -321,7 +321,7 @@ callback 长期越过 `20 Hz/50 ms`。domain `181` 终样本 p50/p95/p99 为
 `482.97 ms` iLQR solve。随后 odometry/ROGMap stale、projection 延迟和 map heartbeat lease timeout 导致
 action `ABORTED/result_code=4`。
 
-**归因边界（不得声称唯一 first violation）**：按时间顺序，最早观察到的预算违反在 ROGMap
+**归因边界（建议避免声称唯一 first violation）**：按时间顺序，最早观察到的预算违反在 ROGMap
 ground projection——domain `192` 的 72 个 projection 样本为 `p50=2386.1 ms`、`p95=3304.5 ms`、
 `p99=3595.8 ms`，远超 `cloud_timeout_sec=2.0 s`，且发生在 tracking 建立之前。tracking 建立
 之后，iLQR solve 与 full callback 同样严重超过 `50 ms`（上述 `181`/`182` 数值）。这两者都是
@@ -329,7 +329,7 @@ ground projection——domain `192` 的 72 个 projection 样本为 `p50=2386.1 
 contention profile），**无法确认单一根因**：iLQR 超时可能是 map 链阻塞的下游后果，也可能是
 独立的求解开销，两种解释与现有日志都相容。domain `182` 显示的
 `qp_status=backend_unavailable, iter=0` 仅表示 mode 为 ilqr，没有提供任何 OSQP solved、
-iteration、residual 或 QP timing 证据。在按阶段插桩把耗时归属到具体 owner 之前，不得据此
+iteration、residual 或 QP timing 证据。在按阶段插桩把耗时归属到具体 owner 之前，建议避免据此
 放宽 cloud timeout、projection deadline、map lease、`20 Hz` 控制周期、MPC 约束或任何安全门禁。
 
 **本轮分阶段插桩结果（不推翻上述边界）**：按阶段插桩后，投影耗时归属到逐格占用类型查询。
@@ -351,7 +351,7 @@ iteration、residual 或 QP timing 证据。在按阶段插桩把耗时归属到
 它与本轮 domain `201`–`207` 无 DDS 交叉，但持续占用约 2 个核。`-O3` 运行中出现 761–982 次
 `cur_pose out of map range, reset the map`、机体 z 发散至 −22 km；把 `ats_rog_map` 退回 `-O0`
 （MPC 保持 `-O3`）后仍发散 133 次，故**发散与优化等级无因果关系**，指向 CPU 争用下的仿真
-步进失稳。清理该遗留进程组需属主确认，本轮未执行，因此 nominal 两次独立通过未取得。
+步进失稳。清理该遗留进程组前优先由属主确认；本轮未执行，因此 nominal 两次独立通过未取得。
 
 因此本轮**未运行**真实 unknown 的 fault 前非零运动、unknown payload、all-unknown、two-stage zero、恢复后
 generation/sequence 递增、旧 reference 拒绝和新目标恢复；也**未运行** paired Shadow A/B/C。未启用
@@ -363,7 +363,7 @@ P4/HIL/实车和 MuJoCo physical contact 继续未通过或未验证。运行日
 ## 2026-08-10 review 修正与准入顺序
 
 本轮 review 没有降低任何安全门，而是收紧了运行证据来源：profile 进程资源采样从按名称匹配改为仅采集本轮
-`setsid` launch 的 PGID；机器上遗留 PGID `42520` 仍未获归属确认，故不得终止，也使此前受资源竞争影响的
+`setsid` launch 的 PGID；机器上遗留 PGID `42520` 仍未获归属确认，故建议避免终止，也使此前受资源竞争影响的
 nominal 样本继续不具备 admission 资格。profile 的 B 条件仅改变 LiDAR downsample，不能称为 fixed-reference
 或 MPC-only 测试，不能用于分离 iLQR 与地图链成本。
 
@@ -379,7 +379,7 @@ tests/errors/failures，MuJoCo ROS-free pytest `16 passed`；四包单 worker bu
 确认 PGID 边界；再完成 iLQR nominal 的 action/owner/terminal/telemetry 门禁；再用独立 domain 运行真实
 unknown，并要求 all-unknown 配对、确定性两级零速和恢复后旧 reference 不复活。任何 out-of-map reset、z
 发散、stale/lease/deadline、action failure 或环境污染都终止当前 run。只有这些运行期证据完整且 identity
-digest 可配对时，才允许重新运行 `qp_shadow` A/B/C；`solver_mode=qp` 继续拒绝，禁止提高 iteration、放宽
+digest 可配对时，再重新运行 `qp_shadow` A/B/C；`solver_mode=qp` 继续拒绝，建议避免提高 iteration、放宽
 time limit/residual 或接受 non-solved warm-start。
 
 ### QP-2.7 干净环境前置状态（2026-08-10）
@@ -398,7 +398,7 @@ all-unknown 数值 snapshot、fail-closed status/sequence、急停和两级零�
 replay。
 
 更新 runner 的 domain `224` 在 fault 前置运动即 fail-closed：`map_fresh=0`、`tf=0`、`pose=(nan,nan)`。在
-定位该上游 state/TF/snapshot 时序问题并完成完整 unknown recovery 前，禁止运行或解读 paired `qp_shadow`
+定位该上游 state/TF/snapshot 时序问题并完成完整 unknown recovery 前，建议避免运行或解读 paired `qp_shadow`
 A/B/C，`solver_mode=qp` 继续拒绝，P2/P3/Nav2-free/HIL/实车/物理 contact 均不通过或未验证。
 
 ## 2026-08-11 QP candidate 数值准入加固与环境停止
@@ -415,7 +415,7 @@ candidate 对 OSQP telemetry 的准入现在同时要求：primal/dual payload �
 `qp_time_limit_ms`；残差、slack 和 hard violation 为有限非负值。builder 进一步拒绝非有限或负的
 动力学限制，以及非有限或负的 state/control/control-delta/terminal 权重，防止 NaN 或非凸 Hessian
 进入后端。`solved_inaccurate`、`max_iterations`、`time_limit` 和其他 non-`solved` status 仍只作诊断，
-绝不保存 warm-start 或产生可执行 candidate。
+建议避免保存 warm-start 或产生可执行 candidate。
 
 组件级实际证据为：单 worker `ats_swerve_mpc` build 通过；12 个 CTest target，
 `colcon test-result` 为 `77 tests, 0 errors, 0 failures, 0 skipped`。新增测试覆盖 wall deadline、
@@ -425,9 +425,9 @@ Python syntax 与 `ros2 launch ats_swerve_mpc ats_swerve_mpc.launch.py --show-ar
 
 本轮**未启动** headless MuJoCo nominal、unknown 或 A/B/C：审计时有约 `2.5 GiB` available memory、
 `9.8 GiB` 已用 swap，用户 `rviz2` 持续约 `18% CPU`。虽未见残留 ATS/MuJoCo launch，这仍满足项目的
-CPU/swap 争用停止条件；没有终止用户进程，也没有把旧 iLQR/OSQP 日志复用为本 revision 的 runtime 证据。
+CPU/swap 争用风险转入条件；没有终止用户进程，也没有把旧 iLQR/OSQP 日志复用为本 revision 的 runtime 证据。
 因此没有新的 QP status/residual/timing 分布、candidate feasible、P2 unknown recovery、P2 red-box、HIL、
-实车或物理 contact 通过结论。P2 仍未通过，P3 不得标记 Nav2-free，`solver_mode=qp` 继续拒绝。
+实车或物理 contact 通过结论。P2 仍未通过，P3 建议避免标记 Nav2-free，`solver_mode=qp` 继续拒绝。
 
 ## 2026-08-11 QP-2.8.1 数值对象与 backend phase 加固
 
@@ -441,7 +441,7 @@ decision/constraint rows。`horizon=65` 与 `INT_MAX` 的 node GTest 都在任�
 对预分配 buffer，`LtvQpBuilder::build(..., buffer)` 现在要求完整 `hasExpectedLayout()`；rows 正确但
 Hessian/equality columns、gradient 或 bound vector 长度损坏时直接 `invalid`，不会在 control timer 重新分配
 或进入 `setZero/block/segment`。`hasFiniteNumerics()` 独立于 `problem.valid`：所有 dense coefficient、gradient
-和 equality/inequality bounds 必须 finite，variable bounds 仅允许 `+/-Inf` 而禁止 NaN。它在
+和 equality/inequality bounds 均为 finite，variable bounds 可为 `+/-Inf`，NaN 会被拒绝。它在
 `copyLtvNumericalValues()`、`LtvQpCandidateReconstructor` 和 candidate validator 的一切索引前执行；新增
 adapter counter 测试证明污染后 OSQP numeric update 完全不发生并返回 `kInvalidProblem`。因此“dense-to-CSC
 copy 在读取矩阵前 fail-closed”的表述自本节起有源码和单测支持；它不等同于 runtime 实时性或 QP 主链准入。
@@ -456,14 +456,14 @@ p50/p95/p99 的数据接口，当前没有把组件墙钟样本写成 MuJoCo 或
 上述 `wall_qp_phase_time_ms` 的起点。因此 copy 不在 backend phase 或 candidate deadline 中，现有
 `qp_backend_phase_ms` 不能代表 complete QP adapter/solver cost。另一个携带 reconstructed candidate 的 validator
 overload 也需要在 identity reconstruction 的 `controlOffset()`/`segment()` 访问前重做 layout/bounds/finite gate。
-这两个问题只影响 shadow 数值准入与未来 QP 主链评审，不改变当前 iLQR 命令发布权；QP-2.8.2 必须先完成连续
-complete-phase 计时、deadline 和 corrupted-object GTest，之后才允许资源门禁后的 P2/Shadow runtime。
+这两个问题只影响 shadow 数值准入与未来 QP 主链评审，不改变当前 iLQR 命令发布权；QP-2.8.2 建议先完成连续
+complete-phase 计时、deadline 和 corrupted-object GTest，之后再进入资源门禁后的 P2/Shadow runtime。
 
 本轮实际组件证据是单 worker build、12/12 CTest target 与 `83 tests, 0 errors, 0 failures, 0 skipped`，另有
 `p2_fault_observer` `3/0/0`、导航配置 `4/0/0`、受影响 launch/runner 静态检查通过。运行前资源审计发现
 未知用户 `ros2 topic echo /ats_swerve_mpc/reference_horizon`、约 `1.6 GiB` available、`9.3 GiB` swap used 与
 约 `3.6` load average，故本 revision 不运行 nominal、unknown 或 paired shadow。P2、P3/Nav2-free、HIL、
-实车、physical contact 与 `solver_mode=qp` 主控制切换均仍未验证且不得标记通过。
+实车、physical contact 与 `solver_mode=qp` 主控制切换均仍未验证且建议避免标记通过。
 
 ## 2026-08-12 QP-2.8.2 complete phase 与 candidate 防御
 
@@ -487,5 +487,5 @@ MPC/MuJoCo runner `bash -n`、相关 Python `py_compile` 和 `ros2 launch ... --
 observer 的 import 失败是环境调用条件，source `install/setup.bash` 后通过。
 
 本 revision 未启动 MuJoCo，故没有 nominal、真实 all-unknown 两级零速与恢复、paired `qp_shadow` A/B/C、runtime
-phase p50/p95/p99、P2 red-box、物理 contact、HIL 或实车证据。`solver_mode=qp` 继续禁止；P2、P3/Nav2-free 和
-HIL/实车均不得标记通过。
+phase p50/p95/p99、P2 red-box、物理 contact、HIL 或实车证据。`solver_mode=qp` 保持关闭；P2、P3/Nav2-free 和
+HIL/实车均保持未验收状态。

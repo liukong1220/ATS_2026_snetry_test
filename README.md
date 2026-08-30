@@ -68,7 +68,7 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 
 ## 工作区与仓库边界
 
-本目录是 ROS 2 工作区根，也是三个独立 Git 仓库的编排与文档仓；提交、状态检查和推送必须
+本目录是 ROS 2 工作区根，也是三个独立 Git 仓库的编排与文档仓；提交、状态检查和推送建议
 逐仓执行。
 
 | 仓库 | 路径 | 主要职责 |
@@ -78,7 +78,7 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 | MuJoCo 仓 | `src/sim/ats_mujoco_sim` | 四舵轮物理、传感器、场地、底盘 bridge 与仿真 launch |
 
 其他 `src/` 包提供机器人描述、行为、接口或第三方依赖。`minco+mpc_reference/` 与
-`参考/` 仅用于算法/许可证溯源；它们不是活动构建输入。所有 `colcon` 命令都必须保留
+`参考/` 仅用于算法/许可证溯源；它们不是活动构建输入。所有 `colcon` 命令都建议保留
 `--base-paths src`，避免同名参考包进入构建图。
 
 ## ✨ 技术亮点
@@ -132,7 +132,7 @@ cd /home/ats/ATS_2026_snetry_test
 vcs import --recursive --skip-existing . < dependencies.repos
 ```
 
-清单包含根 bringup 之外的导航、行为、接口、实机驱动、MuJoCo、loopback、工具和必须从
+清单包含根 bringup 之外的导航、行为、接口、实机驱动、MuJoCo、loopback、工具，以及优先从
 源码构建的依赖。`src/sim/loopback_sim` 被明确保留为自研导航框架的轻量运动学/栅格/行为
 回归域；正式导航运行图仍不启动 Nav2 server、plugin 或 costmap。
 
@@ -153,8 +153,8 @@ rosdep update
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-`rosdep init` 已完成时不要重复执行。Livox SDK、small_gicp、MuJoCo 与可选 LiDAR backend
-可能需按各项目上游说明额外安装；不要把未验证的版本组合写成已部署基线。
+`rosdep init` 已完成时可直接跳过。Livox SDK、small_gicp、MuJoCo 与可选 LiDAR backend
+可能需要按各项目上游说明额外安装；未验证的版本组合保持“待验证”标记。
 
 ## ⚡ Quick Start
 
@@ -167,7 +167,7 @@ MAKEFLAGS=-j6 colcon build --base-paths src --symlink-install --parallel-workers
 source install/setup.bash
 ```
 
-只需构建仿真及其上游依赖时：
+若仅构建仿真及其上游依赖，可使用：
 
 ```bash
 MAKEFLAGS=-j6 colcon build --base-paths src --symlink-install \
@@ -186,7 +186,7 @@ ros2 launch ats_mujoco_sim rmuc_2025_mujoco.launch.py --show-args
 
 ### 部署前清单
 
-在允许执行任何运动命令前，必须确认：
+在允许执行任何运动命令前，建议确认：
 
 - `world` 对应的静态地图与 prior PCD 文件存在且坐标系匹配；
 - LiDAR/IMU、底盘串口、云台连接、波特率与 `node_params.yaml` 一致；
@@ -212,10 +212,10 @@ launch_chassis_vel_transform:=True
 require_gimbal_status:=True
 ```
 
-这两层速度转换是既有云台/底盘 topic 与 frame 契约的一部分。固定雷达迁移只能通过 launch
+这两层速度转换是既有云台/底盘 topic 与 frame 契约的一部分。固定雷达迁移仅通过 launch
 参数关闭兼容层，并同时验证下游速度坐标系、TF 和 topic；不能仅关闭 transform 后继续假定
 底盘接收到相同 frame 的命令。fake-yaw 关闭时仍须保留
-`gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF，且不得增加重复的
+`gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF，且建议避免增加重复的
 `base_footprint -> base_link` 发布者。
 
 仅调试导航 action、暂不启动行为树：
@@ -225,7 +225,7 @@ ros2 launch ats_sentry_bringup real_robot_navigation.launch.py \
   world:=rmuc_2026 launch_behavior:=false use_rviz:=true
 ```
 
-下列命令会驱动车辆，只能在完成上方安全清单后使用：
+下列命令会驱动车辆，仅在完成上方安全清单后使用：
 
 ```bash
 ros2 action send_goal --feedback \
@@ -249,7 +249,7 @@ scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
 横移回归使用 `TEST_PROFILE=rectangle`；south/north 段应观察到非零 `linear.y`，用于防止
-四舵轮控制链静默退化为差速运动。每个 P2/P3 故障场景都必须在新的 `ROS_DOMAIN_ID` 和新的
+四舵轮控制链静默退化为差速运动。每个 P2/P3 故障场景都建议在新的 `ROS_DOMAIN_ID` 和新的
 MuJoCo launch 中运行，不能在同一进程内串行注入后声称独立通过。
 
 可选故障入口：
@@ -284,10 +284,10 @@ MuJoCo 依赖、launch、资产和 telemetry 说明见
 
 `/planner/emergency_stop` 与 `/minco/reference_path` 是独立 DDS topic，不具备跨 topic
 原子顺序。Goal Manager 的提交点会重新校验地图 snapshot/heartbeat，并在同一临界区内先发布
-`emergency_stop=false`、再发布重定时 reference；MPC 必须拒绝急停前或无有效时间戳的旧轨迹。
+`emergency_stop=false`、再发布重定时 reference；MPC 建议拒绝急停前或无有效时间戳的旧轨迹。
 
 `/cmd_vel/selected` 是仲裁后的导航速度边界。实机串口、MuJoCo bridge 与 Gazebo chassis adapter
-只能订阅它；实机保留 `fake_vel_transform` 和 `chassis_vel_transform`，MuJoCo/Gazebo 不得订空的
+仅订阅它；实机保留 `fake_vel_transform` 和 `chassis_vel_transform`，MuJoCo/Gazebo 建议避免订空的
 `/cmd_vel/autonomy`。下位机负责 CAN、电机、轮速、电流、电压、温度、底盘反馈、
 硬件 watchdog、制动和物理急停；这些信号不由导航 action、Gazebo/MuJoCo 回归或配置校验订阅和裁决。
 `standard_robot_pp_ros2` 的决策与自瞄内容保持不变，`serial/gimbal_joint_state` 仍提供云台 yaw、
@@ -302,8 +302,8 @@ src/ats_sentry_bringup/params/node_params.yaml
 ```
 
 正式 launch 将同一 `params_file` 传给定位、地图、规划、控制、串口与行为节点；launch 仅覆盖
-`use_sim_time` 与资产/设备路径。ROGMap 的正式 profile 不允许
-`map_config_file` 与显式 ROS 参数同时生效。`static_map_publisher.py` 必须保留 `/map` 的
+`use_sim_time` 与资产/设备路径。ROGMap 的正式 profile 不接受
+`map_config_file` 与显式 ROS 参数同时生效。`static_map_publisher.py` 建议保留 `/map` 的
 frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
 导航模块的细化配置、接口语义和 action 用法见
@@ -320,7 +320,7 @@ MINCO 离散 footprint collision sample `0` 与终态 `/cmd_vel_mpc=0`。该话�
 
 P2 的 adapter lease、projection timeout、Point-LIO input stale、unknown、unreachable，以及
 P3 的 cancel、preempt、timeout、TF failure 已有独立故障运行记录；它们均记录到急停和
-`/cmd_vel_mpc=0`，同样只能作为迁移前历史证据。当前 revision 必须重跑并记录
+`/cmd_vel_mpc=0`，同样仅作为迁移前历史证据。当前 revision 建议重跑并记录
 `/cmd_vel/selected=0` 与最终底盘输入为零。完整证据边界、P4 接口进度和实机导航边界见
 [`docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`](docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)。
 
