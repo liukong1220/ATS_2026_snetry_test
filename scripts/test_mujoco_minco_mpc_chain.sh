@@ -5,6 +5,89 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="/tmp/ats_minco_mpc_test_logs"
 # ROS 领域号；默认 88，避免回归测试与其他 ROS 进程串话。
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-88}"
+# CycloneDDS 的发现端口为 7400 + 250 * domain，超过 65535 时每个节点都在
+# rmw_create_node 失败，表象是 "timeout waiting for node graph" 而不是
+# 非法 domain。这里先做上界检查，避免把配置错误当成闭环失败记入验收。
+if [[ ! "${ROS_DOMAIN_ID}" =~ ^[0-9]+$ ]]; then
+  echo "FAIL: ROS_DOMAIN_ID 必须是非负整数，当前为 '${ROS_DOMAIN_ID}'" >&2
+  exit 2
+fi
+# Normalize leading zeroes before Bash arithmetic; otherwise values such as
+# `000233` are parsed as octal and an arithmetic syntax error can fall through
+# the conditional as if the domain were valid.
+ROS_DOMAIN_ID_DECIMAL="$(sed 's/^0*//' <<<"${ROS_DOMAIN_ID}")"
+if [ -z "${ROS_DOMAIN_ID_DECIMAL}" ]; then
+  ROS_DOMAIN_ID_DECIMAL=0
+fi
+if [[ ! "${ROS_DOMAIN_ID_DECIMAL}" =~ ^[0-9]{1,3}$ ]] ||
+  (( ROS_DOMAIN_ID_DECIMAL > 232 )); then
+  echo "FAIL: ROS_DOMAIN_ID=${ROS_DOMAIN_ID} 超出 CycloneDDS 合法范围 0..232" >&2
+  echo "      发现端口 7400 + 250 * ${ROS_DOMAIN_ID_DECIMAL} > 65535" >&2
+  exit 2
+fi
+
+# 部署产物新鲜度前置检查。install/ 使用 symlink-install，因此运行的其实是
+# build/<pkg>/<exe>；源码比该 executable 新时，节点会以旧接口启动，表现为
+# 话题/参数凭空缺失，而不是编译错误。历史上 ats_rog_map_adapter 的 install
+# 产物比 PlanningMapSnapshot 发布者早 18 天，goal manager 因
+# require_planning_snapshot 永远拿不到 snapshot，提交门禁每轮静默 early return，
+# 对外只看到"目标不进入 tracking"。这类失配必须 fail-fast，不能计入算法验收。
+runtime_binary_is_fresh() {
+  local package_name="$1" executable_path="$2" source_dir="$3"
+  local newer_source
+  if [ ! -x "${executable_path}" ]; then
+    printf '%s executable_missing path=%s\n' "${package_name}" "${executable_path}"
+    return 1
+  fi
+  newer_source="$(find "${source_dir}" -type f \
+    \( \
+      \( \
+        \( -path "${source_dir}/src/*" -o -path "${source_dir}/include/*" \) \
+        -a \( -name '*.cpp' -o -name '*.hpp' \) \
+      \) \
+      -o -name 'CMakeLists.txt' -o -name 'package.xml' \
+    \) \
+    -newer "${executable_path}" -print -quit)"
+  if [ -n "${newer_source}" ]; then
+    printf '%s stale_binary source=%s binary=%s\n' \
+      "${package_name}" "${newer_source}" "${executable_path}"
+    return 1
+  fi
+  printf '%s fresh binary=%s\n' "${package_name}" "${executable_path}"
+}
+
+check_runtime_binary_freshness() {
+  local freshness
+  freshness="$({
+    runtime_binary_is_fresh ats_cmd_vel_arbiter \
+      "${WORKSPACE_DIR}/build/ats_cmd_vel_arbiter/cmd_vel_arbiter_node" \
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_cmd_vel_arbiter"
+    runtime_binary_is_fresh ats_swerve_mpc \
+      "${WORKSPACE_DIR}/build/ats_swerve_mpc/ats_swerve_mpc_node" \
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_swerve_mpc"
+    runtime_binary_is_fresh ats_goal_manager \
+      "${WORKSPACE_DIR}/build/ats_goal_manager/ats_goal_manager_node" \
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_goal_manager"
+    runtime_binary_is_fresh minco_planner \
+      "${WORKSPACE_DIR}/build/minco_planner/minco_planner_node" \
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/minco_planner"
+    runtime_binary_is_fresh ats_rog_map \
+      "${WORKSPACE_DIR}/build/ats_rog_map/ats_rog_map_node" \
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map"
+    runtime_binary_is_fresh ats_rog_map_adapter \
+      "${WORKSPACE_DIR}/build/ats_rog_map_adapter/ats_rog_map_adapter_node" \
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map_adapter"
+  } 2>&1)"
+  printf 'critical_runtime_binary_freshness:\n%s\n' "${freshness}"
+  if printf '%s\n' "${freshness}" | grep -qE ' (stale_binary|executable_missing) '; then
+    echo "FAIL: 关键运行产物与源码失配，先重新构建对应包再运行验收" >&2
+    return 1
+  fi
+}
+
+if ! check_runtime_binary_freshness; then
+  exit 3
+fi
 # 每个隔离 domain 使用独立 launch 日志，避免异常遗留的旧进程污染本轮验收记录。
 LAUNCH_LOG="/tmp/ats_minco_mpc_test_launch_${ROS_DOMAIN_ID}.log"
 # MuJoCo 初始位姿（map/odom 平面坐标，单位 m；yaw 单位 rad）。
@@ -1779,7 +1862,10 @@ if [[ "${USE_RVIZ}" == "true" ]]; then
 else
   assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc
 fi
-assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mpc
+# 授权链有两个合法消费者：MPC 用它决定是否跟踪，arbiter 用它决定自动源是否
+# 有权占用 selected。手动源不依赖该授权，因此 arbiter 的订阅不能算多余。
+# 这里仍然要求订阅数恰好为 2，第三个订阅者依旧判为所有权失控。
+assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mpc cmd_vel_arbiter
 # MPC 清 tracker；安全信号允许多个 consumer，但只有 Goal Manager 可以发布
 # 最终急停权威。
 assert_topic_ownership /planner/emergency_stop ats_goal_manager
