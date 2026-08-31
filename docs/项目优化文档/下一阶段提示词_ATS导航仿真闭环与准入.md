@@ -1,273 +1,102 @@
-# 下一阶段新对话提示词：Gazebo 定位新鲜度与规划闭环准入
+# 下一阶段提示词：ATS P2 接触区停机根因与 red-box 收敛
 
-下面内容可直接作为新对话的首条提示词。
+下面内容可直接作为 Claude 新对话的首条提示词。
 
+```text
 [$develop-robot-vision-navigation]
 
-继续 ~/ATS_2026_snetry_test 的 ATS 四驱四转哨兵导航优化。P0 已完成，本轮从
-P1 Gazebo localization freshness 开始。完整读取：
+继续 /home/ats/ATS_2026_snetry_test 的 ATS 四驱四转哨兵导航优化。本轮从 Codex review 后的
+P2 安全基线开始，优先定位 MuJoCo red_box 目标 5 与 unknown 恢复后的接触区问题，不再重复 P1 bridge
+归因实验，也不先调整目标 9/10 的 terminal relocation。
+
+开始前请完整读取：
 
 1. AGENTS.md
-2. docs/项目优化文档/ATS导航剩余优化总TODO.md
-3. docs/nav2_to_3desdf_minco_mpc_optimization_direction.md
-4. docs/ats_swerve_mpc_ltv_qp_backend_admission.md
-5. dependencies.repos 与 dependencies.lock.repos
+2. docs/nav2_to_3desdf_minco_mpc_optimization_direction.md 的 2026-08-31 review 结论
+3. docs/项目优化文档/ATS导航剩余优化总TODO.md 的 2026-08-31 当前执行清单
+4. minco_planner 的 terminal yaw relocation、goal admission、footprint safety、local repair 与测试
+5. ats_goal_manager 的 progress watchdog 与 RMUC 2025 navigation profile
 
-建议按“定位 -> 最小修改 -> 构建 -> 聚焦单测 -> 隔离 Gazebo 闭环 -> 文档”推进。风险条件触发后优先保存
-raw artifact 和 first violation，让当前高风险运行安全退出；随后继续只读审查、证据整理与修复复盘。Codex 负责分仓提交和普通 push；
-Claude 的交付范围为实现、测试与结果报告，不包含 Git 写操作。提交沿用用户既有个人身份，不添加其他作者或 `Co-authored-by`。
+工作边界：Claude 负责定位、实现、构建、测试、仿真和交付报告；Git 暂存、提交和 push 交给 Codex。
+建议保留用户已有修改，显式列出每个准备编辑的文件。每次源码修改前先给出 DoD、文件范围、验证清单、
+当前假设和风险转入条件。
 
-当前已验证基线：
+当前可信基线：
 
-- P0 已完成：从用户 SSH `origin/develop` 的 depth-1 root clone 后，使用 exact lock import
-  成功取得 22 个仓库；锁文件由 vcs export --exact -n 生成。
-- rmoss_gz_resources 使用 humble=b5c759f08844dfda19c79aa870866ace8d4c7b3a；
-  ats_mujoco_sim、teleop_gimbal_keyboard 使用已验证的用户 SSH URL。
-- Gazebo fork ac2085fcf5e109f9f53d80e5d0661facbe588a6a 已加入单一 C++ recorder、
-  EvidenceStatistics 与 runner 进程 telemetry；“包级 CTest 32/32”是历史记录，不能当作当前状态。
-  当前 focused `test_evidence_statistics` 已验证四次 arrival 记录三段 wall 间隔，即使 ROS stamp 重复或
-  倒退；该 fixture 修正不放宽任何 freshness 判据。
-- **当前速度接口迁移（2026-08-23）**：Gazebo 已使用
-  `ats_swerve_mpc -> /cmd_vel/autonomy_raw -> cmd_vel_arbiter -> /cmd_vel/selected ->
-  gz_chassis_cmd_adapter`；adapter 保留 big-yaw 旋转和 `/motion_control`/Gazebo chassis 唯一发布。
-  `validate_navigation_config.py` 和 arbiter 19 条 GTest 已通过。重装当前 launch 后，loopback 在隔离 domain
-  `222` 实测 `/cmd_vel -> selected -> /odom`；selected publisher/subscriber=`1/1`，`vx=0.3` 对应
-  `/odom.x=0.825`（artifact：`/tmp/ats_loopback_arbiter_domain222.fEjFyT`）。这只是手动源仲裁出口证据，
-  不是 P1 或完整速度链闭环。
-- **已实现且聚焦测试通过**：当 `gz_chassis_cmd_adapter` 要求 big-yaw feedback 而样本缺失时，
-  `/motion_control` 与 Gazebo chassis 输出建议同时精确归零；建议避免只让 chassis 输出归零而保留非零
-  `/motion_control`。这不影响 P1 freshness 判据，尚不是 Gazebo 物理闭环证据。
-- **历史 selected P1（2026-08-23，domain `218`）**：默认 `10 Hz / 625`、headless、`rog_map` owner 的
-  recorder 实际完成 `60.008622 s`。`/lidar_odometry` 是首个 freshness 违反者，wall p99/max=
-  `0.818336/0.877152 s`；`/localization`=`0.818289/0.877242 s`，status
-  `TRACKING/non-TRACKING=575/25`、TF failure=`4/601`。action `ABORTED`，JPS/MINCO/MPC 路径均为空，
-  `/cmd_vel/selected` 无非零样本并在 terminal 保持唯一 publisher/零速。`p1_admission_evidence=false`，
-  原始 artifact：`/tmp/ats_p1_selected_domain218/20260823_194049_nominal_none_domain218/`。
-- **最新默认 P1（2026-08-23，domain `228`）**：默认 `10 Hz / 625`、headless、`rog_map` owner、
-  `OBSERVE_GAZEBO_TRANSPORT_LIDAR=false`、`USE_DIRECT_GAZEBO_LIDAR_BRIDGE=false` 与 generic
-  `RELIABLE/KeepLast(10)` 的正式运行，recorder 完成 `60.001345 s`。`/lidar_odometry` 是首个 freshness
-  违反者，wall p99/max=`0.650163/0.743549 s`；`/localization`=`0.650164/0.743591 s`，raw Gazebo LiDAR
-  wall p99/max=`0.708598/0.714906 s`。`/clock` wall p99=`0.010387 s`、RTF p99=`1.032094`，status
-  `TRACKING/non-TRACKING=585/15`、TF failure=`7/600`。JPS/MINCO/MPC path 均为空，selected 无非零样本，
-  active owner=`1/2`；这是定位/地图 fail-closed。`p1_admission_evidence=false`，原因为
-  `freshness_lidar_odometry`，artifact：
-  `log/gazebo_minco_mpc_chain/20260823_211350_nominal_none_domain228/`。RTF 正常不能证明 generic bridge、DDS
-  或 Point-LIO 中任一方是唯一根因。
-- **最新 owner 审计（2026-08-24，无新运行）**：活动 generic LiDAR publisher 是系统安装的
-  `/opt/ros/humble/lib/ros_gz_bridge/parameter_bridge`，包版本
-  `0.244.25-1jammy.20260608.160002`；workspace 没有 `ros_gz_bridge` 源包。对应 upstream
-  `0.244.25` 的 GZ-to-ROS 路径在 Gazebo Transport 回调内同步执行
-  `PointCloudPacked -> PointCloud2 -> publish()`，且没有使用 YAML 传入的 subscriber queue size。
-  项目只拥有 generic bridge 的 topic/方向/ROS publisher QoS 配置；`rmoss_gz_bridge` 只有 pose/RFID
-  bridge，不是该 LiDAR owner。因此已触发“owner 不在项目可修改范围”的风险转入条件：本轮没有源码修改、
-  没有添加计数、没有占用新 ROS domain，domain `228` 仍是最新运行失败 artifact，P1 仍未通过。
-- domain `217` 的健康门禁失败来自过期 install 二进制，而不是源码参数：源码的
-  `sensor_scan_generation`/`localization_fusion` 已含 Gazebo frame 与固定 map 注册，实际执行文件却早于源码。
-  runner 现把 arbiter、MPC、两定位节点与 Gazebo recorder 五个关键 executable 的源码新旧检查写入 `runtime_preflight.txt`，失配即拒绝启动，建议避免将此类
-  artifact 当作 P1 失败或通过。
-- **P1 Transport 分层（domain `219`，未通过）**：60.009199 s 内 Gazebo Transport PointCloudPacked
-  记录 `599` 个样本，wall p99=`0.108672 s`；ROS `/<robot>/livox/lidar` 仅 `168`
-  个，wall/stamp p99=`0.639515/1.800000 s`，`/lidar_odometry` p99=`0.662703 s`。该运行增加了
-  一个只读 Transport subscriber，能证明该运行的源头稳定，不能单独证明默认无 observer 链的因果。
-- **P1 DDS 元数据分层（domain `220`，未通过）**：60.009184 s 内 Transport `600`
-  个样本且 wall p99=`0.105195 s`，ROS raw `150` 个且 wall/stamp p99=`0.802505/1.900000 s`，
-  `/lidar_odometry`/`/localization` p99=`0.881395/0.881366 s`。Fast DDS RMW 报
-  `gazebo_lidar_dds_publication_sequence_supported=no`，故 sequence 的 `0` 不是零丢包证据；建议避免用它区分
-  generic bridge 未发布与 DDS 接收丢样。这两次均为 action `ABORTED`、`p1_admission_evidence=false`。
-- 历史 domain 230 的 /localization interval p50/p95/p99 为 0.371/0.994/1.612 s，
-  adapter 反复 ready=false，action fail-closed。
-- 旧版本分类器只检查到 `/lidar_odometry`，因此历史“首个可见违反者”结论存在阶段遗漏。当前分类器按
-  `gazebo_transport_lidar -> gazebo_lidar -> livox_input -> cloud_registered -> lidar_odometry -> odometry ->
-  localization -> localization_status` 扫描；仍不能直接归因 LiDAR、Point-LIO、DDS、Gazebo RTF、TF、
-  localization_fusion 或 recorder 中的任一唯一行为 owner。
-- **最新对照（2026-08-30，domain `107/113`）**：domain `107` 7 级 freshness 全通过，但 Point-LIO Z 轴
-  发散至约 `292.56 m` 并触发多次 ROGMap reset；domain `113` 目标成功但 `gazebo_lidar` p99=`0.323823 s`
-  未通过。该 run-to-run 反转说明单次运行不足以确认 owner，P1 继续保留未通过状态。
-- Direct bridge 与 Transport observer 在当前工作区没有实际运行 artifact，相关结论先标为已实现未运行，
-  不作为候选否决的测量证据。
-- P1 的最终 60 s headless 已在迁移前的 domain `225` 完成：`ENABLE_CAMERA_SENSORS=false`、终态急停与
-  旧 `/cmd_vel_mpc=0` 均成立，但 action 在 90 s 内未终止；`/lidar_odometry` p99/max wall interval 为
-  `2.759540/2.942285 s`，因此 freshness 不通过，P1 和 P2 仍未通过。独立 domain `224` 曾 action 成功，
-  但同样不满足 freshness。
-- recorder 已在新 `60 s` domain 实际覆盖 raw `/<robot>/livox/lidar`、bridge `/livox/lidar`、
-  `/cloud_registered` 与 `/lidar_odometry`。domain `215` 的 `4 ms` physics candidate（`10 Hz / 625 x 32`）
-  p99=`1.610141/1.435872/1.430092 s`；domain `214` 的 `5 Hz / 625 x 32`、SDF/bridge/Point-LIO 三处
-  `0.2 s` 同期 candidate 恶化为 `3.666797/3.312480/3.308619 s`；domain `213` 的无 GUI state broadcaster
-  headless world 在 `10 Hz / 625 x 32` 下为 `1.409273/1.322408/1.319348 s`。三次 action 均 unsafe
-  ABORTED，均为 `freshness_lidar_odometry`，建议避免作为默认或 P1/P2 通过。
-- 默认仍是 `LIVOX_UPDATE_RATE_HZ=10.0`、`LIVOX_HORIZONTAL_SAMPLES=625`。频率参数会同步驱动 SDF
-  update rate、C++ bridge `scan_period_sec` 和 Point-LIO `mapping.lidar_time_inte`；`WORLD_SDF_PATH` 只在
-  非空时传入 launch。`rmu_gazebo_simulator` 本轮为 `32 tests, 0 errors, 0 failures`。
-- domain `233` 不合法（Fast DDS domain 上限/port 计算错误），建议避免再使用大于 `232` 的 domain；
-  runner 现会先按十进制规范化输入，前导零也会按数值检查。
-  合法 domain `231` 曾在 `ROS_LOG_DIR=/tmp` 下启动完整导航链，但 RTF 偏低、localization wall gap
-  最大约 `2.185 s`、status 有非 TRACKING 样本，action 未完成并最终急停。该结果是历史诊断运行，
-  不能作为 P1 通过。
-- MINCO production node 仍未将 InitialKinematicState 传到 center、footprint、fallback、
-  repair 四条路径；geometry telemetry 还不是完整 production gate。
-- TEST_PROFILE 尚未真正控制 straight/corner/S/narrow/red-box 场景，GOAL_YAW 未进入 action payload。
-- 默认保持 solver_mode=ilqr；qp_shadow 只诊断，solver_mode=qp 继续拒绝。
-- runner 在启动前审计合法 ROS domain、残留导航/仿真进程及关键运行二进制新鲜度。
-- 当前 runner 的二进制新鲜度审计范围有限：仅覆盖六个 C++ 导航包和 `*.cpp/*.hpp` 输入；
-  `localization_fusion`、`sensor_scan_generation`、Python 仿真入口及 `*.h` 等输入仍需单独核对。
-- 仲裁器仍存在 ROS/sim clock 与 steady lease 混用的残留风险；低 RTF 场景先按未收敛处理，直到消息年龄和租约
-  采用同一时钟契约或完成节点级回归。
+- Gazebo P1 已在 domain 127/129/131 连续三次通过；本轮不通过放宽 freshness、TF 或安全阈值换结果。
+- Point-LIO Z 发散已由 Gazebo launch 的 SI 单位覆盖修复：acc_norm=9.81、satu_acc=30.0；实机配置保持不变。
+- MuJoCo 最终安全 revision 已在独立 domain 132--137 重跑：adapter_lease、service_timeout、input_stale、
+  unreachable、freeze 通过；unknown 的故障注入和两级零速通过，但恢复后的新目标因起点附近
+  `8--9` 个 footprint collisions 被安全拒绝，当前矩阵为 5/6。
+- planner escape_from_contact_enabled=false，goal manager ego_blocked_escape_enabled=false；RMUC profile
+  显式保持两者关闭。runner 对任一 footprint_collisions>0 判失败。
+- 有界碰撞前缀不能区分量化接触与薄实体障碍。本轮避免重新打开 escape，也避免让 runner 接受碰撞轨迹。
+- 最终安全 revision 的 red_box domain 138 中目标 1--4 以零碰撞成功，终点误差分别为
+  `0.0456/0.0069/0.0277/0.0492 m`；目标 5 在约 `(1.18,-7.62,yaw=0.50)` 停入墙侧占据带，
+  后续重规划从 index 0/1 持续发现 `2--4` 个碰撞并由 watchdog 安全终止。
+- red_box 仍未通过，P2 不能写成总体通过；MuJoCo 物理接触仍未由独立 evaluator 验证。
 
-开始前先报告 DoD、精确文件范围、验证清单、假设/未验证项/风险转入条件，并核对根仓、导航仓、
-MuJoCo、Gazebo fork、机器人描述仓的 branch/HEAD/upstream/remote/status。
+Definition of Done：
 
-以下用户内容不在本轮设计、修改、暂存或提交范围内：
+1. 对目标 5 和 unknown 恢复分别建立 `reference pose -> localization actual pose -> selected command -> stop pose`
+   的同一时钟证据，记录横向/纵向/yaw 跟踪误差、速度、命令年龄、急停时刻和停止距离。
+2. 对每个首冲突样本记录 immutable snapshot identity，以及 terrain、static、unknown、ROG inflation 的来源，
+   区分轨迹发布时已碰撞、执行跟踪后越界和地图更新后变为碰撞三种情况。
+3. 修复放在首个违反安全不变量的行为 owner，不写 RMUC 坐标、目标编号或场景专用旁路；任一最终 reference
+   继续满足离散与 swept footprint collisions=0。
+4. 最终 revision 的 P2 六故障独立 domain 达到 6/6，完整 red_box 至少越过目标 5；若未达到，保存首违证据
+   并维持确定性零速，不用放宽 footprint、地图或 runner 门禁换取通过。
+5. 修改后的 focused GTest、构建、故障矩阵与 red_box 都有原始 artifact；未执行项如实标注。
 
-- src/ats_sentry_nav/ats_nav_bringup/scripts/static_map_publisher.py
-- src/ats_sentry_nav/ats_swerve_mpc/求解器.md
-- src/sim/gazebo_simulator/rmu_gazebo_simulator/scripts/ats_bridge/gz_livox_bridge.py
+第一项任务：目标 5 的 reference/actual/stop 证据
 
-Codex 负责显式 `add`、分仓 commit 与普通 push；Claude 的交付不包含 Git 写操作。
-暂存采用显式文件清单，不使用 `git add .`、`git add -A`、破坏性恢复或 force push。Gazebo fork 的写入范围限定为 Codex 将当前 `main`
-普通 push 到用户 `origin/main`，upstream 保持只读；未知改动均视为用户内容，若与必要 owner 重叠，保留现场并报告。
+- 先在不改算法参数的独立 domain 复现目标 1--5。围绕目标 5 首次进入低净空区域的前后窗口，按同一
+  steady/ROS time 基准保存 localization、reference、MPC predicted/executed、`/cmd_vel/selected`、
+  `/motion_control`、急停状态和地图 generation。
+- 对 reference 与 actual 分别运行同一个离散和 swept footprint evaluator，记录最小 clearance、首冲突
+  center/yaw、碰撞 index、相对墙法向误差、实际速度和从首次制动/急停到静止的位移。
+- 先回答三个可证伪问题：发布时 reference 是否为零碰撞；actual 是否在跟踪中越过 reference 的安全包络；
+  相同 pose 是否因 snapshot/source 更新从 free 变为 occupied。缺少时间配对时先补只读 telemetry 与测试。
+- 若 reference 安全而 actual 越界，优先审查 MPC tracking error、执行延迟、速度/加速度限幅和停机包络；
+  若 reference 本身不安全，优先审查最终 revalidation 的 snapshot、采样连续性和提交时序；若地图发生变化，
+  优先审查 generation/heartbeat 与旧 reference 撤销时序。
+- 避免只通过加大 watchdog 时间、缩小 footprint/margin、降低障碍阈值或允许碰撞前缀来绕过首违。
 
-阶段 P1：定位 Gazebo localization freshness 的首个违反者。
+第二项任务：unknown 恢复后的起点冲突
 
-运行开始前审计残留进程、Gazebo z/RTF 和关键 telemetry；一旦系统失稳、残留进程、TF/速度多 owner、
-unknown/lease/急停门异常或 callback/话题证据缺失时，优先保存 raw artifact，让当前 run 安全退出并继续复盘。建议避免通过提高
-localization/adapter/MPC timeout 或关闭 fail-closed 来“通过”。
+- 使用全新 domain 复现 all-unknown 注入、零速和恢复，不复用 red_box 的机器人状态。保存故障前、故障中、
+  ready 恢复和新目标提交四个时刻的 localization pose、footprint cells、各地图来源、source generation、
+  adapter publication 与 MINCO local snapshot identity。
+- 对恢复后 `8--9` 个碰撞逐格列出来源和值，确认是机器人确实停在 occupied/unknown 边界、ego unknown
+  清理范围/方向不足、地图 origin/yaw 转换偏差，还是恢复后的 snapshot 时序问题。
+- 恢复时只允许健康条件重新准入；ready 本身不复活旧 reference。若当前 pose 已不具备零碰撞起步条件，
+  保持零速并给出结构化失败，不启用未经同等碰撞验证的 escape motion。
+- 为确认的 owner 增加最窄回归，包括恢复前后 generation、起点 footprint、旧 reference 失效和新目标准入。
 
-最终 revision 的 C++ recorder 已在独立 domain 实际记录 raw Gazebo LiDAR、`/livox/lidar`、
-`/cloud_registered`、`/lidar_odometry`、`/odometry` 和 `/localization` 的同构 steady-wall、ROS stamp 与
-`/clock` age。domain `219/220` 已表明 raw 至 loam 的 wall gap 仍同阶、recorder callback p99 为微秒级，
-而 Transport source 保持 10 Hz。Transport observer 是 `OBSERVE_GAZEBO_TRANSPORT_LIDAR=true` 的可选诊断，
-不改默认链但会新增 subscriber。DDS sequence 元数据当前不可用；最新 domain `228` 在无 Transport observer
-下仍失败，且 `/clock`/RTF 正常。generic `ros_gz_bridge` owner 已确认位于系统安装包、超出当前四仓
-可修改范围；下一步优先由用户决定是否将对应源码纳入 workspace/fork，或采用项目外 trace。在形成该选择前，源码修改暂缓，
-仍可继续只读审查与证据整理；Point-LIO、loam、recorder 或 DDS consumer 侧的替代计数无法证明 generic 发布次数，也不能
-凭相关性归因 Point-LIO、loam 或 DDS。
+第三项任务：目标 9/10 后续门禁
 
+- 目标 5 与 unknown 恢复首违收敛后，再继续目标 9。先打印 relocation 的 tail/window、全部候选 index、
+  collision interval 和拒绝原因；候选优先覆盖窗口边界、冲突带首末与 tail_start，再按弧长确定性补点。
+- 历史目标 9 的候选间距会漏掉窄冲突带，且已记录接近路径东向极值 `9.832 m`；单纯把候选数从 6
+  调高或缩小 terrain 过报只作为 A/B 诊断。最终方案仍需从 snapshot 与 footprint 几何推导。
+- 目标 9 达到零碰撞安全终态后，再用新 domain 独立发送目标 10，并保存起点 footprint、首冲突样本、
+  terrain/static/unknown 来源和 snapshot identity。
 
-1. 当前 recorder 已低开销订阅并测量：
-   /clock、/lidar_odometry、/odometry、/localization、/localization/status、
-   /rog_map_adapter/ready；先审计实现和现有 CTest，字段缺失时再修改。
-2. 每级记录 steady_clock wall arrival interval p50/p95/p99/max、ROS stamp interval、
-   stamp age、重复/倒退、最长 gap、消息数；记录 RTF、TF lookup failure、关键进程
-   CPU/RSS/thread/context switch、DDS queue/drop 与 callback blocking。
-3. 建立字段级 contract table：
-   /clock -> /lidar_odometry -> /odometry -> /localization -> status -> adapter
-   建议涵盖 frame、clock、QoS、producer、consumer、timeout、health gate、fallback。
-4. 当前 domain `213/214/215/224/225` 都把 `/lidar_odometry` 标为首个可见违反者。下一轮使用新 domain、
-   固定 revision，观测范围聚焦 publisher/DDS 分层所需的单因素；建议避免将已拒绝的 `4 ms`、`5 Hz` 或无 GUI
-   state broadcaster world 作为默认或重复用于通过声明。设置 `ROS_LOG_DIR=/tmp/<run>`，避免用户 home
-   的只读日志路径干扰；建议避免高频 ros2 topic echo 干扰被测链。
-5. 找到最早违反 freshness 的行为 owner 后，修改范围聚焦该 owner，并补最窄 deterministic regression。
-   建议避免提高 odom/localization/map/reference timeout、adapter lease 或 projection deadline；
-   建议避免 Ground Truth 接管正式 /localization。
+第四项任务：回归与证据
 
-P1 DoD：低负载 headless 连续至少 60 s，/localization p99 interval < 0.25 s，
-无 >0.5 s gap，stamp 不倒退，status 持续 TRACKING，adapter 不因 localization 抖动
-变为 ready=false；随后两个独立 ROS domain 的 straight action 成功，并记录终点误差、
-规划/速度唯一 owner 与收尾零速。
+- 先运行最窄包：ats_navigation_interfaces、ats_rc_esdf、minco_planner、ats_goal_manager、
+  terrain_analysis_ext、ats_mujoco_sim。
+- 功能测试与既有 lint 分开报告。当前 minco_planner 和 terrain_analysis_ext 有历史 copyright/cpplint/
+  format 欠债，建议避免顺带格式化无关文件。
+- query_occupancy_grid.py 的 farthest-free --max-distance 默认 0.0 保留旧行为；runner 默认
+  FARTHEST_GOAL_MAX_DISTANCE=4.0。保留对应 deterministic regression。
+- P2 六个故障分别使用新 ROS_DOMAIN_ID，避免在同一机器人状态中串行注入。
+- 每个 fault 保存 ready=false -> emergency_stop=true -> selected=0 -> motion_control=0，恢复后没有新目标时
+  旧 reference 不复活。
+- red_box 每段记录终点误差、raw/reference 点数、reference/actual footprint collisions、跟踪误差、停止距离、
+  失败原因和恢复次数。
+- 没有独立 contact evaluator 时，物理接触写为未验证。
 
-P1 通过后，后续工作建议依总 TODO 采用以下顺序：
-
-1. P2：InitialKinematicState 接入 MINCO 四条路径，geometry telemetry 升级为按路径类别门禁。
-2. P3：实现真正改变 world/start/goal/yaw/验收逻辑的 straight、single_corner、s_turn、
-   narrow_corridor、nominal、red_box profile。
-3. P4：重跑当前 revision 的 nominal、unknown、stale、unreachable、lease、timeout、recovery、
-   TF/localization epoch 与 runtime unsafe。
-4. 再推进 RViz 滑窗、P3 Nav2-free、P4 swept footprint、MuJoCo 跨后端、QP paired shadow 和
-   受限实机导航。建议避免跳级。
-
-Gazebo 与 loopback 的迁移已完成：Gazebo 使用
-`/cmd_vel/autonomy_raw -> /cmd_vel/selected -> gz_chassis_cmd_adapter`，loopback 使用
-`/cmd_vel -> cmd_vel_arbiter -> /cmd_vel/selected -> loopback_simulator`；
-不启动实机专属 fake/chassis yaw transform 时仍保持 Gazebo adapter 的既有 frame 语义。现在建议以新
-合法 domain 重跑 P1，验证定位、建图、规划、轨迹、MPC、云台协调和 selected 导航安全链。此前
-`/cmd_vel_mpc` artifact 是历史失败诊断，不能作为新链通过或失败的直接证据。建议避免新增或恢复
-CAN、电机、轮速、电流、电压、温度、底盘反馈、硬件 watchdog、`/motion_control` 或接触 telemetry
-作为仿真或 action 通过条件。下位机/HIL 诊断不属于该提示词的执行范围。建议保留
-`standard_robot_pp_ros2` 的决策/自瞄相关内容，以及 `serial/gimbal_joint_state`、`GimbalYawStatus` 和
-`YawAuthorityRequest` 的云台与速度变换契约。
-
-当前会话直接实施、验证并依据实际 artifact 更新 `docs/`。Codex 负责 review、显式暂存、
-分仓提交和普通 push；Claude 的交付不包含 Git 写操作。提交沿用用户本机既有 Git 身份，不添加任何其他作者或
-`Co-authored-by`。Gazebo 的
-`gz_chassis_cmd_adapter` 保留 big-yaw 变换、`/motion_control` 与 Gazebo chassis 的唯一发布，只将它的
-  输入切到 selected；loopback 也启动 arbiter 且只订阅 selected。同步更新 Gazebo evidence recorder、cancel client 和
-runner，使 active/terminal ownership、非零动作和故障归零都观察 `/cmd_vel/selected`，不保留旧字段名作为
-当前话题判据。
-
-每次变更后按风险递增执行：
-
-  MAKEFLAGS=-j1 colcon build --base-paths src --packages-select <targets> --parallel-workers 1
-  colcon test --base-paths src --packages-select <targets> --parallel-workers 1
-  colcon test-result --test-result-base build/<package> --verbose
-  python3 -m py_compile <changed_python_files>
-  bash -n <changed_shell_files>
-  ros2 launch <package> <launch> --show-args
-  git diff --check
-
-影响地图、定位、规划、安全或控制行为后，建议以最终 revision 在隔离 ROS domain 重跑闭环；
-适用时运行 headless MuJoCo 跨后端回归。建议避免复用修改前运行结果。
-
-最后更新总 TODO 与当前方向文档；未改 QP 时 backend admission 默认保持不变。stage 范围使用本轮文件的显式清单，
-按接口/算法/安全/仿真/文档拆分中文提交，作者仅保留用户本人既有身份，
-push 范围限定为有改动的用户仓库。最终报告列出每仓 baseline/final SHA、push、测试、ROS domain、
-指标、first violation、未验证项和回滚 revision。
-
-## 2026-08-21 最新交接（优先于历史诊断条目）
-
-当前源码 revision 在本次提交后以各仓库 `origin` 分支 HEAD 为准。最后一个完整 P1 默认基线为：
-
-```bash
-ROS_DOMAIN_ID=208 \
-ROS_LOG_DIR=/tmp/ats_p1_runtime_208 \
-LOG_ROOT=/tmp/ats_p1_runtime_208 \
-PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none TEST_PROFILE=nominal \
-HEADLESS=true HEADLESS_RENDERING=true ENABLE_CAMERA_SENSORS=false \
-USE_RVIZ=false USE_VIEWER=false \
-LIVOX_UPDATE_RATE_HZ=10.0 LIVOX_HORIZONTAL_SAMPLES=625 \
-OBSERVE_GAZEBO_TRANSPORT_LIDAR=false \
-USE_DIRECT_GAZEBO_LIDAR_BRIDGE=false \
-LIDAR_BRIDGE_PUBLISHER_DEPTH=10 \
-LIDAR_BRIDGE_PUBLISHER_RELIABILITY=reliable \
-RUN_DURATION_SEC=60 ACTIVE_OBSERVER_WINDOW_SEC=60 \
-GOAL_TIMEOUT_SEC=90 GOAL_RESULT_WAIT_SEC=90 \
-scripts/test_gazebo_minco_mpc_chain.sh
+交付报告请包含：根因、行为所有者、精确修改文件、关键 diff、实际命令与退出码、focused tests、
+六故障结果、red_box 每段结果、未验证项和残余风险。完成后输出 READY_FOR_CODEX_REVIEW，保持 Git 无写入。
 ```
-
-该命令的 artifact 是
-`/tmp/ats_p1_runtime_208/20260820_175758_nominal_none_domain208/`，退出码为 `1`。这是有效的
-失败证据，不是运行环境污染或通过记录：recorder 完成 `60.016403 s`，启动前和结束后无残留进程，
-`/clock` wall p99=`0.078741 s`，但 raw ROS `/<robot>/livox/lidar` p99=`2.954985 s`、
-`/livox/lidar`=`2.958803 s`、`/cloud_registered`=`3.327495 s`、`/lidar_odometry`=`3.327198 s`、
-`/localization`=`3.324217 s`。分类器首违仍为 `lidar_odometry`，status
-`TRACKING/non-TRACKING=362/210`，TF failure=`35/600`，故 `p1_admission_evidence=false`。
-动作有 JPS/MINCO/MPC 与 `/cmd_vel_mpc` 证据，但最终 `ABORTED`；terminal
-`emergency_stop=true` 且 `/cmd_vel_mpc` 为零。连续 swept 与离散 footprint 冲突未验证。
-
-本轮随后在新 domain `208` 重跑无 viewer/RViz 的 `TEST_PROFILE=nominal`，recorder 实际完成
-`90.007728 s`，JPS、MINCO、MPC、ROGMap adapter 与 `/cmd_vel_mpc` 单一发布者均有运行证据，但 action
-在 `90 s` 内未成功。`/lidar_odometry`、`/odometry`、`/localization` 的 wall interval p95/max 为
-`1.427/2.744 s`、`1.424/2.750 s`、`1.419/2.757 s`，`/clock` RTF p50/p95/p99 为
-`0.330/0.585/0.984`，结果仍是 `freshness_lidar_odometry`。artifact 位于
-`log/gazebo_minco_mpc_chain/20260821_101956_nominal_none_domain208/`；它是当前 revision 的失败证据，
-不是 P1/P2 通过记录。
-
-本轮 MuJoCo red_box 使用新 domain `207`；首个 action 目标已接受，ROGMap adapter generation 从
-`756` 前进至 `769`，但 Goal Manager 后续记录 `pose=(nan, nan)` 并 fail-stop，故首个目标未完成。
-无效 pose 的首次来源未定位，建议避免用仿真内部速度适配、轮速、接触、CAN 或底盘反馈替代该导航侧诊断。
-
-在性能更高的新电脑上建议先用**全新且合法的** `ROS_DOMAIN_ID`（`0..232`，建议避免复用旧 domain）和
-同一默认参数重跑上面的 60 秒 baseline。先运行 `bash -n scripts/test_gazebo_minco_mpc_chain.sh`、
-`scripts/test_gazebo_runner_contract.sh`、定向 `rmu_gazebo_simulator` build/CTest 与两个 launch 的
-`--show-args`，并保存完整 artifact。P1 的全部条件通过后，再进入 P2：
-
-- `/localization` p99 `<0.25 s`、max gap `<=0.5 s`，且 stamp 无倒退；
-- `/localization/status` 持续 TRACKING，TF lookup 没有 failure；
-- adapter heartbeat 不因定位而失效；
-- 两个独立 domain 的真实 straight action 成功，且唯一 owner、终点误差和终态零速都有证据。
-
-建议避免把本机 domain `208` 的绝对 wall 时间外推到新电脑，也建议避免基于硬件更快而直接跳到 P2。若新的默认
-baseline 仍失败，先在独立新 domain 以 `OBSERVE_GAZEBO_TRANSPORT_LIDAR=true` 运行同一窗口；该 recorder
-订阅只在诊断进程寿命内存在，用于区分 Gazebo publisher 调度与 generic `ros_gz_bridge`/ROS-DDS 接收边界。
-若 source 边界仍不足以归因，再补 DDS 接收计数；已拒绝的 `4 ms` physics、
-`5 Hz`、无 SceneBroadcaster、Direct bridge 或 `BEST_EFFORT/KeepLast(1)` candidate 保持非默认。继续优先避开
-swap/内存/CPU 等主机资源准入设计、timeout 放宽、Ground Truth 接管定位和关闭 fail-closed。

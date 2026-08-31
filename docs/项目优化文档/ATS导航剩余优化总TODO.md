@@ -1,10 +1,33 @@
 # ATS 导航剩余优化总 TODO
 
 > 状态：唯一活动导航优化清单
-> 更新时间：2026-08-24
+> 更新时间：2026-08-31
 > 适用范围：Gazebo、MuJoCo 与实机导航软件侧的 ATS 四驱四转哨兵导航链
 > 历史说明：旧阶段 TODO 已退役；历史实现与运行证据通过 Git 历史、
 > `docs/ats_swerve_mpc_ltv_qp_backend_admission.md` 和状态文档追溯。
+
+## 0. 2026-08-31 当前执行清单
+
+- [x] Gazebo P1 在 domain `127/129/131` 连续三次通过；记录 Transport/ROS LiDAR cadence、
+  `TRACKING 600/600`、TF 首次建立后零失败和 action 终点误差；
+- [x] Gazebo 仿真 profile 按 SI 单位覆盖 Point-LIO `acc_norm=9.81`、`satu_acc=30.0`，实机参数保持不变；
+- [x] TF warm-up 计数拆为建立前失败、首次建立和建立后失败，准入同时要求链实际建立；
+- [x] MuJoCo P2 六个故障用例在 review 前候选 revision 通过；freeze 终止日志和 unknown 前置目标上限已有回归；
+- [x] Codex 安全 review：planner 与 goal manager 的实验 escape 默认关闭，RMUC profile 显式关闭；runner 对
+  任一 `footprint_collisions>0` 保持失败；
+- [x] 运行产物预检改为明确比较实际载入 artifact，源码目录、artifact 或扫描缺失时 fail-closed；
+- [x] 安全修正后的 P2 故障矩阵已在 domain `132–137` 重跑：五项通过；unknown 故障主体通过但恢复新目标
+  因起点 footprint 冲突失败，当前为 `5/6`；
+- [x] 当前 `red_box` domain `138` 已运行：目标 1–4 零碰撞成功，目标 5 因跟踪/停车后进入墙侧接触区失败；
+- [ ] 对齐目标 5 和 unknown 恢复的 reference/actual pose、tracking error、停止距离与地图来源，保证故障停车
+  和重规划起点仍在零碰撞可重启域；
+- [ ] 修复 `red_box` 目标 9：候选索引覆盖实际冲突带，并抑制终端接近 suffix 的东向过冲；
+- [ ] 从目标 9 的安全终态独立验证目标 10，区分起点过报与目标自身不可达；
+- [ ] 增加动态 TF stamp/age 门禁，补齐 P1 当前只证明“链建立后可查询”的证据边界；
+- [ ] 增加 MuJoCo 独立 contact evaluator；离散 `footprint_collisions=0` 继续不替代物理接触结论。
+
+当前状态：Gazebo P1 为**已验证通过**；MuJoCo P2 当前故障矩阵为**5/6**，`red_box` 到目标 5；
+`red_box`、物理接触和 P2 总体准入仍为**未通过**。
 
 ## 1. 目标与完成定义
 

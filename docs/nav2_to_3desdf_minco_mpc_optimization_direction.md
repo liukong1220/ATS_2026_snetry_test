@@ -1,8 +1,62 @@
 # ATS 自研导航 V1 当前状态与优化方向
 
-> 更新时间：2026-08-24
+> 更新时间：2026-08-31
 > 本页只记录当前准入状态、稳定架构边界和下一执行入口。历史阶段流水账已从活动文档移除，
 > 仍可由 Git 历史和专项准入记录追溯。
+
+## 0. 2026-08-31 Codex review 结论
+
+### Gazebo P1
+
+**已验证通过**：隔离 domain `127/129/131` 连续三次得到
+`p1_admission_evidence=true`、`all_p1_gates_passed`、`failures=0`。三次 action 终态误差分别为
+`0.07443/0.06013/0.06239 m`；Gazebo Transport LiDAR p99 wall interval 为
+`0.103479/0.103899/0.108009 s`，ROS LiDAR 边界为 `0.104534/0.107123/0.109608 s`。
+定位状态均为 `TRACKING 600/600`，`tf_chain_established=yes`，首次建立后的 TF 查询失败为 `0`。
+
+Point-LIO Z 发散的行为所有者是仿真 IMU 单位 profile：Gazebo IMU 静止输出约
+`(0,0,9.8) m/s^2`，而共享实机配置使用 `acc_norm=1.0`、`satu_acc=6.0`。Gazebo launch 现局部覆盖为
+`acc_norm=9.81`、`satu_acc=30.0`，实机 profile 未改；通过运行中的 map reset 从 `677` 降为 `0`。
+
+证据边界：Transport 与 ROS 两侧到达间隔相近只支持“这三次运行没有可测的频率退化”，不等价于
+端到端传输延迟为零。TF recorder 使用缓存中的最新变换，支持“链已建立且可查询”，尚未独立证明动态
+TF 持续更新或 age 始终在阈值内。[Confidence: High] P1 准入结果由三次独立运行支持；
+[Confidence: Medium] bridge 延迟与动态 TF age 仍需要专用时间戳证据。
+
+### MuJoCo P2
+
+**已验证（review 前候选 revision）**：`adapter_lease/service_timeout/input_stale/unknown/unreachable/freeze`
+六个独立故障用例均通过。freeze 的真实缺陷是 `kExhausted` 终止原因只进入 action result、没有进入日志；
+unknown 的失败来自前置 `farthest-free` 无距离上限，选到约 `14 m` 的不可提交目标。两处已分别由终止日志
+和 `FARTHEST_GOAL_MAX_DISTANCE=4.0` 修复，并补入聚焦回归。
+
+**review 阻塞**：候选实现曾允许提交 `FootprintSafetyChecker` 已判碰撞的 escape prefix。长度、点数与 yaw
+上界不能排除在 `0.4 m` 内穿过薄实体障碍，因此当前代码和 RMUC profile 已把 planner/goal-manager 两层
+escape 默认关闭，runner 恢复为任一 `footprint_collisions>0` 即失败。上述 6/6 artifact 早于这项安全修正；
+在新 revision 重跑前记为历史候选证据，不升级为当前 P2 总体通过。
+
+**已验证（Codex 安全 revision）**：domain `132/133/134/136/137` 的
+`adapter_lease/service_timeout/input_stale/unreachable/freeze` 为 `5/5` 通过，名义前段均为
+`footprint_collisions=0`、`escape_prefix_end=0`，故障与恢复等待阶段的 `/cmd_vel/selected` 和
+`/motion_control` 均为零。domain `135` 的 unknown 故障主体门禁通过，包括真实 all-unknown、identity 配对、
+两级零速和旧 reference 不复活；但恢复新目标在起点附近被 `8–9` 个 footprint 冲突安全拒绝，整项因此失败。
+当前故障矩阵结论为 `5/6`，不是 `6/6`。
+
+**已验证（当前 red_box，domain `138`）**：目标 1–4 以零碰撞成功，终点误差为
+`0.0456/0.0069/0.0277/0.0492 m`。目标 5 行驶到约 `(1.18,-7.62,yaw=0.50)` 后，实际足迹西缘进入墙侧
+占据带；后续重规划在 index `0/1` 持续得到 `2–4` 个碰撞并被拒，最终
+`progress watchdog exhausted the bounded suspended-replan wait`。该运行说明最先需要收敛的是跟踪/制动后
+停入接触区的行为，而不是直接从目标 9 开始调参。
+
+`red_box` 仍未通过。目标 9 的绑定约束位于终端接近路径：实测冲突中心最坏东向极值为 `9.832 m`，仅缩小
+terrain 过报仍不足；现有 6 个 terminal yaw relocation 候选也全部构造后被拒。候选间距还会漏过冲突带，
+`12` 个候选可覆盖 index `43/48`，`24` 个可覆盖 `41/43/45/48`。目标 10 从目标 9 停车位起步时，被同一
+terrain 过报挡在起点，尚未证伪其自身可达性。
+
+下一轮优先级：先定位目标 5 与 unknown 恢复的 reference/actual tracking error、急停制动距离和地图来源，
+让车辆在需要重规划或故障停车时仍留在零碰撞可重启域；随后再让目标 9 候选显式覆盖实际冲突带，并约束
+终端 suffix 的东向摆动。所有约束从 snapshot、footprint、跟踪误差与碰撞样本推导，避免写入 RMUC 坐标特例。
+若后续恢复 escape 能力，优先增加结构化、snapshot-bound 授权和薄墙/unknown/地图变化负例，而不是放宽 runner。
 
 ## 1. 当前架构
 
