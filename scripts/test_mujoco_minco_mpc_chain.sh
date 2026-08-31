@@ -2,6 +2,8 @@
 set -u
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/runtime_binary_freshness.sh
+source "${WORKSPACE_DIR}/scripts/runtime_binary_freshness.sh"
 LOG_DIR="/tmp/ats_minco_mpc_test_logs"
 # ROS 领域号；默认 88，避免回归测试与其他 ROS 进程串话。
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-88}"
@@ -26,60 +28,42 @@ if [[ ! "${ROS_DOMAIN_ID_DECIMAL}" =~ ^[0-9]{1,3}$ ]] ||
   exit 2
 fi
 
-# 部署产物新鲜度前置检查。install/ 使用 symlink-install，因此运行的其实是
-# build/<pkg>/<exe>；源码比该 executable 新时，节点会以旧接口启动，表现为
-# 话题/参数凭空缺失，而不是编译错误。历史上 ats_rog_map_adapter 的 install
-# 产物比 PlanningMapSnapshot 发布者早 18 天，goal manager 因
-# require_planning_snapshot 永远拿不到 snapshot，提交门禁每轮静默 early return，
-# 对外只看到"目标不进入 tracking"。这类失配必须 fail-fast，不能计入算法验收。
-runtime_binary_is_fresh() {
-  local package_name="$1" executable_path="$2" source_dir="$3"
-  local newer_source
-  if [ ! -x "${executable_path}" ]; then
-    printf '%s executable_missing path=%s\n' "${package_name}" "${executable_path}"
-    return 1
-  fi
-  newer_source="$(find "${source_dir}" -type f \
-    \( \
-      \( \
-        \( -path "${source_dir}/src/*" -o -path "${source_dir}/include/*" \) \
-        -a \( -name '*.cpp' -o -name '*.hpp' \) \
-      \) \
-      -o -name 'CMakeLists.txt' -o -name 'package.xml' \
-    \) \
-    -newer "${executable_path}" -print -quit)"
-  if [ -n "${newer_source}" ]; then
-    printf '%s stale_binary source=%s binary=%s\n' \
-      "${package_name}" "${newer_source}" "${executable_path}"
-    return 1
-  fi
-  printf '%s fresh binary=%s\n' "${package_name}" "${executable_path}"
-}
-
 check_runtime_binary_freshness() {
   local freshness
   freshness="$({
     runtime_binary_is_fresh ats_cmd_vel_arbiter \
       "${WORKSPACE_DIR}/build/ats_cmd_vel_arbiter/cmd_vel_arbiter_node" \
-      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_cmd_vel_arbiter"
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_cmd_vel_arbiter" \
+      "${WORKSPACE_DIR}/build/ats_cmd_vel_arbiter/cmd_vel_arbiter_node"
     runtime_binary_is_fresh ats_swerve_mpc \
       "${WORKSPACE_DIR}/build/ats_swerve_mpc/ats_swerve_mpc_node" \
-      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_swerve_mpc"
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_swerve_mpc" \
+      "${WORKSPACE_DIR}/build/ats_swerve_mpc/ats_swerve_mpc_node"
     runtime_binary_is_fresh ats_goal_manager \
       "${WORKSPACE_DIR}/build/ats_goal_manager/ats_goal_manager_node" \
-      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_goal_manager"
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_goal_manager" \
+      "${WORKSPACE_DIR}/build/ats_goal_manager/ats_goal_manager_node"
     runtime_binary_is_fresh minco_planner \
       "${WORKSPACE_DIR}/build/minco_planner/minco_planner_node" \
-      "${WORKSPACE_DIR}/src/ats_sentry_nav/minco_planner"
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/minco_planner" \
+      "${WORKSPACE_DIR}/build/minco_planner/libminco_planner.so"
     runtime_binary_is_fresh ats_rog_map \
       "${WORKSPACE_DIR}/build/ats_rog_map/ats_rog_map_node" \
-      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map"
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map" \
+      "${WORKSPACE_DIR}/build/ats_rog_map/ats_rog_map_node"
     runtime_binary_is_fresh ats_rog_map_adapter \
       "${WORKSPACE_DIR}/build/ats_rog_map_adapter/ats_rog_map_adapter_node" \
-      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map_adapter"
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map_adapter" \
+      "${WORKSPACE_DIR}/build/ats_rog_map_adapter/ats_rog_map_adapter_node"
+    linked_library_is_propagated ats_rc_esdf \
+      "${WORKSPACE_DIR}/build/ats_rc_esdf/libats_rc_esdf.a" \
+      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rc_esdf" \
+      "${WORKSPACE_DIR}/build/minco_planner/libminco_planner.so" \
+      "${WORKSPACE_DIR}/build/ats_rog_map_adapter/ats_rog_map_adapter_node"
   } 2>&1)"
   printf 'critical_runtime_binary_freshness:\n%s\n' "${freshness}"
-  if printf '%s\n' "${freshness}" | grep -qE ' (stale_binary|executable_missing) '; then
+  if printf '%s\n' "${freshness}" | \
+    grep -qE ' (stale_binary|executable_missing|source_missing|source_scan_failed|artifact_missing|library_missing|dependent_missing) '; then
     echo "FAIL: 关键运行产物与源码失配，先重新构建对应包再运行验收" >&2
     return 1
   fi
@@ -119,6 +103,13 @@ GOAL_TOLERANCE="${GOAL_TOLERANCE:-0.30}"
 LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-24}"
 # 故障注入必须单独启动一套 MuJoCo，避免目标与机器人状态跨用例污染。
 P2_FAULT_CASE="${P2_FAULT_CASE:-none}"
+# unknown 前置目标的距离上限。下界由故障注入延迟决定：ready=false 落在注入后
+# 约 6.6 s，而 domain 60 实测 single 段 1.18 m 用了 3.98 s（约 0.30 m/s），所以
+# 前置段至少要 2 m 才能在故障生效时仍然在飞。上界由规划器能否提交参考决定：
+# 不设上限时 domain 61 选到 (11.37, -8.49)（约 14 m），MINCO 连续以 452~622 个
+# footprint collisions 拒绝，前置段一次都没产生控制量。4.0 m 落在两者之间，
+# 相对下界仍有约 2 倍余量。
+FARTHEST_GOAL_MAX_DISTANCE="${FARTHEST_GOAL_MAX_DISTANCE:-4.0}"
 # Planning-grid ownership is a launch-time contract; it is intentionally not
 # changed while a robot is running.  The current MuJoCo chain implements the
 # ROGMap adapter owner only.
@@ -138,6 +129,7 @@ SOLVER_MODE="${SOLVER_MODE:-ilqr}"
 # MPC 只发布 autonomy_raw；键鼠走默认 /cmd_vel；仿真底盘只吃 arbiter 的 selected。
 MPC_CMD_VEL_TOPIC="${MPC_CMD_VEL_TOPIC:-/cmd_vel/autonomy_raw}"
 SELECTED_CMD_VEL_TOPIC="${SELECTED_CMD_VEL_TOPIC:-/cmd_vel/selected}"
+MOTION_CONTROL_TOPIC="${MOTION_CONTROL_TOPIC:-/motion_control}"
 # 默认仍为 warn；qp_shadow 观察可显式传 LOG_LEVEL=info 以保存有界 telemetry。
 LOG_LEVEL="${LOG_LEVEL:-warn}"
 # 仅在回归调用方显式给出路径时导出控制遥测。文件 I/O 由独立 Python 客户端执行，绝不进入
@@ -671,6 +663,7 @@ start_fault_observer() {
     --recovery-trigger-file "${recovery_trigger}" \
     --ready-file "${ready_file}" \
     --cmd-vel-topic "${SELECTED_CMD_VEL_TOPIC}" \
+    --motion-ctrl-topic "${MOTION_CONTROL_TOPIC}" \
     --settle-sec 25 \
     --zero-window-sec 3 \
     --require-gate >"${log}" 2>&1 &
@@ -946,10 +939,18 @@ stream_has_boolean_value() {
 capture_zero_outputs() {
   local label="$1"
   local cmd_file="/tmp/ats_p2_fault_${label}_cmd.out"
+  local motion_file="/tmp/ats_p2_fault_${label}_motion.out"
   sleep 0.5
   capture_numeric_stream "${SELECTED_CMD_VEL_TOPIC}" "${cmd_file}" || \
     fail "${label} did not publish ${SELECTED_CMD_VEL_TOPIC} during stop"
   assert_zero_stream "${label} ${SELECTED_CMD_VEL_TOPIC}" "${cmd_file}"
+  # 故障矩阵要求的链路是 ready=false -> emergency_stop -> 速度=0 -> /motion_control=0。
+  # 只断言 selected 归零会漏掉最后一段:twist_to_motion_ctrl 是 MuJoCo 的最终执行
+  # 边界,它自带 clamp 和缩放,selected 为零并不能替代出口为零的证据。MotionCtrl 的
+  # linear_x/linear_y/angular_z 与 Twist 同名,所以复用同一套数值解析即可。
+  capture_numeric_stream "${MOTION_CONTROL_TOPIC}" "${motion_file}" || \
+    fail "${label} did not publish ${MOTION_CONTROL_TOPIC} during stop"
+  assert_zero_stream "${label} ${MOTION_CONTROL_TOPIC}" "${motion_file}"
 }
 
 capture_numeric_stream() {
@@ -1037,6 +1038,49 @@ publish_relative_fault_goal() {
   publish_fault_goal_with_motion_gate "${label}" odom "${p3_goal_x}" "${current_y}" 30
 }
 
+publish_farthest_free_fault_goal() {
+  local label="$1"
+  local timeout_sec="${2:-90}"
+  local pose_file="/tmp/ats_p2_fault_${label}_pose.out"
+  local query_error="/tmp/ats_p2_fault_${label}_farthest.err"
+  local query_output start_x start_y
+  capture_pose "${pose_file}" || fail "cannot capture pose for ${label}"
+  start_x="$(pose_axis "${pose_file}" x)"
+  start_y="$(pose_axis "${pose_file}" y)"
+  # 固定 1.80 m 的相对前置目标会在故障生效前自然完成：domain 226 实测该段
+  # SUCCEEDED（final_distance=0.055），而 ready=false 落在注入后约 6.6 s，于是
+  # 没有在飞目标可被 abort，用例只能超时。改为在同一张实时规划栅格上取"距起点
+  # 洪泛跳数最远的可达自由格"，前置段因此有足够长的 tracking 窗口。阈值与净空
+  # 取规划器自己的 RMUC 契约（obstacle_value_threshold=100、jps_safe_distance）。
+  # 距离上限见 FARTHEST_GOAL_MAX_DISTANCE：无上限时"最远可达"会退化成全场最远
+  # 角，其 JPS 路径过不了 MINCO 的矩形足迹门禁，前置段于是零控制量。
+  query_output="$(timeout 30 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
+    --topic /rc_esdf/planning_grid --timeout 10 farthest-free \
+    --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance 0.42 \
+    --max-distance "${FARTHEST_GOAL_MAX_DISTANCE}" \
+    2>"${query_error}")" || \
+    fail "cannot select farthest free goal for ${label}: $(<"${query_error}")"
+  read -r FARTHEST_GOAL_X FARTHEST_GOAL_Y FARTHEST_GOAL_INDEX FARTHEST_GOAL_VALUE \
+    FARTHEST_GOAL_FRAME FARTHEST_GOAL_STAMP <<<"${query_output}"
+  [[ "${FARTHEST_GOAL_INDEX}" =~ ^[0-9]+$ && "${FARTHEST_GOAL_VALUE}" =~ ^[0-9]+$ && \
+    "${FARTHEST_GOAL_VALUE}" -lt 100 ]] || \
+    fail "farthest-free query returned malformed data: ${query_output}"
+  echo "OK: selected farthest free ${FARTHEST_GOAL_FRAME} cell ${FARTHEST_GOAL_INDEX} " \
+    "at (${FARTHEST_GOAL_X}, ${FARTHEST_GOAL_Y}) stamp=${FARTHEST_GOAL_STAMP}"
+  publish_fault_goal_with_motion_gate "${label}" "${FARTHEST_GOAL_FRAME}" \
+    "${FARTHEST_GOAL_X}" "${FARTHEST_GOAL_Y}" "${timeout_sec}"
+}
+
+assert_fault_goal_still_in_flight() {
+  local label="$1"
+  # 故障用例的前提是"注入时确有在飞目标"。前置目标已经结束时必须显式失败，
+  # 否则后面的 abort 判据只会以超时形式表现，掩盖真实原因。
+  if grep -q 'Goal finished with status:' "${FAULT_ACTION_OUTPUT}"; then
+    fail "${label} pre-fault goal already finished before injection: $(grep -m 1 'Goal finished with status:' "${FAULT_ACTION_OUTPUT}")"
+  fi
+  echo "OK: ${label} pre-fault goal still in flight at injection"
+}
+
 resume_process() {
   local pid="$1"
   local label="$2"
@@ -1074,12 +1118,13 @@ find_unreachable_goal() {
   start_y="$(pose_axis "${pose_file}" y)"
   query_output="$(timeout 20 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
     --topic /rc_esdf/planning_grid --timeout 10 unreachable \
-    --start-x "${start_x}" --start-y "${start_y}" --threshold 50 --clearance 0.57 \
+    --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance 0.341 \
+    --assume-start-traversable \
     2>"${query_error}")" || fail "cannot select free unreachable goal: $(<"${query_error}")"
   read -r UNREACHABLE_GOAL_X UNREACHABLE_GOAL_Y UNREACHABLE_GOAL_INDEX \
     UNREACHABLE_GOAL_VALUE UNREACHABLE_GOAL_FRAME UNREACHABLE_GOAL_STAMP <<<"${query_output}"
   [[ "${UNREACHABLE_GOAL_INDEX}" =~ ^[0-9]+$ && \
-    "${UNREACHABLE_GOAL_VALUE}" =~ ^[0-9]+$ && "${UNREACHABLE_GOAL_VALUE}" -lt 50 ]] || \
+    "${UNREACHABLE_GOAL_VALUE}" =~ ^[0-9]+$ && "${UNREACHABLE_GOAL_VALUE}" -lt 100 ]] || \
     fail "unreachable-grid query returned malformed data: ${query_output}"
   echo "OK: selected free ${UNREACHABLE_GOAL_FRAME} cell ${UNREACHABLE_GOAL_INDEX} " \
     "at (${UNREACHABLE_GOAL_X}, ${UNREACHABLE_GOAL_Y}) stamp=${UNREACHABLE_GOAL_STAMP}"
@@ -1172,15 +1217,16 @@ run_p2_fault_injection() {
       # pre-fault action.  A recovery cannot pass the no-revival gate without that baseline.
       start_fault_observer "${observer_report}" "${fault_trigger}" \
         "${recovery_trigger}" "${observer_log}"
-      publish_relative_fault_goal unknown
+      # 与目标无关的健康期基线先读，注入时刻因此只落在目标发布之后的最短路径上。
+      source_before="$(read_rog_numeric_projection_generation \
+        "/tmp/ats_p2_unknown_numeric_before_${ROS_DOMAIN_ID}.out")" || \
+        fail "cannot capture healthy ROGMap numeric source generation"
+      publish_farthest_free_fault_goal unknown 120
       wait_for_command "unknown action accepted" 8 \
         bash -c "grep -q 'Goal accepted' '${FAULT_ACTION_OUTPUT}'"
       request_identity="$(sed -n 's/^Goal accepted with ID: //p' "${FAULT_ACTION_OUTPUT}" | head -n 1)"
       [[ "${request_identity}" =~ ^[[:xdigit:]]{32}$ ]] || \
         fail "cannot capture unknown action request identity"
-      source_before="$(read_rog_numeric_projection_generation \
-        "/tmp/ats_p2_unknown_numeric_before_${ROS_DOMAIN_ID}.out")" || \
-        fail "cannot capture healthy ROGMap numeric source generation"
       # publication_sequence / localization_epoch / ready 的同一性由观测器在
       # 同一条 PlanningMapStatus 上判定，脚本不再分两次 echo 拼接跨消息字段。
       record_unknown_timeline pre_fault_nonzero true
@@ -1188,6 +1234,7 @@ run_p2_fault_injection() {
       record_unknown_timeline plan_request_identity "${request_identity}"
       start_rog_unknown_audit_capture "${audit_report}" "${audit_log}" audit_capture_pid
       record_unknown_timeline observer_ready_ns
+      assert_fault_goal_still_in_flight unknown
       record_unknown_timeline fault_injected_ns
       # 触发文件先于参数写入落地：观测器的 fault 起点因此不晚于真实注入时刻，
       # 测得的延迟只会偏保守，绝不会漏掉注入后的第一条消息。
@@ -1281,6 +1328,22 @@ run_p2_fault_injection() {
     unreachable)
       # 该查询会在大规划栅格上保守展开，先在静止状态找目标；随后立即用
       # free-unreachable action 抢占 tracking 任务，避免查询耗时让前置目标自然完成。
+      # 前提必须按规划器最宽松的那一级判定：threshold 取 RMUC profile 的 100，起点无条件
+      # 洪泛对应 assume_start_traversable。unknown 不放行，因为 node_params.yaml 给
+      # minco_planner 的 unknown_is_obstacle 是 true。旧的 50/0.57 比两级都严，
+      # 选出的目标 A* fallback 仍可达，故障前提因此不成立。
+      #
+      # clearance 取 0.341，即 footprintConsistentClearanceFloor 实际解析出的梯子下限，
+      # 不是内切半宽本身：该函数在 inscribed(0.27) 之上再加半个格对角线
+      # res*M_SQRT1_2=0.0707，下限因此是 0.341 而不是 0.27。用 0.27 选目标会挑到在下限
+      # 那一级仍然欠 clearance 的格，GridJps 对这种目标先做端点放宽、按目标自身 clearance
+      # 重跑整张图，失败后仍报 "goal occupied"——不是 "no path"。于是
+      # classifyGraphSearchFailure 给出 FAILURE_START_OR_GOAL_OCCUPIED，而 goal manager
+      # 在 recovering=true 期间把它归为瞬时故障，每 2 s 重新下发同一个目标，直到 action
+      # 超时，永远等不到 result_code 5。观测证据：domain 156，11.7 s 停留在
+      # waiting_for_map，规划器侧稳定重复 "jps failed: goal is occupied expanded=0
+      # clearance=0.341"。取下限本身即可让目标在下限那一级可通行，失败原因才会收敛到
+      # 连通性，也就是 expanded>1 的 FAILURE_NO_PATH。
       find_unreachable_goal
       publish_relative_fault_goal unreachable_precondition
       log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
@@ -1567,24 +1630,29 @@ assert_minco_plan_record() {
   local label="$1"
   local start_line="$2"
   local deadline=$((SECONDS + 10))
-  local record generation raw_points reference_points collisions
+  local record generation raw_points reference_points collisions escape_prefix_end
   while (( SECONDS < deadline )); do
     record="$(tail -n +"${start_line}" "${LAUNCH_LOG}" | \
       grep 'planned generation=' | tail -n 1 || true)"
-    if [[ "${record}" =~ generation=([0-9]+).*raw_points=([0-9]+).*reference_points=([0-9]+).*collisions=([0-9]+) ]]; then
+    if [[ "${record}" =~ generation=([0-9]+).*raw_points=([0-9]+).*reference_points=([0-9]+).*collisions=([0-9]+).*escape_prefix_end=([0-9]+) ]]; then
       generation="${BASH_REMATCH[1]}"
       raw_points="${BASH_REMATCH[2]}"
       reference_points="${BASH_REMATCH[3]}"
       collisions="${BASH_REMATCH[4]}"
+      escape_prefix_end="${BASH_REMATCH[5]}"
       if ! awk -v raw="${raw_points}" -v reference="${reference_points}" \
         'BEGIN {exit raw > 0 && reference > 0 ? 0 : 1}'
       then
         fail "${label} MINCO log contains an empty raw/reference path"
       fi
-      [[ "${collisions}" == "0" ]] || \
+      # 当前没有结构化、snapshot-bound 的逃逸授权。任何已被 footprint gate
+      # 判定有碰撞的提交都不纳入 P2 安全验收。
+      if [[ "${collisions}" != "0" ]]; then
         fail "${label} MINCO footprint gate reported ${collisions} collisions"
+      fi
       echo "RESULT: ${label} generation=${generation} raw_points=${raw_points} " \
-        "reference_points=${reference_points} footprint_collisions=${collisions}"
+        "reference_points=${reference_points} footprint_collisions=${collisions}" \
+        "escape_prefix_end=${escape_prefix_end}"
       return 0
     fi
     sleep 0.2
@@ -1853,6 +1921,10 @@ echo "OK: MPC nodes present and fake_vel_transform absent"
 wait_for_command "cmd_vel_arbiter node" 30 node_is_present /cmd_vel_arbiter
 assert_topic_ownership "${MPC_CMD_VEL_TOPIC}" ats_swerve_mpc cmd_vel_arbiter
 assert_topic_ownership "${SELECTED_CMD_VEL_TOPIC}" cmd_vel_arbiter twist_to_motion_ctrl
+# selected 唯一并不能推出出口唯一：twist_to_motion_ctrl 之外若还有别的
+# MotionCtrl 发布者，仲裁归零就不再等于底盘归零。故障矩阵最后一段断言的是
+# /motion_control 的数值，这里补上它的所有权前提。
+assert_topic_ownership "${MOTION_CONTROL_TOPIC}" twist_to_motion_ctrl ats_mujoco_sim
 assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
 # RViz may observe the reference in the UI, but it must never gain execution
 # authority.  The assertion still accepts exactly one controller and one named

@@ -33,6 +33,7 @@ def valid_report():
         "fault_status_identity": {"ready": False},
         "latency_sec": {"fault_to_emergency_stop_true": 0.1},
         "cmd_vel_mpc_zero_window": {"sustained_zero": True},
+        "motion_ctrl_zero_window": {"sustained_zero": True},
         "fault_status_snapshot_pairing": {
             **pairing,
             "snapshot": {"all_unknown": True, "publication_sequence": 7},
@@ -44,6 +45,9 @@ def valid_report():
             "recovered_status_snapshot_pairing": pairing,
             "non_empty_reference_after_recovery_without_new_goal": False,
             "no_new_goal_cmd_vel_mpc_zero_window": {
+                "sustained_zero": True,
+            },
+            "no_new_goal_motion_ctrl_zero_window": {
                 "sustained_zero": True,
             },
         },
@@ -70,6 +74,19 @@ class P2FaultObserverTest(unittest.TestCase):
         verdict = OBSERVER.gate_verdict(valid_report())
 
         self.assertTrue(verdict["passed"])
+
+    def test_missing_motion_control_evidence_fails_closed(self):
+        report = valid_report()
+        del report["motion_ctrl_zero_window"]
+        del report["recovery"]["no_new_goal_motion_ctrl_zero_window"]
+
+        verdict = OBSERVER.gate_verdict(report)
+
+        self.assertFalse(verdict["passed"])
+        self.assertFalse(verdict["checks"]["motion_ctrl_zero_in_window"])
+        self.assertFalse(
+            verdict["checks"]["motion_ctrl_stays_zero_without_a_new_goal"]
+        )
 
 
 if __name__ == "__main__":

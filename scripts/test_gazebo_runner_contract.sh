@@ -30,6 +30,9 @@ if contains "$REMOVED_GATE_PATTERN" "$RUNNER"; then
   fail "runner still contains removed admission gate"
 fi
 contains 'run_runtime_preflight' "$RUNNER" || fail "runtime preflight is missing"
+contains 'runtime_binary_freshness.sh' "$RUNNER" || fail "shared runtime freshness helper is missing"
+contains 'libsensor_scan_generation.so' "$RUNNER" || fail "sensor component artifact is not checked"
+contains 'libsmall_gicp_relocalization.so' "$RUNNER" || fail "localization component artifact is not checked"
 contains 'p1_first_freshness_violation' "$RUNNER" || fail "freshness classifier metric is missing"
 contains 'p1_admission_evidence' "$RUNNER" || fail "P1 admission metric is missing"
 contains 'wait_for_active_evidence_window' "$RUNNER" || fail "P1 observer window is not enforced"
@@ -58,6 +61,15 @@ contains 'observe_gazebo_transport_lidar' "$RECORDER" || fail "recorder lacks Ga
 contains 'gazebo_transport_node_\.Subscribe' "$RECORDER" || fail "recorder does not subscribe to Gazebo Transport LiDAR"
 contains 'gazebo_transport_lidar_mutex_' "$RECORDER" || fail "transport callback statistics are not synchronized"
 contains 'gazebo_transport_lidar' "$RUNNER" || fail "runner does not emit Gazebo Transport LiDAR metrics"
+
+# The recorder polls map -> gimbal_yaw_odom before localization_fusion can
+# publish it, so admission must judge post-establishment failures and require
+# the chain to actually come up, instead of rejecting warm-up absence.
+contains 'tf_chain_established' "$RECORDER" || fail "recorder does not report TF chain establishment"
+contains 'tf_lookup_failures_after_establishment' "$RECORDER" || fail "recorder does not separate post-establishment TF failures"
+contains 'tf_chain_never_established' "$RUNNER" || fail "admission does not require an established TF chain"
+contains 'tf_lookup_failures_after_establishment' "$RUNNER" || fail "admission does not gate on post-establishment TF failures"
+
 contains 'use_direct_gazebo_lidar_bridge' "$NAV_LAUNCH" || fail "top-level launch does not expose direct LiDAR bridge"
 contains 'use_direct_gazebo_lidar_bridge' "$SPAWN_LAUNCH" || fail "spawn launch does not route direct LiDAR bridge"
 contains 'qos_overrides.' "$SPAWN_LAUNCH" || fail "spawn launch does not configure generic LiDAR QoS overrides"
