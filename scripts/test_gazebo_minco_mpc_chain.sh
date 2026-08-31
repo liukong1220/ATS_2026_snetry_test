@@ -26,6 +26,8 @@ WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$WORKSPACE_ROOT"
 # shellcheck source=scripts/gazebo_freshness_classifier.sh
 source "$WORKSPACE_ROOT/scripts/gazebo_freshness_classifier.sh"
+# shellcheck source=scripts/runtime_binary_freshness.sh
+source "$WORKSPACE_ROOT/scripts/runtime_binary_freshness.sh"
 
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-91}"
 PLANNING_GRID_OWNER="${PLANNING_GRID_OWNER:-rog_map}"
@@ -140,31 +142,6 @@ fail() {
   log "FAIL: $1"
 }
 
-runtime_binary_is_fresh() {
-  local package_name="$1" executable_path="$2" source_dir="$3"
-  local newer_source
-
-  if [ ! -x "$executable_path" ]; then
-    printf '%s executable_missing path=%s\n' "$package_name" "$executable_path"
-    return 1
-  fi
-  newer_source="$(find "$source_dir" -type f \
-    \( \
-      \( \
-        \( -path "$source_dir/src/*" -o -path "$source_dir/include/*" \) \
-        -a \( -name '*.cpp' -o -name '*.hpp' \) \
-      \) \
-      -o -name 'CMakeLists.txt' -o -name 'package.xml' \
-    \) \
-    -newer "$executable_path" -print -quit)"
-  if [ -n "$newer_source" ]; then
-    printf '%s stale_binary source=%s binary=%s\n' \
-      "$package_name" "$newer_source" "$executable_path"
-    return 1
-  fi
-  printf '%s fresh binary=%s\n' "$package_name" "$executable_path"
-}
-
 run_runtime_preflight() {
   local residual_processes binary_freshness
   if ! [[ "$ROS_DOMAIN_ID" =~ ^[0-9]+$ ]] || [ "$ROS_DOMAIN_ID" -gt 232 ]; then
@@ -178,23 +155,28 @@ run_runtime_preflight() {
     runtime_binary_is_fresh \
       ats_cmd_vel_arbiter \
       "$WORKSPACE_ROOT/build/ats_cmd_vel_arbiter/cmd_vel_arbiter_node" \
-      "$WORKSPACE_ROOT/src/ats_sentry_nav/ats_cmd_vel_arbiter"
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/ats_cmd_vel_arbiter" \
+      "$WORKSPACE_ROOT/build/ats_cmd_vel_arbiter/cmd_vel_arbiter_node"
     runtime_binary_is_fresh \
       ats_swerve_mpc \
       "$WORKSPACE_ROOT/build/ats_swerve_mpc/ats_swerve_mpc_node" \
-      "$WORKSPACE_ROOT/src/ats_sentry_nav/ats_swerve_mpc"
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/ats_swerve_mpc" \
+      "$WORKSPACE_ROOT/build/ats_swerve_mpc/ats_swerve_mpc_node"
     runtime_binary_is_fresh \
       sensor_scan_generation \
       "$WORKSPACE_ROOT/build/sensor_scan_generation/sensor_scan_generation_node" \
-      "$WORKSPACE_ROOT/src/ats_sentry_nav/sensor_scan_generation"
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/sensor_scan_generation" \
+      "$WORKSPACE_ROOT/build/sensor_scan_generation/libsensor_scan_generation.so"
     runtime_binary_is_fresh \
       small_gicp_relocalization \
       "$WORKSPACE_ROOT/build/small_gicp_relocalization/localization_fusion_node" \
-      "$WORKSPACE_ROOT/src/ats_sentry_nav/small_gicp_relocalization"
+      "$WORKSPACE_ROOT/src/ats_sentry_nav/small_gicp_relocalization" \
+      "$WORKSPACE_ROOT/build/small_gicp_relocalization/libsmall_gicp_relocalization.so"
     runtime_binary_is_fresh \
       rmu_gazebo_simulator \
       "$WORKSPACE_ROOT/build/rmu_gazebo_simulator/ats_navigation_evidence_recorder" \
-      "$WORKSPACE_ROOT/src/sim/gazebo_simulator/rmu_gazebo_simulator"
+      "$WORKSPACE_ROOT/src/sim/gazebo_simulator/rmu_gazebo_simulator" \
+      "$WORKSPACE_ROOT/build/rmu_gazebo_simulator/ats_navigation_evidence_recorder"
   } 2>&1)"
   {
     date --iso-8601=seconds
@@ -212,7 +194,8 @@ run_runtime_preflight() {
   metric "runtime_preflight_artifact" "$RUNTIME_PREFLIGHT_LOG"
   metric "runtime_preflight_residual_processes" \
     "$( [ -n "$residual_processes" ] && printf detected || printf none_detected )"
-  if printf '%s\n' "$binary_freshness" | grep -qE ' (stale_binary|executable_missing) '; then
+  if printf '%s\n' "$binary_freshness" | \
+    grep -qE ' (stale_binary|executable_missing|source_missing|source_scan_failed|artifact_missing) '; then
     fail "runtime_stale_critical_binary"
     return 1
   fi
@@ -960,8 +943,17 @@ set_p1_admission_evidence() {
     P1_ADMISSION_REASON="localization_status_not_continuously_tracking"
     return 0
   fi
-  if [ "$(evidence_value tf_lookup_failures)" != "0" ]; then
-    P1_ADMISSION_REASON="tf_lookup_failures_$(evidence_value tf_lookup_failures)"
+  # The recorder begins polling map -> gimbal_yaw_odom before the localization
+  # chain can publish it, so a leading burst of failures is an absent transform
+  # rather than a broken one. Admission requires the chain to actually come up
+  # and to stay up afterwards; total tf_lookup_failures stays in the evidence
+  # for diagnosis but no longer fails the gate on warm-up alone.
+  if [ "$(evidence_value tf_chain_established)" != "yes" ]; then
+    P1_ADMISSION_REASON="tf_chain_never_established"
+    return 0
+  fi
+  if [ "$(evidence_value tf_lookup_failures_after_establishment)" != "0" ]; then
+    P1_ADMISSION_REASON="tf_lookup_failures_after_establishment_$(evidence_value tf_lookup_failures_after_establishment)"
     return 0
   fi
   if [ "${GOAL_SUCCEEDED:-0}" != "1" ]; then

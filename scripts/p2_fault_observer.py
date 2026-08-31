@@ -51,6 +51,7 @@ import rclpy
 from ats_navigation_interfaces.msg import PlanningMapSnapshot
 from ats_navigation_interfaces.msg import PlanningMapStatus
 from geometry_msgs.msg import Twist
+from manda_can_control.msg import MotionCtrl
 from nav_msgs.msg import Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -193,6 +194,7 @@ class Observation:
     snapshots: list[SnapshotSample] = field(default_factory=list)
     emergency_stop: list[tuple[float, bool]] = field(default_factory=list)
     cmd_vel: list[VelocitySample] = field(default_factory=list)
+    motion_ctrl: list[VelocitySample] = field(default_factory=list)
     reference_path: list[tuple[float, int, int]] = field(default_factory=list)
 
 
@@ -214,13 +216,20 @@ class FaultObserver(Node):
         self.create_subscription(
             Twist, topics["cmd_vel"], self._on_cmd_vel, stream_qos()
         )
+        # /cmd_vel/selected 归零只是仲裁出口归零。
+        # twist_to_motion_ctrl 带 clamp 和缩放,它才是
+        # MuJoCo 的最终执行边界,故障矩阵要求的链路最后
+        # 一段就在这里。
+        self.create_subscription(
+            MotionCtrl, topics["motion_ctrl"], self._on_motion_ctrl, stream_qos()
+        )
         self.create_subscription(
             Path,
             topics["reference_path"],
             self._on_reference_path,
             reference_path_qos(),
         )
-        self.subscription_count = 5
+        self.subscription_count = 6
 
     def _on_status(self, message: PlanningMapStatus) -> None:
         self.observation.status.append(
@@ -295,6 +304,14 @@ class FaultObserver(Node):
             abs(float(message.angular.z)),
         )
         self.observation.cmd_vel.append(VelocitySample(time.monotonic(), magnitude))
+
+    def _on_motion_ctrl(self, message: MotionCtrl) -> None:
+        magnitude = max(
+            abs(float(message.linear_x)),
+            abs(float(message.linear_y)),
+            abs(float(message.angular_z)),
+        )
+        self.observation.motion_ctrl.append(VelocitySample(time.monotonic(), magnitude))
 
     def _on_reference_path(self, message: Path) -> None:
         self.observation.reference_path.append(
@@ -383,6 +400,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--emergency-stop-topic", default="/planner/emergency_stop")
     parser.add_argument("--cmd-vel-topic", default="/cmd_vel/selected")
     parser.add_argument("--reference-path-topic", default="/minco/reference_path")
+    parser.add_argument("--motion-ctrl-topic", default="/motion_control")
     parser.add_argument("--fault-wait-sec", type=float, default=180.0)
     parser.add_argument(
         "--settle-sec",
@@ -415,18 +433,24 @@ def gate_verdict(report: dict) -> dict:
     """Reduce the report to the pass/fail criteria of the unknown fault gate."""
     checks = {}
     snapshot = report.get("first_all_unknown_snapshot")
-    checks["real_all_unknown_snapshot"] = bool(snapshot and snapshot["all_unknown"])
+    checks["real_all_unknown_snapshot"] = bool(snapshot and snapshot.get("all_unknown"))
     checks["adapter_reported_not_ready"] = (
         report.get("fault_status_identity") is not None
     )
+    latency = report.get("latency_sec") or {}
     checks["emergency_stop_asserted"] = (
-        report["latency_sec"]["fault_to_emergency_stop_true"] is not None
+        latency.get("fault_to_emergency_stop_true") is not None
     )
+    cmd_vel_window = report.get("cmd_vel_mpc_zero_window") or {}
     checks["cmd_vel_mpc_zero_in_window"] = bool(
-        report["cmd_vel_mpc_zero_window"]["sustained_zero"]
+        cmd_vel_window.get("sustained_zero")
+    )
+    motion_ctrl_window = report.get("motion_ctrl_zero_window") or {}
+    checks["motion_ctrl_zero_in_window"] = bool(
+        motion_ctrl_window.get("sustained_zero")
     )
     pairing = report.get("fault_status_snapshot_pairing")
-    checks["fault_status_paired_with_snapshot"] = bool(pairing and pairing["paired"])
+    checks["fault_status_paired_with_snapshot"] = bool(pairing and pairing.get("paired"))
     checks["fault_status_ready_matches_snapshot"] = bool(
         pairing and pairing.get("ready_matches")
     )
@@ -452,11 +476,11 @@ def gate_verdict(report: dict) -> dict:
     )
     if recovery and recovery.get("observed"):
         checks["recovery_publication_advanced_past_fault"] = bool(
-            recovery["publication_advanced_past_fault"]
+            recovery.get("publication_advanced_past_fault")
         )
         recovery_pairing = recovery.get("recovered_status_snapshot_pairing")
         checks["recovered_status_paired_with_snapshot"] = bool(
-            recovery_pairing and recovery_pairing["paired"]
+            recovery_pairing and recovery_pairing.get("paired")
         )
         checks["recovered_status_ready_matches_snapshot"] = bool(
             recovery_pairing and recovery_pairing.get("ready_matches")
@@ -472,10 +496,19 @@ def gate_verdict(report: dict) -> dict:
         )
         checks["old_reference_did_not_revive"] = bool(
             report.get("pre_fault_non_empty_reference_observed")
-            and not recovery["non_empty_reference_after_recovery_without_new_goal"]
+            and recovery.get("non_empty_reference_after_recovery_without_new_goal") is False
+        )
+        recovery_cmd_vel_window = (
+            recovery.get("no_new_goal_cmd_vel_mpc_zero_window") or {}
         )
         checks["cmd_vel_mpc_stays_zero_without_a_new_goal"] = bool(
-            recovery["no_new_goal_cmd_vel_mpc_zero_window"]["sustained_zero"]
+            recovery_cmd_vel_window.get("sustained_zero")
+        )
+        recovery_motion_ctrl_window = (
+            recovery.get("no_new_goal_motion_ctrl_zero_window") or {}
+        )
+        checks["motion_ctrl_stays_zero_without_a_new_goal"] = bool(
+            recovery_motion_ctrl_window.get("sustained_zero")
         )
     else:
         checks["recovery_publication_advanced_past_fault"] = False
@@ -485,6 +518,7 @@ def gate_verdict(report: dict) -> dict:
         checks["recovered_snapshot_source_generation_matches_status"] = False
         checks["old_reference_did_not_revive"] = False
         checks["cmd_vel_mpc_stays_zero_without_a_new_goal"] = False
+        checks["motion_ctrl_stays_zero_without_a_new_goal"] = False
     return {"checks": checks, "passed": all(checks.values())}
 
 
@@ -531,8 +565,17 @@ def build_report(args: argparse.Namespace, observation: Observation,
         first_all_unknown.source_generation if first_all_unknown is not None else None
     )
 
+    first_zero_motion_ctrl = first_at_or_after(
+        observation.motion_ctrl,
+        lambda s: s.magnitude <= args.zero_threshold,
+        fault_monotonic,
+    )
+
     cmd_vel_window = sustained_zero_window(
         observation.cmd_vel, window_start, window_end, args.zero_threshold
+    )
+    motion_ctrl_window = sustained_zero_window(
+        observation.motion_ctrl, window_start, window_end, args.zero_threshold
     )
 
     report = {
@@ -558,12 +601,21 @@ def build_report(args: argparse.Namespace, observation: Observation,
             "fault_to_first_zero_cmd_vel_mpc": latency(
                 first_zero_cmd_vel, fault_monotonic
             ),
+            "fault_to_first_zero_motion_ctrl": latency(
+                first_zero_motion_ctrl, fault_monotonic
+            ),
         },
         "cmd_vel_mpc_zero_window": {
             "window_start_monotonic": window_start,
             "window_end_monotonic": window_end,
             "window_length_sec": window_end - window_start,
             **cmd_vel_window,
+        },
+        "motion_ctrl_zero_window": {
+            "window_start_monotonic": window_start,
+            "window_end_monotonic": window_end,
+            "window_length_sec": window_end - window_start,
+            **motion_ctrl_window,
         },
         "reference_path_after_fault": [
             {"monotonic": entry[0], "poses": entry[1], "stamp_ns": entry[2]}
@@ -604,6 +656,9 @@ def build_recovery_report(
     cmd_vel_window = sustained_zero_window(
         observation.cmd_vel, window_start, window_end, args.zero_threshold
     )
+    motion_ctrl_window = sustained_zero_window(
+        observation.motion_ctrl, window_start, window_end, args.zero_threshold
+    )
     references = [
         {"monotonic": entry[0], "poses": entry[1], "stamp_ns": entry[2]}
         for entry in observation.reference_path
@@ -631,6 +686,12 @@ def build_recovery_report(
             "window_length_sec": window_end - window_start,
             **cmd_vel_window,
         },
+        "no_new_goal_motion_ctrl_zero_window": {
+            "window_start_monotonic": window_start,
+            "window_end_monotonic": window_end,
+            "window_length_sec": window_end - window_start,
+            **motion_ctrl_window,
+        },
         "reference_path_after_recovery": references,
         "non_empty_reference_after_recovery_without_new_goal": any(
             entry["poses"] > 0 for entry in references
@@ -647,6 +708,7 @@ def main() -> int:
             "snapshot": args.snapshot_topic,
             "emergency_stop": args.emergency_stop_topic,
             "cmd_vel": args.cmd_vel_topic,
+            "motion_ctrl": args.motion_ctrl_topic,
             "reference_path": args.reference_path_topic,
         }
     )
