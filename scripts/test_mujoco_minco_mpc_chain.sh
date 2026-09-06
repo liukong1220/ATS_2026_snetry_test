@@ -129,6 +129,7 @@ SOLVER_MODE="${SOLVER_MODE:-ilqr}"
 # MPC 只发布 autonomy_raw；键鼠走默认 /cmd_vel；仿真底盘只吃 arbiter 的 selected。
 MPC_CMD_VEL_TOPIC="${MPC_CMD_VEL_TOPIC:-/cmd_vel/autonomy_raw}"
 SELECTED_CMD_VEL_TOPIC="${SELECTED_CMD_VEL_TOPIC:-/cmd_vel/selected}"
+SWERVE_TELEMETRY_TOPIC="${SWERVE_TELEMETRY_TOPIC:-/swerve/telemetry}"
 MOTION_CONTROL_TOPIC="${MOTION_CONTROL_TOPIC:-/motion_control}"
 # 默认仍为 warn；qp_shadow 观察可显式传 LOG_LEVEL=info 以保存有界 telemetry。
 LOG_LEVEL="${LOG_LEVEL:-warn}"
@@ -1723,6 +1724,190 @@ ensure_topic_capture_ready() {
   fail "${label} topic capture could not remain subscribed before the goal"
 }
 
+# MuJoCo 物理接触证据。sim_node 的 contact_is_violation() 只把"机器人与非地面
+# 几何体接触"计为违规，正常四轮接地不计入，因此它与规划期的离散
+# footprint_collisions 是两条独立证据：前者是刚体求解器实际算出的接触，后者只是
+# MINCO 轨迹在采样点上的几何自检。任何一条为零都不能替代另一条。
+#
+# contact_violation_count 自仿真启动累计，且按物理步逐步累加（同一次持续接触会
+# 计很多次），所以有意义的量是单个目标窗口内的增量，而不是绝对值。
+capture_contact_telemetry() {
+  local output_file="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    timeout 5 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
+      "${SWERVE_TELEMETRY_TOPIC}" --field contact_violation_count \
+      >"${output_file}" 2>/dev/null || true
+    if grep -Eq '^[0-9]+$' "${output_file}"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+capture_contact_force() {
+  local output_file="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    timeout 5 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
+      "${SWERVE_TELEMETRY_TOPIC}" --field max_contact_force \
+      >"${output_file}" 2>/dev/null || true
+    if grep -Eq '^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$' "${output_file}"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+contact_count_value() {
+  local output_file="$1"
+  tr -d ' \r' <"${output_file}" | grep -Em1 '^[0-9]+$' || echo ""
+}
+
+contact_force_value() {
+  local output_file="$1"
+  tr -d ' \r' <"${output_file}" |
+    grep -Em1 '^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$' || echo ""
+}
+
+# 单个目标窗口内的物理接触必须为零增量。这条门禁与 assert_minco_plan_record 的
+# footprint_collisions 检查并列，不互相替代：缺少 telemetry 时 fail-closed，
+# 因为"读不到接触证据"不等于"没有接触"。
+assert_no_physical_contact() {
+  local label="$1" before_file="$2" after_file="$3" force_file="$4"
+  local before after delta force
+  before="$(contact_count_value "${before_file}")"
+  after="$(contact_count_value "${after_file}")"
+  if [[ -z "${before}" || -z "${after}" ]]; then
+    fail "${label} 物理接触证据缺失（telemetry 未读到 contact_violation_count）"
+  fi
+  delta=$((after - before))
+  force="$(contact_force_value "${force_file}")"
+  [[ -n "${force}" ]] || force=unverified
+  echo "CONTACT: ${label} contact_violation_delta=${delta}" \
+    "contact_violation_before=${before} contact_violation_after=${after}" \
+    "max_contact_force_n=${force}"
+  if (( delta < 0 )); then
+    fail "${label} contact_violation_count 回退（${before} -> ${after}），仿真可能已重启"
+  fi
+  if (( delta > 0 )); then
+    fail "${label} 发生 ${delta} 次物理接触违规（max_contact_force=${force} N）"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 同一时钟的 reference/actual/stop 证据。
+#
+# 既有 gate 只看 planner 自己在 launch log 里报出的 footprint_collisions，也就是
+# 它对 *自己的候选轨迹* 的几何自检；没有任何 artifact 把已提交的 reference 与
+# 实际跟踪出来的位姿放在同一时钟上，对同一张 immutable snapshot 用同一套几何判定。
+# 缺了这一层，"发布时就已碰撞"、"跟踪中越过安全包络" 与 "地图更新后才变成碰撞"
+# 三种情况在日志里长得一样，行为 owner 无法区分。
+#
+# recorder 只订阅，不发布、不调用服务、不持有 lease，因此加入它不改变导航栈的任何
+# 决策；analyzer 完全离线。默认不作为门禁（NAV_TRACKING_GATE=1 才判失败），
+# 所以本块不会翻转任何既有 leg 的通过/失败结论。
+NAV_TRACKING_RECORDER="${NAV_TRACKING_RECORDER:-1}"
+NAV_TRACKING_GATE="${NAV_TRACKING_GATE:-0}"
+# 证据目录必须在 LOG_DIR 之外：运行开始时 `rm -rf "${LOG_DIR}"` 会连同上一轮
+# 的 nav_tracking 产物一起删除，首违证据就只能靠当轮存活。按 domain 命名，
+# 因此并发 domain 不会互相覆盖。
+NAV_TRACKING_DIR="${NAV_TRACKING_DIR:-/tmp/ats_nav_evidence/nav_tracking_${TEST_PROFILE}_${ROS_DOMAIN_ID}}"
+NAV_TRACKING_RATE_HZ="${NAV_TRACKING_RATE_HZ:-50.0}"
+NAV_TRACKING_START_TIMEOUT="${NAV_TRACKING_START_TIMEOUT:-20}"
+NAV_TRACKING_STOP_TIMEOUT="${NAV_TRACKING_STOP_TIMEOUT:-20}"
+NAV_TRACKING_PROFILE_YAML="${NAV_TRACKING_PROFILE_YAML:-${WORKSPACE_DIR}/src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml}"
+NAV_TRACKING_PID=""
+NAV_TRACKING_LEG_DIR=""
+
+# footprint 几何必须来自本次运行真正生效的 profile。写死数字会让 analyzer 用一个
+# 机器人没用过的足迹去判定这次运行；因此读不到就 fail，不回退到某个默认值。
+nav_tracking_footprint_param() {
+  local key="$1" value
+  value="$(awk -v key="${key}" '
+    /^[^[:space:]#]/ {in_node = 0}
+    /^[[:space:]]*minco_planner:[[:space:]]*$/ {in_node = 1; next}
+    in_node && $1 == key":" {print $2; exit}
+  ' "${NAV_TRACKING_PROFILE_YAML}" 2>/dev/null)"
+  [[ -n "${value}" ]] || fail "cannot read minco_planner ${key} from ${NAV_TRACKING_PROFILE_YAML}"
+  printf '%s' "${value}"
+}
+
+start_nav_tracking_recorder() {
+  local label="$1" dir="$2"
+  [[ "${NAV_TRACKING_RECORDER}" == "1" ]] || return 0
+  mkdir -p "${dir}"
+  NAV_TRACKING_LEG_DIR="${dir}"
+  python3 "${WORKSPACE_DIR}/scripts/nav_tracking_recorder.py" \
+    --output-dir "${dir}" --rate-hz "${NAV_TRACKING_RATE_HZ}" \
+    >"${dir}/recorder.out" 2>&1 &
+  NAV_TRACKING_PID=$!
+  CAPTURE_PIDS+=("${NAV_TRACKING_PID}")
+  local deadline=$((SECONDS + NAV_TRACKING_START_TIMEOUT))
+  while (( SECONDS < deadline )); do
+    if ! kill -0 "${NAV_TRACKING_PID}" 2>/dev/null; then
+      cat "${dir}/recorder.out" || true
+      fail "${label} nav tracking recorder exited before recording anything"
+    fi
+    if [[ -s "${dir}/samples.jsonl" ]]; then
+      echo "OK: ${label} nav tracking recorder is sampling -> ${dir}"
+      return 0
+    fi
+    sleep 0.5
+  done
+  cat "${dir}/recorder.out" || true
+  fail "${label} nav tracking recorder produced no samples within ${NAV_TRACKING_START_TIMEOUT}s"
+}
+
+stop_nav_tracking_recorder() {
+  local label="$1"
+  [[ -n "${NAV_TRACKING_PID}" ]] || return 0
+  # SIGINT 而不是 SIGTERM：recorder 在 KeyboardInterrupt 上写 summary.json，
+  # 里面有 topics_without_messages 与截断标记，也就是证据缺口本身。
+  kill -INT "${NAV_TRACKING_PID}" 2>/dev/null || true
+  local deadline=$((SECONDS + NAV_TRACKING_STOP_TIMEOUT))
+  while kill -0 "${NAV_TRACKING_PID}" 2>/dev/null && (( SECONDS < deadline )); do
+    sleep 0.2
+  done
+  if kill -0 "${NAV_TRACKING_PID}" 2>/dev/null; then
+    stop_capture_process "${NAV_TRACKING_PID}"
+    echo "WARN: ${label} nav tracking recorder needed a hard stop; summary may be absent"
+  fi
+  wait "${NAV_TRACKING_PID}" 2>/dev/null || true
+  NAV_TRACKING_PID=""
+  if [[ -n "${NAV_TRACKING_LEG_DIR}" ]]; then
+    tail -n 3 "${NAV_TRACKING_LEG_DIR}/recorder.out" 2>/dev/null || true
+  fi
+}
+
+analyze_nav_tracking_leg() {
+  local label="$1" dir="$2" status=0
+  [[ "${NAV_TRACKING_RECORDER}" == "1" ]] || return 0
+  [[ -s "${dir}/samples.jsonl" ]] || {
+    echo "WARN: ${label} has no nav tracking samples to analyze"
+    return 0
+  }
+  python3 "${WORKSPACE_DIR}/scripts/analyze_nav_tracking.py" \
+    --input-dir "${dir}" --output "${dir}/verdict.json" \
+    --length "$(nav_tracking_footprint_param footprint_length)" \
+    --width "$(nav_tracking_footprint_param footprint_width)" \
+    --safety-margin "$(nav_tracking_footprint_param footprint_safety_margin)" \
+    >"${dir}/analysis.out" 2>&1 || status=$?
+  sed 's/^/  /' "${dir}/analysis.out"
+  # 退出码 1 表示"分析完整且发现冲突"，2 表示"证据不足以判定"。两者都不默认判失败：
+  # 本轮这层是取证，不是新门禁；打开 NAV_TRACKING_GATE=1 才让它决定 leg 结论。
+  if [[ "${NAV_TRACKING_GATE}" == "1" && "${status}" -ne 0 ]]; then
+    fail "${label} nav tracking analysis returned ${status} (see ${dir}/verdict.json)"
+  fi
+  if [[ "${status}" -ne 0 ]]; then
+    echo "NOTE: ${label} nav tracking analysis exit=${status} (evidence only; " \
+      "NAV_TRACKING_GATE=0)"
+  fi
+  return 0
+}
+
 run_navigation_goal() {
   local index="$1"
   local name="${GOAL_NAMES[index]}"
@@ -1734,12 +1919,19 @@ run_navigation_goal() {
   local goal_output="${prefix}_goal.out"
   local goal_error="${prefix}_goal.err"
   local command_output="${prefix}_cmd_vel.out"
+  local before_contact="${prefix}_before_contact.out"
+  local after_contact="${prefix}_after_contact.out"
+  local after_contact_force="${prefix}_after_contact_force.out"
+  local tracking_dir="${NAV_TRACKING_DIR}/goal_$((index + 1))_${name}"
   local topic output_file expected_frame pid log_line_count log_start_line
   local -a topic_pids=()
 
   log_line_count="$(wc -l < "${LAUNCH_LOG}")"
   log_start_line=$((log_line_count + 1))
   capture_pose "${before_pose}" || fail "cannot capture pose before ${name}"
+  # 物理接触基线。读不到 telemetry 就 fail-closed，避免"没有证据"被当成"没有接触"。
+  capture_contact_telemetry "${before_contact}" || \
+    fail "cannot capture contact telemetry before ${name}"
   # 每个 action 必须捕获四层可视化 Path：JPS 离散搜索、MINCO 局部参考、
   # 当前 MPC 跟随 horizon 与 iLQR 预测 rollout。这样证明它们在同一目标执行
   # 窗口中可观察，而不是仅在 launch 生命周期的某个时刻出现过一次。
@@ -1767,6 +1959,10 @@ run_navigation_goal() {
   # MINCO 路径为事件触发发布；先等待 DDS 单次订阅发现完成，
   # 避免目标触发后多个路径话题瞬时发布而被测试遗漏。
   sleep 2
+
+  # 记录窗口必须早于目标下发：目标 5 那种情况的首违发生在进入低净空区域的过程中，
+  # 等 action 返回再开始录就已经错过了。
+  start_nav_tracking_recorder "${name} leg" "${tracking_dir}"
 
   timeout "${GOAL_TIMEOUT}" ros2 action send_goal --feedback /ats_navigate_to_pose \
     ats_navigation_interfaces/action/NavigateToPose \
@@ -1814,6 +2010,13 @@ run_navigation_goal() {
   capture_pose "${after_pose}" || fail "cannot capture pose after ${name}"
   assert_pose_progress "${name} leg" "${before_pose}" "${after_pose}"
   assert_pose_near_goal "${name} leg" "${after_pose}" "${goal_x}" "${goal_y}"
+  capture_contact_telemetry "${after_contact}" || \
+    fail "cannot capture contact telemetry after ${name}"
+  capture_contact_force "${after_contact_force}" || true
+  assert_no_physical_contact "${name} leg" "${before_contact}" "${after_contact}" \
+    "${after_contact_force}"
+  stop_nav_tracking_recorder "${name} leg"
+  analyze_nav_tracking_leg "${name} leg" "${tracking_dir}"
 }
 
 # MPC 分阶段耗时只存在于 telemetry ring 里，绝不为了采集在 20 Hz 控制定时器里
