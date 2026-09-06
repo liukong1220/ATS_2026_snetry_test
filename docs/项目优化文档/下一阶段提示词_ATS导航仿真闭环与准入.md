@@ -10,9 +10,9 @@
 先阅读 AGENTS.md、docs/nav2_to_3desdf_minco_mpc_optimization_direction.md 的最新 review 结论、
 docs/项目优化文档/ATS导航剩余优化总TODO.md，以及 minco_planner 的 terminal yaw relocation、goal admission、
 footprint safety、local repair 和测试。开始前列出完成条件、精确文件范围、验证命令、假设和风险转入条件，
-保留工作区既有修改并保持 Git 无提交。
+保留工作区既有修改，交付时 Git 不新增提交。
 
-可信基线（2026-09-01）：
+可信基线（2026-09-06，活动证据窗口为 2026-08-30 至 2026-09-06）：
 
 - Gazebo P1 在动态 TF 双门禁下 domain 147/149/151 连续通过；bridge 延迟在 143 复现过，问题仍开放。
 - MuJoCo P2 六故障 domain 154/156/158/166/168/170 为 6/6，unknown 恢复后新目标已独立确认。
@@ -21,6 +21,8 @@ footprint safety、local repair 和测试。开始前列出完成条件、精确
   最大偏航误差 1.107 rad、横向误差 0.275 m、足迹最小间隙 -0.100 m。escape_from_contact_enabled 和
   ego_blocked_escape_enabled 保持关闭。
 - 失败 leg 的 contact/analyzer 收尾仍在成功断言之后，失败段的物理接触无法补测；Gazebo 物理接触也没有独立遥测。
+- 最近一周已补齐 `freeze` 终止日志、`farthest-free --max-distance` 夹具参数和
+  reference/snapshot pairing 回归；这些修改仍等待失败 leg 统一收尾和 red_box 新运行确认。
 
 完成条件：
 
@@ -37,7 +39,7 @@ footprint safety、local repair 和测试。开始前列出完成条件、精确
 
 一、目标 5 取证和修复
 
-- 不改安全阈值先复现目标 1--5。围绕首个低净空冲突采集 localization、reference、MPC predicted/executed、
+- 先在现有安全阈值下复现目标 1--5。围绕首个低净空冲突采集 localization、reference、MPC predicted/executed、
   /cmd_vel/selected、/motion_control、急停和地图 generation。
 - 对 reference 与 actual 运行同一 footprint evaluator，保存最小 clearance、首冲突 index/cell/center/yaw、
   实际速度和急停到静止的位移。
