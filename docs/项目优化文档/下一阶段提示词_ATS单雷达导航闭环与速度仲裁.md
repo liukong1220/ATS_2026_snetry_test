@@ -59,7 +59,7 @@ teleop_twist_keyboard -> /cmd_vel
 4. fake/chassis transform 的 topic、frame 和速度分量保持一致，避免重复 base_footprint -> base_link TF。
 5. 缺少 required big-yaw 反馈时，Gazebo chassis 与 /motion_control 使用同一份全零输出。
 6. recorder 保存动态 edge source stamp、age、更新计数、reference/snapshot identity 和 tracking error；
-   TimePointZero 查询只作为链路存在性信息，不能代表动态新鲜度。
+   TimePointZero 查询仅用于链路存在性信息；动态新鲜度由 source stamp、age 和更新计数门禁判断。
 
 回归安排：
 
