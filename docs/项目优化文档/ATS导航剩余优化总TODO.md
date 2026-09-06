@@ -197,7 +197,10 @@ Gazebo 侧接触遥测仍未实现（`147/149/151` 的 `gazebo_contact_telemetry
 - 仿真与实机导航侧分别保留独立 artifact；下位机/HIL 诊断不构成导航准入；
 - 性能结论来自固定 revision、配置、硬件和原始 artifact。
 
-### 1.1 2026-08-21 交接更新
+### 1.1 历史交接背景（已归档）
+
+本节仅保留架构决策和历史诊断线索，不能替代第 0 节的当前证据。旧运行的 domain、终点和通过状态以 Git
+历史和原始 artifact 为准，后续准入只引用同一 revision 下的新 domain 结果。
 
 - MuJoCo 默认场景已切换为与 Gazebo 同源的 RMUC 2025 模型、world 几何与高度场；`red_box`
   的最终目标固定为 map 坐标 `(10.45, 0.35)`，即原图像标注的中央高地位置；
@@ -217,34 +220,10 @@ Gazebo 侧接触遥测仍未实现（`147/149/151` 的 `gazebo_contact_telemetry
   publisher/subscriber 为 `cmd_vel_arbiter/loopback_simulator=1/1`，`/odom.x=0.825`（artifact：
   `/tmp/ats_loopback_arbiter_domain222.fEjFyT`）。该试验仅验证
   手动源仲裁出口，不覆盖 MPC 授权、完整导航或物理仿真。
-- **未验证**：无需 remap 的键鼠到串口或 `/motion_control`、MuJoCo nominal/red_box/P2 fault matrix 和物理
-  接触。历史 `/cmd_vel_mpc` artifact 只用于迁移前的 freshness 诊断；当前 selected 链最新默认 P1 基线
-  为 domain `228`，仍未通过。
-- **未通过（Gazebo P1，2026-08-23 domain `218`）**：默认 `10 Hz / 625`、headless、`rog_map` owner 的
-  recorder 正常完成 `60.008622 s`。`/lidar_odometry` 是 first violation，wall p99/max=
-  `0.818336/0.877152 s`；`/localization`=`0.818289/0.877242 s`，status
-  `TRACKING/non-TRACKING=575/25`、TF failure=`4/601`，action `ABORTED`。运行期
-  `/cmd_vel/selected` owner=`1/2`、terminal=`1/1` 且零速；定位/地图 fail-closed 后没有 JPS/MINCO/MPC
-  path 或非零 selected。这不构成速度仲裁回归，也不满足 P1/P2。
-- **未通过（最新 Gazebo P1，2026-08-23 domain `228`）**：默认 `10 Hz / 625`、headless、`rog_map` owner、
-  关闭 Transport observer/Direct bridge 的 recorder 正常完成 `60.001345 s`。`/lidar_odometry` 是 first
-  violation，wall p99/max=`0.650163/0.743549 s`；`/localization`=`0.650164/0.743591 s`，raw Gazebo LiDAR
-  wall p99/max=`0.708598/0.714906 s`，`/clock` p99=`0.010387 s`、RTF p99=`1.032094`，status
-  `TRACKING/non-TRACKING=585/15`、TF failure=`7/600`。active `/cmd_vel/selected` owner=`1/2`，无非零
-  selected，JPS/MINCO/MPC path 为空，故 `p1_admission_evidence=false`、原因为
-  `freshness_lidar_odometry`。这是定位/地图 fail-closed，不是仲裁回归；artifact：
-  `log/gazebo_minco_mpc_chain/20260823_211350_nominal_none_domain228/`。
 - **已修复（P1 预检）**：domain `217` 暴露 install executable 早于
   `sensor_scan_generation`/`small_gicp_relocalization` 源码。Gazebo runner 现检查 arbiter、MPC、两定位节点与
   Gazebo recorder 的源码/可执行文件新旧，失配时写入 `runtime_preflight.txt` 并 fail-fast；217 artifact
   不作为算法验收。
-- **未通过（P1 上游分层，2026-08-23 domain `219/220`）**：两个 60 s 窗口内 Gazebo Transport
-  PointCloudPacked 分别记录 `599/600` 个样本，wall p99=`0.108672/0.105195 s`；ROS raw
-  `/<robot>/livox/lidar` 仅 `168/150` 个样本，wall p99=`0.639515/0.802505 s`，下游
-  `/lidar_odometry` p99=`0.662703/0.881395 s`。domain `220` 还确认 Fast DDS RMW 不支持
-  reception publication sequence（`supported=no`），sequence 计数 `0` 不能解释为零丢包。两次均
-  `freshness_lidar_odometry`、action `ABORTED`、`p1_admission_evidence=false`；Transport observer 为额外
-  subscriber，对默认链的因果归因仍是 **[Confidence: Medium]**。
 - **已验证（2026-08-30 交付复核）**：MuJoCo runner 增加关键运行产物新鲜度检查，arbiter 增加断链恢复与
   车体系分量回归，MuJoCo LiDAR 增加 MuJoCo 3.4/3.10 `mj_multiRay` 参数兼容层。MuJoCo single 与
   `adapter_lease/service_timeout/input_stale` 独立故障用例通过；`red_box`、`unknown`、`unreachable` 的
