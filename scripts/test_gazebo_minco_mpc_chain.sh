@@ -795,9 +795,13 @@ capture_launch_process_resources() {
         "$pid" "${cpu_ticks:-unverified}" "${rss_kb:-unverified}" \
         "${threads:-unverified}" "${vctx:-unverified}" "${ivctx:-unverified}" "$args"
     done < <(
+      # parameter_bridge is the ros_gz_bridge process that carries the LiDAR
+      # cloud into ROS. It was previously absent from this filter, which left the
+      # one process the stamp-age evidence implicates as the only unmeasured
+      # participant in the chain.
       ps -eo pid=,sid=,args= | awk -v sid="$sid" '
         $2 == sid &&
-        $0 ~ /(gz_livox_bridge_node|pointlio_mapping|loam_interface_node|sensor_scan_generation_node|localization_fusion_node|ats_rog_map_node|ats_rog_map_adapter_node|ign gazebo)/ {
+        $0 ~ /(parameter_bridge|gz_livox_bridge_node|pointlio_mapping|loam_interface_node|sensor_scan_generation_node|localization_fusion_node|ats_rog_map_node|ats_rog_map_adapter_node|ign gazebo)/ {
           pid = $1
           $1 = ""
           $2 = ""
@@ -935,6 +939,18 @@ set_p1_admission_evidence() {
     P1_ADMISSION_REASON="observer_duration_shorter_than_requested"
     return 0
   fi
+  # The navigation outcome is judged before any evidence-quality gate. Ordering
+  # this last hid a real failure twice: domains 135 and 137 both aborted with
+  # "map did not become ready before deadline" (the ROGMap adapter could not
+  # resolve map <- gimbal_yaw_odom at its projection stamp, 360 not-ready
+  # heartbeats against 2 in the passing domain 131), yet the reported reason was
+  # whichever dynamic-TF evidence gate happened to trip first. A run that never
+  # reached its goal must say so, because no evidence threshold is the actionable
+  # fact about it.
+  if [ "${GOAL_SUCCEEDED:-0}" != "1" ]; then
+    P1_ADMISSION_REASON="straight_action_not_succeeded"
+    return 0
+  fi
   if [ "$(freshness_metric_value "$FRESHNESS_CLASSIFICATION" first_violation)" != "none" ]; then
     P1_ADMISSION_REASON="freshness_$(freshness_metric_value "$FRESHNESS_CLASSIFICATION" first_violation)"
     return 0
@@ -956,8 +972,127 @@ set_p1_admission_evidence() {
     P1_ADMISSION_REASON="tf_lookup_failures_after_establishment_$(evidence_value tf_lookup_failures_after_establishment)"
     return 0
   fi
-  if [ "${GOAL_SUCCEEDED:-0}" != "1" ]; then
-    P1_ADMISSION_REASON="straight_action_not_succeeded"
+  # Dynamic-edge freshness for map -> gimbal_yaw_odom. Everything above is
+  # satisfied by a TimePointZero lookup that keeps replaying a cached transform
+  # after its broadcaster died, so those fields cannot separate a live chain
+  # from a frozen one. These gates judge the source stamp carried by the
+  # returned transform instead.
+  local tf_dynamic_updates tf_dynamic_gap_max tf_dynamic_staleness_p99
+  local tf_dynamic_staleness_samples tf_dynamic_age_p99 tf_dynamic_age_samples
+  local tf_dynamic_backward tf_dynamic_invalid
+  tf_dynamic_updates="$(evidence_value tf_dynamic_distinct_stamp_updates)"
+  tf_dynamic_gap_max="$(evidence_value tf_dynamic_update_gap_max_s)"
+  tf_dynamic_staleness_p99="$(evidence_value tf_dynamic_stamp_staleness_p99_s)"
+  tf_dynamic_staleness_samples="$(evidence_value tf_dynamic_staleness_samples)"
+  tf_dynamic_age_p99="$(evidence_value tf_dynamic_age_p99_s)"
+  tf_dynamic_age_samples="$(evidence_value tf_dynamic_age_samples)"
+  tf_dynamic_backward="$(evidence_value tf_dynamic_backward_stamps)"
+  tf_dynamic_invalid="$(evidence_value tf_dynamic_invalid_stamps)"
+  # Fail closed on a recorder that does not emit these fields at all, so an
+  # older binary cannot silently skip the gate.
+  if ! printf '%s' "$tf_dynamic_updates" | grep -Eq '^[0-9]+$' ||
+     ! printf '%s' "$tf_dynamic_gap_max" | grep -Eq '^-?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$' ||
+     ! printf '%s' "$tf_dynamic_age_p99" | grep -Eq '^-?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$' ||
+     ! printf '%s' "$tf_dynamic_staleness_p99" | grep -Eq '^-?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$'; then
+    P1_ADMISSION_REASON="tf_dynamic_freshness_evidence_missing"
+    return 0
+  fi
+  # An empty staleness sample set makes every percentile read 0.0, so the count
+  # must be checked before the thresholds are trusted.
+  if ! printf '%s' "$tf_dynamic_staleness_samples" | grep -Eq '^[0-9]+$' ||
+     [ "$tf_dynamic_staleness_samples" = "0" ]; then
+    P1_ADMISSION_REASON="tf_dynamic_staleness_samples_missing"
+    return 0
+  fi
+  # A frozen broadcaster reports exactly one distinct stamp, which leaves the
+  # gap sample set empty and makes every gap percentile read 0.0. Requiring a
+  # minimum average update rate over the observer window closes that hole
+  # before any gap threshold is consulted.
+  if ! awk -v updates="$tf_dynamic_updates" -v window="$ACTIVE_OBSERVER_WINDOW_SEC" \
+      -v min_rate="${P1_TF_DYNAMIC_MIN_UPDATE_RATE_HZ:-1.0}" '
+      BEGIN {
+        required = (min_rate + 0.0) * (window + 0.0)
+        exit !(window + 0.0 > 0.0 && updates + 0.0 >= required)
+      }'; then
+    P1_ADMISSION_REASON="tf_dynamic_stamp_updates_${tf_dynamic_updates}_below_min_rate"
+    return 0
+  fi
+  if ! awk -v gap="$tf_dynamic_gap_max" -v limit="${P1_TF_DYNAMIC_UPDATE_GAP_LIMIT_SEC:-0.5}" '
+      BEGIN {exit !(gap + 0.0 <= limit + 0.0)}'; then
+    P1_ADMISSION_REASON="tf_dynamic_update_gap_max_${tf_dynamic_gap_max}s"
+    return 0
+  fi
+  # An empty age sample set makes every age percentile read 0.0, which would
+  # read as a perfectly fresh chain. Check the count before the threshold.
+  if ! printf '%s' "$tf_dynamic_age_samples" | grep -Eq '^[0-9]+$' ||
+     [ "$tf_dynamic_age_samples" = "0" ]; then
+    P1_ADMISSION_REASON="tf_dynamic_age_samples_missing"
+    return 0
+  fi
+  # Absolute stamp age: /clock minus the source stamp of the returned transform,
+  # i.e. how far behind the consumer's view of map -> gimbal_yaw_odom is. This is
+  # the gate that separates the passing run from the failing ones, and it is real
+  # end-to-end lag rather than a clock-epoch artifact:
+  #
+  #   domain 131  per-stage stamp age p50 0.012-0.032 s  adapter not-ready 1
+  #               action SUCCEEDED
+  #   domain 135  tf age p50 2.082 p99 2.482  adapter not-ready 180  ABORTED
+  #   domain 137  tf age p50 2.032 p99 2.332  adapter not-ready 180  ABORTED
+  #   domain 139  tf age p50 2.062 p99 2.442  adapter not-ready 180  ABORTED
+  #   domain 141  tf age p50 2.152 p99 2.352  adapter not-ready 180  ABORTED
+  #
+  # An earlier revision of this gate removed the absolute age on the argument
+  # that its ~2.0 s floor was a /clock-versus-sensor epoch offset present in
+  # clean and degraded runs alike. That argument was wrong: every run in that
+  # comparison was lagged, so it had no healthy baseline. Domain 131 supplies
+  # one, and it reports 0.012-0.072 s on the same stages.
+  #
+  # The limit is derived from the consumer contract, not from the runs. The
+  # projection-stamp fallback in ats_rog_map_adapter accepts a skew in
+  # [0, 0.1] s; beyond that it rejects the lookup as future extrapolation,
+  # publishes ready=0, and the goal manager's map-ready deadline expires. 0.5 s
+  # is five times that acceptance window: it admits the healthy chain with an
+  # order of magnitude of headroom (0.072 s worst observed) while every lagged
+  # run above exceeds it by 4.7x or more. p99 rather than max, for the same
+  # reason as the staleness gate - one best-effort /clock catch-up sample can
+  # inflate the maximum without any chain being late.
+  if ! awk -v age="$tf_dynamic_age_p99" \
+      -v limit="${P1_TF_DYNAMIC_AGE_P99_LIMIT_SEC:-0.5}" '
+      BEGIN {exit !(age + 0.0 <= limit + 0.0)}'; then
+    P1_ADMISSION_REASON="tf_dynamic_age_p99_${tf_dynamic_age_p99}s"
+    return 0
+  fi
+  # Staleness: how much /clock elapsed since the source stamp last advanced.
+  # Both terms are /clock values, so this is independent of how far behind the
+  # stamps are, and it catches a stall the age gate cannot - a broadcaster that
+  # freezes while the buffer keeps replaying its last transform, which every
+  # gate above this point reports as a spotless run.
+  #
+  # It is NOT a substitute for the age gate, and reading it as one is what hid
+  # the defect above: a lag shared by every sample cancels in it by
+  # construction. Domains 139 and 141 both reported a healthy 0.200 s staleness
+  # p99 on an edge that was 2.06-2.15 s behind and aborting navigation.
+  #
+  # The limit is one broadcast period plus headroom: the chain updates at ~10 Hz
+  # with a 0.2 s p99 gap, so 0.5 s admits normal jitter while a frozen or
+  # halved-rate broadcaster exceeds it. p99 rather than max, because a /clock
+  # catch-up inflates exactly one sample; the peak stall is bounded by the
+  # update-gap gate above, measured on the steady clock where no sim-clock jump
+  # can reach it.
+  #
+  # The domain 137 lesson stands for the retired third instrument: age minus the
+  # run's own minimum. The minimum is an extreme-value estimator, and one
+  # 0.092 s sample against a 2.02 s floor re-based every excursion to ~2.24 s and
+  # rejected a cadence-clean run. Gate the age directly or gate the staleness;
+  # never gate a difference against an estimated floor.
+  if ! awk -v staleness="$tf_dynamic_staleness_p99" \
+      -v limit="${P1_TF_DYNAMIC_STAMP_STALENESS_P99_LIMIT_SEC:-0.5}" '
+      BEGIN {exit !(staleness + 0.0 <= limit + 0.0)}'; then
+    P1_ADMISSION_REASON="tf_dynamic_stamp_staleness_p99_${tf_dynamic_staleness_p99}s"
+    return 0
+  fi
+  if [ "$tf_dynamic_backward" != "0" ] || [ "$tf_dynamic_invalid" != "0" ]; then
+    P1_ADMISSION_REASON="tf_dynamic_stamp_anomalies_backward_${tf_dynamic_backward}_invalid_${tf_dynamic_invalid}"
     return 0
   fi
   P1_ADMISSION_EVIDENCE="true"
