@@ -1,33 +1,175 @@
 # ATS 导航剩余优化总 TODO
 
 > 状态：唯一活动导航优化清单
-> 更新时间：2026-08-31
+> 更新时间：2026-09-01
 > 适用范围：Gazebo、MuJoCo 与实机导航软件侧的 ATS 四驱四转哨兵导航链
 > 历史说明：旧阶段 TODO 已退役；历史实现与运行证据通过 Git 历史、
 > `docs/ats_swerve_mpc_ltv_qp_backend_admission.md` 和状态文档追溯。
 
-## 0. 2026-08-31 当前执行清单
+## 0. 2026-09-01 当前执行清单
 
-- [x] Gazebo P1 在 domain `127/129/131` 连续三次通过；记录 Transport/ROS LiDAR cadence、
-  `TRACKING 600/600`、TF 首次建立后零失败和 action 终点误差；
+- [x] **2026-09-01：Gazebo P1 在完整门禁集（含双动态 TF 门禁）下连续三次通过 `147/149/151`**，
+  固定默认 profile，退出码均为 0，三次都是 `all_p1_gates_passed`、`failures: 0`。桥侧 ~2 s 延迟缺陷
+  **未修复**，只是三次未复现（`143` 同 profile、同产物却失败），因此这是“当前门禁集下的连续通过”；
+- [x] **2026-09-01：MuJoCo `single` 在独立新 domain `178` 通过**（exit 0，终点 0.0343 m，owner 逐条唯一，
+  50 Hz 离线取证 q1=yes/q2=no/q3=no）；
+- [x] **2026-09-01：arbiter 专项 GTest 已运行**：24 tests, 0 errors, 0 failures, 0 skipped，覆盖优先项 2/3/6；
+- [x] **2026-09-01：`red_box` 根因改判**——由 `176` 的 50 Hz 离线取证定位为执行/跟踪偏差（q2=yes、q3=no），
+  推翻此前“栅格过报”的解释；修法属 MPC 跟踪/限速侧，`escape_from_contact_enabled` 不得打开；
 - [x] Gazebo 仿真 profile 按 SI 单位覆盖 Point-LIO `acc_norm=9.81`、`satu_acc=30.0`，实机参数保持不变；
 - [x] TF warm-up 计数拆为建立前失败、首次建立和建立后失败，准入同时要求链实际建立；
-- [x] MuJoCo P2 六个故障用例在 review 前候选 revision 通过；freeze 终止日志和 unknown 前置目标上限已有回归；
 - [x] Codex 安全 review：planner 与 goal manager 的实验 escape 默认关闭，RMUC profile 显式关闭；runner 对
   任一 `footprint_collisions>0` 保持失败；
 - [x] 运行产物预检改为明确比较实际载入 artifact，源码目录、artifact 或扫描缺失时 fail-closed；
-- [x] 安全修正后的 P2 故障矩阵已在 domain `132–137` 重跑：五项通过；unknown 故障主体通过但恢复新目标
-  因起点 footprint 冲突失败，当前为 `5/6`；
-- [x] 当前 `red_box` domain `138` 已运行：目标 1–4 零碰撞成功，目标 5 因跟踪/停车后进入墙侧接触区失败；
-- [ ] 对齐目标 5 和 unknown 恢复的 reference/actual pose、tracking error、停止距离与地图来源，保证故障停车
-  和重规划起点仍在零碰撞可重启域；
-- [ ] 修复 `red_box` 目标 9：候选索引覆盖实际冲突带，并抑制终端接近 suffix 的东向过冲；
-- [ ] 从目标 9 的安全终态独立验证目标 10，区分起点过报与目标自身不可达；
-- [ ] 增加动态 TF stamp/age 门禁，补齐 P1 当前只证明“链建立后可查询”的证据边界；
-- [ ] 增加 MuJoCo 独立 contact evaluator；离散 `footprint_collisions=0` 继续不替代物理接触结论。
+- [x] P2 六故障矩阵已在独立新 domain 全部执行并通过，当前为 `6/6`：`adapter_lease` 154、
+  `service_timeout` 156、`input_stale` 158、`unreachable` 166、`freeze` 168、`unknown` 170，
+  退出码均为 0。`unknown` 恢复新目标已通过（action result code 0，终点 0.012154 m，
+  observer 20 项检查全通过，恢复延迟 2.218 s，`reference_path_after_recovery=[]`）；
+- [x] 产物审计在本轮真实拦截了一次污染：`unreachable` 162 与 `freeze` 164 以退出码 3 在导航门禁之前
+  被拒，原因是一次并发的 `colcon build --packages-select ... ats_rc_esdf minco_planner ...`
+  在 13:15:56 重链了 `libats_rc_esdf.a` 却没有包含 `ats_rog_map_adapter`。重链 adapter 后两例
+  重跑通过。同一次并发构建与 `unknown` 160 的运行窗口重叠（13:15:50–13:18:33），因此 160 的产物
+  来源不干净、已作废并在 170 重跑。**验收运行期间不得并发构建**；
+- [x] `unknown` 恢复新目标的停车与重规划起点已修复并在 domain `170` 独立确认（result code 0）。
+  **归因边界**：与上一次失败之间没有导航代码提交（根仓 `git log --since=2026-08-30` 只有文档与脚本，
+  `src/ats_sentry_nav` 最后一次提交为 `efd68e1`，工作区唯一 nav 代码改动是 `ats_rog_map_adapter_node.cpp`
+  里纯诊断的 `tf_failure_detail`），所以这是安全修正后的复跑结果，不能声称由某次定点修改导致；
+- [ ] `red_box` 仍为**未通过**，失败目标编号在三次运行间漂移：domain `152` 失败于目标 9
+  `highland_ramp`（`final_distance=0.548`），domain `174` 失败于目标 8 `east_mid`，domain `176`
+  失败于目标 5 `south_lane_entry`——而目标 5 是前两次都零碰撞通过的一段。三次终局形态一致：
+  车停住后每条 MINCO 轨迹都在 `first_index=0` 被拒、`escape_allowed=0`，goal manager 最终
+  `no-executable-plan budget exhausted`（`map_ready=0`）。**`152` 与 `174` 不构成同条件对比**：
+  `scripts/test_mujoco_minco_mpc_chain.sh` 的 mtime 为 13:26:48，晚于 `152`（13:09）、早于 `174`（13:33），
+  `174` 起才带每段 50 Hz 的 `nav_tracking_recorder` 进程，`152` 全程没有它（日志 0 行）。
+  可做同条件对比的是 `174` 与 `176`（同 runner、同产物、同 profile），二者失败目标仍不同；
+- [x] `red_box` 根因已用 domain `176` 的离线取证定位，并**推翻**了此前“停车位姿落入 footprint
+  冲突带（栅格过报）”的解释。`python3 scripts/analyze_nav_tracking.py --input-dir <leg>
+  --length 0.60 --width 0.50 --safety-margin 0.02` 对 `176` 每段独立判定：
+  q1（发布时参考轨迹无碰撞）=yes，q3（同一位姿被地图更新从 free 翻成 occupied）=**no**，
+  即冲突是真实几何而不是地图翻转或量化过报；q2（实际位姿离开参考包络）在目标 1–4 为 no、
+  目标 5 为 **yes**：最大偏航误差按段为 0.0089 / 0.1927 / 0.3961 / 0.0940 / **1.1073 rad**，
+  最大横向误差 0.053 / 0.179 / 0.037 / 0.047 / **0.275 m**，目标 5 有 337/360 个评估 tick 在碰撞。
+  首个冲突在该段第 2.367 s、`pose=(1.1495, -7.0767, yaw=-1.7926)`、footprint 最小间隙 **−0.100 m**
+  （已嵌入障碍 0.1 m），当时 `localization_age=0.0098 s`、`map_ready=true`、`emergency_stop=false`，
+  MPC 请求 `vx=1.0283` 而 `motion_control.linear_x` 恰好被夹到 `1.0`，实测 `wz=-0.691` 对指令 `-0.526`，
+  `drive_acceleration_saturation_count=11731`。因此顺序是**先执行/跟踪偏差把车开进真实障碍**，
+  随后 fail-closed 提交门（`escape_from_contact_enabled` 默认 `false`，理由见
+  `src/ats_sentry_nav/minco_planner/include/minco_planner/safety/escape_prefix.hpp`）使其再也无法提交轨迹而死锁。
+  证据边界：q2 只覆盖有 reference+snapshot 配对的 tick（各段 93–360，对应总样本 446–1733），
+  analyzer 不评估物理接触；
+- [ ] `red_box` 修复方向（未实施，留给 Codex/用户决策）：按 analyzer 自带 routing
+  「audit MPC tracking error, execution latency, velocity/acceleration limiting and the stopping envelope」，
+  先核对 MPC 指令与底盘可达加速度/限幅的一致性，而不是放宽 footprint margin 或 obstacle threshold；
+  `escape_from_contact_enabled` 不得为了通过而打开——`escape_prefix.hpp` 已写明它缺少 snapshot 绑定的
+  逃逸授权，打开即属于“用放宽换通过”；
+- [ ] **失败段同时丢掉 analyzer 与物理接触两份证据**，根因是 `fail()` 直接 `exit 1`
+  （`scripts/test_mujoco_minco_mpc_chain.sh:338-343`），而 leg 收尾里的
+  `capture_contact_telemetry after` → `assert_no_physical_contact` → `stop_nav_tracking_recorder`
+  → `analyze_nav_tracking_leg` 全部排在动作成功判定之后（约 2010–2019 行）。后果分两种：
+  - analyzer 可离线补跑，`176` 目标 5 的结论就是这样取得的（recorder 虽然在 SIGINT 时以
+    `RCLError: failed to initialize wait set` 崩退，数据在崩退前已落盘）；
+  - **物理接触读数不可补**：`contact_violation_count` / `max_contact_force` 只能从运行中的
+    `/swerve/telemetry` 取，仿真拆掉后就没有了。所以 `176` 只有目标 1–4 的
+    `CONTACT: ... contact_violation_delta=0 ... max_contact_force_n=0.0` 四行，**失败的目标 5 没有任何
+    接触读数**，`assert_no_physical_contact` 在该段从未执行。`174` 同理只有 7 行（覆盖成功段）。
+    因此“footprint 最小间隙 −0.100 m”是几何结论，**目标 5 是否真的发生刚体接触仍未测量**——
+    既不能说发生了，也不能说没发生。修法是把 after-capture 与 analyzer 移到失败路径也会经过的
+    收尾里（trap/EXIT 或先采集后判定），未实现；
+- [ ] domain `174` 全程 `/localization` 零消息（RMW 报 `incompatible QoS ... RELIABILITY`，
+  recorder 侧请求的是 BEST_EFFORT，`localization_fusion_node` 用 `SensorDataQoS()`），
+  该运行的 q2/q3 因此不可判；`176` 用同一脚本同一 QoS 正常收到（134 条/段），
+  故这是 `174` 运行期一次性的发现顺序问题，不是工具与 profile 不匹配；
+- [ ] 原“修复目标 9 候选索引覆盖冲突带、抑制终端东向过冲”与“从目标 9 安全终态独立验证目标 10”
+  两项的前提（栅格过报）已被 q3=no 推翻，改为在跟踪偏差修好后重新评估是否仍需要；
+- [x] 增加动态 TF stamp/age 门禁：`tf_dynamic_age_p99_s` 与 `tf_dynamic_stamp_staleness_p99_s`
+  双门禁（各 0.5 s），配 distinct-update 速率下限、`update_gap_max` 与 stamp 异常计数；
+  两个百分位及其样本数缺失时 fail-closed。`scripts/test_gazebo_dynamic_tf_gate.sh` 19 例，
+  两个门禁与两处 fail-closed 均经变异测试；
+- [x] Gazebo P1 阻塞点已定位到 `ros_gz_bridge parameter_bridge`：同一次运行内对比雷达在桥两侧的
+  证据（domain `143`，`OBSERVE_GAZEBO_TRANSPORT_LIDAR=true`）——gz-transport 侧 898 帧、
+  间隔 0.099994 s、stamp age p50 0.002 s；ROS 侧只剩 659 帧（丢 26.6%）、间隔 0.136471 s、
+  stamp age p50 1.982 s。通过的 domain `131` 在同一默认 profile 下两侧均为 600 帧、
+  age 0.012 s。Gazebo 与传感器在通过/失败两次运行中完全一致，唯一变量是桥；
+- [x] `parameter_bridge` 已补入 `capture_launch_process_resources` 的进程过滤：此前该过滤只覆盖
+  `gz_livox_bridge_node`、`pointlio_mapping` 等，唯独漏掉证据所指向的桥进程，导致桥的 CPU、线程和
+  非自愿上下文切换在全部九次运行里都没有被测量。`scripts/test_gazebo_runner_contract.sh` 新增断言
+  只匹配 `ps` 过滤表达式本身（第一版被我自己写的注释满足、变异存活，已修正后变异被杀）；
+- [x] 一个候选根因已被证据否证：`OBSERVE_GAZEBO_TRANSPORT_LIDAR` 不是通过/失败的区分变量——
+  domain `127/129/131` 该开关为 `true` 且通过，`133/135/137/139/141` 为 `false` 且全部失败。
+  录制器的 gz-transport 订阅不是桥延迟的成因；
+- [x] 用补齐后的进程测量重跑 Gazebo P1（domain `147`，默认 profile + `OBSERVE_GAZEBO_TRANSPORT_LIDAR=true`），
+  该次**通过**，并首次拿到 `parameter_bridge` 的资源基线。`147` 与 `143` 的 active 窗口长度相同
+  （90.43 s 对 90.40 s），因此 tick 增量可直接比较（每秒 tick）：`ign gazebo` 85.10 对 77.32、
+  `pointlio_mapping` 32.59 对 15.60、`gz_livox_bridge_node` 12.82 对 8.14——**通过的那次在三个进程上
+  CPU 都更高**。这否证了“主机 CPU 争用导致桥延迟”：若是争用，失败运行应当压力更大，而实测是失败运行
+  下游做的功更少，正是输入被拖慢后的表现。`parameter_bridge` 在通过运行为 21.48 tick/s、
+  非自愿上下文切换 90 s 内仅 98 次（健康时几乎不被抢占）；
+- [ ] 仍缺一次**带该进程测量的失败运行**才能判定桥自身每帧成本：`143` 及更早九次运行都在补测之前，
+  `147` 又通过了，因此“桥内部成本 vs 外部饿死”目前无法定论，不能推断；
+- [x] 同一次运行内的分级证据再次确认插入点就是桥：`147` 为 gz-transport 0.002 s → ROS 侧
+  `gazebo_lidar` 0.022 s（+0.020）→ `livox_input` 0.042 → `cloud_registered` 0.042 →
+  `localization` 0.042 → `tf_dynamic_age_p99` 0.122 s；`143` 为 0.002 → **1.982**（+1.980）→ 2.042
+  → 2.232 → 2.232 → 2.302 s。两次同一默认 profile，链路结构一致，唯一插入 ~2 s 的环节相同；
+- [x] Gazebo P1 三次连续通过：**已达成 3/3**，全部使用固定默认 profile（`TEST_PROFILE=nominal`、
+  `P2_FAULT_CASE=none`、`PLANNING_GRID_OWNER=rog_map`、`USE_DIRECT_GAZEBO_LIDAR_BRIDGE=false`、
+  `LIDAR_BRIDGE_PUBLISHER_RELIABILITY=reliable`、`LIDAR_BRIDGE_PUBLISHER_DEPTH=10`），
+  三次都是 `p1 admission evidence: true`、`reason=all_p1_gates_passed`、`failures: 0`：
+  - domain `147`（`log/gazebo_minco_mpc_chain/20260901_135358_nominal_none_domain147`）：
+    `tf_dynamic_age_p99_s=0.122043`、`tf_dynamic_stamp_staleness_p99_s=0.200000`、
+    `tf_dynamic_update_gap_max_s=0.200108`；
+  - domain `149`（`log/gazebo_minco_mpc_chain/20260901_135756_nominal_none_domain149`）：
+    `tf_dynamic_age_p99_s=0.122037`、`tf_dynamic_stamp_staleness_p99_s=0.100000`、
+    `tf_dynamic_update_gap_max_s=0.200008`、`tf_lookup_failures=2`（全部在 established 之前，
+    `failures_after_establishment=0`）、`goal_action_final_distance_m=0.0656`、
+    `terminal_localization_goal_error_m=0.1163`、`post_goal_localization_delta_m=0.1792`；
+  - domain `151`（`log/gazebo_minco_mpc_chain/20260901_140013_nominal_none_domain151`）：
+    `tf_dynamic_age_p99_s=0.112042`、`tf_dynamic_stamp_staleness_p99_s=0.100000`、
+    `tf_dynamic_update_gap_max_s=0.199670`、`tf_lookup_failures_after_establishment=0`、
+    `goal_action_final_distance_m=0.0334`、`terminal_localization_goal_error_m=0.1646`、
+    `post_goal_localization_delta_m=0.1942`。
+  三次的 owner 计数一致：`selected_cmd_vel_publisher_max=1`、`selected_cmd_vel_subscriber_max=2`、
+  `planning_grid_publisher_max=1`、`planning_grid_publisher_names=/ats_rog_map_adapter`、
+  `planning_grid_named_non_adapter_seen=no`、`planning_grid_anonymous_endpoint_seen=no`。
+  分级 stamp age 在三次中都停在桥前：gz-transport 0.002 s → `gazebo_lidar` 0.022 s（+0.020），
+  与 `143` 的 0.002 → 1.982（+1.980）形成对照；
+- [ ] 该 3/3 的证据边界：桥延迟缺陷**未被修复**，只是三次未复现。`143` 与 `147/149/151` 使用同一
+  默认 profile 与同一批产物，因此缺陷是**间歇性**的，三次连续通过不等于该缺陷已消除；后续任何
+  Gazebo 运行仍可能重现 ~2 s 插入。三次运行的 `minimum_clearance_m`、`minco_footprint_collisions`、
+  `gazebo_contact_telemetry` 均为 `unverified`，物理接触仍**未验证**；
+- [x] MuJoCo 独立 contact evaluator **已实现并已在运行中产出读数**：runner 的
+  `capture_contact_telemetry` / `capture_contact_force` / `assert_no_physical_contact` 从
+  `/swerve/telemetry` 读 `contact_violation_count` 与 `max_contact_force`，按单个目标窗口取**增量**
+  （计数自仿真启动累计、按物理步累加，绝对值无意义），telemetry 读不到时 **fail-closed**，计数回退时
+  判仿真已重启。它与离散 `footprint_collisions` 并列、互不替代：前者是刚体求解器算出的接触
+  （`contact_is_violation()` 只计机器人与非地面几何体的接触，四轮正常接地不计入），后者只是 MINCO
+  轨迹采样点的几何自检。单元级门禁 `bash scripts/test_mujoco_contact_gate.sh` **exit 0**
+  （`RESULT: MuJoCo contact gate test PASSED`，含 `force_reported_on_reject` 的拒绝分支）。
+  domain `178` 的实测读数：`CONTACT: single leg contact_violation_delta=0
+  contact_violation_before=0 contact_violation_after=0 max_contact_force_n=0.0`，
+  因此 MuJoCo `single` 的物理接触是**已验证为零**，不再只依赖 `footprint_collisions=0`。
+- [ ] Gazebo 侧仍无对应物理接触证据：`147/149/151` 三次的 `minimum_clearance_m`、
+  `minco_footprint_collisions`、`gazebo_contact_telemetry` 均为 `unverified`，
+  `物理接触评估 未验证`。Gazebo 接触遥测未实现，`footprint_collisions=0` 在 Gazebo 侧继续不替代
+  物理接触结论。
 
-当前状态：Gazebo P1 为**已验证通过**；MuJoCo P2 当前故障矩阵为**5/6**，`red_box` 到目标 5；
-`red_box`、物理接触和 P2 总体准入仍为**未通过**。
+当前状态：Gazebo P1 在固定默认 profile 下**三次连续通过（3/3）**：domain `147`、`149`、`151` 均为
+`p1 admission evidence: true`、`all_p1_gates_passed`、`failures: 0`，双动态 TF 门禁读数分别为
+`tf_dynamic_age_p99_s` 0.122043 / 0.122037 / 0.112042 与 `tf_dynamic_stamp_staleness_p99_s`
+0.200000 / 0.100000 / 0.100000（限值各 0.5 s）。此前 domain `133/135/137/139/141/143` 六次全部失败，
+更早通过的 domain `131` 无该门禁。桥延迟缺陷本身**未修复**、只是未复现：`143` 与这三次同 profile、同一批产物，
+失败模式是桥侧 ~2.0 s 雷达延迟使 `ats_rog_map_adapter` 把 `map <- gimbal_yaw_odom` 判为未来外插
+（`143` 在 sim t≈21.4 s 跨过 `[0,0.1]` 接受窗），planning grid never ready、action abort。
+因此该 3/3 是“当前门禁集下的连续通过”，不是“缺陷已消除”。此前 domain `127/129/131` 的通过结论只在
+“无动态 TF 新鲜度门禁”的证据边界内成立，不再作为 P1 通过依据；三次运行的物理接触仍为未验证。
+MuJoCo P2 六故障矩阵已在独立新 domain 全部执行并通过，为**6/6**（154/156/158/166/168/170）。
+`red_box` 仍为**未通过**：三次运行分别失败于目标 9（`152`）、目标 8（`174`）、目标 5（`176`），
+失败目标编号漂移。根因已由 `176` 的离线取证定位为**执行/跟踪偏差**（目标 5 最大偏航误差 1.107 rad、
+footprint 最小间隙 −0.100 m），而不是此前认为的栅格过报——同一位姿的 free→occupied 翻转判定为 no；
+车进入真实障碍后，默认 fail-closed 的提交门使其无法再提交任何轨迹而死锁。
+MuJoCo 侧物理接触已有独立读数：`154/156/158/166/168/170/178` 与 `174/176` 的成功段均为
+`contact_violation_delta=0`、`max_contact_force_n=0.0`；但**失败段没有接触读数且不可补测**，
+Gazebo 侧接触遥测仍未实现（`147/149/151` 的 `gazebo_contact_telemetry=unverified`）。
+`red_box` 未通过与 Gazebo 侧接触证据缺失，使 P2 总体准入仍为**未通过**。
 
 ## 1. 目标与完成定义
 
@@ -107,6 +249,87 @@
   车体系分量回归，MuJoCo LiDAR 增加 MuJoCo 3.4/3.10 `mj_multiRay` 参数兼容层。MuJoCo single 与
   `adapter_lease/service_timeout/input_stale` 独立故障用例通过；`red_box`、`unknown`、`unreachable` 的
   失败分别记录为真实规划缺陷、注入时序竞态和故障前提未成立，物理接触仍未验证。
+- **已验证（arbiter 专项 GTest，2026-09-01）**：`colcon build --base-paths src --packages-select
+  ats_cmd_vel_arbiter --cmake-args -DCMAKE_BUILD_TYPE=Release`（exit 0）+ `colcon test --base-paths src
+  --packages-select ats_cmd_vel_arbiter`（exit 0）+ `colcon test-result --test-result-base
+  build/ats_cmd_vel_arbiter --all`（exit 0）：`test_cmd_vel_arbiter.gtest.xml` **24 tests, 0 errors,
+  0 failures, 0 skipped**（合计 25 tests，含包级 1 项）。24 例覆盖优先项 2/3/6：手动新鲜优先与手动
+  超时归零（`FreshManualPreemptsAuthorizedAuto`、`ManualTimeoutDoesNotResurrectOldCommand`、
+  `ManualTimeoutRecoversToAuthorizedAuto`、`ManualTimeoutThenNewManualIsAccepted`）、自动源需要有新鲜
+  `ExecutionCommand`（`AutoWithoutAuthorizationStaysZero`、`StaleOrReplayExecutionCommandIsRejected`、
+  `AutoTimeoutDoesNotResurrectOldCommand`、`ExecutionLeaseExpiresWithoutNewCommand`）、STOP/新化身/急停/
+  断链使旧自动失效（`StopRevokesAutoAndRequiresNewAutoSample`、`StopDoesNotClearFreshManual`、
+  `NewIncarnationRequiresStopBeforeExecute`、`EmergencyStopZerosBothSources`、
+  `ExecutionCommandDuringEmergencyStopIsNotHonored`、`LinkDownZerosBothSources`、
+  `LinkHeartbeatTimeoutZerosOutput`、`MissingLinkHeartbeatZerosOutput`、
+  `AuthorizationDuringLinkDownIsNotHonored`）、DOWN→UP 只接受恢复后新到命令
+  （`LinkDownToUpDiscardsCommandsBufferedWhileDown`、`HeartbeatTimeoutThenLinkUpDiscardsBufferedCommands`、
+  `ManualReceivedBeforeInitialLinkUpDoesNotRevive`）、以及车体系 `[vx,vy,wz]` 分量保持
+  （`BodyFrameHolonomicComponentsArePreserved`）。该结论是单元级的，不替代整链 owner 与零速链实测。
+- **已验证（MuJoCo `single` 独立新 domain，2026-09-01）**：`ROS_DOMAIN_ID=178 TEST_PROFILE=single
+  bash scripts/test_mujoco_minco_mpc_chain.sh`，**exit 0**，`PASS: MuJoCo JPS/MINCO/clearance-aware yaw/
+  SE2 MPC 'single' profile completed.`。运行前产物新鲜度审计全部通过（`ats_cmd_vel_arbiter`、
+  `ats_swerve_mpc`、`ats_goal_manager`、`minco_planner`、`ats_rog_map`、`ats_rog_map_adapter` 为
+  `fresh`，`ats_rc_esdf` 为 `propagated` 到 `libminco_planner.so` 与 `ats_rog_map_adapter_node`）。
+  owner 唯一性逐条通过：`/cmd_vel/autonomy_raw` `ats_swerve_mpc -> cmd_vel_arbiter`、
+  `/cmd_vel/selected` `cmd_vel_arbiter -> twist_to_motion_ctrl`、`/motion_control`
+  `twist_to_motion_ctrl -> ats_mujoco_sim`、`/rc_esdf/planning_grid` 单一 publisher 属
+  `ats_rog_map_adapter`、`/planner/execution_command` `ats_goal_manager -> ats_swerve_mpc` 且
+  `cmd_vel_arbiter` 为只读 observer。终点 `final_distance=0.0343 m`，
+  `RESULT: single generation=26 raw_points=3 reference_points=24 footprint_collisions=0
+  escape_prefix_end=0`，零速链 `stop from last_nonzero_selected_command: 0.1132 m over 0.518 s`。
+  50 Hz 离线取证（`/tmp/ats_nav_evidence/nav_tracking_single_178/goal_1_single/verdict.json`）：
+  q1=`yes`、q2=`no`、q3=`no`，`ticks_evaluated=104`、`ticks_unpaired_frame=0`、`colliding_ticks=0`、
+  `swept_colliding_segments=0`、`max_abs_yaw_error_rad=0.0082`、`max_abs_lateral_error_m=0.0033`、
+  `min_clearance_m=+0.400`。该组读数与 `red_box` 目标 5 的 1.107 rad / −0.100 m 形成直接对照，
+  说明缺陷是 profile 相关的执行偏差而非全局跟踪能力缺失。`footprint_collisions=0` 与
+  `colliding_ticks=0` 仍不替代物理接触结论（verdict 自带 `physical contact is not evaluated here`）。
+- [ ] 该离线取证工具的一个证据边界（新记录）：`verdict.json` 的 `recorder_summary.publishers` 在
+  d178 中每个 topic 都是 `count: 0` 且带 `RCLError: ... rcl node's context is invalid`——枚举发生在
+  SIGINT 关停之后，节点 context 已失效。因此 recorder 的 publisher 枚举**不携带 owner 结论**（既不
+  支持也不反驳），owner 数量只能取自 runner 自身的 owner 审计与 Gazebo `active_ownership.log`；
+  修法是把枚举移到关停之前，未实现。
+- **已验证（离线取证层与门禁的单元测试，2026-09-01，全部 exit 0）**：
+  `python3 scripts/test_analyze_nav_tracking.py`（`RESULT: nav tracking analyzer test PASSED`）、
+  `python3 scripts/test_footprint_evaluator.py`（`RESULT: footprint evaluator test PASSED`）、
+  `bash scripts/test_footprint_evaluator_parity.sh`（`PARITY: compared 1280 cases against the linked
+  C++ FootprintSafetyChecker`，`RESULT: footprint evaluator parity PASSED`——Python 评估器与实际链接的
+  C++ `FootprintSafetyChecker` 逐例对齐，这是离线结论可以引用在线语义的依据）、
+  `bash scripts/test_gazebo_dynamic_tf_gate.sh`（`RESULT: dynamic TF gate test PASSED`，含
+  `no_staleness_samples -> evidence=false reason=tf_dynamic_staleness_samples_missing` 与
+  `aborted_action_outranks_evidence_gates -> evidence=false reason=straight_action_not_succeeded`，
+  即门禁顺序本身被当作正确性属性测试）、`bash scripts/test_mujoco_contact_gate.sh`
+  （`RESULT: MuJoCo contact gate test PASSED`）。
+  `python3 scripts/test_nav_tracking_recorder.py` 需要先 source 工作区：未 source 时以
+  `ModuleNotFoundError: No module named 'ats_navigation_interfaces'` **exit 1**；
+  `source /opt/ros/humble/setup.bash && source install/setup.bash` 后 **exit 0**
+  （`RESULT: nav tracking recorder test PASSED`）。这些都是单元级结论，不替代整链实测。
+- **已验证（四环境 launch/config 契约与优先项 4/5，2026-09-01）**：
+  `python3 scripts/test_validate_navigation_config.py` **exit 0**（`Ran 11 tests ... OK`）、
+  `python3 scripts/validate_navigation_config.py` **exit 0**（`PASS: formal single-source behavior,
+  navigation configuration, and ROGMap visualization contract`）、
+  `bash scripts/test_gazebo_runner_contract.sh` **exit 0**（`PASS: Gazebo runner runtime contract`）。
+  该校验器同时断言四个环境的速度链拓扑：实机（`bringup.launch.py` +
+  `rm_navigation_reality_launch.py` + `navigation_launch.py`，MPC `command_topic=/cmd_vel/autonomy_raw`、
+  `IfElseSubstitution(launch_fake_vel_transform, '/cmd_vel/autonomy_gimbal', ...)`、串口节点
+  `cmd_vel_topic` 默认 `/cmd_vel/selected`）、MuJoCo（`rmuc_2025_mujoco.launch.py`：
+  `"input_topic": "/cmd_vel/selected"`、`"require_serial_link": False`）、Gazebo
+  （`"selected_cmd_vel_topic": "/cmd_vel/selected"`、adapter `input_topic` 同）、loopback/HIL
+  （`'command_topic': '/cmd_vel/selected'`）。
+  - 优先项 4（避免重复 `base_footprint -> base_link`、fake yaw 关闭时保留零旋转兼容 TF）在
+    `src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py:79-88` 由条件互斥保证：
+    `static_transform_publisher_base_footprint_to_base_link` 带
+    `UnlessCondition(use_robot_state_pub)`，`static_transform_publisher_fake_yaw_compat`
+    （`gimbal_yaw_odom -> gimbal_yaw_fake`，无 rpy 参数即恒等旋转）带
+    `UnlessCondition(launch_fake_vel_transform)`。Gazebo profile 另有单 owner 说明：
+    `odom -> base_footprint` / `odom -> gimbal_yaw_odom` 唯一发布者是 `sensor_scan_generation`，
+    且该 profile 有意不启动 `fake_vel_transform`/`chassis_vel_transform`。**结论是静态/结构级的**；
+  - 优先项 5（缺必要大 yaw 反馈时 Gazebo 底盘与 `/motion_control` 同时归零）在
+    `chassis_command_logic.py:46-49` 是 fail-closed 的单点：`transform_with_big_yaw and big_yaw is None`
+    且 `require_big_yaw` 时返回 `ChassisCommandOutputs(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, True)`——六个分量
+    全零，因此 `/motion_control` 与底盘 `Twist` 由同一输出驱动、不可能只归零一路。
+    `python3 src/sim/gazebo_simulator/rmu_gazebo_simulator/tests/test_chassis_command_logic.py`
+    **exit 0**（`Ran 2 tests ... OK`）。该结论是单元级的，未在 Gazebo 运行中注入过缺失 yaw 反馈；
 - **已修复（Gazebo freshness 分类器）**：阶段表覆盖 Transport、raw LiDAR、Livox、registered scan、
   lidar odometry、odometry、localization 与 status；旧 domain `228` 的 `lidar_odometry` 首违属于阶段遗漏。
   domain `107/113` 出现 freshness 与动作结果反转，单次 run 不足以确认 owner；Direct bridge/Transport
@@ -116,13 +339,11 @@
 
 ### 2.1 仓库基线
 
-| 仓库 | P0 起始 revision | 远端状态 | 说明 |
+| 仓库 | 当前 revision | 远端状态 | 说明 |
 | --- | --- | --- | --- |
-| 根仓 | `c7cc0e54cc7d` | `origin/develop` 已同步 | P0 阻塞记录后的文档基线 |
-| 导航仓 | `5ea786eb2e70` | `origin/develop` 已同步 | ROGMap、JPS/MINCO、Goal Manager、MPC |
-| Gazebo 用户 fork | `a28ccd20428f` | `origin/main` 已同步 | clean checkout 的运动学测试源已固化；建议避免向 `upstream` 写入 |
-| MuJoCo | `e3d6ea7a5e61` | `origin/develop` 已同步 | 当前轮未修改 |
-| `ats_robot_description` | `dea591e53fa0` | `origin/develop` 已同步 | 该提交已于 2026-08-15 经 SSH 推送；干净 Git/vcs 复建仍受本机传输失败阻塞 |
+| 根仓 | `011338b` | `origin/develop` 待本轮同步 | 文档、runner 与离线证据工具 |
+| 导航仓 | `efd68e1` | `origin/develop` 已同步 | ROGMap、JPS/MINCO、Goal Manager、MPC |
+| MuJoCo | `54a7c01` | `origin/develop` 已同步 | 仿真模型与 launch |
 
 受保护的用户内容继续保留：
 
@@ -143,14 +364,12 @@
 - OSQP v1.0.0、固定 CSC、warm-start ABI、complete-phase 计时和 `qp_shadow` 已实现；
 - 默认仍为 `solver_mode=ilqr`，`solver_mode=qp` 显式拒绝。
 
-### 2.3 已有运行证据但不能升级准入
+### 2.3 当前证据边界
 
-- Gazebo domain `228/229` 的短直线 action 成功，终点误差约 `0.060/0.045 m`；
-- domain `230` 观测到直线长度比 `1.000`、横向偏差和曲率为零；
-- domain `230` 因 `/localization` wall interval
-  `p50/p95/p99=0.371/0.994/1.612 s` 触发 freshness fail-closed；
-- 旧 revision 的八个 Gazebo fault domain 曾通过，但 MINCO 行为修改后建议重跑；
-- 历史 `qp_shadow` 仍以 `max_iterations`、零 feasible 和零 warm-start 为主，不能启用 QP 主链。
+- Gazebo `147/149/151` 只代表当前动态 TF 门禁集下的三次连续通过，bridge 延迟故障仍可能复现；
+- MuJoCo `154/156/158/166/168/170` 的 P2 故障矩阵为 `6/6`，`red_box` 仍未通过；
+- `single` domain `178` 有 reference/actual 零碰撞与 contact telemetry 零增量证据，不能外推到失败段或 Gazebo；
+- QP 仍为 shadow/显式拒绝状态，未形成主链准入证据。
 
 ## 3. 稳定契约
 
