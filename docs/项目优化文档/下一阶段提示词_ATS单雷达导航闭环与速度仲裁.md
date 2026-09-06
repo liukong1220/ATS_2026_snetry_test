@@ -27,7 +27,7 @@ docs/项目优化文档/ATS导航剩余优化总TODO.md 的最新清单。先列
 launch_fake_vel_transform:=True、launch_chassis_vel_transform:=True；fake yaw 关闭时保留
 gimbal_yaw_odom -> gimbal_yaw_fake 零旋转兼容 TF。单雷达 profile 不引入双雷达链。
 
-当前可信状态（2026-09-01）：
+当前可信状态（2026-09-06，活动证据窗口为 2026-08-30 至 2026-09-06）：
 
 - Gazebo P1 在动态 TF age/staleness 门禁下 domain 147/149/151 连续三次通过；bridge 约 2 s 延迟在
   domain 143 复现过，尚无带失败运行资源测量的结论。
@@ -37,6 +37,8 @@ gimbal_yaw_odom -> gimbal_yaw_fake 零旋转兼容 TF。单雷达 profile 不引
   最大偏航误差 1.107 rad、横向误差 0.275 m、最小足迹间隙 -0.100 m。修复 owner 在 MPC 跟踪、执行限幅和
   停车包络，escape_from_contact_enabled 保持关闭。
 - 实机/HIL 尚未运行；Gazebo 物理接触遥测仍未形成独立证据。
+- 最近一周已补齐 `freeze` 终止日志和 `farthest-free --max-distance` 夹具参数，并完成
+  reference/snapshot pairing、footprint parity 和 contact gate 回归；这些结果不改变 red_box 与失败 leg 的未完成边界。
 
 速度链契约：
 
@@ -72,10 +74,10 @@ teleop_twist_keyboard -> /cmd_vel
   `bash scripts/test_mujoco_contact_gate.sh` 均纳入离线验证。
 - footprint_collisions=0 只代表几何采样结果，物理接触单独记录；缺少接触 evaluator 时结论写为未验证。
 
-避免通过降低 freshness、footprint、障碍阈值或开启 escape 来换取结果；也不要把 topic 存在、编译成功或
-单次运动当成闭环准入。目标终态误差与 recorder 结束时定位误差分别记录。
+降低 freshness、footprint、障碍阈值或开启 escape 会改变安全边界；topic 存在、编译成功或单次运动不构成
+闭环准入。目标终态误差与 recorder 结束时定位误差分别记录。
 
 交付报告区分已验证、已实现未运行、推断和未实现，列出精确文件、命令与退出码、domain artifact、终点误差、
-owner 数量、零速链、reference/actual 碰撞、接触证据和残余风险。完成后输出 READY_FOR_CODEX_REVIEW，保持 Git
-工作区不产生提交。
+owner 数量、零速链、reference/actual 碰撞、接触证据和残余风险。完成后输出 READY_FOR_CODEX_REVIEW，交付时 Git
+工作区保持无新增提交。
 ```
