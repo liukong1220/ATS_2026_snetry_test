@@ -1693,6 +1693,31 @@ metric "tf_lookup_attempts" "$(evidence_value tf_lookup_attempts)"
 metric "tf_lookup_successes" "$(evidence_value tf_lookup_successes)"
 metric "tf_lookup_failures" "$(evidence_value tf_lookup_failures)"
 metric "tf_lookup_max_ms" "$(evidence_value tf_lookup_max_ms)"
+# Dynamic-edge freshness evidence for the P1 admission gates. The bridge
+# delay attribution needs these fields to split the ~2 s lag (domains
+# 143/147+ shape) into a chain-level freeze (distinct updates/gaps) and a
+# consumer-side lag (age/staleness against /clock). Missing fields print
+# empty here but fail closed in set_p1_admission_evidence.
+metric "tf_dynamic_samples" "$(evidence_value tf_dynamic_samples)"
+metric "tf_dynamic_distinct_stamp_updates" "$(evidence_value tf_dynamic_distinct_stamp_updates)"
+metric "tf_dynamic_duplicate_stamps" "$(evidence_value tf_dynamic_duplicate_stamps)"
+metric "tf_dynamic_backward_stamps" "$(evidence_value tf_dynamic_backward_stamps)"
+metric "tf_dynamic_invalid_stamps" "$(evidence_value tf_dynamic_invalid_stamps)"
+metric "tf_dynamic_future_stamps" "$(evidence_value tf_dynamic_future_stamps)"
+metric "tf_dynamic_age_p50_s" "$(evidence_value tf_dynamic_age_p50_s)"
+metric "tf_dynamic_age_p99_s" "$(evidence_value tf_dynamic_age_p99_s)"
+metric "tf_dynamic_age_max_s" "$(evidence_value tf_dynamic_age_max_s)"
+metric "tf_dynamic_age_floor_s" "$(evidence_value tf_dynamic_age_floor_s)"
+metric "tf_dynamic_age_samples" "$(evidence_value tf_dynamic_age_samples)"
+metric "tf_dynamic_staleness_samples" "$(evidence_value tf_dynamic_staleness_samples)"
+metric "tf_dynamic_stamp_staleness_p50_s" "$(evidence_value tf_dynamic_stamp_staleness_p50_s)"
+metric "tf_dynamic_stamp_staleness_p99_s" "$(evidence_value tf_dynamic_stamp_staleness_p99_s)"
+metric "tf_dynamic_stamp_staleness_max_s" "$(evidence_value tf_dynamic_stamp_staleness_max_s)"
+metric "tf_dynamic_backward_clock_samples" "$(evidence_value tf_dynamic_backward_clock_samples)"
+metric "tf_dynamic_update_gap_samples" "$(evidence_value tf_dynamic_update_gap_samples)"
+metric "tf_dynamic_update_gap_p50_s" "$(evidence_value tf_dynamic_update_gap_p50_s)"
+metric "tf_dynamic_update_gap_p99_s" "$(evidence_value tf_dynamic_update_gap_p99_s)"
+metric "tf_dynamic_update_gap_max_s" "$(evidence_value tf_dynamic_update_gap_max_s)"
 metric "dds_queue_drop_counter" "$(evidence_value dds_queue_drop_counter)"
 metric "adapter_max_wall_interval_s" "$(evidence_value adapter_max_wall_interval_s)"
 metric "adapter_status_callback_count" "$(evidence_value adapter_status_callback_count)"
@@ -1850,13 +1875,33 @@ set_p1_admission_evidence
 metric "p1_admission_evidence" "$P1_ADMISSION_EVIDENCE"
 metric "p1_admission_reason" "$P1_ADMISSION_REASON"
 
-# There is no standalone Gazebo contact evaluator in this profile, so physical
-# contact must stay explicitly unverified. footprint_collisions=0 is a planner
-# metric and never evidence of zero physical contact.
+# There is no MuJoCo-style contact_violation_count on this profile. Probe ROS
+# and gz contact topics; a missing source stays unverified and is never written
+# as zero physical contact.
+GAZEBO_CONTACT_LOG="$RUN_DIR/gazebo_contact.txt"
+GAZEBO_CONTACT_SOURCE="none"
+GAZEBO_CONTACT_VALUE="unverified"
+if timeout 2 ros2 topic list --no-daemon 2>/dev/null | grep -Eq '/gazebo/contacts$|/contacts$'; then
+  GAZEBO_CONTACT_SOURCE="ros_contacts"
+  if timeout 3 ros2 topic echo --no-daemon --once --qos-reliability best_effort /gazebo/contacts \
+    >"$GAZEBO_CONTACT_LOG" 2>/dev/null; then
+    if grep -Eq 'contact_violation_count:[[:space:]]*[0-9]+' "$GAZEBO_CONTACT_LOG"; then
+      GAZEBO_CONTACT_VALUE="$(awk '/contact_violation_count:/ {print $2; exit}' "$GAZEBO_CONTACT_LOG")"
+    else
+      GAZEBO_CONTACT_VALUE="unverified"
+    fi
+  fi
+elif command -v gz >/dev/null 2>&1 && timeout 2 gz topic -l 2>/dev/null | grep -q contacts; then
+  GAZEBO_CONTACT_SOURCE="gz_contacts"
+  timeout 3 gz topic -e -n 1 -t "$(timeout 2 gz topic -l 2>/dev/null | awk '/contacts/ {print; exit}')" \
+    >"$GAZEBO_CONTACT_LOG" 2>/dev/null || true
+  GAZEBO_CONTACT_VALUE="unverified"
+fi
+metric "gazebo_contact_source" "$GAZEBO_CONTACT_SOURCE"
+metric "gazebo_contact_telemetry" "$GAZEBO_CONTACT_VALUE"
 metric "minimum_clearance_m" "unverified"
 metric "minco_footprint_collisions" "unverified"
-metric "gazebo_contact_telemetry" "unverified"
-metric "物理接触评估" "未验证"
+metric "物理接触评估" "$([ "$GAZEBO_CONTACT_VALUE" = "unverified" ] && echo 未验证 || echo "$GAZEBO_CONTACT_VALUE")"
 
 metric "failure_count" "$FAILURE_COUNT"
 metric "recovery_count" "unverified"

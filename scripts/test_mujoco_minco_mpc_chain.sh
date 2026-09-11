@@ -298,6 +298,12 @@ mkdir -p "${LOG_DIR}"
 
 CAPTURE_PIDS=()
 STOPPED_PIDS=()
+EVIDENCE_FLUSHED=0
+FLUSHING_EVIDENCE=0
+LEG_LABEL=""
+LEG_BEFORE_CONTACT=""
+LEG_AFTER_CONTACT=""
+LEG_AFTER_CONTACT_FORCE=""
 
 stop_capture_process() {
   local pid="$1"
@@ -315,6 +321,9 @@ stop_capture_process() {
 }
 
 cleanup() {
+  if declare -F flush_leg_evidence >/dev/null; then
+    flush_leg_evidence || true
+  fi
   for pid in "${STOPPED_PIDS[@]:-}"; do
     kill -CONT "${pid}" 2>/dev/null || true
   done
@@ -339,6 +348,10 @@ fail() {
   echo "FAIL: $1"
   echo "launch_log=${LAUNCH_LOG}"
   tail -n 160 "${LAUNCH_LOG}" || true
+  FLUSHING_EVIDENCE=1
+  if declare -F flush_leg_evidence >/dev/null; then
+    flush_leg_evidence || true
+  fi
   exit 1
 }
 
@@ -802,8 +815,11 @@ capture_pose() {
   local attempt
   # ros2cli discovery is independent from the already-verified localization
   # lease. Retry boundedly so one missed transient-local discovery window is
-  # not reported as a control or yaw-authority failure.
-  for attempt in 1 2 3; do
+  # not reported as a control or yaw-authority failure. 6 attempts with 1 s
+  # spacing covers the same transient-local discovery window observed with
+  # contact telemetry; a shorter budget was seen to abort red-box goal 7 in
+  # domain 185 even though the chain itself was healthy.
+  for attempt in 1 2 3 4 5 6; do
     timeout 5 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
       /localization --field pose.pose.position \
       >"${output_file}" 2>/dev/null || true
@@ -1734,8 +1750,8 @@ ensure_topic_capture_ready() {
 capture_contact_telemetry() {
   local output_file="$1"
   local attempt
-  for attempt in 1 2 3; do
-    timeout 5 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
+  for attempt in 1 2 3 4 5 6; do
+    timeout 5 ros2 topic echo --no-daemon --once \
       "${SWERVE_TELEMETRY_TOPIC}" --field contact_violation_count \
       >"${output_file}" 2>/dev/null || true
     if grep -Eq '^[0-9]+$' "${output_file}"; then
@@ -1749,8 +1765,8 @@ capture_contact_telemetry() {
 capture_contact_force() {
   local output_file="$1"
   local attempt
-  for attempt in 1 2 3; do
-    timeout 5 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
+  for attempt in 1 2 3 4 5 6; do
+    timeout 5 ros2 topic echo --no-daemon --once \
       "${SWERVE_TELEMETRY_TOPIC}" --field max_contact_force \
       >"${output_file}" 2>/dev/null || true
     if grep -Eq '^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$' "${output_file}"; then
@@ -1863,19 +1879,28 @@ start_nav_tracking_recorder() {
 
 stop_nav_tracking_recorder() {
   local label="$1"
-  [[ -n "${NAV_TRACKING_PID}" ]] || return 0
+  local recorder_pid="${NAV_TRACKING_PID}"
+  [[ -n "${recorder_pid}" ]] || return 0
+  local kept_pids=()
+  local pid
+  for pid in "${CAPTURE_PIDS[@]:-}"; do
+    if [[ "${pid}" != "${recorder_pid}" ]]; then
+      kept_pids+=("${pid}")
+    fi
+  done
+  CAPTURE_PIDS=("${kept_pids[@]}")
   # SIGINT 而不是 SIGTERM：recorder 在 KeyboardInterrupt 上写 summary.json，
   # 里面有 topics_without_messages 与截断标记，也就是证据缺口本身。
-  kill -INT "${NAV_TRACKING_PID}" 2>/dev/null || true
+  kill -INT "${recorder_pid}" 2>/dev/null || true
   local deadline=$((SECONDS + NAV_TRACKING_STOP_TIMEOUT))
-  while kill -0 "${NAV_TRACKING_PID}" 2>/dev/null && (( SECONDS < deadline )); do
+  while kill -0 "${recorder_pid}" 2>/dev/null && (( SECONDS < deadline )); do
     sleep 0.2
   done
-  if kill -0 "${NAV_TRACKING_PID}" 2>/dev/null; then
-    stop_capture_process "${NAV_TRACKING_PID}"
+  if kill -0 "${recorder_pid}" 2>/dev/null; then
+    stop_capture_process "${recorder_pid}"
     echo "WARN: ${label} nav tracking recorder needed a hard stop; summary may be absent"
   fi
-  wait "${NAV_TRACKING_PID}" 2>/dev/null || true
+  wait "${recorder_pid}" 2>/dev/null || true
   NAV_TRACKING_PID=""
   if [[ -n "${NAV_TRACKING_LEG_DIR}" ]]; then
     tail -n 3 "${NAV_TRACKING_LEG_DIR}/recorder.out" 2>/dev/null || true
@@ -1898,7 +1923,7 @@ analyze_nav_tracking_leg() {
   sed 's/^/  /' "${dir}/analysis.out"
   # 退出码 1 表示"分析完整且发现冲突"，2 表示"证据不足以判定"。两者都不默认判失败：
   # 本轮这层是取证，不是新门禁；打开 NAV_TRACKING_GATE=1 才让它决定 leg 结论。
-  if [[ "${NAV_TRACKING_GATE}" == "1" && "${status}" -ne 0 ]]; then
+  if [[ "${NAV_TRACKING_GATE}" == "1" && "${status}" -ne 0 && "${FLUSHING_EVIDENCE:-0}" != "1" ]]; then
     fail "${label} nav tracking analysis returned ${status} (see ${dir}/verdict.json)"
   fi
   if [[ "${status}" -ne 0 ]]; then
@@ -1906,6 +1931,45 @@ analyze_nav_tracking_leg() {
       "NAV_TRACKING_GATE=0)"
   fi
   return 0
+}
+
+flush_leg_evidence() {
+  local label="${LEG_LABEL:-leg}"
+  local before after force delta
+  [[ "${EVIDENCE_FLUSHED:-0}" == "1" ]] && return 0
+  EVIDENCE_FLUSHED=1
+  if [[ -n "${LEG_AFTER_CONTACT:-}" ]]; then
+    capture_contact_telemetry "${LEG_AFTER_CONTACT}" || true
+    if [[ -n "${LEG_AFTER_CONTACT_FORCE:-}" ]]; then
+      capture_contact_force "${LEG_AFTER_CONTACT_FORCE}" || true
+    fi
+    before=""
+    after=""
+    force=""
+    if [[ -n "${LEG_BEFORE_CONTACT:-}" ]]; then
+      before="$(contact_count_value "${LEG_BEFORE_CONTACT}")"
+    fi
+    after="$(contact_count_value "${LEG_AFTER_CONTACT}")"
+    if [[ -n "${LEG_AFTER_CONTACT_FORCE:-}" ]]; then
+      force="$(contact_force_value "${LEG_AFTER_CONTACT_FORCE}")"
+    fi
+    if [[ -z "${before}" || -z "${after}" ]]; then
+      echo "CONTACT: ${label} contact_violation_delta=unverified" \
+        "contact_violation_before=${before:-unverified}" \
+        "contact_violation_after=${after:-unverified}" \
+        "max_contact_force_n=${force:-unverified}"
+    else
+      delta=$((after - before))
+      [[ -n "${force}" ]] || force=unverified
+      echo "CONTACT: ${label} contact_violation_delta=${delta}" \
+        "contact_violation_before=${before} contact_violation_after=${after}" \
+        "max_contact_force_n=${force}"
+    fi
+  fi
+  stop_nav_tracking_recorder "${label}"
+  if [[ -n "${NAV_TRACKING_LEG_DIR:-}" ]]; then
+    analyze_nav_tracking_leg "${label}" "${NAV_TRACKING_LEG_DIR}" || true
+  fi
 }
 
 run_navigation_goal() {
@@ -1925,6 +1989,12 @@ run_navigation_goal() {
   local tracking_dir="${NAV_TRACKING_DIR}/goal_$((index + 1))_${name}"
   local topic output_file expected_frame pid log_line_count log_start_line
   local -a topic_pids=()
+
+  LEG_LABEL="${name} leg"
+  LEG_BEFORE_CONTACT="${before_contact}"
+  LEG_AFTER_CONTACT="${after_contact}"
+  LEG_AFTER_CONTACT_FORCE="${after_contact_force}"
+  EVIDENCE_FLUSHED=0
 
   log_line_count="$(wc -l < "${LAUNCH_LOG}")"
   log_start_line=$((log_line_count + 1))
@@ -2017,6 +2087,7 @@ run_navigation_goal() {
     "${after_contact_force}"
   stop_nav_tracking_recorder "${name} leg"
   analyze_nav_tracking_leg "${name} leg" "${tracking_dir}"
+  EVIDENCE_FLUSHED=1
 }
 
 # MPC 分阶段耗时只存在于 telemetry ring 里，绝不为了采集在 20 Hz 控制定时器里
@@ -2145,6 +2216,10 @@ assert_topic_ownership /planner/execution_command ats_goal_manager ats_swerve_mp
 # 最终急停权威。
 assert_topic_ownership /planner/emergency_stop ats_goal_manager
 wait_for_topic_once /gimbal/yaw_status 20
+# Contact telemetry is RELIABLE/VOLATILE from sim_node. Wait here so the first
+# goal's fail-closed capture is not racing discovery; missing readings stay
+# unverified rather than being filled as zero.
+wait_for_topic_once "${SWERVE_TELEMETRY_TOPIC}" 30
 
 declare -a DEBUG_TOPICS=(
   /ats_swerve_mpc/reference_horizon

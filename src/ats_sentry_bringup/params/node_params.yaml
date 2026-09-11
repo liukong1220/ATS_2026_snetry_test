@@ -836,9 +836,9 @@ minco_planner:
     raw_path_topic: minco/raw_path
     reference_path_topic: minco/reference_path
     candidate_reference_path_topic: /minco/reference_path_candidate
-    preprocessed_guide_topic: /minco/preprocessed_guide
-    esdf_refined_guide_topic: /minco/esdf_refined_guide
-    debug_marker_topic: minco/debug_markers
+    preprocessed_guide_topic: ""
+    esdf_refined_guide_topic: ""
+    debug_marker_topic: ""
     map_ready_topic: /rog_map_adapter/ready
     emergency_stop_topic: /planner/emergency_stop
     planner_manages_emergency_stop: false
@@ -873,25 +873,28 @@ minco_planner:
     esdf_obstacle_target_clearance: 0.45
     esdf_obstacle_max_iterations: 6
     esdf_obstacle_control_point_spacing: 0.30
+    guide_control_point_spacing: 0.30
     esdf_obstacle_max_step: 0.10
-    esdf_obstacle_max_deviation: 0.50
+    esdf_obstacle_max_deviation: 0.35
     esdf_obstacle_trust_region: 0.10
     esdf_obstacle_backtracking_steps: 4
     esdf_obstacle_smoothing_weight: 0.25
     esdf_footprint_optimization_enabled: true
-    esdf_footprint_clearance: 0.10
-    esdf_footprint_trigger_clearance: 0.08
-    esdf_footprint_target_clearance: 0.10
+    esdf_footprint_clearance: 0.14
+    esdf_footprint_trigger_clearance: 0.12
+    esdf_footprint_target_clearance: 0.14
     esdf_footprint_sample_spacing: 0.10
     path_duplicate_epsilon: 0.000001
     path_collinear_lateral_tolerance: 0.025
     path_short_segment_length: 0.05
     path_corner_angle_threshold_rad: 0.20
     path_footprint_aware_shortcut_enabled: true
+    path_fillet_radius: 0.35
+    path_fillet_arc_samples: 3
     yaw_mode: clearance_aware
     yaw_rate_limit: 2.5
-    narrow_clearance_enter: 0.55
-    narrow_clearance_exit: 0.70
+    narrow_clearance_enter: 1.20
+    narrow_clearance_exit: 1.40
     terminal_yaw_sample_period: 0.10
     footprint_length: 0.70
     footprint_width: 0.55
@@ -997,7 +1000,7 @@ ats_swerve_mpc:
     projection_forward_window: 2.00
     cross_track_slowdown_start: 0.15
     cross_track_slowdown_end: 0.60
-    min_reference_progress_scale: 0.25
+    min_reference_progress_scale: 0.10
     command_latency_compensation: 0.01
     horizon: 30
     dt: 0.05
@@ -1006,7 +1009,7 @@ ats_swerve_mpc:
     line_search_decay: 0.5
     min_line_search_step: 0.05
     convergence_tolerance: 1.0e-3
-    state_weight: [18.0, 18.0, 4.0]
+    state_weight: [18.0, 18.0, 10.0]
     terminal_weight: [28.0, 28.0, 8.0]
     control_weight: [0.12, 0.12, 0.08]
     control_delta_weight: [0.7, 0.7, 0.25]
