@@ -1,8 +1,16 @@
 # ATS 自研导航 V1 当前状态与优化方向
 
-> 更新时间：2026-08-31
+> 更新时间：2026-09-09
 > 本页只记录当前准入状态、稳定架构边界和下一执行入口。历史阶段流水账已从活动文档移除，
 > 仍可由 Git 历史和专项准入记录追溯。
+
+## 0. 2026-09-09 P2 红框与代码闭环
+
+**已验证（domain `186`，`PLANNING_GRID_OWNER=rog_map`，`P2_FAULT_CASE=none`，`TEST_PROFILE=red_box`）**：目标 1--9 全部到达，终点误差 `0.049/0.009/0.036/0.034/0.010/0.061/0.023/0.024/0.033 m`。MINCO 提交 `collisions=0`。analyzer Q1 yes / Q2 no / Q3 no。历史 domain `176` 目标 5 Q2 越界与 domain `183/184` 目标 9 规划拒绝均未复现。提交点日志带 occupancy/content digest。
+
+**MINCO 后端优化**（对照 `参考/navi_minco_bit` 但未照搬）：内角 fillet（`path_fillet_radius=0.35`）+ guide densify（`guide_control_point_spacing=0.30`）+ 连续侧向加速度限速 + 提前窄通道 yaw 切线（预扫整条轨迹）。MPC yaw 权重 4→10、min_progress_scale 0.25→0.10。诊断 topic 门控为空。
+
+**未通过**：目标 9 `highland_ramp` 的 sim contact gate 拒绝（`delta=3`，`max_force=234 N`）。这是 sim `contact_is_violation()` 把底盘与高地 hfield `rmuc_2025_field` 的坡面接触判为违规，不是导航链失败。目标 10 未下发。
 
 ## 0. 2026-08-31 Codex review 结论
 
