@@ -1,5 +1,12 @@
-# Prior pcd file
+# Prior PCD (RMUC 2025)
 
-Due to the large size of the PCD file, it is not suitable for Git management. Please download it yourself
+权威仿真先验（与 `map/rmuc_2025.yaml` / `.pgm` 同框）：
 
-<https://flowus.cn/lihanchen/share/87f81771-fc0c-4e09-a768-db01f4c136f4?code=4PP1RS>
+- `rmuc_2025.pcd` — 规范名（`world:=rmuc_2025` 默认解析到此文件）
+- `rmuc_2025_gazebo_fullfield.pcd` — STL 全场采样生成物（同内容）
+- `rmuc_2025_gazebo_prior.pcd` — 兼容别名（同内容）
+
+生成：从 Gazebo `rmuc_2025.stl` 采样，变换 `p_map = p_stl + (10.92, -1.44, 0.20)`，
+体素 `0.03 m`，高度带 `[-0.2, 3.0]`。
+
+`rmul_2025.pcd` 仅用于 RMUL 场地，与 RMUC 无关。

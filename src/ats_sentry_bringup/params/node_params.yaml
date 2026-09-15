@@ -941,7 +941,7 @@ ats_goal_manager:
     goal_yaw_tolerance: 0.15
     terminal_linear_velocity_tolerance: 0.05
     terminal_angular_velocity_tolerance: 0.10
-    terminal_dwell_sec: 0.30
+    terminal_dwell_sec: 0.5
     require_planning_snapshot: true
     # Adapter publishes at 0.5 Hz, so a 1 s snapshot lease expired between
     # healthy publications and forced the Goal Manager into fail-stop. Keep the

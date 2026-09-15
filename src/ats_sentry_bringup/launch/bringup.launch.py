@@ -54,7 +54,7 @@ def generate_launch_description():
     ])
     declarations = [
         DeclareLaunchArgument("robot_name", default_value="ats_sentry_robot"),
-        DeclareLaunchArgument("world", default_value=""),
+        DeclareLaunchArgument("world", default_value="rmuc_2025"),
         DeclareLaunchArgument(
             "map",
             default_value=[TextSubstitution(text=os.path.join(bringup_dir, "map", "")), world, TextSubstitution(text=".yaml")],
