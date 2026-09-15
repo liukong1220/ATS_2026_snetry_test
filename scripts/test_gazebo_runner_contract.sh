@@ -153,4 +153,35 @@ awk '
   END {exit !found}
 ' "$RUNNER" || fail "parameter_bridge is not in the launch process resource capture filter"
 
+# Gazebo red-box integrity must reuse the MuJoCo map-frame 10-leg route and
+# keep contact telemetry fail-open (unverified) when no contact source exists.
+contains 'TEST_PROFILE=red_box' "$RUNNER" || fail "runner usage lacks red_box entry"
+contains 'run_red_box_goal_legs' "$RUNNER" || fail "runner lacks red_box multi-leg driver"
+contains 'sample_gazebo_contact_once' "$RUNNER" || fail "runner lacks shared Gazebo contact sampler"
+contains 'GOAL_TOLERANCE_M' "$RUNNER" || fail "runner lacks red_box goal tolerance"
+contains 'highland_ramp' "$RUNNER" || fail "runner red_box route missing highland_ramp"
+contains '10.45' "$RUNNER" || fail "runner red_box route missing final map x=10.45"
+contains 'Unsupported TEST_PROFILE' "$RUNNER" || fail "runner does not reject unknown profiles"
+contains 'red_box_legs_total' "$RUNNER" || fail "runner does not emit red_box leg totals"
+# Keep Gazebo/MuJoCo red_box waypoints identical; drift here is an integrity bug.
+MUJOCO_RUNNER="$ROOT_DIR/scripts/test_mujoco_minco_mpc_chain.sh"
+gazebo_xs="$(awk '
+  /GOAL_NAMES=\(south_approach/ {want=1}
+  want && /GOAL_XS=\(/ {line=$0; sub(/^.*GOAL_XS=\(/,"",line); sub(/\).*$/,"",line); print line; exit}
+' "$RUNNER")"
+mujoco_xs="$(awk '
+  /GOAL_NAMES=\(south_approach/ {want=1}
+  want && /GOAL_XS=\(/ {line=$0; sub(/^.*GOAL_XS=\(/,"",line); sub(/\).*$/,"",line); print line; exit}
+' "$MUJOCO_RUNNER")"
+[ "$gazebo_xs" = "$mujoco_xs" ] || fail "Gazebo/MuJoCo red_box GOAL_XS diverge: [$gazebo_xs] vs [$mujoco_xs]"
+gazebo_ys="$(awk '
+  /GOAL_NAMES=\(south_approach/ {want=1}
+  want && /GOAL_YS=\(/ {line=$0; sub(/^.*GOAL_YS=\(/,"",line); sub(/\).*$/,"",line); print line; exit}
+' "$RUNNER")"
+mujoco_ys="$(awk '
+  /GOAL_NAMES=\(south_approach/ {want=1}
+  want && /GOAL_YS=\(/ {line=$0; sub(/^.*GOAL_YS=\(/,"",line); sub(/\).*$/,"",line); print line; exit}
+' "$MUJOCO_RUNNER")"
+[ "$gazebo_ys" = "$mujoco_ys" ] || fail "Gazebo/MuJoCo red_box GOAL_YS diverge: [$gazebo_ys] vs [$mujoco_ys]"
+
 echo "PASS: Gazebo runner runtime contract"
