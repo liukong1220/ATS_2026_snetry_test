@@ -98,7 +98,14 @@ else
 fi
 # 每一段至少应产生的位姿位移（m），低于此值视为控制未真正跟随。
 MIN_LEG_PROGRESS="${MIN_LEG_PROGRESS:-0.20}"
-# 每段终点的平面位置误差门限（m）。
+# 每段终点的平面位置误差门限（m）。red_box profile 在下方 case 中收紧到
+# 0.15 m（其停泊圆盘必须满足 all-yaw 半径），其余 profile 保持 0.30 m。
+# GOAL_TOLERANCE_USER_SET 区分「用户显式传入」与「本行默认填充」：
+# profile 的收紧只作用于默认值。
+GOAL_TOLERANCE_USER_SET="0"
+if [ -n "${GOAL_TOLERANCE:-}" ]; then
+  GOAL_TOLERANCE_USER_SET="1"
+fi
 GOAL_TOLERANCE="${GOAL_TOLERANCE:-0.30}"
 LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-24}"
 # 故障注入必须单独启动一套 MuJoCo，避免目标与机器人状态跨用例污染。
@@ -266,10 +273,30 @@ case "${TEST_PROFILE}" in
     # 再从 x=1.50 绕墙西端下行，最后进入 y=-7.65 南廊；这些短段的
     # 0.10 m planning grid 最小离散 clearance 为 0.50 m，高于 RMUC
     # 实体 all-yaw footprint 半径 0.42 m。
+    # 停泊点不变量（domain 178/184 的 goal 9 起点碰撞教训）：goal N 的
+    # 停泊位姿是 goal N+1 规划的起点，机器人会在原地朝下一目标转向，
+    # 所以每个停泊点必须满足 all-yaw 半径 0.4187 m + 停止容差。
+    #   west_corridor_exit (1.50,-6.40): clearance 0.711 m。旧点 (1.50,-6.20)
+    #     只有 0.511 m，0.15 m 圆盘最坏 0.361 m，低于 all-yaw 半径。
+    #   east_mid (9.20,-5.00): clearance 0.949 m。旧点 (8.70,-4.90) 只有
+    #     0.563 m，goal 8→9 切换时朝东北转向，footprint 后角扫进
+    #     x<=8.30 的西南墙块，FAILURE_FOOTPRINT 拒绝全部 16 次重规划并
+    #     死锁在 e-stop（domain 178, goal 9 colliding_ticks=268）。
+    #   highland_ramp (9.00,-2.80): clearance 0.785 m。旧点 (9.25,-2.25)
+    #     只有 0.422 m，低于 0.50 m 离散 floor 本身。
+    # GOAL_TOLERANCE 收紧到 0.15 m：0.30 m 容差圆盘在这些墙角区域无法
+    # 全部满足 all-yaw 半径，收紧后停泊圆盘的 min clearance >= 0.42 m。
+    # 全序列离线 BFS 连通（格心 clearance >= 0.4187 m）已验证。
     # 最终 action 仍严格落在用户标注的中央高地。
     GOAL_NAMES=(south_approach south_entry west_corridor_east west_corridor_exit south_lane_entry south_west south_east east_mid highland_ramp red_box)
-    GOAL_XS=(4.20 4.40 5.20 1.50 1.50 2.20 6.50 8.70 9.25 10.45)
-    GOAL_YS=(-4.30 -5.90 -6.20 -6.20 -7.65 -7.65 -7.65 -4.90 -2.25 0.35)
+    GOAL_XS=(4.20 4.40 5.20 1.50 1.50 2.20 6.50 9.20 9.00 10.45)
+    GOAL_YS=(-4.30 -5.90 -6.20 -6.40 -7.65 -7.65 -7.65 -5.00 -2.80 0.35)
+    # GOAL_TOLERANCE 收紧到 0.15 m：0.30 m 容差圆盘在这些墙角区域无法
+    # 全部满足 all-yaw 半径（实测 0.12~0.26 m），收紧后停泊圆盘的
+    # min clearance >= 0.42 m。显式传 GOAL_TOLERANCE 的调用不被覆盖。
+    if [ "${GOAL_TOLERANCE_USER_SET}" != "1" ]; then
+      GOAL_TOLERANCE="0.15"
+    fi
     ;;
   *)
     echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', 'south_corridor', or 'red_box'."
@@ -976,7 +1003,8 @@ capture_numeric_stream() {
   local attempt
   for attempt in 1 2 3; do
     : >"${output_file}"
-    timeout 3 ros2 topic echo --no-daemon "${topic}" >"${output_file}" 2>/dev/null || true
+    timeout 3 ros2 topic echo --no-daemon --qos-reliability best_effort \
+      "${topic}" >"${output_file}" 2>/dev/null || true
     if grep -Eq '^[[:space:]]*(x|y|z|linear_x|linear_y|angular_z):' "${output_file}"; then
       return 0
     fi
@@ -1021,11 +1049,15 @@ publish_fault_goal_with_motion_gate() {
   : >"${command_file}"
   # 重定向到文件时 ros2 Python CLI 会块缓冲；强制无缓冲才能在 tracking 期间
   # 立即观察到非零控制量，而不是等采样 timeout 后才注入故障。
-  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon "${SELECTED_CMD_VEL_TOPIC}" >"${command_file}" 2>/dev/null &
+  # /cmd_vel/selected is SensorData/BEST_EFFORT; a default RELIABLE echo sees no
+  # publishers and the motion gate times out even while the fault goal tracks.
+  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon \
+    --qos-reliability best_effort "${SELECTED_CMD_VEL_TOPIC}" >"${command_file}" 2>/dev/null &
   monitor_pid=$!
   CAPTURE_PIDS+=("${monitor_pid}")
   : >"${emergency_file}"
-  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon /planner/emergency_stop \
+  timeout 15 env PYTHONUNBUFFERED=1 ros2 topic echo --no-daemon \
+    --qos-reliability best_effort /planner/emergency_stop \
     >"${emergency_file}" 2>/dev/null &
   emergency_monitor_pid=$!
   CAPTURE_PIDS+=("${emergency_monitor_pid}")
