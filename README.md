@@ -60,6 +60,7 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 - [Quick Start](#quick-start)
 - [实机部署](#实机部署)
 - [MuJoCo 仿真与回归](#mujoco-仿真与回归)
+- [Gazebo 仿真与 P1 归因](#gazebo-仿真与-p1-归因)
 - [关键接口与所有权](#关键接口与所有权)
 - [统一配置](#统一配置)
 - [验证状态与限制](#验证状态与限制)
@@ -236,11 +237,23 @@ ros2 action send_goal --feedback \
 
 ## 🧪 MuJoCo 仿真与回归
 
-无界面闭环是自动化回归推荐入口：
+无界面闭环是自动化回归推荐入口。当前正式算法链为：
+
+```text
+Point-LIO (/localization, /registered_scan)
+  -> ROGMap / adapter -> /rc_esdf/planning_grid
+  -> JPS + MINCO S3 + independent yaw + footprint gate / Local Collision Repair
+  -> omnidirectional SE2 MPC -> /cmd_vel/autonomy_raw
+  -> cmd_vel_arbiter -> /cmd_vel/selected
+```
+
+MuJoCo 红框（`TEST_PROFILE=red_box`）覆盖南廊、西廊、东段与高地坡道共 10 个目标；sim 接触门禁把高地 hfield 记为地面，底盘/轮与地面接触不计违规，仅非地面接触计违规。
 
 ```bash
-cd /home/ats/ATS_2026_snetry_test
-ROS_DOMAIN_ID=187 \
+cd /home/kong/ATS_2026_snetry_test
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ROS_DOMAIN_ID=189 \
 PLANNING_GRID_OWNER=rog_map \
 P2_FAULT_CASE=none \
 TEST_PROFILE=red_box \
@@ -268,6 +281,48 @@ emergency_stop=true -> /cmd_vel/selected=0 -> 最终底盘输入=0
 恢复时还要确认 generation 继续前进，且未提交新目标时旧 reference/执行授权不复活。详细的
 MuJoCo 依赖、launch、资产和 telemetry 说明见
 [`src/sim/ats_mujoco_sim/README.md`](src/sim/ats_mujoco_sim/README.md)。
+
+
+## 🧪 Gazebo 仿真与 P1 归因
+
+Gazebo 覆盖两类验收：`TEST_PROFILE=nominal` 做 P1 桥接/动态 TF 归因；`TEST_PROFILE=red_box` 做与 MuJoCo **同一组 map 系 10 段航点**的完整性回归（到达、路径非空、唯一 owner）。Gazebo 物理接触无 MuJoCo 同级 `contact_violation_count` 时记 `unverified`，不写成 0。
+
+```bash
+cd /home/kong/ATS_2026_snetry_test
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+# P1 名义直线 + 分层归因
+ROS_DOMAIN_ID=191 \
+PLANNING_GRID_OWNER=rog_map \
+P2_FAULT_CASE=none \
+TEST_PROFILE=nominal \
+OBSERVE_GAZEBO_TRANSPORT_LIDAR=true \
+scripts/test_gazebo_minco_mpc_chain.sh
+
+# 红框完整性（与 MuJoCo red_box 航点一致；默认 GOAL_TIMEOUT_SEC=180、容差 0.15 m）
+ROS_DOMAIN_ID=198 \
+PLANNING_GRID_OWNER=rog_map \
+P2_FAULT_CASE=none \
+TEST_PROFILE=red_box \
+scripts/test_gazebo_minco_mpc_chain.sh
+```
+
+P1 证据分层（由 runner 写入 metric，缺测字段保持 `unverified`）：
+
+| 层 | 观测 | 归因标签 |
+| :--- | :--- | :--- |
+| Gazebo Transport LiDAR | wall/stamp interval、stamp age、进程 CPU/RSS | `upstream_publish` |
+| `parameter_bridge` / Livox 边界 | ROS 侧 `/gazebo_lidar`、`/livox_input` age | `bridge_internal` |
+| DDS 接收 | stamp cadence 正常但 wall gap 放大 | `dds_receive` |
+| 动态 TF | age p99 + stamp staleness p99 双门禁 | 准入门禁，不单独归因 |
+
+`classify_p1_delay_attribution` 只写 `p1_delay_attribution*` metric，不单独翻转准入。动态 TF 门禁、localization freshness、straight action、唯一 owner 与完整 recorder 窗口仍须同时成立。
+
+```bash
+bash scripts/test_gazebo_freshness_classifier.sh
+bash scripts/test_gazebo_dynamic_tf_gate.sh
+bash scripts/test_gazebo_runner_contract.sh
+```
 
 ## 📡 关键接口与所有权
 
@@ -311,22 +366,20 @@ frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
 ## ✅ 验证状态与限制
 
-**已记录的历史运行证据（本次 README 更新未重新执行）：** 2026-08-02 的 S1 记录中，
-`planning_grid_owner=rog_map` 的 rectangle 场景在 domain `184`（RViz）和 `186`（headless）
-完成五段 action；最大终点误差分别为 `0.038681 m` 与 `0.041613 m`，generation 分别为
-`313 -> 1328` 与 `309 -> 1264`。两例记录了 south/north 非零 `vy`、唯一导航速度 owner、
-MINCO 离散 footprint collision sample `0` 与终态 `/cmd_vel_mpc=0`。该话题属于迁移前的
-历史 artifact，不能证明当前 `/cmd_vel/selected` 链。
+**当前算法与仿真契约（2026-09-14）：**
 
-P2 的 adapter lease、projection timeout、Point-LIO input stale、unknown、unreachable，以及
-P3 的 cancel、preempt、timeout、TF failure 已有独立故障运行记录；它们均记录到急停和
-`/cmd_vel_mpc=0`，同样仅作为迁移前历史证据。当前 revision 建议重跑并记录
-`/cmd_vel/selected=0` 与最终底盘输入为零。完整证据边界、P4 接口进度和实机导航边界见
-[`docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`](docs/nav2_to_3desdf_minco_mpc_optimization_direction.md)。
+- 规划地图 owner 默认 `PLANNING_GRID_OWNER=rog_map`；RC-ESDF 数值经 adapter 发布，不从 `/rog_map/esdf` 点云反解析。
+- 速度链为车体系 `[vx, vy, wz]`；`/cmd_vel/selected` 由 `cmd_vel_arbiter` 唯一发布，实机/MuJoCo/Gazebo 执行端只订 selected。
+- MuJoCo `contact_is_violation()`：机器人与 `ground_geom_ids`（含 `rmuc_2025_field` hfield）接触不计违规；仅非地面接触计违规。门禁看单目标窗口 `contact_violation_delta`，不是绝对值。
+- Gazebo P1：动态 TF age/staleness 双门禁 + `p1_delay_attribution` 分层（upstream / bridge / dds）；分类器单测与 runner contract 已覆盖。
 
-以下仍是**未完成或未验证**项：连续 swept footprint、`PlanningMapSnapshot`/
-`PlannerCandidate` 原子契约的全链运行迁移，以及受限低速实机导航。仿真 footprint sample
-只用于导航算法复核，不能替代实机导航数据。
+**已验证的库级/门禁回归：** `test_mujoco_contact_gate`、`test_gazebo_freshness_classifier`（含 delay attribution）、`test_gazebo_dynamic_tf_gate`、`test_gazebo_runner_contract`。
+
+**历史运行证据（迁移前，不能直接证明当前 `/cmd_vel/selected` 链）：** 2026-08-02 S1 rectangle domain `184/186`；P2/P3 故障注入曾记录到急停与 `/cmd_vel_mpc=0`。当前 revision 的红框/归因闭环以本轮 `scripts/test_*_minco_mpc_chain.sh` 产物为准。
+
+活动优化清单见 [`docs/项目优化文档/ATS导航剩余优化总TODO.md`](docs/项目优化文档/ATS导航剩余优化总TODO.md)。
+
+以下仍是**未完成或未验证**项：连续 swept footprint、`PlanningMapSnapshot`/`PlannerCandidate` 原子契约全链迁移、受限低速实机导航，以及 P3 Nav2-free。仿真 footprint sample 只用于算法复核，不能替代实机数据。
 
 ## 📂 目录结构
 
