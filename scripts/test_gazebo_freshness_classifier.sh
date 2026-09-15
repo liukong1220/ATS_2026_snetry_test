@@ -119,4 +119,62 @@ set -u
 [ "$RC" -eq 2 ] || fail "partial stage evidence did not return 2"
 assert_contains "$RESULT" "reason=cloud_registered_timing_missing"
 
+# ---------------------------------------------------------------------------
+# P1 delay attribution: bridge vs upstream vs DDS
+# ---------------------------------------------------------------------------
+
+ATTR_HEADER="ATS_NAVIGATION_EVIDENCE_RESULT clock_max_wall_interval_s=0.05"
+
+attr_stage() {
+  local stage="$1" age="$2" wall="$3" stamp="${4:-0.10}"
+  printf ' %s_p99_stamp_age_s=%s %s_p99_wall_interval_s=%s %s_p99_stamp_interval_s=%s' \
+    "$stage" "$age" "$stage" "$wall" "$stage" "$stamp"
+}
+
+EVIDENCE="$ATTR_HEADER gazebo_transport_lidar_observation_enabled=yes"
+EVIDENCE+="$(attr_stage gazebo_transport_lidar 0.02 0.11)"
+EVIDENCE+="$(attr_stage gazebo_lidar 2.10 0.12)"
+EVIDENCE+="$(attr_stage livox_input 2.12 0.12)"
+RESULT="$(classify_p1_delay_attribution "$EVIDENCE")" || fail "bridge_internal evidence rejected"
+assert_contains "$RESULT" "delay_attribution=bridge_internal"
+
+EVIDENCE="$ATTR_HEADER gazebo_transport_lidar_observation_enabled=yes"
+EVIDENCE+="$(attr_stage gazebo_transport_lidar 1.80 0.55)"
+EVIDENCE+="$(attr_stage gazebo_lidar 1.90 0.56)"
+EVIDENCE+="$(attr_stage livox_input 1.92 0.56)"
+RESULT="$(classify_p1_delay_attribution "$EVIDENCE")" || fail "upstream_publish evidence rejected"
+assert_contains "$RESULT" "delay_attribution=upstream_publish"
+
+EVIDENCE="$ATTR_HEADER gazebo_transport_lidar_observation_enabled=no"
+EVIDENCE+="$(attr_stage gazebo_lidar 0.02 0.90 0.10)"
+EVIDENCE+="$(attr_stage livox_input 0.02 0.91 0.10)"
+RESULT="$(classify_p1_delay_attribution "$EVIDENCE")" || fail "dds_receive evidence rejected"
+assert_contains "$RESULT" "delay_attribution=dds_receive"
+
+EVIDENCE="$ATTR_HEADER gazebo_transport_lidar_observation_enabled=no"
+EVIDENCE+="$(attr_stage gazebo_lidar 0.02 0.12)"
+EVIDENCE+="$(attr_stage livox_input 0.02 0.12)"
+RESULT="$(classify_p1_delay_attribution "$EVIDENCE")" || fail "healthy delay evidence rejected"
+assert_contains "$RESULT" "delay_attribution=none"
+
+set +e
+RESULT="$(classify_p1_delay_attribution "$ATTR_HEADER gazebo_lidar_p99_stamp_age_s=unverified livox_input_p99_stamp_age_s=0.02 gazebo_lidar_p99_wall_interval_s=0.1 livox_input_p99_wall_interval_s=0.1")"
+RC=$?
+set -u
+[ "$RC" -eq 2 ] || fail "missing lidar age did not return 2"
+assert_contains "$RESULT" "delay_attribution=unverified"
+
+
+# Transport observer on, wall cadence present, stamp age unverified: a ROS-side
+# wall gap with fresh stamps attributes to dds_receive, not unverified.
+EVIDENCE="$ATTR_HEADER gazebo_transport_lidar_observation_enabled=yes"
+EVIDENCE+="$(attr_stage gazebo_transport_lidar unverified 0.24 0.10)"
+# attr_stage with non-numeric age breaks freshness_is_number checks; build manually.
+EVIDENCE="$ATTR_HEADER gazebo_transport_lidar_observation_enabled=yes"
+EVIDENCE+=" gazebo_transport_lidar_p99_stamp_age_s=unverified gazebo_transport_lidar_p99_wall_interval_s=0.24 gazebo_transport_lidar_p99_stamp_interval_s=0.10"
+EVIDENCE+="$(attr_stage gazebo_lidar 0.012 0.51 0.10)"
+EVIDENCE+="$(attr_stage livox_input 0.012 0.50 0.10)"
+RESULT="$(classify_p1_delay_attribution "$EVIDENCE")" || fail "unverified transport age evidence rejected"
+assert_contains "$RESULT" "delay_attribution=dds_receive"
+
 echo "PASS: Gazebo freshness first-violation classifier"
