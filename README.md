@@ -59,8 +59,8 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 - [系统依赖](#系统依赖)
 - [Quick Start](#quick-start)
 - [实机部署](#实机部署)
-- [MuJoCo 仿真与回归](#mujoco-仿真与回归)
-- [Gazebo 仿真与 P1 归因](#gazebo-仿真与-p1-归因)
+- [MuJoCo 导航仿真](#mujoco-导航仿真)
+- [Gazebo 导航仿真](#gazebo-导航仿真)
 - [关键接口与所有权](#关键接口与所有权)
 - [统一配置](#统一配置)
 - [验证状态与限制](#验证状态与限制)
@@ -180,7 +180,8 @@ source install/setup.bash
 
 ```bash
 ros2 launch ats_sentry_bringup real_robot_navigation.launch.py --show-args
-ros2 launch ats_mujoco_sim rmuc_2025_mujoco.launch.py --show-args
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py --show-args
+ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py --show-args
 ```
 
 ## 🚀 实机部署
@@ -235,9 +236,9 @@ ros2 action send_goal --feedback \
   "{goal_pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}, timeout: {sec: 60, nanosec: 0}}"
 ```
 
-## 🧪 MuJoCo 仿真与回归
+## 🧪 MuJoCo 导航仿真
 
-无界面闭环是自动化回归推荐入口。当前正式算法链为：
+先启动完整导航仿真（物理 + 定位/地图 + 规划/控制），再用 action 下发目标。正式算法链：
 
 ```text
 Point-LIO (/localization, /registered_scan)
@@ -247,81 +248,82 @@ Point-LIO (/localization, /registered_scan)
   -> cmd_vel_arbiter -> /cmd_vel/selected
 ```
 
-MuJoCo 红框（`TEST_PROFILE=red_box`）覆盖南廊、西廊、东段与高地坡道共 10 个目标；sim 接触门禁把高地 hfield 记为地面，底盘/轮与地面接触不计违规，仅非地面接触计违规。
+### 直接启动（推荐）
 
 ```bash
 cd /home/kong/ATS_2026_snetry_test
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ROS_DOMAIN_ID=189 \
-PLANNING_GRID_OWNER=rog_map \
-P2_FAULT_CASE=none \
-TEST_PROFILE=red_box \
-GOAL_TIMEOUT=180 \
-scripts/test_mujoco_minco_mpc_chain.sh
+
+# 带 MuJoCo viewer（本机可视化）
+ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  use_viewer:=true \
+  show_viewer:=true \
+  use_rviz:=false
+
+# 无 viewer，仅开 RViz
+# ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+#   use_viewer:=false show_viewer:=false use_rviz:=true
 ```
 
-横移回归使用 `TEST_PROFILE=rectangle`；south/north 段应观察到非零 `linear.y`，用于防止
-四舵轮控制链静默退化为差速运动。每个 P2/P3 故障场景都建议在新的 `ROS_DOMAIN_ID` 和新的
-MuJoCo launch 中运行，不能在同一进程内串行注入后声称独立通过。
+`rmuc_2026_mujoco.launch.py` / `mujoco_navigation.launch.py` 均转发到同一正式编排；默认 `launch_physics:=true` 且 `launch_navigation:=true`。
 
-可选故障入口：
+另开终端下发目标（会驱动仿真车，确认急停可用后再执行）：
 
-```text
-P2_FAULT_CASE: adapter_lease | service_timeout | input_stale | unknown | unreachable
-P3_FAULT_CASE: cancel | preempt | timeout | tf_failure
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 action send_goal --feedback \
+  /ats_navigate_to_pose \
+  ats_navigation_interfaces/action/NavigateToPose \
+  "{goal_pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}, timeout: {sec: 60, nanosec: 0}}"
 ```
 
-故障验收至少要观察：
+更细的依赖、资产与 telemetry 见 [`src/sim/ats_mujoco_sim/README.md`](src/sim/ats_mujoco_sim/README.md)。
 
-```text
-emergency_stop=true -> /cmd_vel/selected=0 -> 最终底盘输入=0
+### 可选：自动化回归脚本
+
+红框 / 横移 / 故障注入用独立 `ROS_DOMAIN_ID` 跑脚本，**不是**日常开仿真的入口：
+
+```bash
+ROS_DOMAIN_ID=189 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  TEST_PROFILE=red_box GOAL_TIMEOUT=180 \
+  scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
-恢复时还要确认 generation 继续前进，且未提交新目标时旧 reference/执行授权不复活。详细的
-MuJoCo 依赖、launch、资产和 telemetry 说明见
-[`src/sim/ats_mujoco_sim/README.md`](src/sim/ats_mujoco_sim/README.md)。
+## 🧪 Gazebo 导航仿真
 
+同样先 `ros2 launch` 起完整导航链，再手动下发目标。Gazebo 默认 `use_gazebo_gt_odometry:=true`（底盘真值中继到 `/odometry`，并旁路 Point-LIO 位姿）；需要练 LIO 时再显式关掉。
 
-## 🧪 Gazebo 仿真与 P1 归因
-
-Gazebo 覆盖两类验收：`TEST_PROFILE=nominal` 做 P1 桥接/动态 TF 归因；`TEST_PROFILE=red_box` 做与 MuJoCo **同一组 map 系 10 段航点**的完整性回归（到达、路径非空、唯一 owner）。Gazebo 物理接触无 MuJoCo 同级 `contact_violation_count` 时记 `unverified`，不写成 0。
+### 直接启动（推荐）
 
 ```bash
 cd /home/kong/ATS_2026_snetry_test
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-# P1 名义直线 + 分层归因
-ROS_DOMAIN_ID=191 \
-PLANNING_GRID_OWNER=rog_map \
-P2_FAULT_CASE=none \
-TEST_PROFILE=nominal \
-OBSERVE_GAZEBO_TRANSPORT_LIDAR=true \
-scripts/test_gazebo_minco_mpc_chain.sh
 
-# 红框完整性（与 MuJoCo red_box 航点一致；默认 GOAL_TIMEOUT_SEC=180、容差 0.15 m）
-ROS_DOMAIN_ID=198 \
-PLANNING_GRID_OWNER=rog_map \
-P2_FAULT_CASE=none \
-TEST_PROFILE=red_box \
-scripts/test_gazebo_minco_mpc_chain.sh
+# 有界面
+ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
+  world:=rmuc_2025 \
+  use_gazebo_gt_odometry:=true \
+  use_rviz:=true
+
+# 无头（服务器/CI 本机联调）
+# ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
+#   world:=rmuc_2025 use_gazebo_gt_odometry:=true headless:=true use_rviz:=false
 ```
 
-P1 证据分层（由 runner 写入 metric，缺测字段保持 `unverified`）：
+常用参数：`world`、`map_yaml`、`params_file`、`robot_name`、`use_gazebo_gt_odometry`、`launch_small_gicp_relocalization`、`prior_pcd_file`。先用 `--show-args` 查看完整列表。
 
-| 层 | 观测 | 归因标签 |
-| :--- | :--- | :--- |
-| Gazebo Transport LiDAR | wall/stamp interval、stamp age、进程 CPU/RSS | `upstream_publish` |
-| `parameter_bridge` / Livox 边界 | ROS 侧 `/gazebo_lidar`、`/livox_input` age | `bridge_internal` |
-| DDS 接收 | stamp cadence 正常但 wall gap 放大 | `dds_receive` |
-| 动态 TF | age p99 + stamp staleness p99 双门禁 | 准入门禁，不单独归因 |
+另开终端下发目标（命令与 MuJoCo 相同，仍是 `/ats_navigate_to_pose`）。
 
-`classify_p1_delay_attribution` 只写 `p1_delay_attribution*` metric，不单独翻转准入。动态 TF 门禁、localization freshness、straight action、唯一 owner 与完整 recorder 窗口仍须同时成立。
+### 可选：自动化回归 / P1 归因脚本
+
+名义直线、红框 10 航点、新鲜度分类器等用 `scripts/test_gazebo_*`，需要独立 `ROS_DOMAIN_ID`，不要与上面的交互式 launch 混成“日常开仿真”：
 
 ```bash
-bash scripts/test_gazebo_freshness_classifier.sh
-bash scripts/test_gazebo_dynamic_tf_gate.sh
-bash scripts/test_gazebo_runner_contract.sh
+ROS_DOMAIN_ID=198 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  TEST_PROFILE=red_box scripts/test_gazebo_minco_mpc_chain.sh
 ```
 
 ## 📡 关键接口与所有权
@@ -411,7 +413,7 @@ ATS_2026_snetry_test/
 | MuJoCo | 四舵轮刚体、接触与传感器物理仿真 | [google-deepmind/mujoco](https://github.com/google-deepmind/mujoco) |
 | Livox ROS Driver 2 | Livox 设备接入与带点时间戳的消息 | [Livox-SDK/livox_ros_driver2](https://github.com/Livox-SDK/livox_ros_driver2) |
 
-### 技术交流与开源贡献致谢
+### 🙏技术交流与开源贡献致谢
 
 除上述直接使用的开源项目外，本项目的学习、设计和工程实践也受到了许多高校、战队和个人的帮助。在此特别致谢：
 
