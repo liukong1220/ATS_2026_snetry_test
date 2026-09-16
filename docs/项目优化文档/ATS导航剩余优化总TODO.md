@@ -277,3 +277,40 @@ OBSERVE_GAZEBO_TRANSPORT_LIDAR=true ROS_DOMAIN_ID=<new> \
 - small_gicp 在仿真薄壁上仍常 `converged=false error=inf`；靠仿真放宽路径验收，实车仍走严格收敛
 - 恢复后位姿可能停在真值与错种子之间的可接受带内（本跑 `best_xy≈0.64 m`）；可后续加密先验/提高迭代再收紧门限
 
+
+## 会话进展摘记（2026-09-16，domain23：commit 几何门禁拦北漂）
+
+### DoD（本轮）
+1. 干净残留 + `ROS_DOMAIN_ID=23` + `USE_GAZEBO_GT_ODOMETRY=true` + 无 `terrainAnalysis`：**已验证**。
+2. GT `min_range=0.450`、adapter `require_terrain_inputs=false`、health `stable=3/3`、`preflight_ok`：**已验证**。
+3. goal1 禁止北漂、须南向推进：**已验证南向**（未达 ≤0.50 m）。
+4. Gazebo `red_box` 10/10：**未关闭**。
+
+### 已落地代码（导航仓 + Gazebo launch）
+- `minco_planner`：`CommitGeometryLimits` + `admitsCommitGeometry()`；名义 commit 前拒过大绕行；escape-from-contact 豁免。
+- 参数：`commit_max_length_ratio` / `commit_max_lateral_deviation_m`（默认 `0`=关闭，MuJoCo/实车不变）。
+- Gazebo-only：`ats_gazebo_nav.launch.py` 置 `2.5` / `3.0 m`（对齐 d21 gen173 `length_ratio=5.496` / `lateral=7.424`）。
+- 单测：`CommitGeometryAdmission.*` **PASSED**（3/3）。
+
+### domain23 已验证事实
+| 项 | 结果 |
+|---|---|
+| 对照 d21 北漂 | d21 goal1 终姿 `(1.07, 1.14)`；**d23 `(1.62, -5.39)`**，spawn `(1.17,-0.44)` 南侧，无北漂 |
+| detour 门禁 | `Rejecting MINCO detour before commit` **21 次**（例 `length_ratio=3.203>2.5`） |
+| goal1 `south_approach` | 超时 FAIL，误差 `2.80 m`；已南推过目标 y，但 x 未收敛 |
+| goal2 `south_entry` | **SUCCEEDED**，误差 `0.084 m` |
+| goal3 `west_corridor_east` | FAIL，终姿 `(6.97, -5.50)` 东漂，误差 `1.90 m` |
+| 西廊 stitch | `center_seat`/`prehop`/`h0`/`reface`/`h1` 仍卡（loc 拒识 `6.97,-5.50`） |
+| terrain | 进程无 `terrainAnalysis`；adapter 持续 `substituting unknown terrain/slope` |
+| occupied | 静止约 14.2k → 运动中约 14.7–14.9k（关 terrain 后仍偏高） |
+
+### 证据路径
+- `log/gazebo_minco_mpc_chain/20260916_141446_red_box_none_domain23/`
+- harness：`/tmp/ats_p1_p2_runs/gazebo_red_box_d23.log`
+- 对照北漂：`log/gazebo_minco_mpc_chain/20260915_175600_red_box_none_domain21/`
+
+### 仍未关闭 / 下一刀
+1. goal1 南向已通但 180s 未进 0.50 m：runtime swept reject + start-in-contact `footprint` 拒轨仍多；需查南向走廊 occupied 来源（ROG 高度带/膨胀），勿再缩足迹。
+2. goal3 东漂与西廊 stitch 卡住：与 d8 西廊问题同类，**勿为过门禁全局放宽 fail-closed**。
+3. 未 10/10 前不关闭 Gazebo `red_box` 条目；MuJoCo domain189 10/10 勿混写。
+
