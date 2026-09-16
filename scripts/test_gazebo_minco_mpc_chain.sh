@@ -824,6 +824,34 @@ PY
   return 1
 }
 
+# True stuck: live loc is far from harness prev AND nearly motionless.
+# Distinguishes ghost /localization spikes from a robot actually parked in
+# the north/east pocket while stitch keeps targeting a stale prev.
+# On success sets TRUE_STUCK_LOC_XY="x y" (second sample).
+detect_true_stuck_vs_prev() {
+  local px="$1" py="$2"
+  local xyt1 xyt2 lx1 ly1 lx2 ly2 jump drift
+  TRUE_STUCK_LOC_XY=""
+  xyt1="$(sample_localization_xyt)" || return 1
+  lx1="$(awk '{print $1}' <<<"$xyt1")"
+  ly1="$(awk '{print $2}' <<<"$xyt1")"
+  jump="$(awk -v px="$px" -v py="$py" -v lx="$lx1" -v ly="$ly1" 'BEGIN{printf "%.3f", sqrt((lx-px)*(lx-px)+(ly-py)*(ly-py))}')"
+  if ! awk -v j="$jump" 'BEGIN{exit !(j > 1.50)}'; then
+    return 1
+  fi
+  sleep 1.0
+  xyt2="$(sample_localization_xyt)" || return 1
+  lx2="$(awk '{print $1}' <<<"$xyt2")"
+  ly2="$(awk '{print $2}' <<<"$xyt2")"
+  drift="$(awk -v a="$lx1" -v b="$ly1" -v c="$lx2" -v d="$ly2" 'BEGIN{printf "%.3f", sqrt((c-a)*(c-a)+(d-b)*(d-b))}')"
+  if awk -v d="$drift" 'BEGIN{exit !(d <= 0.15)}'; then
+    TRUE_STUCK_LOC_XY="$lx2 $ly2"
+    return 0
+  fi
+  return 1
+}
+
+
 parse_goal_action_metrics() {
   local output="$1"
   GOAL_ACCEPTED=0
@@ -926,11 +954,19 @@ run_red_box_goal_legs() {
       # before the east mouth goal.
       # Domain 188/182: fixed dip x still let the planner arc EAST to x≈5.8–6.1
       # while seeking y=-6.35. Command a pure SOUTH hop at the current prev_x.
-      # Domain 174: from y≈-5.87 the dip still east-escaped to x≈5.84 (180 s)
-      # then goal3 overshot to x≈4.10. Skip dip unless clearly north of band.
-      # Domain 148: (4.16,-5.67) triggered dip despite already being at corridor x.
-      # Only dip when north of band AND still east of the mouth.
-      if awk -v py="$prev_y" -v px="$prev_x" 'BEGIN{exit !(py > -5.80 && px > 4.90)}'; then
+      # Red-box goal3 stall: (4.43,-5.82) was skipped by py>-5.80&&px>4.90
+      # ("near-band") while still ~0.5–0.6 m north of y∈[-6.50,-6.20]. Force
+      # the dip unless already seated in that band; refresh from live loc first.
+      if loc="$(sample_localization_xy)"; then
+        lx="$(awk '{print $1}' <<<"$loc")"
+        ly="$(awk '{print $2}' <<<"$loc")"
+        lj="$(awk -v px="$prev_x" -v py="$prev_y" -v lx="$lx" -v ly="$ly" 'BEGIN{printf "%.3f", sqrt((lx-px)*(lx-px)+(ly-py)*(ly-py))}')"
+        if awk -v j="$lj" 'BEGIN{exit !(j <= 3.50)}'; then
+          prev_x="$lx"; prev_y="$ly"
+          metric "goal_$((index + 1))_west_corridor_south_dip_prev_from_loc" "$prev_x $prev_y"
+        fi
+      fi
+      if ! awk -v py="$prev_y" 'BEGIN{exit !(py <= -6.20 && py >= -6.50)}'; then
       local entry_name="west_corridor_south_dip"
       local entry_x="$prev_x"
       local entry_y="-6.35"
@@ -1000,7 +1036,7 @@ run_red_box_goal_legs() {
         fi
       fi
       else
-        metric "goal_$((index + 1))_west_corridor_south_dip_skipped_near_band" "prev_y=$prev_y"
+        metric "goal_$((index + 1))_west_corridor_south_dip_skipped_in_band" "prev_y=$prev_y"
       fi
       GOAL_X="$goal_x"; GOAL_Y="$goal_y"
       GOAL_YAW="$(leg_approach_yaw "$prev_x" "$prev_y" "$goal_x" "$goal_y")"
@@ -1606,6 +1642,17 @@ run_red_box_goal_legs() {
                 j=sqrt((lx-px)*(lx-px)+(ly-py)*(ly-py));
                 exit !(px<=5.25 && px>=1.80 && dy<=0.55 && j>=0.80)
               }'; then
+              # Ghost ignore is only safe for brief loc spikes. If loc stays
+              # >1.5 m from prev and nearly motionless, the robot is really
+              # parked in the pocket — adopt live loc and abort west hops.
+              if detect_true_stuck_vs_prev "$prev_x" "$prev_y"; then
+                prev_x="$(awk '{print $1}' <<<"$TRUE_STUCK_LOC_XY")"
+                prev_y="$(awk '{print $2}' <<<"$TRUE_STUCK_LOC_XY")"
+                metric "goal_$((index + 1))_west_hops_true_stuck_adopt_abort" "$prev_x $prev_y was_ignore_inband"
+                log "FAIL: true stuck at $prev_x $prev_y — abort west hops (no ghost-ignore)"
+                skip_west_exit_dispatch=1
+                break
+              fi
               metric "goal_$((index + 1))_west_hops_north_pocket_ghost_ignored_inband" "$lx $ly prev=$prev_x $prev_y"
               log "WARN: ignore north-pocket ghost $lx $ly — keep in-band prev $prev_x $prev_y"
             elif awk -v px="$prev_x" -v py="$prev_y" 'BEGIN{dy=py+6.20; if(dy<0)dy=-dy; exit !(px<=5.25 && px>=1.80 && dy<=0.55)}'; then
@@ -1634,6 +1681,14 @@ run_red_box_goal_legs() {
               need_face_west=0
               prev_x="$lx"
             elif [ "${north_pocket_ignore_hops:-0}" -gt 0 ] || awk -v px="$prev_x" -v py="$prev_y" 'BEGIN{dy=py+6.28; if(dy<0)dy=-dy; exit !(px>=4.80 && dy<=0.45)}'; then
+              if detect_true_stuck_vs_prev "$prev_x" "$prev_y"; then
+                prev_x="$(awk '{print $1}' <<<"$TRUE_STUCK_LOC_XY")"
+                prev_y="$(awk '{print $2}' <<<"$TRUE_STUCK_LOC_XY")"
+                metric "goal_$((index + 1))_west_hops_true_stuck_adopt_abort" "$prev_x $prev_y was_ignore_mouth"
+                log "FAIL: true stuck at $prev_x $prev_y — abort west hops (no mouth ghost-ignore)"
+                skip_west_exit_dispatch=1
+                break
+              fi
               if [ "${north_pocket_ignore_hops:-0}" -gt 0 ]; then
                 north_pocket_ignore_hops=$((north_pocket_ignore_hops - 1))
               fi
@@ -1837,6 +1892,14 @@ run_red_box_goal_legs() {
                 # Domain 122: if we were already deep (hop start x<=4.20), do
                 # NOT adopt the eastward pose or mouth-recover — keep west prev.
                 if awk -v hx="$hop_prev_x" 'BEGIN{exit !(hx<=4.80)}'; then
+                  if detect_true_stuck_vs_prev "$prev_x" "$prev_y"; then
+                    prev_x="$(awk '{print $1}' <<<"$TRUE_STUCK_LOC_XY")"
+                    prev_y="$(awk '{print $2}' <<<"$TRUE_STUCK_LOC_XY")"
+                    metric "goal_$((index + 1))_${stitch_name}_true_stuck_east_escape_abort" "$prev_x $prev_y keep_was=$hop_prev_x"
+                    log "FAIL: true stuck east escape $prev_x $prev_y — abort west hops"
+                    skip_west_exit_dispatch=1
+                    break
+                  fi
                   metric "goal_$((index + 1))_${stitch_name}_east_escape_ignored_deep" "$fx $fy keep=$prev_x $prev_y"
                   need_mouth_recover=0
                   need_face_west=1
@@ -1872,6 +1935,14 @@ run_red_box_goal_legs() {
                 # Domain 122: if we were already deep (hop start x<=4.20), do
                 # NOT adopt the eastward pose or mouth-recover — keep west prev.
                 if awk -v hx="$hop_prev_x" 'BEGIN{exit !(hx<=4.80)}'; then
+                  if detect_true_stuck_vs_prev "$prev_x" "$prev_y"; then
+                    prev_x="$(awk '{print $1}' <<<"$TRUE_STUCK_LOC_XY")"
+                    prev_y="$(awk '{print $2}' <<<"$TRUE_STUCK_LOC_XY")"
+                    metric "goal_$((index + 1))_${stitch_name}_true_stuck_east_escape_abort" "$prev_x $prev_y keep_was=$hop_prev_x"
+                    log "FAIL: true stuck east escape $prev_x $prev_y — abort west hops"
+                    skip_west_exit_dispatch=1
+                    break
+                  fi
                   metric "goal_$((index + 1))_${stitch_name}_east_escape_ignored_deep" "$fx $fy keep=$prev_x $prev_y"
                   need_mouth_recover=0
                   need_face_west=1
@@ -2284,9 +2355,10 @@ run_red_box_goal_legs() {
     log "RUN: red_box goal $((index + 1))/${#GOAL_NAMES[@]} '$name' -> ($goal_x, $goal_y) yaw=$GOAL_YAW"
     if [ "${skip_west_exit_dispatch:-0}" -eq 1 ] && [ "$name" = "west_corridor_exit" ]; then
       metric "goal_$((index + 1))_dispatch" "skipped_north_pocket"
-      fail "$name blocked in north pocket — exit not dispatched"
+      fail "$name blocked in north pocket — exit not dispatched; abort remaining red_box legs"
       skip_west_exit_dispatch=0
-      continue
+      # Do not continue to goal5–10 from a poisoned north-pocket seed.
+      break
     fi
     if ! start_goal_action "$goal_x" "$goal_y" "$leg_output" "$leg_error"; then
       fail "could not establish an isolated action-client session for $name"
