@@ -536,6 +536,33 @@ small_gicp_relocalization:
     max_dist_sq: 3.0
     # 每内点 GICP 目标值上限；5.0 是 P4 初值，必须用 rosbag 与实机残差分布复核。
     max_registration_error: 5.0
+    # 配准模式：initial_guess 用当前/参数初值；multi_guess 在 XY/Yaw 网格上粗搜后精配。
+    registration_mode: "initial_guess"
+    # 累积多少帧点云后再触发一次对齐；正确性优先于频率。
+    accumulate_frames: 3
+    # 粗配准后是否用更小对应距离精配；首个确认窗口粗+精，后续可 fine-only。
+    fine_alignment.enable: true
+    fine_alignment.coarse_first_window_only: true
+    fine_alignment.max_correspondence_distance: 0.45
+    coarse_max_iterations: 10
+    fine_max_iterations: 16
+    # 质量门（0 关闭）。借鉴 odom_localizer：重叠率/信息矩阵病态拒绝。
+    min_overlap_ratio: 0.30
+    min_information_eigenvalue: 0.0
+    max_information_condition_number: 0.0
+    multi_guess.search_half_xy: 2.0
+    multi_guess.step_xy: 1.0
+    multi_guess.step_yaw: 0.785398
+    multi_guess.z_candidates: [0.0]
+    # TRACKING 严精配；LOST/DEGRADED 强制粗搜（可自动 multi_guess）。实车默认 fail-closed。
+    follow_localization_status: true
+    auto_multi_guess_on_lost: true
+    force_registration_when_lost: true
+    # 源点高度裁剪：实车可开，去掉明显离群 z；仿真默认关。
+    height_filter.enable: true
+    height_filter.min_z: -0.5
+    height_filter.max_z: 2.5
+
     # 是否打印每次注册结果。联调建议开，比赛可关。
     log_registration_details: false
     # 由 localization_fusion 独占 map->odom 时，此项由 launch 覆盖为 false。
@@ -594,6 +621,9 @@ localization_fusion:
     epoch_yaw_threshold: 0.05
     max_correction_translation: 2.0
     max_correction_yaw: 1.0
+    # TRACKING 保持 2.0/1.0 fail-closed；仅 LOST 放宽以接纳全局搜观测。
+    lost_max_correction_translation: 5.0
+    lost_max_correction_yaw: 1.5
     min_observation_quality: 0.02
     min_observation_inliers: 200
     max_registration_error: 5.0
