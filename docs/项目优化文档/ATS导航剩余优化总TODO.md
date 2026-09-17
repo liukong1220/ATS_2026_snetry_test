@@ -1,8 +1,8 @@
 # ATS 导航剩余优化总 TODO
 
 > 状态：唯一活动导航优化清单
-> 更新时间：2026-09-14
-> 活动证据窗口：2026-08-30 至 2026-09-14
+> 更新时间：2026-09-17
+> 活动证据窗口：2026-08-30 至 2026-09-17
 > 适用范围：Gazebo、MuJoCo 与实机导航软件侧的 ATS 四驱四转哨兵导航链
 > 归档规则：窗口以前的运行流水、旧 domain 和已退役结论从活动文档移除；原始日志、artifact 与 Git 历史保留追溯入口。
 
@@ -314,3 +314,72 @@ OBSERVE_GAZEBO_TRANSPORT_LIDAR=true ROS_DOMAIN_ID=<new> \
 2. goal3 东漂与西廊 stitch 卡住：与 d8 西廊问题同类，**勿为过门禁全局放宽 fail-closed**。
 3. 未 10/10 前不关闭 Gazebo `red_box` 条目；MuJoCo domain189 10/10 勿混写。
 
+
+## 2026-09-17：Gazebo 红框与导航中 LOST 实测未闭环
+
+本轮 **A 未通过，B 仅完成失败现场取证，C 一个受控样本擦线达标但不稳定，D 通过**。无生产源码或配置改动，未调整 footprint、fusion correction 或 overlap 门限以换取通过。未重跑已完成的 mid/hard spawn 压力。完整命令、实验脚本与失败尝试见 `log/gazebo_validation_20260917/EVIDENCE.md`。
+
+### 红框主门：domain104 安全中止
+
+执行：
+
+```bash
+ROS_DOMAIN_ID=104 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  TEST_PROFILE=red_box GOAL_TIMEOUT=180 GOAL_TIMEOUT_SEC=180 \
+  scripts/test_gazebo_minco_mpc_chain.sh
+```
+
+脚本实际读取 `GOAL_TIMEOUT_SEC`。domain101 的首次 preflight 因 7 个旧 bridge 残留拒绝启动；定向清理记录保留，未绕过门禁。domain104 日志位于 `log/gazebo_minco_mpc_chain/20260917_155559_red_box_none_domain104/`。
+
+| 目标 | 实际终姿 map (m) | 位置误差 (m) | 结果 |
+| --- | --- | --- | --- |
+| goal1 south_approach | (1.954684, -1.642510) | 3.479037 | ABORTED |
+| goal2 south_entry | (1.954684, -1.642510) | 4.909765 | ABORTED |
+| south_dip helper | (1.954684, -1.642510) | 南向差 4.707490 | 已派发，失败 |
+| goal3 west_corridor_east | (1.954684, -1.642510) | 5.594890 | ABORTED，未进入南走廊验收带 |
+| goal4 west_corridor_exit | 未验证 | 未验证 | 仅运行口部/走廊 helpers，主目标未派发 |
+| goal5–10 | 未运行 | 未验证 | 安全中止后未派发 |
+
+前三腿 action 原因均为 `progress watchdog exhausted the bounded suspended-replan wait`。实际出现 `west_corridor_south_dip`，未采用 near-band skip；但其起点仍远离口部，不能计为走廊通过。未出现 `true_stuck_*_abort` 或 `skipped_north_pocket`，这两个门禁本轮未验证；goal5–10 没有派发是外部安全中止的结果。
+
+16:22:25 因急停振荡和重复 mouth recovery 停止本次仿真，`SAFETY_ABORT.json` 记录急停 true 51 次（含初始）、false 50 次；cleanup 后全日志为 51/51。最后一次 harness 位姿约 (0.467706, 2.311446)，不是 goal4 成功终姿。红框没有自然完整跑完，不能宣称完整回归通过。
+
+- 拒绝 unsafe MINCO 候选 799 次，单候选 footprint collision count 为 1–416；这些是拒绝候选计数，不是已发布路径或物理接触计数。
+- 有限窗口独立 analyzer：一条 263 点 reference 对接收时 adapter snapshot 有 5 个几何冲突（离散 3、swept 2）；851 个可评估 actual ticks 中 20 个冲突，另 1 个 swept segment 冲突。[Confidence: Medium] 它不是 producer 的 MINCO commit snapshot；另有首段漏采、3990 ticks 缺 payload、17 ticks 缺 TF、1 个层 gzip CRC 损坏，不能据此宣称完整 footprint 通过，也不能直接判定 planner fail-open。原始与仅含有效文件的分析视图均保留。
+- 物理接触：**未验证**。首 90 s 内部 observer 采到 JPS/MINCO/MPC predicted 最大点数 30/190/31；planning grid publisher max=1，识别到 adapter，存在匿名 discovery 样本；selected publisher max=1。完整运行唯一所有权未闭合。
+
+### P0 口部与北袋：本次未复现 occupied
+
+`corridor_comparison.json` 使用 goal3 final ROS stamp 177.969 附近的 planning grid 178.112（差 0.143 s）与 ROG 数值服务 178.782；服务和 adapter 不同 generation，不声称原子配对。TF 实测 `map←odom=(1.17,-0.44,0)`，ROG 的 `odom` 单元变换到 map 后计数。
+
+| 原生图层 | 口部 (5.0–5.4, -6.4–-6.0) free/occ/unknown | 北袋 (6.5–7.2, -5.7–-5.3) free/occ/unknown |
+| --- | --- | --- |
+| planning，0.10 m | 16 / 0 / 0 | 28 / 0 / 0 |
+| static，0.05 m | 64 / 0 / 0 | 112 / 0 / 0 |
+| ROG raw，0.10 m，仅投影覆盖部分 | 0 / 0 / 4 | 0 / 0 / 12 |
+
+ROG 未覆盖部分是缺少该来源证据；static 明确 free 消解 ROG unknown。terrain/slope 没有观测，launch 显式关闭 terrain，adapter 实效 `require_terrain_inputs=false`。参数服务确认高度带 `[0.10,0.80]`、`core.inflation_step=1`、`unknown_is_obstacle=true`。
+
+**没有图层把本次指定测区写成 occupied。** [Confidence: High] 原始 dump 与离线重算支持计数；[Confidence: Medium] 不能将远处停机样本推广为机器人靠近口部时的根因，也不能由小测区 free 推导完整矩形 footprint 可通行。数值投影源码调用原始 `getGridType()`，不读取 inflated occupancy；不能直接把 planning-grid occupied 归因于 `inflation_step`。本轮没有修改共享 adapter YAML 的证据基础。
+
+### 导航中 1.5 m 偏差恢复：domain118 单次擦线达标
+
+`log/gazebo_validation_20260917/run_mid_nav_full_deadline.sh` 在独立 domain118 启动；日志内实验 launch 副本保持 TRACKING `2.0 m/1.0 rad`、LOST `5.0 m/1.5 rad`，observation timeout 为 6/8 s。生产 launch 未修改。GICP 延后启动以隔离导航偏差注入，故不覆盖 GICP 持续运行中的自然 LOST。
+
+1. TRACKING 下实际导航位移 `1.000940 m`，真值约 `(1.855249,-1.169599)` 后，通过一次标记为 `TEST_ONLY` 的 synthetic observation 注入 `map→odom` x 偏差 1.5 m，未增加 TF publisher。车辆仍在移动，第一次 error>1 m 的观测值为 `1.050332 m`，不能把该时刻误写成稳态 1.5 m 残差。
+2. 状态为 `TRACKING → RELOCALIZING → TRACKING → DEGRADED → LOST`。GICP 随后出现 `Starting async multi_guess recovery with 225 candidates (state=4)`。
+3. 搜索期间发送 `/initialpose`，日志记录接收并取消异步搜索；随后 seeded coarse+fine 被接受。以 `/initialpose` 后 90 s 为 deadline，**24.039 s 首次达到 best_xy=0.796377 m ≤ 0.80 m**（从 GICP 启动计为 44.050 s），该点已回到 TRACKING，恢复阶段 6 条 accepted observation。仅有约 3.6 mm 门限余量；未要求持续保持，也没有证据称为稳定残差。
+4. 注入/恢复阶段 status 接收最大间隔分别 `0.109778/0.363151 s`，ROS stamp 持续推进。原脚本 `pass=false` 使用包含 action-server 阻塞等待的全局 gap `3.292581 s`；原文件保留，`mid_nav_domain118/result_audited.json` 显式按任务要求的注入/恢复期间审计，`audited_c_gates_met=true`。这是观察窗口修正，未改变 0.80 m 或 90 s 门限。
+5. C++ 观察器从 DDS MessageInfo 提取的 map→odom GID 仅一个，graph 映射 `/localization_fusion`。[Confidence: High] 本次阈值到达、TF 权威与期间 status 新鲜有运行证据；[Confidence: Medium] 仅为晚启动 GICP 的一次受控样本，不证明持续运行 GICP 的自然恢复稳定性，不宣称优秀全局后端。
+
+反例全部保留：domain116 同样实际注入 1.5 m、进入 LOST 并 async，但从 GICP 启动计 90 s 内最佳误差仍 1.50 m；其 `/initialpose` 后仅覆盖约 70 s，因计时口径不足而重跑 domain118。domain110 是 Humble rclpy 观察器 MessageInfo API 不兼容，未注入；domain114 短 lease 下未完成 1 m TRACKING 导航位移；domain115 有导航位移，但 fusion 严格 plausibility gate 拒绝 GICP 观测，未建立 accepted TRACKING，未注入 SIGSTOP。这些样本不冒充恢复成功。
+
+### 回归、参数差异与剩余边界
+
+- `MAKEFLAGS=-j1 colcon build --base-paths src --packages-select small_gicp_relocalization --parallel-workers 1`：通过。
+- 指定 `colcon test ... --ctest-args -R 'gtest|pytest|cpplint|clang_format'`：实际重跑两个 lint，通过。CTest `-R` 匹配名称，故补跑 `test_localization_fusion_core|test_localization_fusion_node`：5 个 GTest、1 个 pytest 均通过。`test-result` 的 34 tests/0 errors/0 failures/5 skipped 含历史 XML，不称作本轮全部重跑。
+- domain117：`OFFSET_X=1.0 OFFSET_Y=0.8 OFFSET_YAW=0.40 RECOVER_XY_M=0.60 scripts/test_gazebo_prior_reloc.sh`，`pass=true`，初始误差 `1.280625 m`、最佳误差 `0.580451 m`、yaw `0.178706 rad`、脚本退出 0。证据：`log/gazebo_prior_reloc/20260917_164128_domain117/reloc_probe.json`。
+- launch `--show-args`、Python AST 语法、两份 shell `bash -n` 均通过；各仓 `git diff --check` 在提交前单独执行。
+- **实效参数与前提不同**：Gazebo nominal fusion 被现有 launch 覆盖为 TRACKING/LOST 均 5.0/1.5，源码默认 2.0/1.0 不是 nominal 实测值。MINCO 实效 footprint 为 0.58×0.44+0.01，adapter 为 0.70×0.55+0.05；本轮未修改，不能声称统一 0.70×0.55 足迹验收。
+- 本轮为 Gazebo GT odometry/registered-scan profile，不是 Point-LIO 运动验证；未将 MuJoCo 189 作为本轮证据。P3/Nav2-free、Gazebo red_box 10/10、残差≤0.30 m、实车信息矩阵分布与物理接触均未验证。
+- 下一步先对齐接收时地图与 planner commit snapshot、定位移动后错误先验匹配的接受原因，再提出最小修复；没有证据支持通过缩小 footprint、增大 correction 或放宽恢复门限解决本轮失败。
