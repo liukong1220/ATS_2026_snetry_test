@@ -321,7 +321,49 @@ Gazebo 物理闭环。loopback 是轻量 Twist 执行端，只订阅 selected；
 逐级测量 `/lidar_odometry -> /odometry -> /localization -> status -> adapter`，不能仅凭相关性归因
 Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 
-## 4. 安全边界
+## 4. 2026-09-18 P2 corridor 对抗前置诊断
+
+### 已验证
+
+- `scripts/test_gazebo_reloc_cell.sh` 现在在 `NAVIGATE_BEFORE_INJECTION=true` 时调用只读
+  `ats_navigation_health_probe`，要求 localization 为 `TRACKING`、adapter `ready/status` 新鲜且
+  epoch 一致、planning grid 有 payload，并连续满足 `3/3` 个样本；探针失败时 evaluator
+  fail-closed，不发送导航 action 后的错误 `/initialpose`，也不把导航阶段 observation 计为 fault 后恢复。
+- relocation harness 显式传入 `projection_rate_hz=0.2` 和 `livox_update_rate_hz=10.0`，并把参数及健康
+  探针原始结果写入运行目录。Gazebo launch 的 `projection_rate_hz` 默认也保持 `0.2`，用于给 MINCO
+  candidate 留出单一 immutable snapshot 的提交窗口；snapshot、swept-footprint、急停与 future-command
+  拒绝逻辑没有放宽。
+- 合法新 domain `221` 的单目标对照（`4.20,-4.30,0.0`）健康门通过：
+  `stable=3/3`、`localization_state=1`、`localization_epoch=2`、`map_ready=true`、
+  `map_status_ready=true`、`grid_payload=yes`。运行中 `/registered_scan` 为 `726` 条、`sim_starved=false`，
+  action 仍在 `90 s` 超时；GT 终点距目标 `4.7634 m`、odom travel `0.1513 m`。
+  日志同时记录 localization lease 中断、ROGMap candidate stale、`pose=(nan,nan)` watchdog 与 MPC
+  reference timeout。该运行未发布错误 `/initialpose`，`post_fault_obs_accepted=0`，不是有效对抗样本。
+- relocation harness 现在拒绝非法 `ROS_DOMAIN_ID>232`，避免把 Fast DDS 端口计算错误误记为算法失败。
+
+### 已实现未运行
+
+- corridor 完整多目标路线、`north_pocket` 路线和至少 `100` 次重复结构样本尚未在健康门改动后完成。
+- health gate 的专用 node 级回归尚未新增；当前由脚本 `bash -n`、Python `py_compile`、Gazebo 构建和
+  `--show-args` 覆盖静态/接口检查，运行证据来自 domain `221`。
+
+### 推断
+
+- [Confidence: High] 健康门不是 domain `221` action timeout 的根因，因为它在 action dispatch 前已连续通过，
+  且 scan/adapter payload 持续存在。
+- [Confidence: High] `projection_rate_hz=0.2` 比历史 `2.0/0.5 Hz` 减少了 snapshot stale 竞争，但仍不能
+  保证执行期地图更新不会触发 runtime swept-footprint 拒绝；不能因此宣称主链闭环或导航能力通过。
+- [Confidence: Medium] 当前失败由 localization lease、地图 snapshot 更新、runtime footprint gate 和
+  watchdog/MPC freshness 共同影响，单一行为 owner 尚未锁定；不应通过降低 GICP overlap/information/inlier
+  或放宽 snapshot/footprint/急停门限来换取到点。
+
+### 未实现
+
+- corridor 至少一个满足“action 成功、GT 到点、静止 hold、fault 注入、fault 后 accepted、recover hold
+  3 s、错误接受 0、非有限接受 0”的有效样本仍未获得；因此不得开始 north_pocket 或宣称重复结构错误解
+  拒绝已运行验证，也不得把 `<=0.30 m` 写作已验证能力。
+
+## 5. 安全边界
 
 - unknown、occupied、outside-map、ESDF sign/gradient、snapshot freshness 和 lease 继续 fail-closed；
 - `/rog_map/esdf` 只是调试点云，不能作为数值规划输入；
@@ -333,7 +375,7 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 - planner collision/footprint 采样只用于导航算法安全复核；
 - 未在目标机测量前建议避免引用报告中的 `50 Hz`、`6 ms` 或内存数据。
 
-## 5. 下一优化顺序
+## 6. 下一优化顺序
 
 1. generic `ros_gz_bridge` owner 审计已确认活动实现属于系统安装包，当前四仓不拥有其转换回调或
    Gazebo Transport 接收代码。下一步优先由用户决定：把对应 `0.244.25` 源码纳入可维护的
@@ -361,7 +403,7 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 - [下一阶段新对话提示词](项目优化文档/下一阶段提示词_ATS单雷达导航闭环与速度仲裁.md)
 - [LTV-QP 后端准入记录](ats_swerve_mpc_ltv_qp_backend_admission.md)
 
-## 6. 文档职责
+## 7. 文档职责
 
 - 本页：只记录当前阶段结论和架构边界；
 - 总 TODO：只记录未完成任务、依赖、DoD 和状态，不累计完整日志；
