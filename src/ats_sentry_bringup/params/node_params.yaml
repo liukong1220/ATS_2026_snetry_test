@@ -586,6 +586,18 @@ small_gicp_relocalization:
     height_filter.enable: true
     height_filter.min_z: -0.5
     height_filter.max_z: 2.5
+    # 输入质量与时序门：无效/过期帧不会进入 GICP 累积窗口。
+    # max_scan_age_s 使用节点 ROS/sim clock；设为 0 仅在离线回放中关闭年龄门。
+    max_scan_age_s: 1.0
+    max_scan_future_s: 0.10
+    scan_min_range_m: 0.10
+    scan_max_range_m: 100.0
+    scan_min_z_m: -5.0
+    scan_max_z_m: 5.0
+    min_scan_valid_ratio: 0.50
+    # latest-state 订阅 + 有界累积；超限时清除旧窗口，避免输入中断期间无限堆积。
+    max_accumulated_points: 40000
+    max_accumulated_frames: 30
 
     # 是否打印每次注册结果。联调建议开，比赛可关。
     log_registration_details: false

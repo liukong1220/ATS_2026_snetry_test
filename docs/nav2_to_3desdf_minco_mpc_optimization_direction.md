@@ -4,6 +4,14 @@
 > 本页只记录当前准入状态、稳定架构边界和下一执行入口。历史阶段流水账已从活动文档移除，
 > 仍可由 Git 历史和专项准入记录追溯。
 
+**2026-09-18 重定位输入门（已实现、未做仿真/实车准入）**：
+`small_gicp_relocalization` 对 `registered_scan` 使用 `SensorDataQoS.keep_last(1)`，在累积前
+拒绝空/错误 `frame_id`、零或回退时间戳、过期/未来帧、非有限或越界点，并按有效点比例拒绝污染帧。
+累积窗口受 `max_accumulated_points`/`max_accumulated_frames` 限制，丢弃、stale、invalid、accepted
+和 trimmed-window 计数以节流日志输出。该修改只保护 GICP 输入，不改变 overlap/inlier/information/
+confirmation/jump 门，也没有将它升级为 Gazebo、MuJoCo 或实车稳定性证据；对应包级构建与 13 项测试
+（含 3 个 GTest、2 个 fusion Python 测试和 lint）退出码为 `0`。
+
 ## 0. 2026-09-09 P2 红框与代码闭环
 
 **已验证（domain `186`，`PLANNING_GRID_OWNER=rog_map`，`P2_FAULT_CASE=none`，`TEST_PROFILE=red_box`）**：目标 1--9 全部到达，终点误差 `0.049/0.009/0.036/0.034/0.010/0.061/0.023/0.024/0.033 m`。MINCO 提交 `collisions=0`。analyzer Q1 yes / Q2 no / Q3 no。历史 domain `176` 目标 5 Q2 越界与 domain `183/184` 目标 9 规划拒绝均未复现。提交点日志带 occupancy/content digest。
