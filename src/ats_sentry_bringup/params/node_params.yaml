@@ -652,6 +652,9 @@ localization_fusion:
     odom_timeout_s: 0.5
     observation_timeout_s: 3.0
     observation_lost_timeout_s: 10.0
+    # 接收时刻与观测 stamp 的独立 freshness 门；不以 odom history 尚未淘汰代替时序健康。
+    observation_stamp_max_age_s: 1.0
+    observation_stamp_max_future_s: 0.25
     history_duration_s: 5.0
     history_boundary_tolerance_s: 0.10
     maximum_interpolation_gap_s: 0.20

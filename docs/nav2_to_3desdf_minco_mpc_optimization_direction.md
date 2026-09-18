@@ -10,7 +10,10 @@
 累积窗口受 `max_accumulated_points`/`max_accumulated_frames` 限制，丢弃、stale、invalid、accepted
 和 trimmed-window 计数以节流日志输出。该修改只保护 GICP 输入，不改变 overlap/inlier/information/
 confirmation/jump 门，也没有将它升级为 Gazebo、MuJoCo 或实车稳定性证据；对应包级构建与 13 项测试
-（含 3 个 GTest、2 个 fusion Python 测试和 lint）退出码为 `0`。
+（含 3 个 GTest、2 个 fusion Python 测试和 lint）功能结果为 `0`；包级 `xmllint` 曾受远端 ROS
+schema 可用性影响，随后对 `package.xml` 单独校验通过。fusion 另增加观测 stamp 的接收时刻年龄/未来
+门（`observation_stamp_max_age_s`/`observation_stamp_max_future_s`），避免旧观测仅因 odom history 尚未
+淘汰而改写 `map->odom`。
 
 ## 0. 2026-09-09 P2 红框与代码闭环
 
