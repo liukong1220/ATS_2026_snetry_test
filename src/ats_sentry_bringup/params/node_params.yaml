@@ -554,6 +554,30 @@ small_gicp_relocalization:
     multi_guess.step_xy: 1.0
     multi_guess.step_yaw: 0.785398
     multi_guess.z_candidates: [0.0]
+    # 候选调度预算：每次扫描只评估一段，剩余候选由 cursor 延续到下一次扫描，
+    # 保证方向/yaw/半径覆盖公平，而不是固定只算格网一侧的前 N 个。
+    multi_guess.time_budget_s: 1.5
+    multi_guess.max_candidates_per_scan: 48
+    # 候选级诊断 CSV（离线 replay 用）。空字符串关闭；实车默认不写盘。
+    multi_guess.candidate_log_path: ""
+    multi_guess.log_candidates: false
+    # 组合评分权重（越小越好）：归一化残差 + (1-overlap) + 信息退化 + 运动一致性 + 先验偏差。
+    candidate_score.weight_error: 1.0
+    candidate_score.weight_overlap: 1.0
+    candidate_score.weight_information: 0.5
+    candidate_score.weight_motion: 0.5
+    candidate_score.weight_prior: 0.2
+    candidate_score.error_scale: 1.0
+    candidate_score.information_eigenvalue_reference: 1.0
+    candidate_score.condition_number_reference: 10000.0
+    candidate_score.motion_scale: 0.5
+    candidate_score.prior_scale: 2.0
+    candidate_score.motion_reference_max_age_s: 2.0
+    # 最优/次优组合评分差小于该值时判为歧义并保持 LOST。
+    # <=0 关闭；阈值必须由 correct/wrong 候选分布统计后再设，不得凭空拍定。
+    ambiguity.min_score_margin: 0.0
+    ambiguity.min_separation_xy: 0.5
+    ambiguity.min_separation_yaw: 0.35
     # TRACKING 严精配；LOST/DEGRADED 强制粗搜（可自动 multi_guess）。实车默认 fail-closed。
     follow_localization_status: true
     auto_multi_guess_on_lost: true
@@ -571,6 +595,11 @@ small_gicp_relocalization:
     confirmation_count: 2
     confirmation_translation_tolerance: 0.15
     confirmation_yaw_tolerance: 0.10
+    # 两次确认扫描的最小时间间隔；禁止同一累积窗口被重复计数。
+    confirmation_min_interval_s: 0.05
+    # 两次估计隐含的机体相对运动必须与 odometry 一致，否则重新计数。
+    confirmation_motion_translation_tolerance: 0.25
+    confirmation_motion_yaw_tolerance: 0.15
     # 定时器周期。表示“最频繁多久尝试一次注册”，不代表每次都真的执行。
     registration_interval_s: 0.35
     # 最短点云累积窗口。太短时跳过注册，避免点还没积够就配。
