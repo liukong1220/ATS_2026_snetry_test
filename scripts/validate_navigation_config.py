@@ -410,6 +410,10 @@ def main():
     assert arbiter["manual_cmd_vel_topic"] == "/cmd_vel"
     assert arbiter["autonomy_cmd_vel_topic"] == chassis_transform["output_cmd_vel_topic"]
     assert arbiter["selected_cmd_vel_topic"] == "/cmd_vel/selected"
+    assert arbiter["planner_status_topic"] == minco["planner_status_topic"]
+    assert arbiter["planner_status_topic"] == "/minco/planning_status"
+    assert arbiter["map_ready_topic"] == "/rog_map_adapter/ready"
+    assert arbiter["execution_command_topic"] == "/planner/execution_command"
     assert arbiter["link_health_topic"] == "/serial/link_up"
     assert arbiter["require_serial_link"] is True
     assert arbiter["link_timeout_ms"] == 300

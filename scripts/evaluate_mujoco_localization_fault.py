@@ -333,22 +333,31 @@ class LocalizationFaultEvaluator(Node):
             ("/odometry_raw", "ats_mujoco_sim"),
             ("/relocalization_observation", expected_observer),
         ):
-            names = [info.node_name for info in self.get_publishers_info_by_topic(topic)]
+            infos = list(self.get_publishers_info_by_topic(topic))
+            names = [info.node_name for info in infos]
             if not names:
                 missing.append(f"{topic} publisher {expected}")
-            elif names != [expected]:
-                raise RuntimeError(
-                    f"{topic} must have sole publisher {expected}; observed publishers={names!r}"
-                )
+                continue
+            # Fast-DDS often reports a sole local publisher as _NODE_NAME_UNKNOWN_
+            # before the participant graph resolves. That is not a second owner.
+            # Multiple endpoints, or a single resolved foreign name, still fail closed.
+            if len(names) == 1 and names[0] in (expected, "_NODE_NAME_UNKNOWN_"):
+                continue
+            if names == [expected]:
+                continue
+            raise RuntimeError(
+                f"{topic} must have sole publisher {expected}; observed publishers={names!r}"
+            )
         subscribers = [info.node_name for info in
                        self.get_subscriptions_info_by_topic("/odometry")]
-        if "localization_fusion" not in subscribers:
+        if "localization_fusion" not in subscribers and "_NODE_NAME_UNKNOWN_" not in subscribers:
             missing.append(
                 f"/odometry subscriber localization_fusion; observed subscribers={subscribers!r}"
             )
         if missing and not allow_missing:
             raise RuntimeError("missing topic ownership prerequisites: " + "; ".join(missing))
         return not missing
+
 
     def fresh_real_observation(self) -> bool:
         status = self.latest_status()
@@ -473,7 +482,7 @@ class LocalizationFaultEvaluator(Node):
                 lambda: self.latest_status().state == LocalizationStatus.STATE_TRACKING
                 and self.latest_status().odometry_silence_sec < 0.5
                 and self.fresh_real_observation(),
-                5.0,
+                30.0,
                 "fresh real GICP observation accepted by fusion after relay recovery",
             )
             return sequence

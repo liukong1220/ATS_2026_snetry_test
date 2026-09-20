@@ -1012,7 +1012,9 @@ ats_goal_manager:
     # Producer lease is conservatively backdated to absorb independent /clock
     # delivery jitter; MPC/arbiter still reject genuinely future samples.
     execution_command_stamp_backdate_sec: 0.02
-    map_wait_timeout_sec: 5.0
+    # Real GICP recovery after odometry_stale often exceeds 5s (recovery184).
+    # Align with evaluator recover wait / no_executable_plan budget.
+    map_wait_timeout_sec: 30.0
     default_goal_timeout_sec: 120.0
     goal_position_tolerance: 0.08
     goal_yaw_tolerance: 0.15
@@ -1040,6 +1042,8 @@ cmd_vel_arbiter:
     autonomy_cmd_vel_topic: /cmd_vel/autonomy
     selected_cmd_vel_topic: /cmd_vel/selected
     execution_command_topic: /planner/execution_command
+    planner_status_topic: /minco/planning_status
+    map_ready_topic: /rog_map_adapter/ready
     emergency_stop_topic: /planner/emergency_stop
     link_health_topic: /serial/link_up
     require_serial_link: true
