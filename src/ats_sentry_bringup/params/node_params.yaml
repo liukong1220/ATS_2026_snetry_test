@@ -601,10 +601,11 @@ small_gicp_relocalization:
 
     # 是否打印每次注册结果。联调建议开，比赛可关。
     log_registration_details: false
-    # 由 localization_fusion 独占 map->odom 时，此项由 launch 覆盖为 false。
-    publish_tf: true
+    # localization_fusion 独占 map->odom，GICP 只发布观测。
+    publish_tf: false
     # 连续两次一致结果才形成 accepted observation，单帧假匹配不改 map->odom。
     confirmation_count: 2
+    confirmation_timeout_s: 10.0
     confirmation_translation_tolerance: 0.15
     confirmation_yaw_tolerance: 0.10
     # 两次确认扫描的最小时间间隔；禁止同一累积窗口被重复计数。
@@ -620,18 +621,17 @@ small_gicp_relocalization:
     min_registration_translation_delta: 0.10
     # 相对上次成功/手动重置后，偏航至少变化这么多才允许再次注册。
     min_registration_yaw_delta: 0.12
+    # 静止时也必须用新扫描重新通过完整 GICP 质量门；该间隔小于 fusion 的 3 s observation lease，
+    # 禁止仅重发旧 observation 伪造全局位姿新鲜度。<=0 仅用于离线诊断禁用 refresh。
+    accepted_observation_refresh_interval_s: 1.0
     # 手动 initialpose 后，允许一段短窗口内强制持续触发注册。
     initial_pose_force_registration_window_s: 2.0
-    # 重定位输出 map->odom 的父坐标系。
+    # 先验 PCD 已在 map 坐标系，禁止再次应用雷达外参。
     map_frame: "map"
-    # 重定位输出 map->odom 的子坐标系。
+    # /registered_scan 必须在 odom 坐标系，配准直接估计 map->odom。
     odom_frame: "odom"
-    # 用于 PCD 初始对齐转换的 base frame。
-    base_frame: "gimbal_yaw_odom"
-    # 当前导航主参考底盘坐标系。
+    # 扫描时刻查询 odom->robot_base_frame 的机体位姿。
     robot_base_frame: "gimbal_yaw_odom"
-    # 配准点云所属雷达坐标系。
-    lidar_frame: "front_mid360"
     init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # [x, y, z, roll, pitch, yaw]
     #init_pose: [20.3, 0.0, 0.0, 0.0, 0.0, 3.14]   # [x, y, z, roll, pitch, yaw]
     # The prior_pcd_file does not need to be specified since it going to be set by defaults in launch.
@@ -1009,6 +1009,9 @@ ats_goal_manager:
     require_localization_status: true
     require_map_status: true
     emergency_stop_heartbeat_period_sec: 0.1
+    # Producer lease is conservatively backdated to absorb independent /clock
+    # delivery jitter; MPC/arbiter still reject genuinely future samples.
+    execution_command_stamp_backdate_sec: 0.02
     map_wait_timeout_sec: 5.0
     default_goal_timeout_sec: 120.0
     goal_position_tolerance: 0.08
@@ -1052,6 +1055,8 @@ ats_swerve_mpc:
     odom_topic: /localization
     trajectory_topic: /minco/reference_path
     execution_command_topic: /planner/execution_command
+    # MPC 与 arbiter 双侧校验 producer header.stamp；未来或超过该 lease 的旧授权
+    # 不得装载 reference，transient-local 重投只能保持零速。
     execution_command_timeout: 0.5
     gimbal_status_topic: /gimbal/yaw_status
     require_gimbal_status: true

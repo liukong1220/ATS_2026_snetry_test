@@ -115,6 +115,13 @@ def generate_launch_description():
         DeclareLaunchArgument("use_respawn", default_value="True"),
         DeclareLaunchArgument("log_level", default_value="info"),
     ]
+    prior_preflight = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(navigation_bringup_dir, "launch", "prior_pcd_preflight.launch.py")),
+        launch_arguments={
+            "world": world, "prior_pcd_file": prior_pcd_file,
+            "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+        }.items(),
+    )
     serial_driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(serial_bringup_dir, "launch", "standard_robot_pp_ros2.launch.py")),
         condition=UnlessCondition(use_robot_state_pub),
@@ -206,6 +213,7 @@ def generate_launch_description():
     ld.add_action(SetEnvironmentVariable("RCUTILS_COLORIZED_OUTPUT", "1"))
     for declaration in declarations:
         ld.add_action(declaration)
+    ld.add_action(prior_preflight)
     for action in (serial_driver, lidar_static_tf, gimbal_status_bridge, rog_map, rog_map_adapter,
                    navigation, behavior, rviz, rosbag):
         ld.add_action(action)
