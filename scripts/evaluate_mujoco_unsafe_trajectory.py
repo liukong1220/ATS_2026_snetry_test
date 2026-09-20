@@ -7,12 +7,16 @@ import math
 import time
 from pathlib import Path
 
+from types import SimpleNamespace
 from ats_navigation_interfaces.action import NavigateToPose
 from ats_navigation_interfaces.msg import ExecutionCommand
 from ats_navigation_interfaces.msg import PlannerStatus
 from ats_navigation_interfaces.msg import PlanningMapStatus
 from geometry_msgs.msg import Twist
+from ats_navigation_interfaces.msg import PlanningMapSnapshot
 from nav_msgs.msg import Odometry
+from nav_msgs.msg import OccupancyGrid
+from query_occupancy_grid import cell_is_traversable, validate_grid, world_to_grid
 from rcl_interfaces.srv import SetParameters
 import rclpy
 from rclpy.action import ActionClient
@@ -33,6 +37,7 @@ FAULTS = (
     "map_after_commit",
     "old_generation",
     "repair_after_unsafe",
+    "occupied",
 )
 
 
@@ -44,10 +49,14 @@ class UnsafeTrajectoryEvaluator(Node):
         self.fault = fault
         self.localization = None
         self.map_statuses = []
+        self.map_snapshots = []
         self.execution_commands = []
+        self.execution_received_at = {}
         self.planner_statuses = []
         self.stop_states = []
         self.latest_cmd = None
+        self.latest_cmd_at = 0.0
+        self.grid = None
         self.transient_qos = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -65,7 +74,7 @@ class UnsafeTrajectoryEvaluator(Node):
         self.create_subscription(
             ExecutionCommand,
             "/planner/execution_command",
-            self.execution_commands.append,
+            self._on_execution,
             self.transient_qos,
         )
         self.create_subscription(
@@ -77,16 +86,57 @@ class UnsafeTrajectoryEvaluator(Node):
             lambda message: self.stop_states.append(message.data),
             self.transient_qos,
         )
-        self.create_subscription(Twist, "/cmd_vel/selected", self._on_command, 20)
+        self.create_subscription(Twist, "/cmd_vel/selected", self._on_command, qos_profile_sensor_data)
+        self.create_subscription(OccupancyGrid, '/rc_esdf/planning_grid',
+                                 self._on_grid, self.transient_qos)
+        self.create_subscription(
+            PlanningMapSnapshot, '/rog_map_adapter/planning_snapshot',
+            self._on_snapshot, self.transient_qos)
         self.action_client = ActionClient(self, NavigateToPose, "/ats_navigate_to_pose")
         self.adapter_parameters = self.create_client(
             SetParameters, "/ats_rog_map_adapter/set_parameters"
         )
 
+    def _on_execution(self, message):
+        self.execution_received_at[message.command_sequence] = time.monotonic()
+        self.execution_commands.append(message)
+
+    @staticmethod
+    def stamp_ns(stamp):
+        return stamp.sec * 1_000_000_000 + stamp.nanosec
+
+    def _on_snapshot(self, message):
+        # Keep identity and target-cell evidence, not copies of the full numeric map.
+        grid = SimpleNamespace(header=message.header, info=message.info, data=message.occupancy)
+        cell = world_to_grid(grid, 1.0, 0.06) if validate_grid(grid) else None
+        self.map_snapshots.append(dict(
+            publication=int(message.publication_sequence), epoch=int(message.localization_epoch),
+            source_generation=int(message.source_generation), ready=bool(message.ready),
+            stamp=self.stamp_ns(message.header.stamp),
+            occupied=(message.header.frame_id == 'map' and cell is not None and
+                      message.occupancy[cell[1] * message.info.width + cell[0]] >= 100)))
+
+    def _on_grid(self, message):
+        self.grid = message
+
+    def nominal_goal_cell(self):
+        if self.grid is None or not validate_grid(self.grid) or self.grid.header.frame_id != 'map':
+            return None
+        return world_to_grid(self.grid, 1.0, 0.06)
+
+    def nominal_goal_free(self):
+        cell = self.nominal_goal_cell()
+        return cell is not None and cell_is_traversable(self.grid, *cell, 100, 0.42)
+
+    def nominal_goal_occupied(self):
+        cell = self.nominal_goal_cell()
+        return cell is not None and self.grid.data[cell[1] * self.grid.info.width + cell[0]] >= 100
+
     def _on_localization(self, message: Odometry) -> None:
         self.localization = message
 
     def _on_command(self, message: Twist) -> None:
+        self.latest_cmd_at = time.monotonic()
         self.latest_cmd = (
             float(message.linear.x),
             float(message.linear.y),
@@ -105,8 +155,10 @@ class UnsafeTrajectoryEvaluator(Node):
     def command_norm(command) -> float:
         return math.hypot(command[0], command[1]) + abs(command[2]) if command else 0.0
 
-    def commands_are_zero(self) -> bool:
-        return self.latest_cmd is not None and self.command_norm(self.latest_cmd) < 1e-3
+    def commands_are_zero(self, after: float = 0.0) -> bool:
+        return (self.latest_cmd is not None and self.latest_cmd_at > after
+                and time.monotonic() - self.latest_cmd_at < 0.5
+                and self.command_norm(self.latest_cmd) < 1e-3)
 
     def set_adapter_parameters(self, **values) -> None:
         self.wait_for(
@@ -142,6 +194,9 @@ class UnsafeTrajectoryEvaluator(Node):
         elif not pure_rotation:
             # This free westward corridor gives the post-commit map update a stable tracking window.
             goal.goal_pose.pose.position.x -= 1.80
+        if self.fault in ('occupied', 'map_after_commit'):
+            goal.goal_pose.pose.position.x = 1.0
+            goal.goal_pose.pose.position.y = 0.06
         if pure_rotation:
             goal.goal_pose.pose.orientation.z = 1.0
             goal.goal_pose.pose.orientation.w = 0.0
@@ -191,12 +246,16 @@ class UnsafeTrajectoryEvaluator(Node):
             half_width = 0.325
             x += math.cos(yaw) * half_length - math.sin(yaw) * half_width
             y += math.sin(yaw) * half_length + math.cos(yaw) * half_width
+        if self.fault == 'map_after_commit':
+            x, y = 1.0, 0.06
         self.set_adapter_parameters(
             test_dynamic_obstacle_x=x,
             test_dynamic_obstacle_y=y,
-            test_dynamic_obstacle_radius=0.06,
+            test_dynamic_obstacle_radius=0.20 if self.fault == 'map_after_commit' else 0.06,
             test_inject_dynamic_obstacle=True,
         )
+        if self.fault == 'map_after_commit':
+            self.wait_for(self.nominal_goal_occupied, 15.0, 'committed route target became occupied')
 
     def cancel_and_hold_stop(self, handle, old_sequence: int) -> None:
         cancel_future = handle.cancel_goal_async()
@@ -214,6 +273,55 @@ class UnsafeTrajectoryEvaluator(Node):
                 raise RuntimeError("old execution command revived after the stop")
             if not self.commands_are_zero():
                 raise RuntimeError("motion resumed after cancellation without a new goal")
+
+    def run_occupied(self):
+        self.wait_for(self.nominal_goal_free, 30.0, 'known-free nominal goal before injection')
+        publication = self.map_statuses[-1].publication_sequence
+        self.set_adapter_parameters(test_dynamic_obstacle_x=1.0, test_dynamic_obstacle_y=0.06,
+                                    test_dynamic_obstacle_radius=0.20, test_inject_dynamic_obstacle=True)
+        self.wait_for(lambda: self.nominal_goal_occupied() and
+                      self.map_statuses[-1].publication_sequence > publication,
+                      15.0, 'source-owned occupied goal publication')
+        command_count = len(self.execution_commands)
+        stop_count = len(self.stop_states)
+        planner_count = len(self.planner_statuses)
+        handle, future = self.send_goal()
+        self.wait_for(lambda: future.done(), 50.0, 'occupied goal terminal rejection')
+        result = future.result()
+        if result is None or result.result.result_code != NavigateToPose.Result.RESULT_PLANNING_FAILED:
+            raise RuntimeError('occupied goal did not terminate with planning failure')
+        self.wait_for(lambda: any(status.state == PlannerStatus.STATE_FAILED and
+                      status.failure_reason == PlannerStatus.FAILURE_START_OR_GOAL_OCCUPIED
+                      for status in self.planner_statuses[planner_count:]),
+                      5.0, 'occupied-cell planner rejection (not timeout/TF/unready)')
+        self.wait_for(lambda: True in self.stop_states[stop_count:] and self.commands_are_zero(),
+                      5.0, 'occupied goal stop and fresh selected zero')
+        if self.latest_execute(command_count) is not None:
+            raise RuntimeError('occupied goal produced executable reference')
+        return dict(fault=self.fault, result_code=int(result.result.result_code),
+                    occupied_publication=int(self.map_statuses[-1].publication_sequence),
+                    executable_reference=False)
+
+    def recover_map_goal(self, old_sequence):
+        self.wait_for(self.nominal_goal_free, 15.0, 'known-free goal after obstacle removal')
+        before_commands = len(self.execution_commands)
+        handle, future = self.send_goal()
+        self.wait_for(lambda: self.latest_execute(before_commands) is not None, 30.0,
+                      'fresh recovery execution')
+        fresh = self.latest_execute(before_commands)
+        if fresh.command_sequence <= old_sequence:
+            raise RuntimeError('map recovery reused old execution sequence')
+        self.wait_for(lambda: future.done(), 50.0, 'map recovery action success')
+        result = future.result()
+        if result is None or result.result.result_code != NavigateToPose.Result.RESULT_SUCCEEDED:
+            raise RuntimeError('new goal did not succeed after map recovery')
+        if any(command.mode == ExecutionCommand.MODE_EXECUTE and
+               command.command_sequence <= old_sequence
+               for command in self.execution_commands[before_commands:]):
+            raise RuntimeError('old execution revived during map recovery')
+        self.wait_for(self.commands_are_zero, 5.0, 'selected zero after recovery success')
+        return dict(recovery_command_sequence=int(fresh.command_sequence),
+                    recovery_result_code=int(result.result.result_code))
 
     def run_outside(self) -> dict:
         before_stop = len(self.stop_states)
@@ -233,6 +341,141 @@ class UnsafeTrajectoryEvaluator(Node):
             "result_code": int(result.result.result_code),
         }
 
+    def committed_status(self, command):
+        return next((status for status in reversed(self.planner_statuses)
+                     if status.state == PlannerStatus.STATE_REFERENCE_READY
+                     and status.goal_id == command.goal_id
+                     and status.localization_epoch == command.localization_epoch
+                     and status.map_generation == command.map_generation
+                     and status.map_publication_sequence == command.map_publication_sequence
+                     and self.stamp_ns(status.reference_stamp) ==
+                     self.stamp_ns(command.reference.header.stamp)), None)
+
+    def map_invalidation(self, command, committed, first_status):
+        for status in self.planner_statuses[first_status:]:
+            if (status.state != PlannerStatus.STATE_FAILED
+                    or status.goal_id != command.goal_id
+                    or status.localization_epoch != command.localization_epoch
+                    or status.plan_request_sequence != committed.plan_request_sequence
+                    or status.map_publication_sequence != command.map_publication_sequence
+                    or status.map_generation <= command.map_generation):
+                continue
+            if (status.failure_reason == PlannerStatus.FAILURE_SNAPSHOT_CHANGED
+                    and self.stamp_ns(status.reference_stamp) ==
+                    self.stamp_ns(command.reference.header.stamp)):
+                return status
+            if status.failure_reason == PlannerStatus.FAILURE_RUNTIME_UNSAFE:
+                return status
+        return None
+
+    def occupied_rejection(self, command, committed, invalidated, first_status, first_snapshot):
+        for status in self.planner_statuses[first_status:]:
+            if (status.state != PlannerStatus.STATE_FAILED
+                    or status.failure_reason != PlannerStatus.FAILURE_START_OR_GOAL_OCCUPIED
+                    or status.goal_id != command.goal_id
+                    or status.localization_epoch != command.localization_epoch
+                    or status.plan_request_sequence <= committed.plan_request_sequence
+                    or status.map_generation < invalidated.map_generation
+                    or status.map_publication_sequence <= command.map_publication_sequence):
+                continue
+            if any(snapshot['ready'] and snapshot['occupied']
+                   and snapshot['epoch'] == status.localization_epoch
+                   and snapshot['publication'] == status.map_publication_sequence
+                   for snapshot in self.map_snapshots[first_snapshot:]):
+                return status
+        return None
+
+    def assert_no_old_execution(self, old, first_command):
+        for command in self.execution_commands[first_command:]:
+            if command.mode != ExecutionCommand.MODE_EXECUTE:
+                continue
+            if (command.manager_incarnation != old.manager_incarnation
+                    or command.command_sequence <= old.command_sequence
+                    or (command.goal_id == old.goal_id
+                        and command.localization_epoch == old.localization_epoch
+                        and (command.map_generation <= old.map_generation
+                             or command.map_publication_sequence <= old.map_publication_sequence
+                             or self.stamp_ns(command.reference.header.stamp) ==
+                             self.stamp_ns(old.reference.header.stamp)))):
+                raise RuntimeError('old execution authorization revived after map invalidation')
+
+    def fresh_map_stop(self, old, first_command):
+        # suspendActiveGoal intentionally zeros epoch/map/reason on STOP;
+        # goal, manager incarnation, sequence and lease stamp identify this stop.
+        return next((command for command in self.execution_commands[first_command:]
+                     if command.mode == ExecutionCommand.MODE_STOP
+                     and command.manager_incarnation == old.manager_incarnation
+                     and command.command_sequence > old.command_sequence
+                     and command.goal_id == old.goal_id
+                     and self.stamp_ns(command.header.stamp) >
+                     self.stamp_ns(old.header.stamp)), None)
+
+    def run_map_after_commit(self):
+        self.wait_for(self.nominal_goal_free, 30.0, 'known-free nominal goal')
+        first_command = len(self.execution_commands)
+        handle, _ = self.send_goal()
+        self.wait_for(lambda: self.latest_execute(first_command) is not None, 30.0,
+                      'committed structured execution command')
+        self.wait_for(lambda: self.command_norm(self.latest_cmd) > 0.02, 20.0,
+                      'initial non-zero control')
+        old = self.latest_execute(first_command)
+        self.wait_for(lambda: self.committed_status(old) is not None, 5.0,
+                      'exact committed planner request identity')
+        committed = self.committed_status(old)
+        first_status = len(self.planner_statuses)
+        first_snapshot = len(self.map_snapshots)
+        fault_command = len(self.execution_commands)
+        fault_stop = len(self.stop_states)
+        fault_at = time.monotonic()
+        self.inject_dynamic_obstacle(old, False)
+        self.wait_for(lambda: self.map_invalidation(old, committed, first_status) is not None,
+                      5.0, 'identity-correlated old snapshot invalidation')
+        invalidated = self.map_invalidation(old, committed, first_status)
+        self.wait_for(lambda: self.occupied_rejection(
+            old, committed, invalidated, first_status, first_snapshot) is not None,
+            5.0, 'new occupied snapshot rejects a fresh planner request')
+        rejected = self.occupied_rejection(old, committed, invalidated, first_status, first_snapshot)
+        fresh_stop = lambda: self.fresh_map_stop(old, fault_command)
+        self.wait_for(lambda: fresh_stop() is not None and True in self.stop_states[fault_stop:]
+                      and self.commands_are_zero(max(fault_at,
+                          self.execution_received_at[fresh_stop().command_sequence])), 8.0,
+                      'fresh correlated STOP and post-injection selected zero')
+        stopped = fresh_stop()
+        after_stop = self.execution_commands.index(stopped) + 1
+        self.assert_no_old_execution(old, after_stop)
+        cancel = handle.cancel_goal_async()
+        self.wait_for(lambda: cancel.done(), 5.0, 'map fault action cancellation')
+        hold_start = len(self.execution_commands)
+        self.set_adapter_parameters(test_inject_dynamic_obstacle=False)
+        self.wait_for(self.nominal_goal_free, 15.0, 'known-free goal after obstacle removal')
+        deadline = time.monotonic() + 0.8
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            self.assert_no_old_execution(old, after_stop)
+            if self.latest_execute(hold_start) is not None or not self.commands_are_zero(fault_at):
+                raise RuntimeError('execution resumed without a fresh recovery goal')
+        before_recovery = len(self.execution_commands)
+        recovery = self.recover_map_goal(int(old.command_sequence))
+        fresh = self.latest_execute(before_recovery)
+        if (fresh is None or fresh.goal_id == old.goal_id
+                or fresh.map_generation <= old.map_generation
+                or fresh.map_publication_sequence <= old.map_publication_sequence
+                or self.stamp_ns(fresh.reference.header.stamp) <=
+                self.stamp_ns(old.reference.header.stamp)):
+            raise RuntimeError('map recovery did not authorize a fresh goal, map and reference')
+        self.assert_no_old_execution(old, after_stop)
+        return dict(fault=self.fault, goal_id=int(old.goal_id),
+                    old_command_sequence=int(old.command_sequence),
+                    old_plan_request_sequence=int(committed.plan_request_sequence),
+                    old_map_generation=int(old.map_generation),
+                    old_map_publication_sequence=int(old.map_publication_sequence),
+                    invalidation_reason=int(invalidated.failure_reason),
+                    invalidated_generation=int(invalidated.map_generation),
+                    occupied_publication=int(rejected.map_publication_sequence),
+                    occupied_plan_request_sequence=int(rejected.plan_request_sequence),
+                    stop_command_sequence=int(stopped.command_sequence),
+                    post_fault_zero=True, old_execution_revived=False, **recovery)
+
     def run(self) -> dict:
         self.wait_for(lambda: self.localization is not None, 30.0, "/localization")
         self.wait_for(
@@ -240,6 +483,10 @@ class UnsafeTrajectoryEvaluator(Node):
             120.0,
             "ready planning map",
         )
+        if self.fault == 'occupied':
+            return self.run_occupied()
+        if self.fault == 'map_after_commit':
+            return self.run_map_after_commit()
         if self.fault == "outside":
             return self.run_outside()
         if self.fault == "unknown":

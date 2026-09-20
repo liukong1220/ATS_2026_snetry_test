@@ -60,6 +60,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--goal-x", required=True, type=float)
     parser.add_argument("--goal-y", required=True, type=float)
     parser.add_argument("--goal-yaw-w", required=True, type=float)
+    parser.add_argument("--goal-yaw", required=True, type=float)
+    parser.add_argument("--goal-yaw-z", required=True, type=float)
     parser.add_argument("--run-start-epoch-ns", required=True, type=int)
     parser.add_argument("--sampling-window-cycles", required=True, type=int)
     parser.add_argument("--timeout-sec", type=float, default=10.0)
@@ -131,6 +133,8 @@ def main() -> int:
                 "p3_fault_case": args.p3_fault_case,
                 "initial_pose": [args.start_x, args.start_y, args.start_z, args.start_yaw],
                 "first_goal": [args.goal_x, args.goal_y, args.goal_yaw_w],
+                "first_goal_yaw_rad": args.goal_yaw,
+                "first_goal_orientation_xyzw": [0.0, 0.0, args.goal_yaw_z, args.goal_yaw_w],
             },
             "telemetry_file": str(args.output),
         }

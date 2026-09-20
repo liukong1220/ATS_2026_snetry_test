@@ -45,6 +45,38 @@ runtime_binary_is_fresh() {
   printf '%s fresh artifact=%s\n' "${package_name}" "${runtime_artifact}"
 }
 
+# Compare only the files owned by one configured target. Metadata belongs to a
+# separate configuration artifact; unrelated targets must not force a relink.
+runtime_artifact_is_fresh() {
+  local target_name="$1" runtime_artifact="$2"
+  shift 2
+  local source resolved_artifact
+  if [ ! -f "${runtime_artifact}" ] || [ ! -r "${runtime_artifact}" ]; then
+    printf '%s artifact_missing path=%s\n' "${target_name}" "${runtime_artifact}"
+    return 1
+  fi
+  resolved_artifact="$(readlink -f -- "${runtime_artifact}")" || {
+    printf '%s artifact_missing path=%s\n' "${target_name}" "${runtime_artifact}"
+    return 1
+  }
+  if [ "$#" -eq 0 ]; then
+    printf '%s source_missing path=no_owned_dependencies\n' "${target_name}"
+    return 1
+  fi
+  for source in "$@"; do
+    if [ ! -f "${source}" ]; then
+      printf '%s source_missing path=%s\n' "${target_name}" "${source}"
+      return 1
+    fi
+    if [ "${source}" -nt "${resolved_artifact}" ]; then
+      printf '%s stale_binary source=%s artifact=%s\n' \
+        "${target_name}" "${source}" "${resolved_artifact}"
+      return 1
+    fi
+  done
+  printf '%s fresh artifact=%s\n' "${target_name}" "${resolved_artifact}"
+}
+
 # A static library is fresh only when its source is not newer and each listed
 # runtime dependent has been relinked after the library.
 linked_library_is_propagated() {

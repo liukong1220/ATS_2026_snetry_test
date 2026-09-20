@@ -193,8 +193,9 @@ class PayloadStore(object):
             origin_y=float(info["origin_y"]),
             origin_yaw=float(info["origin_yaw"]),
             data=payload["occupancy"],
-            frame_id=str(identity.get("frame_id", "")),
+            frame_id=str(identity.get("frame_id") or ""),
             identity={
+                "frame_id": identity.get("frame_id"),
                 "stamp_identity": identity.get("stamp_identity"),
                 "source_stamp_identity": identity.get("source_stamp_identity"),
                 "source_generation": identity.get("source_generation"),
@@ -448,44 +449,38 @@ def summarize_verdict(verdict, payload, grid, params, layers, mono_s):
     return summary
 
 
-def first_sample_for_reference(samples, digest, stamp_identity=None):
-    """Earliest tick that observed one committed reference in force.
+def first_sample_for_reference(samples, digest, stamp_identity, epoch, publication):
+    """Earliest tick observing both the Path and its exact EXECUTE authority.
 
-    Geometry digests are intentionally stable across republishes.  The ROS stamp
-    is therefore part of the pairing key; otherwise a replan that reuses the same
-    poses could be judged against the first replan's snapshot.  Artifacts written
-    before the stamp field existed remain readable when they contain only one
-    un-stamped match.
+    Independent topic callbacks can expose the Path before its lease. Skip those
+    ticks by identity, never by a nearest-time estimate or the latest snapshot.
     """
-    matches = [sample for sample in samples
-               if sample.get("reference_digest") == digest]
-    if stamp_identity is None:
-        return matches[0] if matches else None
-    stamped = [sample for sample in matches
-               if sample.get("reference_stamp_identity") == stamp_identity]
-    if stamped:
-        return stamped[0]
-    legacy = [sample for sample in matches
-              if "reference_stamp_identity" not in sample]
-    return legacy[0] if len(legacy) == 1 else None
+    for sample in samples:
+        execution = sample.get("execution") or {}
+        if (sample.get("reference_digest") == digest and
+                sample.get("reference_stamp_identity") == stamp_identity and
+                execution.get("mode") == 1 and
+                execution.get("reference_stamp_identity") == stamp_identity and
+                execution.get("localization_epoch") == epoch and
+                execution.get("map_publication_sequence") == publication):
+            return sample
+    return None
 
 
 def analyze_reference_at_publish(samples, references, store, layers, params,
-                                 reference_topic):
-    """Q1: was each committed reference collision-free when it was published?
+                                 reference_topic, events=(), snapshots=()):
+    """Q1: evaluate only the snapshot authorized by a matching EXECUTE lease.
 
-    The snapshot used is the one the recorder saw in force at the first tick that
-    observed the reference, i.e. the map the planner had just validated against.
-    Judging a reference against a *later* snapshot would answer Q3 while looking
-    like an answer to Q1, so the two are kept apart deliberately.
+    Tick snapshots are latest callback state, not commit authority. Repeated
+    leases with the same reference/map identity are replay, not ambiguity.
     """
     results = []
+    commands = [event.get("payload", {}) for event in events
+                if event.get("kind") == "execution_command"]
     for reference in references:
         if reference.get("source") != reference_topic:
             continue
         digest = reference.get("digest")
-        sample = first_sample_for_reference(
-            samples, digest, reference.get("stamp_identity"))
         entry = {
             "reference_index": reference.get("reference_index"),
             "reference_digest": digest,
@@ -494,29 +489,97 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
             "pose_count": reference.get("pose_count"),
             "recorded_mono_s": reference.get("mono_s"),
         }
-        if sample is None:
-            entry["evaluated"] = False
-            entry["reason"] = "no tick observed this reference in force"
-            results.append(entry)
+        entry["evaluated"] = False
+        results.append(entry)
+        candidates = [command for command in commands
+                      if command.get("mode") == 1 and
+                      reference.get("stamp_identity") is not None and
+                      command.get("reference_stamp_identity") ==
+                      reference.get("stamp_identity")]
+        if not candidates:
+            entry["reason"] = "no matching EXECUTE reference authority recorded"
             continue
-        entry["observed_tick"] = sample.get("tick")
-        entry["observed_mono_s"] = sample.get("mono_s")
-        snapshot = sample.get("snapshot")
-        if not snapshot:
-            entry["evaluated"] = False
-            entry["reason"] = "no snapshot in force at that tick"
-            results.append(entry)
+        if any(command.get("reference_frame_id") != reference.get("frame_id") or
+               command.get("reference_poses") != reference.get("poses") or
+               command.get("reference_pose_count") != reference.get("pose_count")
+               for command in candidates):
+            entry["reason"] = "EXECUTE reference frame/content mismatch or ambiguity"
             continue
+        identities = {(command.get("localization_epoch"),
+                       command.get("map_publication_sequence"),
+                       command.get("map_generation")) for command in candidates}
+        if len(identities) != 1 or None in next(iter(identities)):
+            entry["reason"] = "missing or ambiguous EXECUTE snapshot identity"
+            continue
+        epoch, publication, generation = next(iter(identities))
+        sample = first_sample_for_reference(
+            samples, digest, reference.get("stamp_identity"), epoch, publication)
+        entry["execution_identity"] = {
+            "localization_epoch": epoch, "map_publication_sequence": publication,
+            "map_generation": generation,
+            "command_sequences": sorted({command.get("command_sequence", 0)
+                                         for command in candidates}),
+        }
+        matches = [snapshot for snapshot in snapshots
+                   if snapshot.get("localization_epoch") == epoch and
+                   snapshot.get("publication_sequence") == publication]
+        # Identical repeated records are harmless; conflicting records are not.
+        unique = {json.dumps({key: value for key, value in snapshot.items()
+                              if key != "mono_s"}, sort_keys=True): snapshot
+                  for snapshot in matches}
+        if len(unique) != 1:
+            entry["reason"] = ("exact EXECUTE snapshot missing" if not unique else
+                               "ambiguous exact EXECUTE snapshot records")
+            continue
+        snapshot = next(iter(unique.values()))
+        entry["snapshot_identity"] = snapshot
+        if not snapshot.get("ready") or not snapshot.get("cell_count"):
+            entry["reason"] = "authorized snapshot not ready or empty"
+            continue
+        if sample is not None:
+            entry["observed_tick"] = sample.get("tick")
+            entry["observed_mono_s"] = sample.get("mono_s")
         snapshot_digest = snapshot.get("occupancy_digest")
-        grid = store.grid(snapshot_digest)
-        if grid is None:
-            entry["evaluated"] = False
-            entry["reason"] = "snapshot payload unavailable (truncated or missing)"
-            entry["snapshot_identity"] = snapshot
-            results.append(entry)
+        exact_store = PayloadStore(store._input_dir, [snapshot])
+        try:
+            payload = exact_store.payload(snapshot_digest)
+            if payload is None:
+                entry["reason"] = "authorized snapshot payload unavailable"
+                continue
+            identity = payload.get("identity", {})
+            if any(identity.get(key) != snapshot.get(key) for key in
+                   ("occupancy_digest", "info", "frame_id",
+                    "occupied_value_threshold", "unknown_is_obstacle")):
+                entry["reason"] = "authorized snapshot payload identity mismatch"
+                continue
+            grid = exact_store.grid(snapshot_digest)
+            # Shared payload bytes do not supply publication authority.
+            grid.identity.update({key: value for key, value in snapshot.items()
+                                  if key not in ("payload", "mono_s", "info")})
+            if (grid.width <= 0 or grid.height <= 0 or grid.resolution <= 0 or
+                    len(payload.get("occupancy", [])) != grid.width * grid.height or
+                    len(payload["occupancy"]) != snapshot.get("cell_count")):
+                entry["reason"] = "authorized snapshot payload empty or malformed"
+                continue
+        except (OSError, ValueError, KeyError, TypeError, EOFError) as exc:
+            entry["reason"] = "authorized snapshot payload unreadable: %s" % exc
             continue
         poses = [tuple(pose) for pose in reference.get("poses", [])]
-        transform = sample.get("map_from_odom")
+        if not poses:
+            entry["reason"] = "committed reference has no poses"
+            continue
+        transform = (sample or {}).get("map_from_odom")
+        if not frames_agree(reference.get("frame_id"), grid.frame_id):
+            execution = (sample or {}).get("execution") or {}
+            entry["transform_evidence"] = (
+                "tick-sampled map<-odom; TF carries no localization epoch; "
+                "not an atomic commit-time transform")
+            if (execution.get("localization_epoch") != epoch or
+                    execution.get("reference_stamp_identity") != reference.get("stamp_identity") or
+                    execution.get("mode") != 1):
+                entry["frame_unpaired"] = True
+                entry["reason"] = "transform tick lacks matching EXECUTE epoch/reference"
+                continue
         if frames_agree(reference.get("frame_id"), grid.frame_id):
             grid_poses = poses
             entry["transform_applied"] = False
@@ -532,14 +595,18 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
                 "was recorded at that tick" % (
                     reference.get("frame_id"), grid.frame_id,
                     grid.frame_id, reference.get("frame_id")))
-            results.append(entry)
             continue
         verdict = fe.check(grid, params, grid_poses, max_collisions=64)
         entry["evaluated"] = True
         entry["verdict"] = summarize_verdict(
-            verdict, store.payload(snapshot_digest), grid, params, layers,
-            sample.get("mono_s"))
-        results.append(entry)
+            verdict, payload, grid, params, layers, reference.get("mono_s"))
+    recorded_stamps = {entry.get("reference_stamp_identity") for entry in results}
+    for command in commands:
+        stamp = command.get("reference_stamp_identity")
+        if command.get("mode") == 1 and stamp not in recorded_stamps:
+            results.append({"reference_stamp_identity": stamp, "evaluated": False,
+                            "reason": "EXECUTE has no recorded committed reference Path"})
+            recorded_stamps.add(stamp)
     return results
 
 
@@ -738,10 +805,11 @@ def analyze_snapshot_flip(probes, store, params):
                           item.get("mono_s") or 0.0))
     results = []
     for probe in probes:
-        pose = probe["pose"]
+        pose = probe.get("pose")
         entry = {
             "label": probe["label"],
-            "pose": {"x": pose[0], "y": pose[1], "yaw": pose[2]},
+            "pose": ({"x": pose[0], "y": pose[1], "yaw": pose[2]}
+                     if pose is not None else None),
             "frame_id": probe.get("frame_id"),
             "source_tick": probe.get("tick"),
             "timeline": [],
@@ -749,9 +817,20 @@ def analyze_snapshot_flip(probes, store, params):
             "flipped_occupied_to_free": False,
             "transitions": [],
         }
+        probe_reason = probe.get("reason")
+        if pose is None:
+            probe_reason = probe_reason or "probe pose unavailable"
         previous = None
         for record in ordered:
             digest = record.get("occupancy_digest")
+            if probe_reason:
+                entry["timeline"].append({
+                    "occupancy_digest": digest,
+                    "publication_sequence": record.get("publication_sequence"),
+                    "evaluated": False,
+                    "reason": probe_reason,
+                })
+                continue
             grid = store.grid(digest)
             if grid is None:
                 entry["timeline"].append({
@@ -768,6 +847,7 @@ def analyze_snapshot_flip(probes, store, params):
                     "publication_sequence": record.get("publication_sequence"),
                     "evaluated": False,
                     "frame_unpaired": True,
+                    "reason": "probe and snapshot frames cannot be paired",
                     "probe_frame": probe.get("frame_id"),
                     "snapshot_frame": grid.frame_id,
                 })
@@ -811,6 +891,11 @@ def analyze_snapshot_flip(probes, store, params):
                 else:
                     entry["flipped_occupied_to_free"] = True
             previous = step
+        entry["evaluated"] = bool(entry["timeline"]) and all(
+            step["evaluated"] for step in entry["timeline"])
+        if not entry["evaluated"]:
+            entry["reason"] = (probe_reason or
+                               "snapshot timeline has unavailable evidence")
         results.append(entry)
     return results
 
@@ -927,6 +1012,8 @@ def grid_pose_for_sample(sample, store):
     pose = (actual["x"], actual["y"], actual["yaw"])
     if frames_agree(actual.get("frame_id"), grid.frame_id):
         return pose, grid.frame_id
+    if actual.get("frame_id") != "odom" or grid.frame_id != "map":
+        return None
     transformed = transform_pose(sample.get("map_from_odom"), pose)
     if transformed is None:
         return None
@@ -949,28 +1036,35 @@ def build_probes(samples, store, tracking, references_result, stop):
     """
     probes = []
     conflict = tracking.get("first_discrete_conflict")
-    if conflict and conflict.get("grid_pose"):
-        pose = conflict["grid_pose"]
-        probes.append({
+    if conflict:
+        pose = conflict.get("grid_pose")
+        frame_id = (conflict.get("verdict") or {}).get(
+            "snapshot_identity", {}).get("frame_id")
+        probe = {
             "label": "actual_pose_at_first_discrete_conflict",
-            "pose": (pose["x"], pose["y"], pose["yaw"]),
-            "frame_id": (conflict.get("verdict") or {}).get(
-                "snapshot_identity", {}).get("frame_id"),
+            "pose": ((pose["x"], pose["y"], pose["yaw"])
+                     if pose is not None else None),
+            "frame_id": frame_id,
             "tick": conflict.get("tick"),
-        })
+        }
+        if not frames_agree(conflict.get("actual_frame"), frame_id) and not (
+                conflict.get("actual_frame") == "odom" and frame_id == "map"
+                and conflict.get("map_from_odom") is not None):
+            probe["reason"] = "first conflict frame or map<-odom transform unavailable"
+        probes.append(probe)
     rest = (stop or {}).get("rest")
     if rest and rest.get("tick") is not None:
         sample = find_sample(samples, rest["tick"])
-        if sample is not None:
-            resolved = grid_pose_for_sample(sample, store)
-            if resolved is not None:
-                pose, frame_id = resolved
-                probes.append({
-                    "label": "actual_rest_pose",
-                    "pose": pose,
-                    "frame_id": frame_id,
-                    "tick": rest.get("tick"),
-                })
+        resolved = grid_pose_for_sample(sample, store) if sample is not None else None
+        probe = {
+            "label": "actual_rest_pose",
+            "pose": resolved[0] if resolved is not None else None,
+            "frame_id": resolved[1] if resolved is not None else None,
+            "tick": rest.get("tick"),
+        }
+        if resolved is None:
+            probe["reason"] = "rest pose snapshot, frame or map<-odom transform unavailable"
+        probes.append(probe)
     for entry in reversed(references_result):
         verdict = entry.get("verdict")
         if not verdict:
@@ -990,9 +1084,10 @@ def build_probes(samples, store, tracking, references_result, stop):
     unique = []
     seen = set()
     for probe in probes:
-        if probe.get("frame_id") is None:
+        if probe.get("pose") is None:
+            unique.append(probe)
             continue
-        key = (probe["label"], round(probe["pose"][0], 6),
+        key = (probe["label"], probe.get("frame_id"), round(probe["pose"][0], 6),
                round(probe["pose"][1], 6), round(probe["pose"][2], 6))
         if key in seen:
             continue
@@ -1012,11 +1107,14 @@ def answer_questions(references_result, tracking, flips):
             "references_not_evaluated":
                 len(references_result) - len(evaluated),
             "references_with_collisions": len(unsafe),
-            "answer": ("unknown" if not evaluated else
-                       ("no" if unsafe else "yes")),
+            "answer": ("no" if unsafe else
+                       "yes" if evaluated and len(evaluated) == len(references_result)
+                       else "unknown"),
             "routing": ("audit the final revalidation snapshot, sampling "
                         "continuity and commit timing"
                         if unsafe else
+                        "reference evidence incomplete" if not evaluated or
+                        len(evaluated) != len(references_result) else
                         "no reference-side violation to route"),
         },
         "q2_actual_left_reference_envelope": {
@@ -1039,14 +1137,23 @@ def answer_questions(references_result, tracking, flips):
         },
     }
     flipped = [flip for flip in flips if flip.get("flipped_free_to_occupied")]
+    incomplete = [flip for flip in flips if not flip.get("evaluated")]
+    unevaluated_ticks = sum(tracking.get(key, 0) for key in (
+        "ticks_unpaired_frame", "ticks_without_snapshot",
+        "ticks_without_snapshot_payload"))
+    flip_answer = ("yes" if flipped else "unknown"
+                   if not flips or incomplete or unevaluated_ticks else "no")
     answers["q3_same_pose_flipped_free_to_occupied"] = {
         "probes": len(flips),
+        "probes_not_evaluated": len(incomplete),
+        "unevaluated_actual_ticks": unevaluated_ticks,
         "probes_flipped_free_to_occupied": len(flipped),
         "flipped_labels": [flip["label"] for flip in flipped],
-        "answer": ("unknown" if not flips else ("yes" if flipped else "no")),
+        "answer": flip_answer,
         "routing": ("audit source generation / adapter heartbeat and the timing of "
                     "old-reference revocation"
-                    if flipped else "no map-update flip to route"),
+                    if flipped else "map-update evidence incomplete"
+                    if flip_answer == "unknown" else "no map-update flip to route"),
     }
     return answers
 
@@ -1173,7 +1280,8 @@ def main(argv=None):
     params, params_source = resolve_params(args, snapshots)
 
     references_result = analyze_reference_at_publish(
-        samples, references, store, layers, params, args.reference_topic)
+        samples, references, store, layers, params, args.reference_topic,
+        events, snapshots)
     tracking = analyze_actual_tracking(samples, store, layers, params)
     stop = analyze_stop_envelope(
         samples, events, args.moving_speed_mps, args.rest_speed_mps,
@@ -1188,6 +1296,11 @@ def main(argv=None):
          "snapshots.jsonl": snapshots_truncated,
          "events.jsonl": events_truncated},
         tracking, store)
+    gaps.extend("reference %s: %s" % (entry.get("reference_stamp_identity"),
+                                    entry.get("reason", "not evaluated"))
+                for entry in references_result if not entry.get("evaluated"))
+    gaps.extend("snapshot probe %s: %s" % (flip["label"], flip["reason"])
+                for flip in flips if not flip["evaluated"])
 
     report = {
         "input_dir": os.path.abspath(input_dir),
@@ -1255,6 +1368,9 @@ def main(argv=None):
     if conflicts:
         print("RESULT: nav tracking analysis COMPLETE, conflicts found")
         return 1
+    if any(answer["answer"] == "unknown" for answer in answers.values()):
+        print("RESULT: nav tracking analysis INCOMPLETE (question evidence unknown)")
+        return 2
     print("RESULT: nav tracking analysis COMPLETE, no conflicts found")
     return 0
 

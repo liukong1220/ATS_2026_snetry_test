@@ -11,6 +11,10 @@ QoS choices that decide whether a latched publisher is heard at all.
 import math
 import os
 import sys
+import gzip
+import json
+import tempfile
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -177,6 +181,110 @@ def main():
           "grid_metadata carries the lattice geometry the evaluator needs")
     check(near(meta["origin_x"], 1.5) and near(meta["origin_y"], -2.5),
           "grid_metadata carries the grid origin")
+
+    # Repeated occupancy must not erase a new publication's commit identity.
+    with tempfile.TemporaryDirectory(prefix="recorder_snapshot_identity_") as directory:
+        os.makedirs(os.path.join(directory, "snapshot_payload"))
+        records = []
+        sink = SimpleNamespace(
+            _args=SimpleNamespace(planning_snapshot_topic="/snapshot", max_snapshot_payloads=1),
+            _output_dir=directory, _count=lambda topic: None, _start_mono=0.0,
+            _seen_snapshot_identities=set(), _snapshot_payload_by_digest={},
+            _snapshot_payloads_written=0, _snapshot_payloads_truncated=False,
+            _snapshots=SimpleNamespace(write=records.append))
+        stamp = SimpleNamespace(sec=100, nanosec=0)
+        message = SimpleNamespace(
+            header=SimpleNamespace(stamp=stamp, frame_id="map"), source_stamp=stamp,
+            ready=True, unknown_is_obstacle=True, occupied_value_threshold=100,
+            localization_epoch=2, source_generation=1134, publication_sequence=58,
+            info=Info(0.0), occupancy=[0] * 1200, signed_distance_m=[1.0] * 1200)
+        recorder.NavTrackingRecorder._on_snapshot(sink, message)
+        recorder.NavTrackingRecorder._on_snapshot(sink, message)
+        message.publication_sequence = 59
+        message.localization_epoch = 3
+        recorder.NavTrackingRecorder._on_snapshot(sink, message)
+        check(len(records) == 2 and records[1]["publication_sequence"] == 59 and
+              records[1]["localization_epoch"] == 3,
+              "new epoch/publication retains metadata; identical heartbeat is deduplicated")
+        check(sink._snapshot_payloads_written == 1 and
+              records[0]["payload"] == records[1]["payload"] and
+              not sink._snapshot_payloads_truncated,
+              "unchanged content reuses payload even at payload budget")
+        with gzip.open(os.path.join(directory, records[1]["payload"]), "rt") as handle:
+            check(json.load(handle)["occupancy"] == message.occupancy,
+                  "reused publication payload preserves recorded occupancy bytes")
+        message.publication_sequence = 60
+        message.occupancy = [100] * 1200
+        recorder.NavTrackingRecorder._on_snapshot(sink, message)
+        check(len(records) == 3 and records[2]["payload"] is None and
+              sink._snapshot_payloads_truncated,
+              "new content above budget retains identity but explicitly lacks payload")
+
+    # Exercise the real callback/sampling path without spinning a ROS graph.
+    # Warmup must not create auditable ticks; loss after readiness must not hide one.
+    from geometry_msgs.msg import TransformStamped
+    from nav_msgs.msg import Odometry
+    from ats_navigation_interfaces.msg import PlanningMapSnapshot
+    recorder.rclpy.init()
+    with tempfile.TemporaryDirectory(prefix="recorder_readiness_") as directory:
+        node = recorder.NavTrackingRecorder(recorder.parse_args(["--output-dir", directory]))
+        try:
+            node._on_tick()
+            check(node._tick == 0 and node._samples.count == 0,
+                  "no subscriptions delivered: warmup creates no auditable sample")
+            actual = Odometry()
+            actual.header.frame_id = "wrong_frame"
+            actual.pose.pose.orientation.w = 1.0
+            node._on_localization(actual)
+            snapshot = PlanningMapSnapshot()
+            snapshot.header.frame_id = "map"
+            snapshot.ready = True
+            snapshot.info.width = snapshot.info.height = 1
+            snapshot.info.resolution = 1.0
+            snapshot.info.origin.orientation.w = 1.0
+            snapshot.occupancy = [0]
+            snapshot.signed_distance_m = [1.0]
+            node._on_snapshot(snapshot)
+            transform = TransformStamped()
+            transform.header.stamp = node.get_clock().now().to_msg()
+            transform.header.frame_id = "map"
+            transform.child_frame_id = "odom"
+            transform.transform.rotation.w = 1.0
+            node._tf_buffer.set_transform(transform, "recorder_test")
+            node._on_tick()
+            check(node._tick == 0 and "actual" in node._warmup_missing,
+                  "mismatched localization frame cannot declare readiness")
+            actual.header.frame_id = "odom"
+            node._on_localization(actual)
+            node._tf_buffer.clear()
+            node._on_tick()
+            check(node._tick == 0 and node._warmup_missing == ["map_from_odom"],
+                  "delayed TF still prevents the first sample")
+            node._tf_buffer.set_transform(transform, "recorder_test")
+            snapshot.ready = False
+            node._on_snapshot(snapshot)
+            node._on_tick()
+            check(node._tick == 0 and node._warmup_missing == ["ready_snapshot"],
+                  "unready snapshot still prevents the first sample")
+            snapshot.ready = True
+            node._on_snapshot(snapshot)
+            node._on_tick()
+            check(node._tick == 1 and node._recording_start_mono is not None,
+                  "matching actual, TF and ready snapshot start recording")
+            node._tf_buffer.clear()
+            node._on_tick()
+            with open(os.path.join(directory, "samples.jsonl")) as handle:
+                samples = [json.loads(line) for line in handle]
+            check(len(samples) == 2 and samples[0]["actual"] is not None and
+                  samples[0]["map_from_odom"] is not None and
+                  samples[0]["snapshot"]["ready"],
+                  "first auditable sample contains initial mandatory evidence")
+            check(samples[1]["tick"] == 2 and samples[1]["map_from_odom"] is None,
+                  "missing TF after recording starts remains an incomplete tick")
+        finally:
+            node.close()
+            node.destroy_node()
+            recorder.rclpy.try_shutdown()
 
     if FAILURES:
         print("RESULT: nav tracking recorder test FAILED (%d)" % len(FAILURES))
