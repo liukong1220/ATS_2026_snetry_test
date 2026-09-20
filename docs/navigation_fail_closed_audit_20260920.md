@@ -67,6 +67,10 @@ colcon build --base-paths src --packages-select small_gicp_relocalization --para
   - yaw102：`/tmp/ats_goal_set_next_100/yaw/runner.log` 的 `/cmd_vel/selected` 所有权门未收敛；观测为2个 publisher，节点名均为 `cmd_vel_arbiter`，但 GID 分别以 `01.0f.1e.d8` 与 `01.0f.7a.ab` 开头。不同 GID 仅证实不同 endpoint 身份，不能单凭此前缀断言来自外部主机或确定发现异常根因。
   - nearby103：`/tmp/ats_goal_set_next_100/nearby/runner.log` 记录 `timeout waiting for localization tracking`，同时 GICP multi-guess 多次报告 `produced no valid candidate`，adapter ready=0、source generation=0；这说明准入时未得到所需定位健康状态，不是 nearby 动作性能结果，也不把单条拒绝理由当成完整根因。
 - MuJoCo matrix220–223（`ROS_LOCALHOST_ONLY=1`，`/tmp/ats_goal_set_next_220/summary.json`）：straight/lateral/yaw/nearby 四场全部失败；各自 `runner_status.env` 为 action=not_started、navigation safety=failed、recorder=not_started、recorder evidence=unverified、analysis=not_run、teardown=passed、launch wait=0、无升级、runner exit=1。各 `runner.log` 首条失败为 `FAIL: timeout waiting for localization tracking`；运行中 GICP multi-guess 多次 `budget_exhausted` / `produced no valid candidate`，adapter `ready=0`、`reason=localization is not tracking`。这是定位 TRACKING 准入超时，不是 DualMap 授权误拒动作，也不因 clean teardown 改写为通过。按用户要求不继续对本机 GICP 性能做反复调参；此前 matrix100 straight 通过与 recovery216 通过仍保留为既有证据，不与本轮 220 结果互相覆盖。
+- DualMap 合入后的恢复与 Gazebo nominal 单轮（不调参）：
+  - MuJoCo recovery domain224（`ROS_LOCALHOST_ONLY=1`，`/tmp/ats_recovery_real_224.json`）：`status=failed`，`stage=initial accepted observation and localization tracking`，`real_gicp_recovery_verified=false`，`observation_sequence=0`，`localization_state=4`，`raw_odometry_count=100`，selected 保持零。launch 见 GICP `not converged` 与 `multi_guess budget_exhausted`。故障注入前即未获 TRACKING，不能写成“恢复失败后的规划链问题”，也不改写既有 recovery216 通过证据。日志：`log/fail_closed_audit_20260920/mujoco_recovery_real_224.log`。
+  - Gazebo nominal domain225：`log/gazebo_minco_mpc_chain/20260920_161448_nominal_none_domain225/`；`runtime_gate_status=failed`、`action_status=not_started`、`p1_admission_evidence=false`（`not_evaluated`）、teardown/gazebo_stop/launch_wait=0 通过。健康门：`localization_state=4`、`map_ready=false`、`source_generation=0`。launch 见 GICP `minimum information eigenvalue below threshold`（converged=true）与后续 multi_guess 无有效候选。按门禁规则 **未派发 red-box**。不宣称 P1/nominal 通过，也不继续性能调参。
+
 
 
 ## 二、已实现未运行：闭环边界账本与部署计划
@@ -117,4 +121,4 @@ Gazebo P1/nominal/red-box、MuJoCo 全目标及故障矩阵、corridor_mouth、n
 
 风险转入条件：任一定位/TF/地图/授权失效、旧命令恢复运动、不能在配置 lease 内停止、未知接触/异常运动、E-stop 不可用、温度电流超限或关键证据缺失，立即退出高风险运行，继续只读分析和低风险修复。Gazebo 未同时通过 P1 freshness 与 nominal action 前，不运行 red-box；不放宽安全门、超大 timeout 或禁用 footprint 来换成功。
 
-最新推进决定：按用户要求停止反复 Gazebo 性能调参与重试；七状态与 DualMap 地图授权已实现并完成聚焦单测；MuJoCo localhost 四场景 matrix220 因定位 TRACKING 超时全部 fail-closed。不宣称四环境稳定运行或 MuJoCo/Gazebo 矩阵通过。Gazebo red-box 不宣称通过，既有 P1/nominal 前置门与所有未验证边界不因推进决定而放宽。
+最新推进决定：七状态与 DualMap 已合入并推送；本轮 MuJoCo matrix220、recovery224、Gazebo225 均因定位未进 TRACKING 在动作派发前 fail-closed。不宣称四环境稳定运行。既有 recovery216 / matrix100-straight 保留为历史通过证据。实车 HIL 仍 blocked。Gazebo red-box 未跑。
