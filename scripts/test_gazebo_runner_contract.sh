@@ -122,6 +122,15 @@ contains 'gazebo_transport_node_\.Subscribe' "$RECORDER" || fail "recorder does 
 contains 'gazebo_transport_lidar_mutex_' "$RECORDER" || fail "transport callback statistics are not synchronized"
 contains 'gazebo_transport_lidar' "$RUNNER" || fail "runner does not emit Gazebo Transport LiDAR metrics"
 
+# Action result poses are map-framed. Terminal localization must use the same
+# frame conversion as every other runner localization sample before computing
+# a goal error or post-action drift metric.
+awk '
+  /TERMINAL_LOCALIZATION_POSE="\$\(sample_localization_xy \|\| true\)"/ { found = 1 }
+  END { exit !found }
+' "$RUNNER" || fail "terminal localization is not normalized to the map frame"
+contains 'terminal_localization_frame' "$RUNNER" || fail "runner does not record the terminal localization frame"
+
 # The recorder polls map -> gimbal_yaw_odom before localization_fusion can
 # publish it, so admission must judge post-establishment failures and require
 # the chain to actually come up, instead of rejecting warm-up absence.

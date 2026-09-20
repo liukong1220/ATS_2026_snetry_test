@@ -8,7 +8,7 @@ RESULT_FILE="${P4_UNSAFE_RESULT_FILE:-/tmp/ats_p4_unsafe_${FAULT_CASE}_${DOMAIN_
 LAUNCH_LOG="${P4_UNSAFE_LAUNCH_LOG:-/tmp/ats_p4_unsafe_${FAULT_CASE}_${DOMAIN_ID}.log}"
 
 case "${FAULT_CASE}" in
-  mid_segment|pure_rotation|unknown|outside|map_after_commit|old_generation|repair_after_unsafe) ;;
+  mid_segment|pure_rotation|unknown|outside|map_after_commit|old_generation|repair_after_unsafe|occupied) ;;
   *)
     echo "Unsupported P4_UNSAFE_FAULT_CASE=${FAULT_CASE}" >&2
     exit 2
@@ -31,10 +31,18 @@ python3 scripts/evaluate_mujoco_unsafe_trajectory.py \
   --fault "${FAULT_CASE}" --output "${RESULT_FILE}" &
 EVALUATOR_PID=$!
 
-setsid ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+# New goal classes use the established RMUC 2025 nominal start/goal corridor.
+START_X=-10.66
+START_Y=1.47
+if [[ "${FAULT_CASE}" == occupied || "${FAULT_CASE}" == map_after_commit ]]; then
+  START_X=-0.18
+  START_Y=0.06
+fi
+setsid env --default-signal=INT ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
+  enable_test_fault_injection:=true \
   use_viewer:=false show_viewer:=false launch_mujoco_rviz:=false \
   enable_lidar:=true lidar_backend:=cpu lidar_downsample:=24 enable_tof:=false \
-  start_x:=-10.66 start_y:=1.47 start_z:=0.42 start_yaw:=0.0 \
+  start_x:="${START_X}" start_y:="${START_Y}" start_z:=0.42 start_yaw:=0.0 \
   nav_start_delay_sec:=9.0 rog_map_start_delay_sec:=15.0 map_start_delay_sec:=2.0 \
   rviz_delay_sec:=1000.0 log_level:=warn >"${LAUNCH_LOG}" 2>&1 &
 LAUNCH_PID=$!
@@ -42,7 +50,8 @@ LAUNCH_PID=$!
 cleanup() {
   kill "${EVALUATOR_PID}" 2>/dev/null || true
   wait "${EVALUATOR_PID}" 2>/dev/null || true
-  kill -INT "-${LAUNCH_PID}" 2>/dev/null || true
+  # Launch forwards SIGINT once; group signals are only for escalation.
+  kill -INT "${LAUNCH_PID}" 2>/dev/null || true
   sleep 2
   kill -TERM "-${LAUNCH_PID}" 2>/dev/null || true
   sleep 1

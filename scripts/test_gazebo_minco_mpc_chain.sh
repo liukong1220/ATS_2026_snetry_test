@@ -142,6 +142,10 @@ STAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_ROOT="${LOG_ROOT:-$WORKSPACE_ROOT/log/gazebo_minco_mpc_chain}"
 RUN_DIR="$LOG_ROOT/${STAMP}_${TEST_PROFILE}_${P2_FAULT_CASE}_domain${ROS_DOMAIN_ID}"
 mkdir -p "$RUN_DIR"
+# ROS_DOMAIN_ID does not isolate Gazebo Transport. Never inherit a shared
+# partition for a runner that owns the globally named /server_control service.
+IGN_PARTITION="ats_gazebo_${ROS_DOMAIN_ID}_${STAMP}_$$"
+export IGN_PARTITION
 
 SUMMARY="$RUN_DIR/summary.txt"
 LAUNCH_LOG="$RUN_DIR/launch.log"
@@ -186,6 +190,18 @@ RUNTIME_PREFLIGHT_LOG="$RUN_DIR/runtime_preflight.txt"
 HEALTH_PROBE_LOG="$RUN_DIR/navigation_health_probe.log"
 RECOVERY_CANCEL_LOG="$RUN_DIR/recovery_cancel_on_command.log"
 RECOVERY_CANCEL_RESULT=""
+CLEANUP_DONE=0
+CLEANUP_STATUS=0
+TEARDOWN_STATUS=not_started
+TEARDOWN_ESCALATION=none
+LAUNCH_WAIT_STATUS=not_started
+GAZEBO_STOP_STATUS=not_started
+GAZEBO_STOP_LOG="$RUN_DIR/gazebo_server_stop.log"
+RECORDER_STATUS=not_started
+RECORDER_WAIT_STATUS=not_started
+RUNTIME_GATE_STATUS=not_completed
+ACTION_STATUS=not_started
+RUNNER_STATUS_FILE="$RUN_DIR/runner_status.env"
 
 log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$SUMMARY"; }
 metric() { printf '%-42s %s\n' "$1" "$2" | tee -a "$METRIC_LOG" >>"$SUMMARY"; }
@@ -198,6 +214,10 @@ fail() {
 
 run_runtime_preflight() {
   local residual_processes binary_freshness
+  local gazebo_source="$WORKSPACE_ROOT/src/sim/gazebo_simulator/rmu_gazebo_simulator"
+  local gazebo_build="$WORKSPACE_ROOT/build/rmu_gazebo_simulator"
+  local gazebo_install="$WORKSPACE_ROOT/install/rmu_gazebo_simulator"
+  local recorder="$gazebo_install/lib/rmu_gazebo_simulator/ats_navigation_evidence_recorder"
   if ! [[ "$ROS_DOMAIN_ID" =~ ^[0-9]+$ ]] || [ "$ROS_DOMAIN_ID" -gt 232 ]; then
     fail "runtime_invalid_ros_domain_${ROS_DOMAIN_ID}"
     return 1
@@ -226,15 +246,34 @@ run_runtime_preflight() {
       "$WORKSPACE_ROOT/build/small_gicp_relocalization/localization_fusion_node" \
       "$WORKSPACE_ROOT/src/ats_sentry_nav/small_gicp_relocalization" \
       "$WORKSPACE_ROOT/build/small_gicp_relocalization/libsmall_gicp_relocalization.so"
-    runtime_binary_is_fresh \
-      rmu_gazebo_simulator \
-      "$WORKSPACE_ROOT/build/rmu_gazebo_simulator/ats_navigation_evidence_recorder" \
-      "$WORKSPACE_ROOT/src/sim/gazebo_simulator/rmu_gazebo_simulator" \
-      "$WORKSPACE_ROOT/build/rmu_gazebo_simulator/ats_navigation_evidence_recorder"
+    # Package metadata must have been configured, but a CTest-only edit does not
+    # require relinking an unchanged recorder. Target build commands below catch
+    # changed compile flags / linked sources without conflating separate targets.
+    runtime_artifact_is_fresh rmu_gazebo_configuration "$gazebo_build/Makefile" \
+      "$gazebo_source/CMakeLists.txt" "$gazebo_source/package.xml"
+    if [ ! -x "$recorder" ]; then
+      printf 'ats_navigation_evidence_recorder executable_missing path=%s\n' "$recorder"
+    fi
+    runtime_artifact_is_fresh ats_navigation_evidence_recorder "$recorder" \
+      "$gazebo_source/src/ats_navigation_evidence_recorder.cpp" \
+      "$gazebo_source/include/rmu_gazebo_simulator/dynamic_transform_freshness.hpp" \
+      "$gazebo_source/include/rmu_gazebo_simulator/evidence_statistics.hpp" \
+      "$gazebo_source/include/rmu_gazebo_simulator/tf_establishment_tracker.hpp" \
+      "$gazebo_build/CMakeFiles/ats_navigation_evidence_recorder.dir/flags.make" \
+      "$gazebo_build/CMakeFiles/ats_navigation_evidence_recorder.dir/link.txt"
+    # Inspect the actual installed plugin (following symlinks), not the recorder
+    # or another recently linked artifact. A stale plugin must block launch.
+    runtime_artifact_is_fresh AtsSwerveDrive4WS \
+      "$gazebo_install/plugins/libAtsSwerveDrive4WS.so" \
+      "$gazebo_source/src/ats_swerve_drive4ws.cpp" \
+      "$gazebo_source/include/rmu_gazebo_simulator/swerve_kinematics.hpp" \
+      "$gazebo_build/CMakeFiles/AtsSwerveDrive4WS.dir/flags.make" \
+      "$gazebo_build/CMakeFiles/AtsSwerveDrive4WS.dir/link.txt"
   } 2>&1)"
   {
     date --iso-8601=seconds
     printf 'ros_domain=%s\n' "$ROS_DOMAIN_ID"
+    printf 'ign_partition=%s\n' "$IGN_PARTITION"
     printf 'root_head=%s\n' "$(git rev-parse HEAD)"
     printf 'gazebo_head=%s\n' "$(git -C src/sim/gazebo_simulator rev-parse HEAD)"
     printf 'critical_runtime_binary_freshness:\n%s\n' "$binary_freshness"
@@ -414,6 +453,10 @@ reap_launch_gazebo_servers() {
       '
     )
     [ "${#server_pids[@]}" -eq 0 ] && return 0
+    if [ "$signal" != INT ]; then
+      TEARDOWN_ESCALATION="$signal"
+      TEARDOWN_STATUS=failed
+    fi
     for pid in "${server_pids[@]}"; do
       kill -"$signal" "$pid" 2>/dev/null || true
     done
@@ -433,35 +476,168 @@ reap_launch_gazebo_servers() {
       $2 == sid && $0 ~ /(^|[[:space:]])ign[[:space:]]+gazebo([[:space:]]|$)/ {print $1}
     '
   )
-  [ "${#server_pids[@]}" -eq 0 ] || log "failed to reap Gazebo server pid(s): ${server_pids[*]}"
+  if [ "${#server_pids[@]}" -ne 0 ]; then
+    log "failed to reap Gazebo server pid(s): ${server_pids[*]}"
+    return 1
+  fi
+}
+
+gazebo_session_server_pids() {
+  ps -eo pid=,sid=,args= | awk -v sid="$1" '
+    $2 == sid && $0 ~ /(^|[[:space:]])ign[[:space:]]+gazebo([[:space:]]|$)/ {print $1}
+  '
+}
+
+stop_launch_gazebo_server() {
+  local sid="$1" deadline="$2" remaining request_seconds request_status=0
+  GAZEBO_STOP_STATUS=not_started
+  # No server startup means there is no native process owned by this launch.
+  if ! grep -Eq '\[ign gazebo-[0-9]+\]: process started' "$LAUNCH_LOG" 2>/dev/null && \
+    [ -z "$(gazebo_session_server_pids "$sid")" ]; then
+    return 0
+  fi
+  if [[ "${IGN_PARTITION:-}" != ats_gazebo_*_$$ ]]; then
+    GAZEBO_STOP_STATUS=partition_not_owned
+    return 1
+  fi
+  remaining=$((deadline - SECONDS))
+  if (( remaining <= 0 )); then
+    GAZEBO_STOP_STATUS=deadline_expired
+    return 1
+  fi
+  request_seconds=$((remaining < 3 ? remaining : 3))
+  GAZEBO_STOP_STATUS=requesting
+  # CLI timeout is milliseconds; the outer deadline also bounds CLI startup.
+  timeout --signal=KILL "${request_seconds}s" ign service \
+    -s /server_control --reqtype ignition.msgs.ServerControl \
+    --reptype ignition.msgs.Boolean --timeout "$((request_seconds * 1000))" \
+    --req 'stop: true' >"$GAZEBO_STOP_LOG" 2>&1 || request_status=$?
+  if (( request_status != 0 )); then
+    GAZEBO_STOP_STATUS="request_failed_${request_status}"
+    return 1
+  fi
+  if ! grep -Eq '^[[:space:]]*data:[[:space:]]*true[[:space:]]*$' "$GAZEBO_STOP_LOG"; then
+    GAZEBO_STOP_STATUS=request_refused_or_unacknowledged
+    return 1
+  fi
+  GAZEBO_STOP_STATUS=acknowledged_waiting_exit
+  while (( SECONDS < deadline )); do
+    if [ -z "$(gazebo_session_server_pids "$sid")" ] && \
+      grep -Eq '\[ign gazebo-[0-9]+\]: process has finished cleanly' "$LAUNCH_LOG"; then
+      GAZEBO_STOP_STATUS=passed
+      return 0
+    fi
+    sleep 0.1
+  done
+  GAZEBO_STOP_STATUS=clean_exit_timeout
+  return 1
+}
+
+teardown_launch() {
+  local sid="${LAUNCH_SESSION_ID:-${LAUNCH_PID:-}}" deadline native_deadline line
+  [ "$TEARDOWN_STATUS" = passed ] && return 0
+  [ "$TEARDOWN_STATUS" = failed ] && return 1
+  TEARDOWN_STATUS=passed
+  if [ -n "${LAUNCH_PID:-}" ]; then
+    deadline=$((SECONDS + SHUTDOWN_GRACE_SEC))
+    # Reserve half of the existing budget for remaining ROS launch shutdown.
+    native_deadline=$((SECONDS + SHUTDOWN_GRACE_SEC / 2))
+    stop_launch_gazebo_server "$sid" "$native_deadline" || TEARDOWN_STATUS=failed
+    kill -INT "$LAUNCH_PID" 2>/dev/null || true
+    while kill -0 "-$sid" 2>/dev/null && (( SECONDS < deadline )); do
+      sleep 0.1
+    done
+    if kill -0 "-$sid" 2>/dev/null; then
+      TEARDOWN_ESCALATION=KILL
+      TEARDOWN_STATUS=failed
+      kill -KILL -- -"$sid" 2>/dev/null || kill -KILL "$LAUNCH_PID" 2>/dev/null || true
+    fi
+    LAUNCH_WAIT_STATUS=0
+    wait "$LAUNCH_PID" 2>/dev/null || LAUNCH_WAIT_STATUS=$?
+    [ "$LAUNCH_WAIT_STATUS" = 0 ] || TEARDOWN_STATUS=failed
+    reap_launch_gazebo_servers "$sid" || TEARDOWN_STATUS=failed
+    if [ ! -r "$LAUNCH_LOG" ]; then
+      TEARDOWN_STATUS=failed
+    else
+      while IFS= read -r line; do
+        if [[ "$line" == *"process has died"* || "$line" == *"escalating to"* ]]; then
+          TEARDOWN_STATUS=failed
+        elif [[ "$line" =~ exit\ code[[:space:]:=]+(-?[0-9]+) ]]; then
+          [[ "${BASH_REMATCH[1]}" == 0 ]] || TEARDOWN_STATUS=failed
+        fi
+      done <"$LAUNCH_LOG"
+    fi
+  fi
+  [ "$TEARDOWN_STATUS" = passed ]
+}
+
+write_runner_status() {
+  printf 'action_status=%q\nruntime_gate_status=%q\nrecorder_status=%q\nrecorder_wait_status=%q\nrecorder_evidence_completed=%q\np1_admission_evidence=%q\nteardown_status=%q\nlaunch_wait_status=%q\nteardown_escalation=%q\nrunner_exit=%q\n' \
+    "$ACTION_STATUS" "$RUNTIME_GATE_STATUS" "$RECORDER_STATUS" "$RECORDER_WAIT_STATUS" \
+    "${RECORDER_EVIDENCE_COMPLETED:-unverified}" "$P1_ADMISSION_EVIDENCE" \
+    "$TEARDOWN_STATUS" "$LAUNCH_WAIT_STATUS" "$TEARDOWN_ESCALATION" "$CLEANUP_STATUS" \
+    >"$RUNNER_STATUS_FILE"
+  printf 'ign_partition=%q\ngazebo_stop_status=%q\n' \
+    "${IGN_PARTITION:-unconfigured}" "${GAZEBO_STOP_STATUS:-not_started}" >>"$RUNNER_STATUS_FILE"
 }
 
 cleanup() {
-  stop_active_observers
+  local prior_status="${1:-0}"
+  if [ "$CLEANUP_DONE" = 1 ]; then
+    [ "$prior_status" = 0 ] || CLEANUP_STATUS="$prior_status"
+    write_runner_status
+    return "$CLEANUP_STATUS"
+  fi
+  CLEANUP_DONE=1
+  if [ "$FAILURE_COUNT" = 0 ]; then
+    RUNTIME_GATE_STATUS=passed
+  else
+    RUNTIME_GATE_STATUS=failed
+  fi
+  if [ "${P2_FAULT_CASE:-none}" != none ]; then
+    ACTION_STATUS=fault_profile
+  elif [ "${TEST_PROFILE:-nominal}" = red_box ]; then
+    ACTION_STATUS=failed
+    [ "${RED_BOX_LEG_SUCCEEDED:-0}" = "${RED_BOX_LEG_COUNT:-0}" ] && ACTION_STATUS=succeeded
+  elif [ "${GOAL_SUCCEEDED:-0}" = 1 ]; then
+    ACTION_STATUS=succeeded
+  elif [ -n "${GOAL_SUCCEEDED:-}" ]; then
+    ACTION_STATUS=failed
+  fi
+  if declare -F stop_active_observers >/dev/null; then
+    stop_active_observers
+  fi
   if [ -n "${GOAL_PID:-}" ] && kill -0 "$GOAL_PID" 2>/dev/null; then
     local goal_sid="${GOAL_SESSION_ID:-$GOAL_PID}"
     kill -TERM -- -"$goal_sid" 2>/dev/null || kill -TERM "$GOAL_PID" 2>/dev/null || true
     sleep 1
     kill -KILL -- -"$goal_sid" 2>/dev/null || kill -KILL "$GOAL_PID" 2>/dev/null || true
   fi
-  if [ -n "${LAUNCH_PID:-}" ] && kill -0 "$LAUNCH_PID" 2>/dev/null; then
-    # ats_gazebo_nav is started in its own session below.  Signal that session
-    # rather than using a broad pkill pattern which can match this shell or an
-    # unrelated Gazebo run owned by another test.
-    local launch_sid="${LAUNCH_SESSION_ID:-$LAUNCH_PID}"
-    kill -INT -- -"$launch_sid" 2>/dev/null || kill -INT "$LAUNCH_PID" 2>/dev/null || true
-    for _ in $(seq "$SHUTDOWN_GRACE_SEC"); do
-      kill -0 "$LAUNCH_PID" 2>/dev/null || break
-      sleep 1
-    done
-    kill -KILL -- -"$launch_sid" 2>/dev/null || kill -9 "$LAUNCH_PID" 2>/dev/null || true
-    reap_launch_gazebo_servers "$launch_sid"
+  if ! teardown_launch; then
+    fail "launch teardown failed (native_stop=${GAZEBO_STOP_STATUS:-not_started} wait=$LAUNCH_WAIT_STATUS escalation=$TEARDOWN_ESCALATION)"
   fi
+  if [ "$RECORDER_STATUS" = failed ]; then
+    fail "navigation evidence recorder exited nonzero or required escalation (wait=$RECORDER_WAIT_STATUS)"
+  fi
+  [ "$FAILURE_COUNT" = 0 ] || CLEANUP_STATUS=1
+  [ "$prior_status" = 0 ] || CLEANUP_STATUS="$prior_status"
+  if ! write_runner_status; then
+    [ "$CLEANUP_STATUS" != 0 ] || CLEANUP_STATUS=1
+  fi
+  return "$CLEANUP_STATUS"
 }
-trap cleanup EXIT INT TERM
+runner_exit() {
+  local status=$?
+  trap - EXIT INT TERM
+  cleanup "$status"
+  exit "$?"
+}
+trap runner_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 log "launching ats_gazebo_nav.launch.py"
-setsid ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
+setsid env --default-signal=INT ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
   world:="$WORLD" \
   map_yaml:="$MAP_YAML" \
   use_sim_time:=true \
@@ -2691,6 +2867,7 @@ start_active_observers() {
     -p observe_gazebo_transport_lidar:="$OBSERVE_GAZEBO_TRANSPORT_LIDAR" \
     >"$ACTIVE_EVIDENCE_LOG" 2>&1 &
   ACTIVE_EVIDENCE_PID=$!
+  RECORDER_STATUS=running
   ACTIVE_EVIDENCE_SESSION_ID="$(ps -o sid= -p "$ACTIVE_EVIDENCE_PID" 2>/dev/null | tr -d ' ' || true)"
   ACTIVE_EVIDENCE_DEADLINE_SEC=$((SECONDS + duration_ceiling + 5))
 }
@@ -2808,7 +2985,7 @@ capture_active_ownership() {
 
 stop_active_observers() {
   local pid
-  if [ -n "${ACTIVE_EVIDENCE_PID:-}" ] && kill -0 "$ACTIVE_EVIDENCE_PID" 2>/dev/null; then
+  if [ -n "${ACTIVE_EVIDENCE_PID:-}" ]; then
     local evidence_sid="${ACTIVE_EVIDENCE_SESSION_ID:-$ACTIVE_EVIDENCE_PID}"
     # rclcpp handles SIGINT by returning from spin; its main then writes the
     # single structured witness line before exiting. SIGKILL is retained only
@@ -2819,9 +2996,16 @@ stop_active_observers() {
       sleep 1
     done
     if kill -0 "$ACTIVE_EVIDENCE_PID" 2>/dev/null; then
+      RECORDER_STATUS=failed
       kill -KILL -- -"$evidence_sid" 2>/dev/null || kill -KILL "$ACTIVE_EVIDENCE_PID" 2>/dev/null || true
     fi
-    wait "$ACTIVE_EVIDENCE_PID" 2>/dev/null || true
+    RECORDER_WAIT_STATUS=0
+    wait "$ACTIVE_EVIDENCE_PID" 2>/dev/null || RECORDER_WAIT_STATUS=$?
+    if [ "$RECORDER_WAIT_STATUS" != 0 ]; then
+      RECORDER_STATUS=failed
+    elif [ "$RECORDER_STATUS" != failed ]; then
+      RECORDER_STATUS=passed
+    fi
   fi
   ACTIVE_EVIDENCE_PID=""
   ACTIVE_EVIDENCE_SESSION_ID=""
@@ -3135,6 +3319,8 @@ write_artifact_summary() {
     echo
     echo "failures: $FAILURE_COUNT"
     echo "first failure: ${FIRST_FAILURE:-none}"
+    echo "independent runner status: $RUNNER_STATUS_FILE"
+    cat "$RUNNER_STATUS_FILE"
   } | tee -a "$SUMMARY"
 }
 
@@ -3169,7 +3355,7 @@ if [ "$CLOCK_OK" != "yes" ]; then
   refresh_topic_cache
   cat "$TOPIC_CACHE" >>"$TOPIC_LOG" 2>/dev/null || true
   ros2 node list --no-daemon >>"$TOPIC_LOG" 2>&1 || true
-  cleanup
+  cleanup 1
   trap - EXIT INT TERM
   write_artifact_summary
   exit 1
@@ -3405,7 +3591,7 @@ if [ "$HEALTH_READY" != "yes" ]; then
   trap - EXIT INT TERM
   write_artifact_summary
   if [ "$P2_FAULT_CASE" = "all-unknown" ] && [ "$FAILURE_COUNT" -eq 0 ]; then
-    exit 0
+    exit "$CLEANUP_STATUS"
   fi
   exit 1
 fi
@@ -3535,7 +3721,7 @@ else
     refresh_topic_cache
     cat "$TOPIC_CACHE" >>"$TOPIC_LOG" 2>/dev/null || true
     ros2 node list --no-daemon >>"$TOPIC_LOG" 2>&1 || true
-    cleanup
+    cleanup 1
     trap - EXIT INT TERM
     write_artifact_summary
     exit 1
@@ -3671,6 +3857,7 @@ wait_for_active_evidence_window
 stop_active_observers
 capture_launch_process_resources "active_end"
 EVIDENCE_RESULT="$(awk '/^ATS_NAVIGATION_EVIDENCE_RESULT / {line=$0} END {print line}' "$ACTIVE_EVIDENCE_LOG")"
+RECORDER_EVIDENCE_COMPLETED="$(evidence_value completed)"
 if [ -z "$EVIDENCE_RESULT" ]; then
   fail "active C++ navigation evidence recorder produced no result"
 fi
@@ -3840,9 +4027,9 @@ twist_is_nonzero() {
 CMD_DUMP="$(echo_once /cmd_vel/selected)"
 metric "cmd_vel_selected_sample" "${CMD_DUMP//$'\n'/ }"
 
-TERMINAL_LOCALIZATION_POSE="$(echo_once /localization \
-  | awk '/position:/{f=1} f&&/x:/{x=$2} f&&/y:/{y=$2} f&&/z:/{print x" "y; exit}')"
+TERMINAL_LOCALIZATION_POSE="$(sample_localization_xy || true)"
 metric "terminal_localization_pose_xy" "${TERMINAL_LOCALIZATION_POSE:-unverified}"
+metric "terminal_localization_frame" "map"
 
 if [ -n "$GOAL_X" ] && [ -n "$GOAL_Y" ] && [ -n "$TERMINAL_LOCALIZATION_POSE" ]; then
   TERMINAL_POS_ERR="$(python3 -c "
@@ -3985,4 +4172,4 @@ trap - EXIT INT TERM
 write_artifact_summary
 
 [ "$FAILURE_COUNT" -eq 0 ] || exit 1
-exit 0
+exit "$CLEANUP_STATUS"

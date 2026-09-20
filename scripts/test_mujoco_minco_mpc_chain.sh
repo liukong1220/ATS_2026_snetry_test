@@ -81,8 +81,27 @@ START_Z="${START_Z:-0.42}"
 START_YAW="${START_YAW:-0.0}"
 GOAL_X="${GOAL_X:-1.0}"
 GOAL_Y="${GOAL_Y:-0.06}"
-# 单点测试的目标朝向四元数 w；当前只使用零 yaw 的 w=1。
-GOAL_YAW_W="${GOAL_YAW_W:-1.0}"
+# Goal yaw is radians; planar quaternions always carry both z and w.
+GOAL_YAW="${GOAL_YAW:-0.0}"
+goal_quaternion() {
+  python3 - "$1" <<'PY'
+import math
+import sys
+try:
+    yaw = float(sys.argv[1])
+    if not math.isfinite(yaw):
+        raise ValueError("yaw must be finite")
+except ValueError as exc:
+    sys.exit(f"Invalid GOAL_YAW: {exc}")
+print(f"{math.sin(yaw / 2.0):.17g} {math.cos(yaw / 2.0):.17g}")
+PY
+}
+if [[ -v GOAL_YAW_W ]]; then
+  echo "GOAL_YAW_W is no longer accepted; specify GOAL_YAW in radians." >&2
+  exit 2
+fi
+GOAL_QUATERNION="$(goal_quaternion "${GOAL_YAW}")" || exit 2
+read -r GOAL_YAW_Z GOAL_YAW_W <<<"${GOAL_QUATERNION}"
 # 每个目标允许的最长执行时间（s）。
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
 # 回归路线：single、rectangle（验证横移）、south_corridor（RMUC 横墙窄回归）、
@@ -331,6 +350,75 @@ LEG_LABEL=""
 LEG_BEFORE_CONTACT=""
 LEG_AFTER_CONTACT=""
 LEG_AFTER_CONTACT_FORCE=""
+ACTION_STATUS=not_started
+NAVIGATION_SAFETY_STATUS=not_completed
+RECORDER_STATUS=not_started
+RECORDER_EVIDENCE_STATUS=not_started
+NAV_TRACKING_ANALYSIS_STATUS=not_run
+TEARDOWN_STATUS=not_started
+LAUNCH_WAIT_STATUS=not_started
+TEARDOWN_ESCALATION=none
+CLEANUP_DONE=0
+CLEANUP_STATUS=0
+RUNNER_STATUS_FILE="${LOG_DIR}/runner_status.env"
+
+write_runner_status() {
+  local runner_exit="$1"
+  printf 'action_status=%q\nnavigation_safety_status=%q\nrecorder_status=%q\nrecorder_evidence_status=%q\nnav_tracking_analysis_status=%q\nteardown_status=%q\nlaunch_wait_status=%q\nteardown_escalation=%q\nrunner_exit=%q\n' \
+    "${ACTION_STATUS}" "${NAVIGATION_SAFETY_STATUS}" "${RECORDER_STATUS}" "${RECORDER_EVIDENCE_STATUS}" \
+    "${NAV_TRACKING_ANALYSIS_STATUS}" "${TEARDOWN_STATUS}" "${LAUNCH_WAIT_STATUS}" \
+    "${TEARDOWN_ESCALATION}" "${runner_exit}" >"${RUNNER_STATUS_FILE}"
+}
+
+start_launch() {
+  # Bash background jobs inherit SIGINT ignored. Restore the default before
+  # Python starts so ROS launch can route SIGINT through its wakeup handler.
+  setsid env --default-signal=INT "$@" >"${LAUNCH_LOG}" 2>&1 &
+  LAUNCH_PID=$!
+}
+
+teardown_launch() {
+  local deadline line code
+  [[ "${TEARDOWN_STATUS}" == passed ]] && return 0
+  [[ "${TEARDOWN_STATUS}" == failed ]] && return 1
+  TEARDOWN_STATUS=passed
+  if [[ -n "${LAUNCH_PID:-}" ]]; then
+    # Launch owns child SIGINT fanout. Signalling the whole group here would
+    # interrupt each child's cleanup a second time when launch forwards it.
+    kill -INT "${LAUNCH_PID}" 2>/dev/null || true
+    deadline=$((SECONDS + 3))
+    while kill -0 "-${LAUNCH_PID}" 2>/dev/null && (( SECONDS < deadline )); do
+      sleep 0.1
+    done
+    if kill -0 "-${LAUNCH_PID}" 2>/dev/null; then
+      TEARDOWN_ESCALATION=TERM
+      TEARDOWN_STATUS=failed
+      kill -TERM "-${LAUNCH_PID}" 2>/dev/null || true
+      deadline=$((SECONDS + 1))
+      while kill -0 "-${LAUNCH_PID}" 2>/dev/null && (( SECONDS < deadline )); do
+        sleep 0.1
+      done
+      if kill -0 "-${LAUNCH_PID}" 2>/dev/null; then
+        TEARDOWN_ESCALATION=KILL
+        kill -KILL "-${LAUNCH_PID}" 2>/dev/null || true
+      fi
+    fi
+    LAUNCH_WAIT_STATUS=0
+    wait "${LAUNCH_PID}" 2>/dev/null || LAUNCH_WAIT_STATUS=$?
+    # Launch must handle normal SIGINT and exit zero; raw signal death alone
+    # cannot establish that all children shut down successfully.
+    [[ "${LAUNCH_WAIT_STATUS}" == 0 ]] || TEARDOWN_STATUS=failed
+    while IFS= read -r line; do
+      if [[ "${line}" == *"process has died"* || "${line}" == *"escalating to"* ]]; then
+        TEARDOWN_STATUS=failed
+      elif [[ "${line}" =~ exit\ code[[:space:]:=]+(-?[0-9]+) ]]; then
+        code="${BASH_REMATCH[1]}"
+        [[ "${code}" == 0 ]] || TEARDOWN_STATUS=failed
+      fi
+    done <"${LAUNCH_LOG}"
+  fi
+  [[ "${TEARDOWN_STATUS}" == passed ]]
+}
 
 stop_capture_process() {
   local pid="$1"
@@ -347,31 +435,69 @@ stop_capture_process() {
   wait "${pid}" 2>/dev/null || true
 }
 
-cleanup() {
-  if declare -F flush_leg_evidence >/dev/null; then
-    flush_leg_evidence || true
-  fi
-  for pid in "${STOPPED_PIDS[@]:-}"; do
-    kill -CONT "${pid}" 2>/dev/null || true
-  done
-  for pid in "${CAPTURE_PIDS[@]:-}"; do
-    stop_capture_process "${pid}"
-  done
-  if [[ -n "${GOAL_PID:-}" ]]; then
-    stop_capture_process "${GOAL_PID}"
-  fi
-  if [[ -n "${LAUNCH_PID:-}" ]]; then
-    kill -INT "-${LAUNCH_PID}" 2>/dev/null || true
-    sleep 3
-    kill -TERM "-${LAUNCH_PID}" 2>/dev/null || true
-    sleep 1
-    kill -KILL "-${LAUNCH_PID}" 2>/dev/null || true
-    wait "${LAUNCH_PID}" 2>/dev/null || true
+update_recorder_evidence_status() {
+  if [[ "${ATS_PROFILE_SKIP_ACTION:-0}" == 1 ]]; then
+    RECORDER_EVIDENCE_STATUS=not_applicable
+  elif [[ "${NAV_TRACKING_RECORDER:-1}" != 1 ]]; then
+    RECORDER_EVIDENCE_STATUS=disabled
+  elif [[ "${RECORDER_STATUS}" == failed ]]; then
+    RECORDER_EVIDENCE_STATUS=failed
+  elif [[ "${RECORDER_STATUS}" == passed && "${NAV_TRACKING_ANALYSIS_STATUS}" == 0 ]]; then
+    RECORDER_EVIDENCE_STATUS=passed
+  elif [[ "${NAV_TRACKING_ANALYSIS_STATUS}" == 1 ]]; then
+    RECORDER_EVIDENCE_STATUS=failed
+  else
+    RECORDER_EVIDENCE_STATUS=unverified
   fi
 }
-trap cleanup EXIT
+
+cleanup() {
+  local prior_status="${1:-$?}" pid
+  if [[ "${CLEANUP_DONE}" == 0 ]]; then
+    CLEANUP_DONE=1
+    FLUSHING_EVIDENCE=1
+    if declare -F flush_leg_evidence >/dev/null; then
+      flush_leg_evidence || CLEANUP_STATUS=1
+    fi
+    for pid in "${STOPPED_PIDS[@]:-}"; do
+      kill -CONT "${pid}" 2>/dev/null || true
+    done
+    for pid in "${CAPTURE_PIDS[@]:-}"; do
+      stop_capture_process "${pid}"
+    done
+    if [[ -n "${GOAL_PID:-}" ]]; then
+      stop_capture_process "${GOAL_PID}"
+    fi
+    teardown_launch || CLEANUP_STATUS=1
+    [[ "${RECORDER_STATUS}" != failed ]] || CLEANUP_STATUS=1
+    update_recorder_evidence_status
+    if [[ "${NAV_TRACKING_GATE:-1}" == 1 && "${RECORDER_EVIDENCE_STATUS}" != passed &&
+          "${RECORDER_EVIDENCE_STATUS}" != not_applicable ]]; then
+      echo "FAIL: mandatory recorder evidence is ${RECORDER_EVIDENCE_STATUS} (analysis=${NAV_TRACKING_ANALYSIS_STATUS})"
+      CLEANUP_STATUS=1
+    fi
+  fi
+  [[ "${prior_status}" == 0 ]] || CLEANUP_STATUS="${prior_status}"
+  if ! write_runner_status "${CLEANUP_STATUS}"; then
+    [[ "${CLEANUP_STATUS}" != 0 ]] || CLEANUP_STATUS=1
+  fi
+  return "${CLEANUP_STATUS}"
+}
+
+runner_exit() {
+  local status=$?
+  trap - EXIT
+  cleanup "${status}"
+  exit "$?"
+}
+trap runner_exit EXIT
 
 fail() {
+  if [[ "${ACTION_STATUS}" == running ]]; then
+    ACTION_STATUS=failed
+  elif [[ "${RECORDER_STATUS}" != failed ]]; then
+    NAVIGATION_SAFETY_STATUS=failed
+  fi
   echo "FAIL: $1"
   echo "launch_log=${LAUNCH_LOG}"
   tail -n 160 "${LAUNCH_LOG}" || true
@@ -1289,10 +1415,11 @@ run_p2_fault_injection() {
       # 测得的延迟只会偏保守，绝不会漏掉注入后的第一条消息。
       : >"${fault_trigger}"
       FAULT_OBSERVER_FAULT_EPOCH="${SECONDS}"
-      timeout 8 ros2 param set /ats_mujoco_sim lidar_occlusion_enabled true \
+      # Direct service ownership plus two fresh empty source scans; no daemon graph cache.
+      timeout 8 python3 "${WORKSPACE_DIR}/scripts/set_mujoco_lidar_occlusion.py" true \
         >/tmp/ats_p2_fault_unknown_occlusion_enable.out 2>&1 || \
         fail "cannot enable MuJoCo LiDAR occlusion"
-      timeout 8 ros2 param set /ats_rog_map test_reset_to_unknown true \
+      timeout 8 ros2 param set --no-daemon /ats_rog_map test_reset_to_unknown true \
         >/tmp/ats_p2_fault_unknown_source_reset.out 2>&1 || \
         fail "cannot reset ROGMap source to unknown"
       wait_for_command "unknown fault keeps ROGMap input fresh" 12 \
@@ -1310,7 +1437,7 @@ run_p2_fault_injection() {
         test -s "${audit_report}"
       wait "${audit_capture_pid}" || \
         fail "unknown audit capture did not validate: $(<"${audit_log}")"
-      timeout 8 ros2 param set /ats_rog_map_adapter test_mask_secondary_evidence true \
+      timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_mask_secondary_evidence true \
         >/tmp/ats_p2_fault_unknown_mask_enable.out 2>&1 || \
         fail "cannot enable adapter secondary-evidence mask"
       # 下游 blocked 证据：融合后的规划栅格全 -1 只说明下游被正确阻断，
@@ -1340,13 +1467,13 @@ run_p2_fault_injection() {
       wait_fault_observer_window "${FAULT_OBSERVER_FAULT_EPOCH}" 32
       : >"${recovery_trigger}"
       record_unknown_timeline recovery_started_ns
-      timeout 8 ros2 param set /ats_rog_map_adapter test_mask_secondary_evidence false \
+      timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_mask_secondary_evidence false \
         >/tmp/ats_p2_fault_unknown_mask_disable.out 2>&1 || \
         fail "cannot disable adapter secondary-evidence mask"
-      timeout 8 ros2 param set /ats_rog_map test_reset_to_unknown false \
+      timeout 8 ros2 param set --no-daemon /ats_rog_map test_reset_to_unknown false \
         >/tmp/ats_p2_fault_unknown_source_rearm.out 2>&1 || \
         fail "cannot rearm ROGMap source reset fixture"
-      timeout 8 ros2 param set /ats_mujoco_sim lidar_occlusion_enabled false \
+      timeout 8 python3 "${WORKSPACE_DIR}/scripts/set_mujoco_lidar_occlusion.py" false \
         >/tmp/ats_p2_fault_unknown_occlusion_disable.out 2>&1 || \
         fail "cannot restore MuJoCo LiDAR raycast"
       wait_for_command "unknown recovery restores adapter ready" 15 \
@@ -1396,12 +1523,17 @@ run_p2_fault_injection() {
       find_unreachable_goal
       publish_relative_fault_goal unreachable_precondition
       log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
-      send_fault_goal unreachable "${UNREACHABLE_GOAL_FRAME}" "${UNREACHABLE_GOAL_X}" "${UNREACHABLE_GOAL_Y}" 30
-      wait_for_fault_action_result unreachable 5 12
+      # NO_PATH is recoverable on a changing map. Bound this test action inside
+      # the existing 12s observer window, without altering server recovery policy.
+      # A timeout alone is NOT no-path evidence: keep the planner cause and zero gates.
+      send_fault_goal unreachable "${UNREACHABLE_GOAL_FRAME}" "${UNREACHABLE_GOAL_X}" "${UNREACHABLE_GOAL_Y}" 8
+      wait_for_fault_action_result unreachable 3 12
+      grep -q 'message: goal timeout' "${FAULT_ACTION_OUTPUT}" || \
+        fail "unreachable action did not finish at its bounded goal deadline"
       wait_for_command "unreachable goal triggers emergency stop" 10 \
         topic_field_equals /planner/emergency_stop data true
       wait_for_command "free unreachable goal is classified no-path" 8 \
-        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'failed.*no path'"
+        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq 'jps failed: no path expanded=[1-9][0-9]* clearance=0.341'"
       capture_zero_outputs unreachable
       ;;
     freeze)
@@ -1855,10 +1987,10 @@ assert_no_physical_contact() {
 # 三种情况在日志里长得一样，行为 owner 无法区分。
 #
 # recorder 只订阅，不发布、不调用服务、不持有 lease，因此加入它不改变导航栈的任何
-# 决策；analyzer 完全离线。默认不作为门禁（NAV_TRACKING_GATE=1 才判失败），
-# 所以本块不会翻转任何既有 leg 的通过/失败结论。
+# 决策；analyzer 完全离线。默认要求完整且通过的独立取证；进程正常退出不能替代
+# 证据通过。显式 NAV_TRACKING_GATE=0 仅用于非验收取证，仍保留独立状态。
 NAV_TRACKING_RECORDER="${NAV_TRACKING_RECORDER:-1}"
-NAV_TRACKING_GATE="${NAV_TRACKING_GATE:-0}"
+NAV_TRACKING_GATE="${NAV_TRACKING_GATE:-1}"
 # 证据目录必须在 LOG_DIR 之外：运行开始时 `rm -rf "${LOG_DIR}"` 会连同上一轮
 # 的 nav_tracking 产物一起删除，首违证据就只能靠当轮存活。按 domain 命名，
 # 因此并发 domain 不会互相覆盖。
@@ -1887,26 +2019,30 @@ start_nav_tracking_recorder() {
   local label="$1" dir="$2"
   [[ "${NAV_TRACKING_RECORDER}" == "1" ]] || return 0
   mkdir -p "${dir}"
+  [[ "${RECORDER_STATUS}" == failed ]] || RECORDER_STATUS=running
   NAV_TRACKING_LEG_DIR="${dir}"
   python3 "${WORKSPACE_DIR}/scripts/nav_tracking_recorder.py" \
     --output-dir "${dir}" --rate-hz "${NAV_TRACKING_RATE_HZ}" \
+    --startup-timeout-sec "${NAV_TRACKING_START_TIMEOUT}" \
     >"${dir}/recorder.out" 2>&1 &
   NAV_TRACKING_PID=$!
   CAPTURE_PIDS+=("${NAV_TRACKING_PID}")
   local deadline=$((SECONDS + NAV_TRACKING_START_TIMEOUT))
   while (( SECONDS < deadline )); do
     if ! kill -0 "${NAV_TRACKING_PID}" 2>/dev/null; then
+      RECORDER_STATUS=failed
       cat "${dir}/recorder.out" || true
-      fail "${label} nav tracking recorder exited before recording anything"
+      fail "${label} nav tracking recorder exited before initial evidence readiness"
     fi
-    if [[ -s "${dir}/samples.jsonl" ]]; then
-      echo "OK: ${label} nav tracking recorder is sampling -> ${dir}"
+    if grep -q "^RECORDER_READY pid=${NAV_TRACKING_PID} first_tick=1$" "${dir}/recorder.out"; then
+      echo "OK: ${label} nav tracking recorder initial evidence ready -> ${dir}"
       return 0
     fi
     sleep 0.5
   done
   cat "${dir}/recorder.out" || true
-  fail "${label} nav tracking recorder produced no samples within ${NAV_TRACKING_START_TIMEOUT}s"
+  RECORDER_STATUS=failed
+  fail "${label} nav tracking recorder initial evidence not ready within ${NAV_TRACKING_START_TIMEOUT}s"
 }
 
 stop_nav_tracking_recorder() {
@@ -1929,10 +2065,17 @@ stop_nav_tracking_recorder() {
     sleep 0.2
   done
   if kill -0 "${recorder_pid}" 2>/dev/null; then
+    RECORDER_STATUS=failed
     stop_capture_process "${recorder_pid}"
     echo "WARN: ${label} nav tracking recorder needed a hard stop; summary may be absent"
   fi
-  wait "${recorder_pid}" 2>/dev/null || true
+  local recorder_exit=0
+  wait "${recorder_pid}" 2>/dev/null || recorder_exit=$?
+  if [[ "${recorder_exit}" != 0 ]]; then
+    RECORDER_STATUS=failed
+  elif [[ "${RECORDER_STATUS}" != failed ]]; then
+    RECORDER_STATUS=passed
+  fi
   NAV_TRACKING_PID=""
   if [[ -n "${NAV_TRACKING_LEG_DIR}" ]]; then
     tail -n 3 "${NAV_TRACKING_LEG_DIR}/recorder.out" 2>/dev/null || true
@@ -1944,6 +2087,9 @@ analyze_nav_tracking_leg() {
   [[ "${NAV_TRACKING_RECORDER}" == "1" ]] || return 0
   [[ -s "${dir}/samples.jsonl" ]] || {
     echo "WARN: ${label} has no nav tracking samples to analyze"
+    if [[ "${NAV_TRACKING_ANALYSIS_STATUS}" == not_run || "${NAV_TRACKING_ANALYSIS_STATUS}" == 0 ]]; then
+      NAV_TRACKING_ANALYSIS_STATUS=2
+    fi
     return 0
   }
   python3 "${WORKSPACE_DIR}/scripts/analyze_nav_tracking.py" \
@@ -1952,15 +2098,16 @@ analyze_nav_tracking_leg() {
     --width "$(nav_tracking_footprint_param footprint_width)" \
     --safety-margin "$(nav_tracking_footprint_param footprint_safety_margin)" \
     >"${dir}/analysis.out" 2>&1 || status=$?
-  sed 's/^/  /' "${dir}/analysis.out"
-  # 退出码 1 表示"分析完整且发现冲突"，2 表示"证据不足以判定"。两者都不默认判失败：
-  # 本轮这层是取证，不是新门禁；打开 NAV_TRACKING_GATE=1 才让它决定 leg 结论。
-  if [[ "${NAV_TRACKING_GATE}" == "1" && "${status}" -ne 0 && "${FLUSHING_EVIDENCE:-0}" != "1" ]]; then
-    fail "${label} nav tracking analysis returned ${status} (see ${dir}/verdict.json)"
+  # A proven conflict dominates incomplete evidence, regardless of leg order.
+  if [[ "${status}" == 1 || "${NAV_TRACKING_ANALYSIS_STATUS}" == not_run ||
+        "${NAV_TRACKING_ANALYSIS_STATUS}" == 0 ]]; then
+    NAV_TRACKING_ANALYSIS_STATUS="${status}"
   fi
+  sed 's/^/  /' "${dir}/analysis.out"
+  # Keep runtime safety separate from offline evidence. Final cleanup gates
+  # mandatory evidence after recorder and launch teardown have both completed.
   if [[ "${status}" -ne 0 ]]; then
-    echo "NOTE: ${label} nav tracking analysis exit=${status} (evidence only; " \
-      "NAV_TRACKING_GATE=0)"
+    echo "NOTE: ${label} nav tracking analysis exit=${status} (NAV_TRACKING_GATE=${NAV_TRACKING_GATE})"
   fi
   return 0
 }
@@ -2004,6 +2151,36 @@ flush_leg_evidence() {
   fi
 }
 
+# Goal-set coordinates come from existing route fixtures, but historical free
+# space is not evidence for this launch. Check the live grid before each leg.
+verify_goal_set_free() {
+  [[ "${GOAL_SET_VERIFY_FREE:-0}" == 1 ]] || return 0
+  timeout 15 python3 - "${WORKSPACE_DIR}/scripts" "$1" "$2" <<'PY'
+import sys
+import time
+sys.path.insert(0, sys.argv[1])
+from query_occupancy_grid import (
+    GridCapture, cell_is_traversable, rclpy, validate_grid, world_to_grid,
+)
+rclpy.init()
+node = GridCapture('/rc_esdf/planning_grid')
+try:
+    deadline = time.monotonic() + 10.0
+    while node.grid is None and time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.1)
+    grid = node.grid
+    if grid is None or not validate_grid(grid) or grid.header.frame_id != 'map':
+        raise RuntimeError('missing/invalid map-frame planning grid')
+    cell = world_to_grid(grid, float(sys.argv[2]), float(sys.argv[3]))
+    if cell is None or not cell_is_traversable(grid, *cell, 100, 0.42):
+        raise RuntimeError('goal lacks known-free 0.42 m grid clearance')
+    print(f'OK: live known-free goal ({sys.argv[2]}, {sys.argv[3]}), clearance=0.42m')
+finally:
+    node.destroy_node()
+    rclpy.shutdown()
+PY
+}
+
 run_navigation_goal() {
   local index="$1"
   local name="${GOAL_NAMES[index]}"
@@ -2027,10 +2204,14 @@ run_navigation_goal() {
   LEG_AFTER_CONTACT="${after_contact}"
   LEG_AFTER_CONTACT_FORCE="${after_contact_force}"
   EVIDENCE_FLUSHED=0
+  # Prerequisite failures belong to this leg, never the previous recorder's
+  # artifacts. Keep the process handle intact for independent teardown.
+  NAV_TRACKING_LEG_DIR=""
 
   log_line_count="$(wc -l < "${LAUNCH_LOG}")"
   log_start_line=$((log_line_count + 1))
   capture_pose "${before_pose}" || fail "cannot capture pose before ${name}"
+  verify_goal_set_free "${goal_x}" "${goal_y}" || fail "${name} goal-set free-space prerequisite failed"
   # 物理接触基线。读不到 telemetry 就 fail-closed，避免"没有证据"被当成"没有接触"。
   capture_contact_telemetry "${before_contact}" || \
     fail "cannot capture contact telemetry before ${name}"
@@ -2066,9 +2247,10 @@ run_navigation_goal() {
   # 等 action 返回再开始录就已经错过了。
   start_nav_tracking_recorder "${name} leg" "${tracking_dir}"
 
+  ACTION_STATUS=running
   timeout "${GOAL_TIMEOUT}" ros2 action send_goal --feedback /ats_navigate_to_pose \
     ats_navigation_interfaces/action/NavigateToPose \
-    "{goal_pose: {header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
+    "{goal_pose: {header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: ${GOAL_YAW_Z}, w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
     >"${goal_output}" 2>"${goal_error}" &
   GOAL_PID=$!
 
@@ -2082,7 +2264,7 @@ run_navigation_goal() {
   if kill -0 "${GOAL_PID}" 2>/dev/null; then
     fail "${name} ATS action did not finish before timeout"
   fi
-  wait "${GOAL_PID}" 2>/dev/null || true
+  wait "${GOAL_PID}" 2>/dev/null || fail "${name} ATS action client exited nonzero"
   unset GOAL_PID
   cat "${goal_output}"
   grep -q 'Goal accepted' "${goal_output}" || fail "${name} ATS action was not accepted"
@@ -2090,6 +2272,7 @@ run_navigation_goal() {
     fail "${name} ATS action did not succeed"
   grep -q 'Feedback:' "${goal_output}" || fail "${name} ATS action did not return feedback"
   echo "OK: ${name} ATS Navigate action returned feedback and SUCCEEDED"
+  ACTION_STATUS=succeeded
 
   for capture in "${topic_pids[@]}"; do
     pid="${capture%%:*}"
@@ -2144,6 +2327,7 @@ export_control_telemetry() {
     --start-z "${START_Z}" --start-yaw "${START_YAW}" \
     --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" \
     --goal-yaw-w "${GOAL_YAW_W}" \
+    --goal-yaw "${GOAL_YAW}" --goal-yaw-z "${GOAL_YAW_Z}" \
     --run-start-epoch-ns "${QP_TELEMETRY_RUN_START_EPOCH_NS}" \
     --sampling-window-cycles "${QP_TELEMETRY_WINDOW_CYCLES}" || \
     fail "cannot export /ats_swerve_mpc/dump_control_telemetry"
@@ -2191,8 +2375,7 @@ else
   LAUNCH_ARGS+=(enable_test_fault_injection:=false)
 fi
 
-setsid ros2 launch "${LAUNCH_ARGS[@]}" >"${LAUNCH_LOG}" 2>&1 &
-LAUNCH_PID=$!
+start_launch ros2 launch "${LAUNCH_ARGS[@]}"
 
 wait_for_command "node graph" 60 timeout 4 ros2 node list --no-daemon
 wait_for_topic_once /localization 70 best_effort
@@ -2303,6 +2486,9 @@ if [[ "${ATS_PROFILE_SKIP_ACTION}" == "1" ]]; then
   done
   assert_zero_stream "no-goal ${SELECTED_CMD_VEL_TOPIC}" /tmp/ats_minco_mpc_cmd_vel_stream.out
   export_control_telemetry
+  ACTION_STATUS=skipped
+  NAVIGATION_SAFETY_STATUS=passed
+  cleanup 0 || exit "$?"
   echo "PASS: map-chain-only profile completed with ${SELECTED_CMD_VEL_TOPIC} held at zero."
   exit 0
 fi
@@ -2344,4 +2530,6 @@ if [[ "${P3_FAULT_CASE}" != "none" ]]; then
   run_p3_action_fault_injection "${P3_FAULT_CASE}"
 fi
 
+NAVIGATION_SAFETY_STATUS=passed
+cleanup 0 || exit "$?"
 echo "PASS: MuJoCo JPS/MINCO/clearance-aware yaw/SE2 MPC '${TEST_PROFILE}' profile completed."

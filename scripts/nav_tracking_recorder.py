@@ -65,6 +65,7 @@ import os
 import time
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import OccupancyGrid
 from nav_msgs.msg import Odometry
@@ -319,7 +320,8 @@ class NavTrackingRecorder(Node):
         self._reference_mono = None
 
         self._seen_reference_keys = set()
-        self._seen_snapshot_digests = set()
+        self._seen_snapshot_identities = set()
+        self._snapshot_payload_by_digest = {}
         self._seen_layer_digests = {}
         self._snapshot_payloads_written = 0
         self._snapshot_payloads_truncated = False
@@ -331,6 +333,9 @@ class NavTrackingRecorder(Node):
         self._layer_retained = {}
         self._topic_counts = {}
         self._tick = 0
+        self._recording_start_mono = None
+        self._warmup_missing = None
+        self._event("warmup_started", {"startup_timeout_s": args.startup_timeout_sec})
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -610,12 +615,15 @@ class NavTrackingRecorder(Node):
         }
         self._snapshot_identity = identity
         self._snapshot_mono = time.monotonic()
-        if digest in self._seen_snapshot_digests:
+        identity_key = json.dumps(identity, sort_keys=True)
+        if identity_key in self._seen_snapshot_identities:
             return
-        self._seen_snapshot_digests.add(digest)
+        self._seen_snapshot_identities.add(identity_key)
         record = dict(identity)
         record["mono_s"] = time.monotonic() - self._start_mono
-        if self._snapshot_payloads_written < self._args.max_snapshot_payloads:
+        if digest in self._snapshot_payload_by_digest:
+            record["payload"] = self._snapshot_payload_by_digest[digest]
+        elif self._snapshot_payloads_written < self._args.max_snapshot_payloads:
             name = "snapshot_%020d_%s.json.gz" % (
                 int(msg.publication_sequence), digest)
             path = os.path.join(self._output_dir, "snapshot_payload", name)
@@ -634,6 +642,7 @@ class NavTrackingRecorder(Node):
         else:
             self._snapshot_payloads_truncated = True
             record["payload"] = None
+        self._snapshot_payload_by_digest[digest] = record["payload"]
         self._snapshots.write(record)
 
     def _on_layer(self, topic, msg):
@@ -724,6 +733,15 @@ class NavTrackingRecorder(Node):
             return None
         translation = transform.transform.translation
         rotation = transform.transform.rotation
+        if (transform.header.frame_id != self._args.grid_frame or
+                transform.child_frame_id != self._args.control_frame or
+                not all(math.isfinite(value) for value in (
+                    translation.x, translation.y, translation.z,
+                    rotation.x, rotation.y, rotation.z, rotation.w)) or
+                not math.isclose(sum(value * value for value in (
+                    rotation.x, rotation.y, rotation.z, rotation.w)),
+                    1.0, rel_tol=1e-3, abs_tol=1e-3)):
+            return None
         return {
             "stamp_identity": stamp_identity(transform.header.stamp),
             "x": float(translation.x),
@@ -733,8 +751,38 @@ class NavTrackingRecorder(Node):
                 float(rotation.z), float(rotation.w)),
         }
 
+    def _initial_missing(self, map_from_odom):
+        """Initial evidence only; after the first sample no tick is filtered."""
+        missing = []
+        actual = self._localization
+        if (actual is None or actual["frame_id"] != self._args.control_frame or
+                not all(math.isfinite(actual[key]) for key in ("x", "y", "yaw"))):
+            missing.append("actual")
+        if map_from_odom is None:
+            missing.append("map_from_odom")
+        snapshot = self._snapshot_identity
+        if (snapshot is None or not snapshot["ready"] or
+                snapshot["frame_id"] != self._args.grid_frame or
+                snapshot["info"]["width"] <= 0 or snapshot["info"]["height"] <= 0 or
+                snapshot["cell_count"] !=
+                snapshot["info"]["width"] * snapshot["info"]["height"] or
+                not math.isfinite(snapshot["info"]["resolution"]) or
+                snapshot["info"]["resolution"] <= 0 or
+                not self._snapshot_payload_by_digest.get(snapshot["occupancy_digest"])):
+            missing.append("ready_snapshot")
+        return missing
+
     def _on_tick(self):
         now_mono = time.monotonic()
+        map_from_odom = self._lookup_map_from_odom()
+        starting = self._recording_start_mono is None
+        if starting:
+            missing = self._initial_missing(map_from_odom)
+            if missing != self._warmup_missing:
+                self._warmup_missing = missing
+                self._event("warmup_prerequisites", {"missing": missing})
+            if missing or now_mono >= self._start_mono + self._args.startup_timeout_sec:
+                return
         self._tick += 1
         actual = self._localization
         reference = self._reference
@@ -780,9 +828,23 @@ class NavTrackingRecorder(Node):
             "reference_pose_count": reference["pose_count"] if reference else None,
             "reference_age_s_mono": self._age(self._reference_mono),
             "tracking_error": error,
-            "map_from_odom": self._lookup_map_from_odom(),
+            "map_from_odom": map_from_odom,
         }
         self._samples.write(record)
+        if starting:
+            self._recording_start_mono = now_mono
+            self._event("recording_started", {
+                "first_tick": self._tick,
+                "warmup_duration_s_mono": now_mono - self._start_mono,
+                "actual_stamp_identity": actual["stamp_identity"],
+                "tf_stamp_identity": map_from_odom["stamp_identity"],
+                "snapshot": self._snapshot_identity,
+            })
+            # Flush the first valid sample and lifecycle event before allowing a
+            # runner to dispatch. Neither process discovery nor file creation is
+            # evidence that subscriptions have delivered usable data.
+            print("RECORDER_READY pid=%d first_tick=%d" % (os.getpid(), self._tick),
+                  flush=True)
 
     # ---- shutdown ----------------------------------------------------------
 
@@ -792,6 +854,11 @@ class NavTrackingRecorder(Node):
             "duration_s_mono": time.monotonic() - self._start_mono,
             "ticks": self._tick,
             "rate_hz": self._args.rate_hz,
+            "recording_started": self._recording_start_mono is not None,
+            "recording_start_s_mono": (
+                self._recording_start_mono - self._start_mono
+                if self._recording_start_mono is not None else None),
+            "warmup_missing": self._warmup_missing,
             "grid_frame": self._args.grid_frame,
             "control_frame": self._args.control_frame,
             "records": {
@@ -893,6 +960,8 @@ def parse_args(argv=None):
                         help="tick rate of the same-clock sample stream")
     parser.add_argument("--duration-sec", type=float, default=0.0,
                         help="stop after this many seconds; 0 runs until killed")
+    parser.add_argument("--startup-timeout-sec", type=float, default=20.0,
+                        help="bounded wait for initial actual/TF/ready snapshot evidence")
     parser.add_argument("--grid-frame", default="map",
                         help="frame the fused planning grid is published in")
     parser.add_argument("--control-frame", default="odom",
@@ -920,7 +989,10 @@ def parse_args(argv=None):
     parser.add_argument("--max-snapshot-payloads", type=int, default=400,
                         help="bound on stored full snapshots; excess is flagged")
     parser.add_argument("--max-layer-payloads", type=int, default=200)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not math.isfinite(args.startup_timeout_sec) or args.startup_timeout_sec <= 0:
+        parser.error("--startup-timeout-sec must be finite and positive")
+    return args
 
 
 def main(argv=None):
@@ -930,24 +1002,38 @@ def main(argv=None):
     node = NavTrackingRecorder(args)
     reason = "signal"
     try:
-        if args.duration_sec > 0.0:
-            deadline = time.monotonic() + args.duration_sec
+        deadline = node._start_mono + args.startup_timeout_sec
+        while (rclpy.ok() and node._recording_start_mono is None and
+               time.monotonic() < deadline):
+            rclpy.spin_once(node, timeout_sec=min(0.1, max(0.0, deadline - time.monotonic())))
+        if node._recording_start_mono is None:
+            reason = "startup_timeout" if rclpy.ok() else "shutdown"
+            node._event("warmup_failed", {"reason": reason, "missing": node._warmup_missing})
+        elif args.duration_sec > 0.0:
+            deadline = node._recording_start_mono + args.duration_sec
             while rclpy.ok() and time.monotonic() < deadline:
                 rclpy.spin_once(node, timeout_sec=0.1)
-            reason = "duration_elapsed"
+            reason = "duration_elapsed" if rclpy.ok() else "shutdown"
         else:
             rclpy.spin(node)
             reason = "shutdown"
     except KeyboardInterrupt:
         reason = "interrupt"
+    except ExternalShutdownException:
+        reason = "shutdown"
+    except RuntimeError:
+        # Humble can invalidate a subscription while SIGINT shuts down the
+        # context, before its executor raises ExternalShutdownException. Never
+        # classify a runtime failure in an active context as normal shutdown.
+        if node.context.ok():
+            reason = "runtime_error"
+            raise
+        reason = "shutdown"
     finally:
         summary = node.write_summary(reason)
         node.close()
         node.destroy_node()
-        try:
-            rclpy.shutdown()
-        except Exception:
-            pass
+        node.context.try_shutdown()
         print("RECORDER: reason=%s ticks=%d samples=%d references=%d snapshots=%d "
               "events=%d" % (
                   summary["reason"], summary["ticks"],
@@ -956,7 +1042,7 @@ def main(argv=None):
         if summary["topics_without_messages"]:
             print("RECORDER: topics without messages: %s"
                   % ", ".join(summary["topics_without_messages"]))
-    return 0
+    return 0 if summary["recording_started"] else 2
 
 
 if __name__ == "__main__":

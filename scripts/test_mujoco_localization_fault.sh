@@ -2,10 +2,24 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FAULT_CASE="${P4_FAULT_CASE:-epoch_jump}"
+FAULT_CASE="${P4_FAULT_CASE:-odometry_stale}"
 DOMAIN_ID="${ROS_DOMAIN_ID:-210}"
 RESULT_FILE="${P4_RESULT_FILE:-/tmp/ats_p4_localization_${FAULT_CASE}_${DOMAIN_ID}.json}"
 LAUNCH_LOG="${P4_LAUNCH_LOG:-/tmp/ats_p4_localization_${FAULT_CASE}_${DOMAIN_ID}.log}"
+RELOCALIZATION_MODE="${P4_RELOCALIZATION_MODE:-real}"
+if [[ "${RELOCALIZATION_MODE}" != real && "${RELOCALIZATION_MODE}" != synthetic ]]; then
+  echo "P4_RELOCALIZATION_MODE must be real or synthetic" >&2
+  exit 2
+fi
+if [[ "${RELOCALIZATION_MODE}" == real && "${FAULT_CASE}" != odometry_stale ]]; then
+  echo "Mutation faults require explicit P4_RELOCALIZATION_MODE=synthetic" >&2
+  exit 2
+fi
+LAUNCH_GICP=true
+[[ "${RELOCALIZATION_MODE}" != synthetic ]] || LAUNCH_GICP=false
+if [[ "${RELOCALIZATION_MODE}" == synthetic ]]; then
+  echo "Synthetic-observation-assisted fixture; this does not validate real GICP recovery."
+fi
 
 case "${FAULT_CASE}" in
   odometry_stale|delayed|gicp_rejected|false_match|epoch_jump|tf_loss) ;;
@@ -28,17 +42,15 @@ export ROS_LOG_DIR="${ROS_LOG_DIR:-/tmp/ats_p4_ros_logs_${DOMAIN_ID}}"
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-SHM}"
 
 python3 scripts/evaluate_mujoco_localization_fault.py \
-  --fault "${FAULT_CASE}" --output "${RESULT_FILE}" &
+  --fault "${FAULT_CASE}" --relocalization-mode "${RELOCALIZATION_MODE}" --output "${RESULT_FILE}" &
 EVALUATOR_PID=$!
 
-setsid ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
-  launch_swerve_mpc:=true launch_twist_bridge:=true \
-  launch_rog_map:=true planning_grid_owner:=rog_map \
-  launch_localization_fusion:=true \
+setsid env --default-signal=INT ros2 launch ats_mujoco_sim rmuc_2025_mujoco.launch.py \
+  planning_grid_owner:=rog_map launch_small_gicp_relocalization:="${LAUNCH_GICP}" \
   mujoco_odom_topic:=/odometry_raw fusion_odom_topic:=/odometry \
   use_viewer:=false show_viewer:=false launch_mujoco_rviz:=false \
   enable_lidar:=true lidar_backend:=cpu lidar_downsample:=24 enable_tof:=false \
-  start_x:=-10.66 start_y:=1.47 start_z:=0.42 start_yaw:=0.0 \
+  start_x:=-0.18 start_y:=0.06 start_z:=0.42 start_yaw:=0.0 \
   nav_start_delay_sec:=9.0 rog_map_start_delay_sec:=15.0 map_start_delay_sec:=2.0 \
   rviz_delay_sec:=1000.0 log_level:=warn >"${LAUNCH_LOG}" 2>&1 &
 LAUNCH_PID=$!
@@ -46,7 +58,8 @@ LAUNCH_PID=$!
 cleanup() {
   kill "${EVALUATOR_PID}" 2>/dev/null || true
   wait "${EVALUATOR_PID}" 2>/dev/null || true
-  kill -INT "-${LAUNCH_PID}" 2>/dev/null || true
+  # Launch forwards SIGINT once; group signals are only for escalation.
+  kill -INT "${LAUNCH_PID}" 2>/dev/null || true
   sleep 2
   kill -TERM "-${LAUNCH_PID}" 2>/dev/null || true
   sleep 1
@@ -72,4 +85,4 @@ if kill -0 "${EVALUATOR_PID}" 2>/dev/null; then
 fi
 wait "${EVALUATOR_PID}"
 cat "${RESULT_FILE}"
-echo "PASS: P4 localization fault ${FAULT_CASE}; result=${RESULT_FILE}"
+echo "PASS: P4 localization fault ${FAULT_CASE}; observation_mode=${RELOCALIZATION_MODE}; result=${RESULT_FILE}"

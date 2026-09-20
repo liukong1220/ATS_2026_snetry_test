@@ -136,7 +136,7 @@ class Fixture(object):
         self.mono = 0.0
 
     def add_snapshot(self, data, publication_sequence, source_generation,
-                     threshold=50, unknown_is_obstacle=True, frame_id="map"):
+                     threshold=50, unknown_is_obstacle=True, frame_id="map", epoch=1):
         digest = digest_of(data)
         identity = {
             "stamp_identity": "%d.000000000" % (100 + publication_sequence),
@@ -145,7 +145,7 @@ class Fixture(object):
             "ready": True,
             "unknown_is_obstacle": unknown_is_obstacle,
             "occupied_value_threshold": threshold,
-            "localization_epoch": 1,
+            "localization_epoch": epoch,
             "source_generation": source_generation,
             "publication_sequence": publication_sequence,
             "occupancy_digest": digest,
@@ -184,6 +184,19 @@ class Fixture(object):
             "mono_s": self.mono, "reference_index": len(self.references),
         }
         self.references.append(record)
+        if self.snapshots:
+            snapshot = self.snapshots[-1]
+            self.events.append({"kind": "execution_command", "mono_s": self.mono,
+                                "payload": {
+                                    "mode": 1, "command_sequence": len(self.references),
+                                    "manager_incarnation": 1, "goal_id": 5,
+                                    "localization_epoch": snapshot["localization_epoch"],
+                                    "map_generation": snapshot["source_generation"],
+                                    "map_publication_sequence": snapshot["publication_sequence"],
+                                    "reference_stamp_identity": stamp_identity,
+                                    "reference_frame_id": frame_id,
+                                    "reference_pose_count": len(poses),
+                                    "reference_poses": poses}})
         return record
 
     def add_sample(self, map_pose, snapshot_identity, reference,
@@ -231,8 +244,11 @@ class Fixture(object):
             "map_status": {"ready": True, "rog_generation": 7,
                            "publication_sequence": 11},
             "snapshot": snapshot_identity, "snapshot_age_s_mono": 0.02,
-            "execution": {"mode": 1, "command_sequence": 3, "goal_id": 5,
-                          "reference_frame_id": "odom"},
+            "execution": next((dict(event["payload"]) for event in self.events
+                               if event.get("kind") == "execution_command" and
+                               reference is not None and
+                               event["payload"].get("reference_stamp_identity") ==
+                               reference["stamp_identity"]), {}),
             "execution_age_s_mono": 0.02,
             "planner_status": {"state": 2, "failure_reason": 0, "goal_id": 5},
             "reference_digest": reference["digest"] if reference else None,
@@ -466,6 +482,89 @@ def case_map_update_occupies_rest_pose(root):
           "Q2 also fires, and Q3 is what distinguishes the owner")
 
 
+def case_first_conflict_flip_with_free_rest(root):
+    """A final free rest pose must not hide a transient first-conflict map flip."""
+    variants = ("complete", "missing_frame", "missing_tf", "wrong_direction",
+                "missing_payload", "missing_rest_tf", "no_flip")
+    for variant in variants:
+        fixture = Fixture(root, "first_conflict_" + variant)
+        first = fixture.add_snapshot(wall_grid(), publication_sequence=1,
+                                     source_generation=5)
+        reference = fixture.add_reference(
+            [(x, ROBOT_Y, 0.0) for x in (0.8, 1.4, 2.0)])
+        fixture.add_sample((0.8, ROBOT_Y, 0.0), first, reference)
+        second_data = wall_grid(extra_blocked=[(20, 15)])
+        if variant == "no_flip":
+            second_data = wall_grid(extra_blocked=[(25, 35)])
+        second = fixture.add_snapshot(
+            second_data, publication_sequence=2, source_generation=6,
+            frame_id="" if variant == "missing_frame" else "map")
+        fixture.add_sample((2.0, ROBOT_Y, 0.0), second, reference)
+        if variant == "missing_tf":
+            fixture.samples[-1]["map_from_odom"] = None
+        if variant == "wrong_direction":
+            fixture.samples[-1]["actual"]["frame_id"] = "lidar"
+        # The last map clears the conflict cell again. The rest pose is free in
+        # every map, so evaluating only that pose would incorrectly answer no.
+        third = fixture.add_snapshot(wall_grid(extra_blocked=[(24, 35)]),
+                                     publication_sequence=3, source_generation=7)
+        fixture.add_sample((0.8, 2.5, 0.0), third, reference, speed=0.0)
+        if variant == "missing_rest_tf":
+            fixture.samples[-1]["map_from_odom"] = None
+        if variant == "missing_payload":
+            fixture.snapshots[1]["payload"] = None
+        status, report = run_analyzer(fixture.write())
+        answers = report["answers"]
+        q3 = answers["q3_same_pose_flipped_free_to_occupied"]
+        expected = ("yes" if variant in ("complete", "missing_rest_tf") else
+                    "no" if variant == "no_flip" else "unknown")
+        check(q3["answer"] == expected,
+              variant + ": Q3 reports " + expected + " despite a free final rest pose")
+        check(answers["q1_reference_collision_free_at_publish"]["answer"] == "yes",
+              variant + ": Q1 remains tied to the free EXECUTE-authorized snapshot")
+        flips = {flip["label"]: flip for flip in report["snapshot_flip"]}
+        rest = flips["actual_rest_pose"]
+        if variant != "missing_rest_tf":
+            check(all(not step.get("occupied", False) for step in rest["timeline"]),
+                  variant + ": the final rest probe never supplies the conflict flip")
+        if variant in ("complete", "missing_rest_tf"):
+            conflict = flips.get("actual_pose_at_first_discrete_conflict")
+            check(conflict is not None and conflict["evaluated"],
+                  variant + ": the first conflict is an evaluated probe, not omitted")
+            if conflict is not None:
+                check(conflict["frame_id"] == "map" and
+                      abs(conflict["pose"]["x"] - 2.0) < 1e-9 and
+                      abs(conflict["pose"]["y"] - ROBOT_Y) < 1e-9 and
+                      abs(conflict["pose"]["yaw"]) < 1e-9,
+                      variant + ": conflict probe retains full odom-to-map SE2 transform")
+                transition = conflict["transitions"][0]
+                check(transition["from_publication_sequence"] == 1 and
+                      transition["to_publication_sequence"] == 2 and
+                      transition["from_source_generation"] == 5 and
+                      transition["to_source_generation"] == 6,
+                      variant + ": first-conflict flip cites the exact map pair")
+            check(status == 1 and
+                  answers["q2_actual_left_reference_envelope"]["answer"] == "yes",
+                  variant + ": observed collision remains unsafe even with evidence gaps")
+        elif variant in ("missing_frame", "wrong_direction"):
+            conflict = flips.get("actual_pose_at_first_discrete_conflict")
+            check(conflict is not None and not conflict["evaluated"] and
+                  bool(conflict.get("reason")),
+                  variant + ": unresolved first conflict stays visible as unknown")
+            check(status == 1,
+                  variant + ": Q3 unknown does not suppress Q2's recorded collision")
+        elif variant in ("missing_tf", "missing_payload"):
+            check(status == 2 and q3["unevaluated_actual_ticks"] == 1,
+                  variant + ": missing conflict evidence cannot become a clean result")
+        else:
+            check(status == 0,
+                  "fully evaluated free probes still allow a clean no-flip result")
+        if variant == "missing_rest_tf":
+            check(not rest["evaluated"] and bool(rest.get("reason")) and
+                  q3["probes_not_evaluated"] == 1,
+                  "unresolved rest probe remains explicit without hiding a proven flip")
+
+
 def case_clean_run(root):
     """Nothing conflicts: the analyzer must report clean, not find something."""
     fixture = Fixture(root, "clean_run")
@@ -571,12 +670,107 @@ def case_truncated_recording_is_a_gap(root):
               encoding="utf-8") as handle:
         handle.write('{"tick": 4, "actual": {"x": 1.0,')
     status, report = run_analyzer(directory)
-    check(status in (0, 1), "a truncated recording is still analyzed (status=%s)"
+    check(status in (0, 1, 2), "a truncated recording is still analyzed (status=%s)"
           % status)
     check(any("unparseable" in gap for gap in report["evidence_gaps"]),
           "the truncated line is reported rather than silently dropped")
     check(report["actual_tracking"]["ticks_evaluated"] == 3,
           "the complete records before the cut are still evaluated")
+
+
+def case_commit_snapshot_authority(root):
+    """A later invalidation must not replace the EXECUTE-authorized snapshot."""
+    fixture = Fixture(root, "late_invalidation")
+    snapshot = fixture.add_snapshot(wall_grid(), 58, 1134, epoch=2)
+    reference = fixture.add_reference(
+        [(x, ROBOT_Y, 0.0) for x in (0.8, 1.4, 2.0)],
+        stamp_identity="1789880513.310223304")
+    fixture.events[-1]["payload"]["map_generation"] = 57
+    invalid = dict(snapshot, localization_epoch=3, publication_sequence=59,
+                   ready=False, cell_count=0, occupancy_digest="empty")
+    fixture.snapshots.append(dict(invalid, payload=None))
+    fixture.add_sample((0.8, ROBOT_Y, 0.0), invalid, reference)
+    # Q2 remains independently evaluable on a later valid tick.
+    fixture.add_sample((0.8, ROBOT_Y, 0.0), snapshot, reference)
+    status, report = run_analyzer(fixture.write())
+    entry = report["reference_at_publish"][0]
+    check(status == 2 and entry["evaluated"] and entry["verdict"]["safe"],
+          "late invalidation does not manufacture a Q1 collision")
+    check(entry["verdict"]["snapshot_identity"]["publication_sequence"] == 58,
+          "Q1 cites exact committed publication58, never latest publication59")
+
+
+def case_authority_gaps_and_replay(root):
+    for variant in ("missing_command", "stop", "content", "frame", "stamp",
+                    "missing_snapshot", "ambiguous_command", "ambiguous_snapshot",
+                    "empty_snapshot", "not_ready", "missing_payload", "empty_reference",
+                    "replay", "shared_payload", "transform_epoch", "missing_reference",
+                    "out_of_order", "mixed_unknown"):
+        fixture = Fixture(root, "authority_" + variant)
+        snapshot = fixture.add_snapshot(wall_grid(), 1, 5)
+        reference = fixture.add_reference([(0.8, ROBOT_Y, 0.0), (1.4, ROBOT_Y, 0.0)])
+        fixture.add_sample((0.8, ROBOT_Y, 0.0), snapshot, reference)
+        command = fixture.events[0]["payload"]
+        if variant == "missing_command":
+            fixture.events.clear()
+        elif variant == "missing_reference":
+            fixture.references.clear()
+        elif variant == "stop":
+            command["mode"] = 0
+        elif variant == "content":
+            command["reference_poses"] = [[9.0, 9.0, 0.0]]
+        elif variant == "frame":
+            command["reference_frame_id"] = "wrong"
+        elif variant == "stamp":
+            command["reference_stamp_identity"] = "999.000000000"
+        elif variant == "missing_snapshot":
+            command["map_publication_sequence"] = 999
+        elif variant in ("ambiguous_command", "replay"):
+            replay = dict(command, command_sequence=2)
+            if variant == "ambiguous_command":
+                replay["map_publication_sequence"] = 999
+            fixture.events.append({"kind": "execution_command", "mono_s": 0.01,
+                                   "payload": replay})
+        elif variant == "ambiguous_snapshot":
+            fixture.snapshots.append(dict(fixture.snapshots[0], source_generation=6))
+        elif variant == "empty_snapshot":
+            fixture.snapshots[0]["cell_count"] = 0
+        elif variant == "not_ready":
+            fixture.snapshots[0]["ready"] = False
+        elif variant == "missing_payload":
+            fixture.snapshots[0]["payload"] = None
+        elif variant == "empty_reference":
+            reference["poses"] = command["reference_poses"] = []
+            reference["pose_count"] = command["reference_pose_count"] = 0
+        elif variant == "shared_payload":
+            reused = dict(fixture.snapshots[0], publication_sequence=2)
+            fixture.snapshots.append(reused)
+            command["map_publication_sequence"] = 2
+            fixture.samples[0]["execution"]["map_publication_sequence"] = 2
+        elif variant == "transform_epoch":
+            fixture.samples[0]["execution"]["localization_epoch"] = 99
+        elif variant == "out_of_order":
+            fixture.samples[0]["execution"]["map_publication_sequence"] = 999
+            fixture.add_sample((0.8, ROBOT_Y, 0.0), snapshot, reference)
+        elif variant == "mixed_unknown":
+            fixture.add_reference([(1.0, ROBOT_Y, 0.0)],
+                                  stamp_identity="201.000000000")
+            fixture.events.pop()
+        status, report = run_analyzer(fixture.write())
+        answer = report["answers"]["q1_reference_collision_free_at_publish"]
+        if variant in ("replay", "shared_payload", "out_of_order"):
+            check(status == 2 and answer["answer"] == "yes",
+                  "equivalent EXECUTE replay is not ambiguous")
+            if variant == "out_of_order":
+                check(report["reference_at_publish"][0]["observed_tick"] == 2,
+                      "Path-before-EXECUTE uses earliest exact authority tick, not first Path tick")
+        else:
+            check(status == 2 and answer["answer"] == "unknown",
+                  variant + " cannot pass evidence gate or manufacture collision")
+            check(answer["references_with_collisions"] == 0 and
+                  any(not entry["evaluated"] and entry.get("reason")
+                      for entry in report["reference_at_publish"]),
+                  variant + " explains unavailable evidence explicitly")
 
 
 def main():
@@ -585,8 +779,11 @@ def main():
         case_actual_drifts_into_wall(root)
         case_reference_unsafe_at_publish(root)
         case_map_update_occupies_rest_pose(root)
+        case_first_conflict_flip_with_free_rest(root)
         case_clean_run(root)
         case_same_geometry_republished(root)
+        case_commit_snapshot_authority(root)
+        case_authority_gaps_and_replay(root)
         case_missing_transform_is_a_gap(root)
         case_truncated_recording_is_a_gap(root)
     finally:

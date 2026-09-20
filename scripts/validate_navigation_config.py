@@ -723,7 +723,11 @@ def main():
     rog_source = workspace / "src/ats_sentry_nav/ats_rog_map/src/ats_rog_map_node.cpp"
     rog_text = rog_source.read_text(encoding="utf-8")
     assert "map_config_file" not in rog_text
-    assert "makeRogMapConfig(declareCoreParameters(*this))" in rog_text
+    assert "const auto core_parameters = declareCoreParameters(*this);" in rog_text
+    assert "makeRogMapConfig(core_parameters)" in rog_text
+    assert "intensity_required_ = core_parameters.intensity_threshold > 0;" in rog_text
+    assert "decodePointCloudForRogMap(*msg, intensity_required_)" in rog_text
+    assert "No map update is committed; stale-map safety applies." in rog_text
     for required in (
         '"rog_map/occ"',
         '"rog_map/inf_occ"',
