@@ -1,8 +1,89 @@
 # ATS 自研导航 V1 当前状态与优化方向
 
-> 更新时间：2026-09-09
+> 更新时间：2026-09-20
 > 本页只记录当前准入状态、稳定架构边界和下一执行入口。历史阶段流水账已从活动文档移除，
 > 仍可由 Git 历史和专项准入记录追溯。
+
+> 本轮新增修复、失败记录、闭环接口账本和实车/HIL 门禁见
+> [2026-09-20 fail-closed 审计](navigation_fail_closed_audit_20260920.md)。
+> 下文带 domain 的已有运行仅证明各自当时 revision，不自动成为后续修改后的验收证据。
+
+**2026-09-20 planning-grid 安全内容身份（已实现，单测已验证）**：MINCO 本地
+`PlanningMapSnapshot.generation` 不再因同一安全栅格的 publication timestamp 或 adapter heartbeat
+而递增。其安全 digest 覆盖 `frame_id`、resolution、width/height、完整 origin pose、全部
+occupied/free/unknown cell，以及 RC-ESDF 的 `obstacle_value_threshold`/`unknown_is_obstacle`
+输入；任一字段变化仍创建新 immutable snapshot、撤销旧 reference 并保持 emergency stop，直到新
+generation 的计划通过 swept-footprint 复核。`ROGMap source generation`、adapter
+`publication_sequence` 与 MINCO local snapshot generation 仍是三个独立字段：前两者续租数据源，
+后者只标识实际用于 JPS、RC-ESDF、MINCO、footprint gate 与 repair 的本地不可变安全内容。此策略不将
+source generation 伪装成端到端同号，也不放宽 snapshot exact-generation 或 stale-map fail-stop；GTest
+覆盖 heartbeat 不变、occupied/unknown、几何和 unknown policy 改变。隔离 MuJoCo `single` 运行中只观测
+到安全内容实际改变后的 invalidation，尚未命中相同 digest 的 runtime retain 分支；该分支仍是**已实现、
+未在动态仿真数据中命中**，不能写为该运行的实测收益。
+
+**2026-09-20 MuJoCo current-revision `single`（已验证，domain `226`）**：
+`PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none TEST_PROFILE=single GOAL_TIMEOUT=60` 的 runner
+退出 `0`。ATS action accepted 且 `SUCCEEDED`，目标 `(1.0, 0.06)`，最终 `(0.979175,
+0.059443)`，误差 `0.020832 m`。`/rc_esdf/planning_grid`、`/cmd_vel/autonomy_raw`、
+`/cmd_vel/selected`、`/motion_control`、planner request、reference 与 `ExecutionCommand` 的
+runner 所检 publisher/subscriber 所有权均唯一；MINCO 的三次提交均为 `footprint_collisions=0`，
+recorder 对 3 条 reference 得到 Q1=yes、134 个有效实际跟踪 tick 得到 Q2=no、Q3=no。
+
+同一动作期间，map generation `55 -> 56`、`57 -> 58` 的真实安全内容变化均先使旧 reference
+invalid，再由 Goal Manager 使用更高 coherent publication 进入 stop/replan/commit；最终的 stop
+heartbeat 在 action 结束时生效。runner 观察到非零 `/cmd_vel/selected`，结束后为零；MuJoCo
+`contact_violation_delta=0`，但这只是在该仿真计数器下没有非地面违规接触，不替代实车物理接触、HIL
+或独立 contact evaluator。recorder 另报告 layer payload 截断与 1 个无 `map<-odom` TF tick，故该
+结果是单条 nominal 回归，不升级为 red-box、故障矩阵或长期稳定性结论。
+
+**2026-09-20 ROGMap `PointCloud2` 输入契约（已实现，构建与单测已验证）**：Gazebo GT
+`/registered_scan` producer 输出仅含 `x/y/z` 的 `PointCloud2`，而 ROGMap 的内部点类型带
+intensity。消费端现先校验 `x/y/z`；缺少几何字段时不调用 PCL 并拒绝。未启用 intensity filter 时，
+XYZ-only 消息以 `pcl::PointXYZ` 解码，内部 intensity 显式写为 `NaN`，不把未观测强度伪造为零；启用
+filter 时，缺 intensity 的消息被拒绝，且不提交 map update，因此既有 map-stale 到 emergency-stop 的
+fail-closed 路径仍然生效。`test_point_cloud_input` 覆盖 XYZ-only 接受、filter 启用时拒绝、保留实际
+intensity、以及 PCL 转换前拒绝缺失几何字段四种情形；`ats_rog_map` 构建和该 GTest 均通过。此修复不改变
+ROGMap source generation、adapter publication sequence、MINCO local immutable snapshot generation、
+exact-generation、swept footprint 或 emergency-stop 契约。
+
+**2026-09-20 Gazebo terminal frame 与 current-revision nominal（已验证为未通过，domain `220`）**：
+action result 的 final pose 是 `map`，而 Gazebo GT `/localization` 的原始 frame 是 `odom`；runner 现复用
+`sample_localization_xy()` 的 `map<-odom` 转换，并显式记录 `terminal_localization_frame=map`。此前把二者
+直接相减得到的约 `1.25 m` 不能作为滑移证据。修复后的本次 action 仍 timeout：Goal Manager 记录
+`final_distance_m=1.742`、`final_pose=(2.849,-3.406,-2.517)`，归一后的 terminal goal error 为
+`1.7512 m`，且 `accepted=1`、`succeeded=0`、最终 `planner_emergency_stop=true` 和 selected command 为零。
+
+同一 artifact 的 P1 admission 为 false；首个 freshness violation 是 `gazebo_lidar`，其 328 个样本的
+wall interval p99/max 为 `1.402925/1.784857 s`，高于 `0.25 s` 门限，`clock_rtf_p50=0.461077`。本次
+launch log 中不再出现 `Failed to find match for field 'intensity'`，与 decoder 实现及单测共同证明缺失
+intensity 的确定性 PCL schema 错误已消除；这不证明 LiDAR cadence 已恢复，因 raw Gazebo LiDAR 和
+livox input 都有相似长尾。Gazebo contact 文件为空，物理接触评估为**未验证**。RTF、Gazebo Transport、DDS
+或调度负载目前只构成相关候选，尚无受控单因素实验可将其写为根因。[Confidence: High] action/P1 失败和
+schema-error 消失由 artifact 加运行源码/测试支持；[Confidence: Medium] 长尾的行为 owner 尚未确定。
+
+**2026-09-20 MuJoCo current-revision `single` 补充运行证据（已验证，domain `221`）**：
+`PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none TEST_PROFILE=single GOAL_TIMEOUT=60` 中，ATS action
+`SUCCEEDED`；Goal Manager 记录 `final_distance_m=0.017`、`final_pose=(1.017,0.061,0.008)`。runner 物理
+pose 从 `(-0.192545,0.075999)` 到 `(1.023685,0.044804)`，相对目标 `(1.0,0.06)` 的几何误差约 `0.028 m`；
+MuJoCo telemetry 为 `contact_violation_before=0`、`after=0`、`delta=0`、`max_contact_force_n=0.0`。本次
+工具记录未单独保留 runner 终止退出码，故结论是 action、终点和安全 artifact 满足，而不是“runner exit 0”。
+action success 后约 16 s，runner 发出 `SIGINT/SIGTERM`，核心 ROGMap、Goal Manager、MINCO、MPC、arbiter、
+fusion 和 GICP cleanly finished；但 `terrainAnalysis`/`terrainAnalysisExt` 在 context 已 shutdown 后抛出
+`RCLError` 并以 `-6` 退出，MuJoCo、static-map 与 twist bridge 的 Python 进程还因
+`ExternalShutdownException` 或二次 `rclpy.shutdown()` 以 `1` 退出。因此 action-time evidence 仍有效，
+但本次 launch 的 graceful teardown 是**未通过**，必须在以 runner 退出码作为门禁前修复并添加最窄回归。
+
+recorder 对 3 条 reference 给出 Q1（发布时无碰撞）=`yes`，164 个 actual tracking tick 给出 Q2（离开
+reference envelope）=`no`、Q3（同 pose free/occupied 翻转）=`no`；未观察到 swept colliding segment，
+minimum clearance=`0.400000 m`。运行中 map/source publication 发生 `110 -> 111 -> 112` 的变化，每次旧
+reference 先 invalid，再按新的 coherent snapshot 重规划/提交，完成后 emergency stop 再置真。recorder
+明确报告 layer payload 截断，且有 1 个未绑定 snapshot 的 tick 被排除；MuJoCo contact counter 又是独立
+证据。因此这里只能记录“仿真 telemetry 未见非地面违规接触、recorder 未见 reference/actual swept-footprint
+冲突”，不能推导实车 physical contact 为零。
+
+本组证据不证明 Gazebo P1、Gazebo red-box、P3/Nav2-free、dynamic same-digest retain 的运行收益、HIL 或
+实车稳定性。Gazebo 红框的风险转入条件仍是先在新的隔离 domain 中满足 P1 freshness 与 nominal action
+success；实车转入仍需要真实 bag、持续运行、accepted observation、资源与独立 physical-contact 证据。
 
 **2026-09-18 重定位输入门（已实现、未做仿真/实车准入）**：
 `small_gicp_relocalization` 对 `registered_scan` 使用 `SensorDataQoS.keep_last(1)`，在累积前
@@ -385,6 +466,27 @@ Point-LIO、DDS、仿真 RTF 或 CPU 争用中的任一项。
 - freshness timeout、QP iteration/deadline/residual 保持现值，不作为绕过失败的手段；
 - planner collision/footprint 采样只用于导航算法安全复核；
 - 未在目标机测量前建议避免引用报告中的 `50 Hz`、`6 ms` 或内存数据。
+
+### 5.1 2026-09-18 MPC 授权时间门
+
+- `ats_cmd_vel_arbiter` 与 `ats_swerve_mpc` 现在都以 `ExecutionCommand.header.stamp` 对接收时刻做
+  producer-stamp lease 校验：未来样本、超过 `execution_command_timeout` 的旧样本，以及缺失身份/序列的样本
+  不得获得自动执行权；MPC 侧拒绝时直接清空 tracker/warm-start 并发布确定性零速度。
+- 该双侧门修复了“arbiter 已防重放但 MPC 被旁路时仍可装载未来/旧 reference”的边界。可直接复现的聚焦回归命令为：
+  `source /opt/ros/humble/setup.bash && source install/setup.bash && ./build/ats_swerve_mpc/test_mpc_localization_gate --gtest_filter='MpcLocalizationGateTest.RejectsFutureAndStaleExecutionCommandTimestamps:MpcLocalizationGateTest.RejectsReferenceReceivedWhileLocalizationIsUnhealthy:MpcLocalizationGateTest.RejectsOldSequenceAndOldEpochExecutionCommands'`
+  ；本轮聚焦测试 `3/3` 通过，日志同时出现 timestamp reject、STOP 和零速路径。
+- Goal Manager 的节点回归还验证了 accepted `ExecutionCommand` heartbeat 会递增 sequence 并刷新 producer stamp；运行该类节点测试时必须使用独立 `ROS_DOMAIN_ID`，否则外部 `/tf` 发布者可能污染“无 TF 应拒绝派发”的负向断言。
+- 这只是组件级闭环证据，不等价于 Gazebo、MuJoCo 或实车主链通过；仍需在最后一次安全源码修改后重跑对应主链，
+  并分别记录 action、GT、静止 hold、fault/recover、unique publisher/subscriber 与资源指标。
+- `minco_planner` 收到新的 planning-grid generation 时，会在同一 map mutex 内清除旧的 active safety
+  reference、置 `plan_safe=false` 并重新发布急停；若旧 reference 绑定了活动 goal，还会发送
+  `FAILURE_SNAPSHOT_CHANGED` 触发 Goal Manager 瞬时重规划。地图 heartbeat 保持有效，但旧 generation
+  不再被 runtime swept-footprint 复核或复活。新增 `PlannerSafetyState.NewMapInvalidatesPlanButKeepsHealthyMapLease`
+  回归覆盖了“新 generation 可用、旧 generation 不可用、急停保持”的状态契约。
+- Goal Manager 的 `ExecutionCommand` producer lease 默认回退 `20 ms` 再写入 `header.stamp`，用于吸收独立
+  `/clock` 回调在仿真/多进程中的 tick 顺序差异；这是 producer 侧保守时间戳，不是放宽 MPC/arbiter 的未来样本
+  拒绝门。`execution_command_stamp_backdate_sec=0` 可用于时钟已严格同步的 profile，负值和超过 `250 ms`
+  的配置被约束；Goal Manager heartbeat 回归同时检查 sequence/stamp 单调刷新且不超前本地 clock。
 
 ## 6. 下一优化顺序
 

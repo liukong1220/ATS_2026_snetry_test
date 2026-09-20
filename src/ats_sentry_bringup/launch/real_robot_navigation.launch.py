@@ -12,12 +12,13 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, TextSubstitution
 
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory("ats_sentry_bringup")
     world = LaunchConfiguration("world")
+    prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     namespace = LaunchConfiguration("namespace")
     params_file = LaunchConfiguration("params_file")
     require_gimbal_status = LaunchConfiguration("require_gimbal_status")
@@ -29,6 +30,11 @@ def generate_launch_description():
 
     declarations = [
         DeclareLaunchArgument("world", default_value="rmuc_2026"),
+        DeclareLaunchArgument(
+            "prior_pcd_file",
+            default_value=[TextSubstitution(text=os.path.join(bringup_dir, "pcd", "")), world, TextSubstitution(text=".pcd")],
+            description="Matching-world prior PCD already expressed in map_frame; required before hardware startup.",
+        ),
         DeclareLaunchArgument("namespace", default_value=""),
         DeclareLaunchArgument(
             "params_file",
@@ -45,6 +51,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(os.path.join(bringup_dir, "launch", "bringup.launch.py")),
         launch_arguments={
             "world": world,
+            "prior_pcd_file": prior_pcd_file,
             "namespace": namespace,
             "params_file": params_file,
             "use_sim_time": "False",
