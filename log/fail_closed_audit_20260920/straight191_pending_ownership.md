@@ -19,3 +19,17 @@ Date: 2026-09-21
 ## Not claimed
 - Four-environment DoD (Gazebo/real HIL still open at write time).
 - Offline ATS replay; 100-repeat; soak; content-lineage atomic snapshot.
+
+## Gazebo nominal domain192 (single-pass)
+- Artifact: `log/gazebo_minco_mpc_chain/20260921_101312_nominal_none_domain192/`
+- Result: **FAIL** — `localization/map health did not become stable before action dispatch`
+- Independent statuses: action=not_started, runtime_gate=failed, teardown=passed
+- Launch symptom: repeated GICP `coarse+fine` reject (`minimum information eigenvalue below threshold` / not converged); adapter briefly `ready=1` then `localization is not tracking`; no sustained TRACKING / DualMap auth.
+- Not retried (single-pass policy). Gazebo reloc params differ from MuJoCo (`fine_max_corr=0.600`, `min_overlap=0.200`); cold-start prior defaults apply but first accept never landed.
+
+## Pushed HEADs
+| Repo | HEAD |
+|---|---|
+| ats_sentry_nav | `3908115` |
+| ats_mujoco_sim | `84f3e24` |
+| ATS_2026_snetry_test | `a501e8f` (+ audit amend below if any) |
