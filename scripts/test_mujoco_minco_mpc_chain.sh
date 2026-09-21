@@ -633,12 +633,18 @@ assert_topic_ownership() {
       return
     fi
     subscription_block="$(sed -n '/^Subscription count:/,$p' <<<"${topic_info}")"
+    # Under CycloneDDS load, ros2 topic info may report _NODE_NAME_UNKNOWN_ for a
+    # live subscriber while the node still exposes the endpoint (straight187).
     if [[ -z "${allowed_observer}" ]] &&
-      grep -q '^Subscription count: 1$' <<<"${topic_info}" &&
-      [[ "$(grep -c "^Node name: ${expected_subscriber}$" <<<"${subscription_block}")" -eq 1 ]]
+      grep -q '^Subscription count: 1$' <<<"${topic_info}"
     then
-      echo "OK: ${topic} ownership ${expected_publisher} -> ${expected_subscriber} is unique"
-      return
+      if [[ "$(grep -c "^Node name: ${expected_subscriber}$" <<<"${subscription_block}")" -eq 1 ]] ||
+        { grep -q '^Node name: _NODE_NAME_UNKNOWN_$' <<<"${subscription_block}" &&
+          node_exposes_endpoint "/${expected_subscriber}" "${topic}"; }
+      then
+        echo "OK: ${topic} ownership ${expected_publisher} -> ${expected_subscriber} is unique"
+        return
+      fi
     fi
     if [[ -n "${allowed_observer}" ]] &&
       grep -q '^Subscription count: 2$' <<<"${topic_info}" &&
