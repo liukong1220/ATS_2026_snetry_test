@@ -77,7 +77,10 @@ LAUNCH_LOG="/tmp/ats_minco_mpc_test_launch_${ROS_DOMAIN_ID}.log"
 # MuJoCo 初始位姿（map/odom 平面坐标，单位 m；yaw 单位 rad）。
 START_X="${START_X:--0.18}"
 START_Y="${START_Y:-0.06}"
-START_Z="${START_Z:-0.42}"
+# RMUC 2025 field height at the nominal start is 0.20097 m. The MuJoCo
+# base_link-to-wheel-bottom offset is 0.180 m, so the grounded root qpos is
+# 0.38097 m. Keep this override aligned with rmuc_2025_mujoco.launch.py.
+START_Z="${START_Z:-0.381}"
 START_YAW="${START_YAW:-0.0}"
 GOAL_X="${GOAL_X:-1.0}"
 GOAL_Y="${GOAL_Y:-0.06}"
