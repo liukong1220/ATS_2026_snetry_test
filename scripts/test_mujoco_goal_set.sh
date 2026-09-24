@@ -23,7 +23,7 @@ SCENARIOS = (
 def scenario_spec(name):
     # These are existing single/rectangle/red_box waypoints, not new free-space claims.
     env = dict(TEST_PROFILE='single', P2_FAULT_CASE='none', P3_FAULT_CASE='none',
-               START_X='-0.18', START_Y='0.06', START_Z='0.42', START_YAW='0.0',
+               START_X='-0.18', START_Y='0.06', START_Z='0.381', START_YAW='0.0',
                GOAL_X='1.0', GOAL_Y='0.06', GOAL_YAW='0.0', GOAL_TIMEOUT='60',
                GOAL_TOLERANCE='0.30', MIN_LEG_PROGRESS='0.20',
                GOAL_SET_VERIFY_FREE='1', PLANNING_GRID_OWNER='rog_map',

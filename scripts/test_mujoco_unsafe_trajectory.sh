@@ -42,7 +42,7 @@ setsid env --default-signal=INT ros2 launch ats_mujoco_sim rmuc_2026_mujoco.laun
   enable_test_fault_injection:=true \
   use_viewer:=false show_viewer:=false launch_mujoco_rviz:=false \
   enable_lidar:=true lidar_backend:=cpu lidar_downsample:=24 enable_tof:=false \
-  start_x:="${START_X}" start_y:="${START_Y}" start_z:=0.42 start_yaw:=0.0 \
+  start_x:="${START_X}" start_y:="${START_Y}" start_z:=0.381 start_yaw:=0.0 \
   nav_start_delay_sec:=9.0 rog_map_start_delay_sec:=15.0 map_start_delay_sec:=2.0 \
   rviz_delay_sec:=1000.0 log_level:=warn >"${LAUNCH_LOG}" 2>&1 &
 LAUNCH_PID=$!

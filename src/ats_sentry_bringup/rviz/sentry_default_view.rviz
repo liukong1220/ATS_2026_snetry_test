@@ -69,7 +69,7 @@ Visualization Manager:
     - Alpha: 1.0
       Autocompute Intensity Bounds: true
       Class: rviz_default_plugins/PointCloud2
-      Color: 255; 0; 0
+      Color: 50; 255; 80
       Color Transformer: FlatColor
       Decay Time: 0
       Enabled: false
@@ -193,7 +193,7 @@ Visualization Manager:
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 0; 220; 255
-      Enabled: true
+      Enabled: false
       Line Style: Lines
       Line Width: 0.025
       Name: Global Planning / JPS Search Path
@@ -213,7 +213,7 @@ Visualization Manager:
     - Alpha: 0.95
       Buffer Length: 1
       Class: rviz_default_plugins/Path
-      Color: 255; 220; 0
+      Color: 0; 255; 0
       Enabled: true
       Line Style: Lines
       Line Width: 0.02
@@ -222,7 +222,7 @@ Visualization Manager:
         X: 0
         Y: 0
         Z: 0.03
-      Pose Color: 255; 220; 0
+      Pose Color: 0; 255; 0
       Pose Style: None
       Topic:
         Depth: 1
