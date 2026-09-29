@@ -44,23 +44,23 @@ def set_cell(grid, ix, iy, value):
 
 
 # ---------------------------------------------------------------- lattice shape
-# half_length = 0.5*0.60 + 0.02 = 0.32; half_width = 0.5*0.50 + 0.02 = 0.27.
-# spacing = max(0.02, 0.10) = 0.10 -> samples_x = ceil(0.64/0.10) = 7,
-# samples_y = ceil(0.54/0.10) = 6 -> (7+1)*(6+1) + 1 centre = 57 samples.
-samples = fe.make_rectangular_footprint_samples(0.60, 0.50, 0.02, 0.10)
-check(len(samples) == 57,
-      "RMUC footprint lattice at 0.10 m has 57 samples (got %d)" % len(samples))
+# half_length = half_width = 0.5*0.58 + 0.02 = 0.31.
+# spacing = max(0.02, 0.10) = 0.10 -> samples_x = samples_y = ceil(0.62/0.10) = 7
+# -> (7+1)*(7+1) + 1 centre = 65 samples.
+samples = fe.make_rectangular_footprint_samples(0.58, 0.58, 0.02, 0.10)
+check(len(samples) == 65,
+      "RMUC footprint lattice at 0.10 m has 65 samples (got %d)" % len(samples))
 check(samples[-1] == (0.0, 0.0), "the explicit centre sample is appended last")
 xs = [s[0] for s in samples[:-1]]
 ys = [s[1] for s in samples[:-1]]
-check(abs(min(xs) + 0.32) < 1e-12 and abs(max(xs) - 0.32) < 1e-12,
+check(abs(min(xs) + 0.31) < 1e-12 and abs(max(xs) - 0.31) < 1e-12,
       "lattice spans the full half length including both borders")
-check(abs(min(ys) + 0.27) < 1e-12 and abs(max(ys) - 0.27) < 1e-12,
+check(abs(min(ys) + 0.31) < 1e-12 and abs(max(ys) - 0.31) < 1e-12,
       "lattice spans the full half width including both borders")
 
 # The spacing floor is 0.02 m, so a finer grid does not produce unbounded samples.
-fine = fe.make_rectangular_footprint_samples(0.60, 0.50, 0.02, 0.001)
-check(len(fine) == (32 + 1) * (27 + 1) + 1,
+fine = fe.make_rectangular_footprint_samples(0.58, 0.58, 0.02, 0.001)
+check(len(fine) == (31 + 1) * (31 + 1) + 1,
       "spacing is floored at 0.02 m rather than following the grid resolution")
 
 # A degenerate footprint still yields the minimum 2x2 lattice plus the centre.
@@ -92,7 +92,7 @@ check(fe.world_to_grid(rotated, 0.35, 0.0) is None,
       "the yawed grid does not cover +x, proving the rotation is applied")
 
 # ------------------------------------------------------------------ occupancy
-params = fe.FootprintParams(length=0.60, width=0.50, safety_margin=0.02,
+params = fe.FootprintParams(length=0.58, width=0.58, safety_margin=0.02,
                             obstacle_value_threshold=100,
                             unknown_is_obstacle=False)
 occupancy_grid = make_grid(10, 10, fill=0)
@@ -133,12 +133,12 @@ check(translation == 20,
       "a 1.0 m translation needs 20 subdivisions (got %d)" % translation)
 
 # Pure rotation must be bounded by the same rule.  A 90 deg turn in place moves
-# each corner by |c| * sqrt(2) where |c| = hypot(0.32, 0.27) = 0.41876 ->
-# 0.59223 m -> ceil(0.59223/0.05) = 12.
+# each corner by |c| * sqrt(2) where |c| = hypot(0.31, 0.31) = 0.43841 ->
+# 0.62 m -> ceil(0.62/0.05) = 13 (floating point may land on 12.4 -> 13).
 rotation = fe.swept_subdivisions(
     grid, params, (0.0, 0.0, 0.0), (0.0, 0.0, math.pi / 2.0))
 expected_rotation = int(math.ceil(
-    math.hypot(0.32, 0.27) * math.sqrt(2.0) / 0.05))
+    math.hypot(0.31, 0.31) * math.sqrt(2.0) / 0.05))
 check(rotation == expected_rotation,
       "pure rotation uses the same corner bound (%d == %d)"
       % (rotation, expected_rotation))
@@ -174,7 +174,7 @@ check(verdict["swept_segments_checked"] == 1
 
 # Place a hard cell at world (1.0, 0.0): grid index ((1.0+1.0)/0.1, (0+1.0)/0.1)
 # = (20, 10).  Both waypoints stay clear of it because the footprint half length
-# is 0.32 m and they sit 1.0 m away.
+# is 0.31 m and they sit 1.0 m away.
 between = set_cell(corridor, 20, 10, 100)
 swept_verdict = fe.check(between, params, free_poses)
 check(not swept_verdict["safe"],
@@ -196,7 +196,7 @@ check(swept_verdict["first_collision"]["cell"]["value"] == 100,
 # An obstacle inside the rectangle of the FIRST waypoint must be reported by the
 # discrete pass with trajectory_index 0, which is the "already colliding at
 # publish" signature the run artifacts have to be able to name.
-at_start = set_cell(corridor, 12, 10, 100)  # world (0.20, 0.0), inside 0.32 m
+at_start = set_cell(corridor, 12, 10, 100)  # world (0.20, 0.0), inside 0.31 m
 start_verdict = fe.check(at_start, params, free_poses)
 check(not start_verdict["safe"], "an obstacle inside waypoint 0 is caught")
 check(start_verdict["first_collision"]["swept"] is False
@@ -232,15 +232,15 @@ check(bounded["swept_collision_count"] + bounded["discrete_collision_count"] > 3
 
 # ------------------------------------------------------------ min clearance
 # Cell (26, 10) has centre (1.65, 0.05) and sits inside the diagnostic window
-# for a pose at (1.0, 0.0); the nearest footprint sample is (1.32, 0.0), so the
-# minimum is hypot(0.33, 0.05) = 0.33242 m.
+# for a pose at (1.0, 0.0); the nearest footprint sample is (1.31, 0.04429)
+# (7 lattice steps over 0.62 m), so the minimum is hypot(0.34, 0.00571) = 0.34005 m.
 clear_grid = set_cell(
     make_grid(60, 60, resolution=0.10, origin_x=-1.0, origin_y=-1.0, fill=0),
     26, 10, 100)
 clearance = fe.footprint_min_clearance_cells(clear_grid, params, (1.0, 0.0, 0.0))
 check(clearance["evaluated"] and clearance["min_clearance_m"] is not None
-      and abs(clearance["min_clearance_m"] - 0.33242) < 1e-4,
-      "minimum clearance to the occupied cell centre is 0.33242 m (got %s)"
+      and abs(clearance["min_clearance_m"] - 0.34005) < 1e-4,
+      "minimum clearance to the occupied cell centre is 0.34005 m (got %s)"
       % clearance["min_clearance_m"])
 
 # "Nothing blocking inside the window" must not be reported the same way as
@@ -271,7 +271,7 @@ unknown_grid = make_grid(60, 60, resolution=0.10, origin_x=-1.0, origin_y=-1.0,
 unknown_grid = set_cell(unknown_grid, 12, 10, -1)
 permissive = fe.check(unknown_grid, params, [(0.0, 0.0, 0.0)])
 blocking = fe.check(unknown_grid,
-                    fe.FootprintParams(length=0.60, width=0.50,
+                    fe.FootprintParams(length=0.58, width=0.58,
                                        safety_margin=0.02,
                                        obstacle_value_threshold=100,
                                        unknown_is_obstacle=True),

@@ -104,8 +104,8 @@ int main(int argc, char ** argv)
       traj.points.push_back(rp);
     }
     FootprintSafetyParams params;
-    params.length = 0.60;
-    params.width = 0.50;
+    params.length = 0.58;
+    params.width = 0.58;
     params.safety_margin = 0.02;
     params.obstacle_value_threshold = (c % 2) ? 100 : 50;
     params.unknown_is_obstacle = (c % 5 == 0);
@@ -190,7 +190,7 @@ for case in CASES:
         origin_yaw=case["origin_yaw"], data=data,
         frame_id="map", identity="parity")
     params = fe.FootprintParams(
-        length=0.60, width=0.50, safety_margin=0.02,
+        length=0.58, width=0.58, safety_margin=0.02,
         obstacle_value_threshold=case["threshold"],
         unknown_is_obstacle=case["unknown_is_obstacle"],
         swept_max_corner_step_cells=case["step_cells"])
