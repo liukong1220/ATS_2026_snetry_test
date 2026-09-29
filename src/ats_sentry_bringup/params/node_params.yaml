@@ -955,8 +955,6 @@ minco_planner:
     esdf_obstacle_max_iterations: 6
     esdf_obstacle_control_point_spacing: 0.30
     guide_control_point_spacing: 0.30
-    # 稀疏 MINCO 航点（仿真已启用 1.0）；实车默认关闭，需实车证据后再开启。
-    guide_sparse_spacing: 0.0
     esdf_obstacle_max_step: 0.10
     esdf_obstacle_max_deviation: 0.35
     esdf_obstacle_trust_region: 0.10
@@ -967,6 +965,30 @@ minco_planner:
     esdf_footprint_trigger_clearance: 0.12
     esdf_footprint_target_clearance: 0.14
     esdf_footprint_sample_spacing: 0.10
+    # 整条轨迹 MINCO 联合优化（唯一的最终轨迹生成器）：在 ESDF 修正后的加密引导上按弧长
+    # 每 1.0 m 取一个内点，以全部内点 q 与全部段时长 T=exp(τ) 为变量一次 L-BFGS 最小化
+    # jerk 能量 + ρ_T·ΣT + 中心/足迹 ESDF + 速度/加速度/横向加速度三次铰链罚（每段 K=16 梯形采样）。
+    # 数值失败 fail-closed；残差交给时间缩放与矩形足迹门禁，门禁阈值不因此放宽。
+    joint_waypoint_spacing: 1.0
+    joint_samples_per_piece: 16
+    joint_max_piece_time: 3.0
+    joint_energy_weight: 1.0
+    joint_time_weight: 20.0
+    # 1e4 在 L 形内角留 ~0.07 m 净空残差，1e6 压到 ~0.01 m。
+    joint_obstacle_weight: 1000000.0
+    joint_velocity_weight: 1000.0
+    joint_acceleration_weight: 1000.0
+    joint_lateral_weight: 1000.0
+    # 仅无 ESDF（如 JPS 无 ESDF 候选）时启用的引导管道：偏离加密引导 > 0.10 m 按三次铰链罚。
+    joint_guide_weight: 1000000.0
+    joint_guide_max_deviation: 0.10
+    # 中心净空目标与 jps_safe_distance(0.57) 对齐；足迹采样点（已含 safety_margin）净空目标 0.03 m。
+    joint_center_clearance: 0.57
+    joint_footprint_clearance: 0.03
+    joint_footprint_edge_samples: 1
+    joint_g_epsilon: 0.00001
+    joint_max_iterations: 200
+    joint_time_budget_ms: 15.0
     path_duplicate_epsilon: 0.000001
     path_collinear_lateral_tolerance: 0.025
     path_short_segment_length: 0.05
