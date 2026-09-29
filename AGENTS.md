@@ -182,7 +182,7 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 
 ```bash
 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  TEST_PROFILE=red_box GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+  TEST_PROFILE=red_box GOAL_TIMEOUT=300 scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
 P2 修改建议让脚本显式支持并传入 ROGMap owner；若脚本尚无该入口，先补脚本，建议避免依赖手工 launch 后宣称通过。

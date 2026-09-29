@@ -105,10 +105,14 @@ if [[ -v GOAL_YAW_W ]]; then
 fi
 GOAL_QUATERNION="$(goal_quaternion "${GOAL_YAW}")" || exit 2
 read -r GOAL_YAW_Z GOAL_YAW_W <<<"${GOAL_QUATERNION}"
-# 每个目标允许的最长执行时间（s）。
+# 每个目标允许的最长执行时间（s）。red_box 单目标路线长，未显式传入时放宽到 300 s。
+GOAL_TIMEOUT_USER_SET="0"
+if [[ -v GOAL_TIMEOUT ]]; then
+  GOAL_TIMEOUT_USER_SET="1"
+fi
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
 # 回归路线：single、rectangle（验证横移）、south_corridor（RMUC 横墙窄回归）、
-# red_box（中央高地长距离路线）。
+# red_box（用户红点单目标，中央高地北侧）。
 TEST_PROFILE="${TEST_PROFILE:-single}"
 # RViz must be optional in the same scenario runner so a display-only change
 # can be checked against the identical closed-loop route and fault gates.
@@ -287,37 +291,15 @@ case "${TEST_PROFILE}" in
     GOAL_YS=(-6.20 -6.20 -7.65 -7.65 -7.65)
     ;;
   red_box)
-    # 用户标注的 RMUC 2025 中央高地中心：pixel=(280,128) ->
-    # map=(10.445,0.335)。RMUC 中部静态墙使 start->red_box 的 A* 路线
-    # 必须经过南侧走廊；分段目标避免一条跨 17 个拐点的 S3 曲线切过墙角。
-    # RMUC 横墙不能由一个长 S3 段斜切。先移到横墙东端外侧，再在
-    # y=-6.20 沿墙上方西行，
-    # 再从 x=1.50 绕墙西端下行，最后进入 y=-7.65 南廊；这些短段的
-    # 0.10 m planning grid 最小离散 clearance 为 0.50 m，高于 RMUC
-    # 实体 all-yaw footprint 半径 0.42 m。
-    # 停泊点不变量（domain 178/184 的 goal 9 起点碰撞教训）：goal N 的
-    # 停泊位姿是 goal N+1 规划的起点，机器人会在原地朝下一目标转向，
-    # 所以每个停泊点必须满足 all-yaw 半径 0.4187 m + 停止容差。
-    #   west_corridor_exit (1.50,-6.40): clearance 0.711 m。旧点 (1.50,-6.20)
-    #     只有 0.511 m，0.15 m 圆盘最坏 0.361 m，低于 all-yaw 半径。
-    #   east_mid (9.20,-5.00): clearance 0.949 m。旧点 (8.70,-4.90) 只有
-    #     0.563 m，goal 8→9 切换时朝东北转向，footprint 后角扫进
-    #     x<=8.30 的西南墙块，FAILURE_FOOTPRINT 拒绝全部 16 次重规划并
-    #     死锁在 e-stop（domain 178, goal 9 colliding_ticks=268）。
-    #   highland_ramp (9.00,-2.80): clearance 0.785 m。旧点 (9.25,-2.25)
-    #     只有 0.422 m，低于 0.50 m 离散 floor 本身。
-    # GOAL_TOLERANCE 收紧到 0.15 m：0.30 m 容差圆盘在这些墙角区域无法
-    # 全部满足 all-yaw 半径，收紧后停泊圆盘的 min clearance >= 0.42 m。
-    # 全序列离线 BFS 连通（格心 clearance >= 0.4187 m）已验证。
-    # 最终 action 仍严格落在用户标注的中央高地。
-    GOAL_NAMES=(south_approach south_entry west_corridor_east west_corridor_exit south_lane_entry south_west south_east east_mid highland_ramp red_box)
-    GOAL_XS=(4.20 4.40 5.20 1.50 1.50 2.20 6.50 9.20 9.00 10.45)
-    GOAL_YS=(-4.30 -5.90 -6.20 -6.40 -7.65 -7.65 -7.65 -5.00 -2.80 0.35)
-    # GOAL_TOLERANCE 收紧到 0.15 m：0.30 m 容差圆盘在这些墙角区域无法
-    # 全部满足 all-yaw 半径（实测 0.12~0.26 m），收紧后停泊圆盘的
-    # min clearance >= 0.42 m。显式传 GOAL_TOLERANCE 的调用不被覆盖。
-    if [ "${GOAL_TOLERANCE_USER_SET}" != "1" ]; then
-      GOAL_TOLERANCE="0.15"
+    # 单目标：用户在 RMUC 2025 地图上标注的红点 pixel≈(278,105) ->
+    # map=(10.36,1.49)，位于中央高地北侧。不再拆分多段停泊点：MINCO 在
+    # footprint 门禁下自行生成绕南侧走廊、经 x≈9.3 坡道上高地的平滑参考，
+    # MPC 全程沿该参考跟随。Gazebo runner 使用同一坐标（契约测试校验一致）。
+    GOAL_NAMES=(red_box)
+    GOAL_XS=(10.36)
+    GOAL_YS=(1.49)
+    if [ "${GOAL_TIMEOUT_USER_SET}" != "1" ]; then
+      GOAL_TIMEOUT="300"
     fi
     ;;
   *)
