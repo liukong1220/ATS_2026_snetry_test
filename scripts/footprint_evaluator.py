@@ -44,8 +44,8 @@ from dataclasses import dataclass, field
 
 # Defaults come from FootprintSafetyParams in footprint_safety_checker.hpp.
 # They are NOT the RMUC values; callers must pass the effective run parameters.
-DEFAULT_LENGTH = 0.70
-DEFAULT_WIDTH = 0.55
+DEFAULT_LENGTH = 0.58
+DEFAULT_WIDTH = 0.58
 DEFAULT_SAFETY_MARGIN = 0.05
 DEFAULT_OBSTACLE_VALUE_THRESHOLD = 50
 DEFAULT_UNKNOWN_IS_OBSTACLE = False

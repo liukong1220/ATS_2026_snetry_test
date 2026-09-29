@@ -892,8 +892,8 @@ ats_rog_map_adapter:
     unknown_is_obstacle: true
     input_timeout_sec: 2.0
     signed_distance_max_m: 2.0
-    footprint_length: 0.70
-    footprint_width: 0.55
+    footprint_length: 0.58
+    footprint_width: 0.58
     footprint_safety_margin: 0.05
     robot_frame: gimbal_yaw_odom
     robot_unknown_clear_radius: 0.0
@@ -937,7 +937,9 @@ minco_planner:
     search_algorithm: jps
     astar_fallback: true
     jps_max_expanded_nodes: -1
-    jps_safe_distance: 0.57
+    # 实车 58x58 cm 足迹 + 0.05 m 余量的全 yaw 半径 hypot(0.34, 0.34) = 0.4808 m;
+    # 保留原 0.70x0.55 配置时 0.57 - 0.5154 = 0.055 m 的额外搜索余量 -> 0.54。
+    jps_safe_distance: 0.54
     publish_unsafe_trajectory: false
     reference_speed: 1.5
     min_segment_time: 0.05
@@ -982,8 +984,8 @@ minco_planner:
     # 仅无 ESDF（如 JPS 无 ESDF 候选）时启用的引导管道：偏离加密引导 > 0.10 m 按三次铰链罚。
     joint_guide_weight: 1000000.0
     joint_guide_max_deviation: 0.10
-    # 中心净空目标与 jps_safe_distance(0.57) 对齐；足迹采样点（已含 safety_margin）净空目标 0.03 m。
-    joint_center_clearance: 0.57
+    # 中心净空目标与 jps_safe_distance(0.54) 对齐；足迹采样点（已含 safety_margin）净空目标 0.03 m。
+    joint_center_clearance: 0.54
     joint_footprint_clearance: 0.03
     joint_footprint_edge_samples: 1
     joint_g_epsilon: 0.00001
@@ -1001,8 +1003,8 @@ minco_planner:
     narrow_clearance_enter: 1.20
     narrow_clearance_exit: 1.40
     terminal_yaw_sample_period: 0.10
-    footprint_length: 0.70
-    footprint_width: 0.55
+    footprint_length: 0.58
+    footprint_width: 0.58
     footprint_safety_margin: 0.05
     swept_max_corner_step_cells: 0.5
     body_yaw_follow_clearance: 0.55
@@ -1061,8 +1063,8 @@ ats_goal_manager:
     replan_stall_timeout_sec: 4.0
     replan_min_interval_sec: 2.0
     max_consecutive_replans: 2
-    footprint_length: 0.70
-    footprint_width: 0.55
+    footprint_length: 0.58
+    footprint_width: 0.58
     footprint_safety_margin: 0.05
 
 
