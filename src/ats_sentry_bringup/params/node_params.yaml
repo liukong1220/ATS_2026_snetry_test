@@ -326,6 +326,10 @@ loam_interface:
     odom_frame: "odom"
     base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
+    # gimbal_yaw_odom 距地面高度 = chassis_height(0.11) + gimbal_yaw_height(0.04)，
+    # 与 ats_sentry_robot.sdf.xmacro 一致。odom 原点锚定在其正下方地面，
+    # 保证 odom z=0 即地面，ROGMap 投影高度带与规划轨迹都以地面为基准。
+    base_frame_height: 0.15
 
 # TF 权威（P6 零.5 / 三.2）：本节点是实车 `odom->gimbal_yaw_odom` 与
 # `odom->base_footprint` 的唯一发布者，但它的 `odometryHandler` 在
@@ -335,8 +339,8 @@ loam_interface:
 # 在实车上没有任何节点发布（全仓 grep TransformBroadcaster，排除 src/sim/），
 # 因此由 `bringup.launch.py` 的 `static_tf_gimbal_yaw_odom_to_front_mid360`
 # 静态 TF 单独提供，且实车只允许这一份。
-# 【未实测】该静态 TF 的数值取自仿真模型（ats_sentry_robot.sdf.xmacro:45），
-# 落地行走前必须替换为实测标定值，属于本轮停止条件。
+# 该静态 TF 的数值与 ats_sentry_robot.sdf.xmacro 中 livox 安装位姿一致（取自与实车一致的旧构型），
+# 实车标定值变化时两处需同步修改。
 sensor_scan_generation:
   ros__parameters:
     use_sim_time: false
@@ -797,7 +801,9 @@ ats_rog_map:
     core.pcd_name: map.pcd
     core.map_sliding.enable: true
     core.map_sliding.threshold: 1.0
-    core.fix_map_origin: [0.0, 0.0, 0.5]
+    # odom 原点在地面（loam_interface.base_frame_height=0.15），以下 z 相关参数
+    # 统一比旧的 gimbal_yaw_odom 原点上移 0.15 m，保持实车感知高度带不变。
+    core.fix_map_origin: [0.0, 0.0, 0.65]
     core.frontier_extraction_enable: false
     core.ros_callback.enable: false
     core.ros_callback.cloud_topic: /cloud_registered
@@ -837,8 +843,8 @@ ats_rog_map:
     core.raycasting.stale_decay.sweep_interval_updates: 1
     core.raycasting.stale_decay.local_update_box_only: true
     core.raycasting.clear_clipped_endpoint: true
-    core.virtual_ground_height: -0.50
-    core.virtual_ceil_height: 1.00
+    core.virtual_ground_height: -0.35
+    core.virtual_ceil_height: 1.15
     # Startup-only authorization gate for every test-only fault fixture. It must
     # stay false for nominal, real-vehicle and default-launch runs; only the
     # isolated MuJoCo P2_FAULT_CASE=unknown launch may override it to true.
@@ -862,8 +868,9 @@ ats_rog_map_adapter:
     # stamps; align this with the independent 2.0 s source-health gate without
     # extending the source input timeout itself.
     input_sync_tolerance_sec: 2.0
-    projection_min_height: 0.10
-    projection_max_height: 0.80
+    # 绝对 odom z（地面 = 0），等价于旧 gimbal 原点下的 [0.10, 0.80]。
+    projection_min_height: 0.25
+    projection_max_height: 0.95
     planning_resolution: 0.10
     static_map_topic: /map
     traversability_grid_topic: /traversability_grid

@@ -106,12 +106,14 @@ def generate_launch_description():
         DeclareLaunchArgument("require_gimbal_status", default_value="True"),
         DeclareLaunchArgument("launch_behavior", default_value="True"),
         DeclareLaunchArgument("launch_lidar_static_tf", default_value="True"),
-        DeclareLaunchArgument("lidar_static_tf_x", default_value="-0.2"),
-        DeclareLaunchArgument("lidar_static_tf_y", default_value="0.0"),
-        DeclareLaunchArgument("lidar_static_tf_z", default_value="0.0"),
-        DeclareLaunchArgument("lidar_static_tf_roll", default_value="0.0"),
+        # Must match the livox mount in ats_sentry_robot.sdf.xmacro:
+        # "-0.1 0.245 0.325 ${75*pi/180} 0 -${161*pi/180}" relative to gimbal_yaw_odom.
+        DeclareLaunchArgument("lidar_static_tf_x", default_value="-0.1"),
+        DeclareLaunchArgument("lidar_static_tf_y", default_value="0.245"),
+        DeclareLaunchArgument("lidar_static_tf_z", default_value="0.325"),
+        DeclareLaunchArgument("lidar_static_tf_roll", default_value="1.3089969389957472"),
         DeclareLaunchArgument("lidar_static_tf_pitch", default_value="0.0"),
-        DeclareLaunchArgument("lidar_static_tf_yaw", default_value="-1.0646508437165408"),
+        DeclareLaunchArgument("lidar_static_tf_yaw", default_value="-2.8099800957108707"),
         DeclareLaunchArgument("use_respawn", default_value="True"),
         DeclareLaunchArgument("log_level", default_value="info"),
     ]

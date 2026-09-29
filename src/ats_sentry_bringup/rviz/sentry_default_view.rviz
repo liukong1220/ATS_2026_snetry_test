@@ -1,20 +1,36 @@
+# Generated navigation view (keep the three ATS RViz configs in sync).
+# Global: fused RC-ESDF; local: ROGMap range boxes (no voxel clouds);
+# paths: JPS -> MINCO -> MPC horizon/prediction, all in odom (ground z = 0).
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
-  - Class: rviz_common/Selection
-    Name: Selection
   - Class: rviz_common/Tool Properties
     Name: Tool Properties
   - Class: rviz_common/Views
     Name: Views
 Visualization Manager:
-  Class: ""
-  Global Options:
-    Background Color: 48; 48; 48
-    Fixed Frame: odom
-    Frame Rate: 30
+  Class: ''
   Displays:
-    - Class: rviz_default_plugins/RobotModel
+    - Alpha: 0.25
+      Cell Size: 1
+      Class: rviz_default_plugins/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 30
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
       Description Source: Topic
       Description Topic:
         Depth: 1
@@ -24,34 +40,17 @@ Visualization Manager:
         Value: robot_description
       Enabled: true
       Name: Robot Model
-      TF Prefix: ""
+      TF Prefix: ''
       Value: true
     - Class: rviz_default_plugins/TF
-      Enabled: true
+      Enabled: false
       Frame Timeout: 15
-      Marker Scale: 1
+      Marker Scale: 0.5
       Name: TF
       Show Arrows: false
-      Show Axes: false
+      Show Axes: true
       Show Names: false
-      Value: true
-    - Alpha: 0.30
-      Class: rviz_default_plugins/Map
-      Color Scheme: map
-      Draw Behind: true
-      Enabled: true
-      Name: Static Map
-      Topic:
-        Depth: 1
-        Durability Policy: Transient Local
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /map
-      Use Timestamp: false
-      Value: true
-    # This is the globally fused ROGMap/static/terrain display encoding.  The
-    # 0..100 values are only RViz colours; numerical ESDF queries stay on the
-    # immutable RC-ESDF snapshot and never consume this topic.
+      Value: false
     - Alpha: 0.62
       Class: rviz_default_plugins/Map
       Color Scheme: costmap
@@ -66,102 +65,12 @@ Visualization Manager:
         Value: /rc_esdf/signed_distance_grid
       Use Timestamp: false
       Value: true
-    - Alpha: 1.0
-      Autocompute Intensity Bounds: true
-      Class: rviz_default_plugins/PointCloud2
-      Color: 50; 255; 80
-      Color Transformer: FlatColor
-      Decay Time: 0
-      Enabled: false
-      Name: ROGMap Occupied
-      Position Transformer: XYZ
-      Size (Pixels): 3
-      Size (m): 0.08
-      Style: Boxes
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /rog_map/occ
-      Use Fixed Frame: true
-      Value: false
-    - Alpha: 0.45
-      Autocompute Intensity Bounds: true
-      Class: rviz_default_plugins/PointCloud2
-      Color: 255; 145; 0
-      Color Transformer: FlatColor
-      Decay Time: 0
-      Enabled: false
-      Name: ROGMap Inflated
-      Position Transformer: XYZ
-      Size (Pixels): 3
-      Size (m): 0.08
-      Style: Boxes
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /rog_map/inf_occ
-      Use Fixed Frame: true
-      Value: false
-    - Alpha: 0.35
-      Autocompute Intensity Bounds: true
-      Class: rviz_default_plugins/PointCloud2
-      Color: 128; 128; 128
-      Color Transformer: FlatColor
-      Decay Time: 0
-      Enabled: false
-      Name: ROGMap Unknown
-      Position Transformer: XYZ
-      Size (Pixels): 3
-      Size (m): 0.08
-      Style: Boxes
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /rog_map/unk
-      Use Fixed Frame: true
-      Value: false
-    - Alpha: 0.65
-      Autocompute Intensity Bounds: true
-      Class: rviz_default_plugins/PointCloud2
-      Color Transformer: Intensity
-      Decay Time: 0
-      Enabled: false
-      Name: ROGMap ESDF Debug
-      Position Transformer: XYZ
-      Size (Pixels): 3
-      Size (m): 0.05
-      Style: Points
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /rog_map/esdf
-      Use Fixed Frame: true
-      Value: false
-    - Alpha: 1.0
-      Class: rviz_default_plugins/MarkerArray
-      Enabled: true
-      Name: "ROGMap Bounds: Orange Local / Purple Visualization / Green Update"
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /rog_map/bounds
-      Value: true
     - Alpha: 0.7
       Class: rviz_default_plugins/Map
       Color Scheme: map
-      Draw Behind: false
-      Enabled: true
-      Name: Planning Grid
+      Draw Behind: true
+      Enabled: false
+      Name: Planning Grid (JPS occupancy)
       Topic:
         Depth: 1
         Durability Policy: Transient Local
@@ -169,31 +78,37 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /rc_esdf/planning_grid
       Use Timestamp: false
-      Value: true
-    - Alpha: 0.78
-      Autocompute Intensity Bounds: true
-      Class: rviz_default_plugins/PointCloud2
-      Color Transformer: RGB8
-      Decay Time: 0
+      Value: false
+    - Alpha: 0.3
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: false
+      Name: Static Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Use Timestamp: false
+      Value: false
+    - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: ROGMap Local Voxel State (debug only)
-      Position Transformer: XYZ
-      Size (Pixels): 3
-      Size (m): 0.09
-      Style: Boxes
+      Name: 'ROGMap Bounds: Orange Local / Green Update'
+      Namespaces: {}
       Topic:
         Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /rog_map/viz
-      Use Fixed Frame: true
+        Value: /rog_map/bounds
       Value: true
     - Alpha: 0.85
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 0; 220; 255
-      Enabled: false
+      Enabled: true
       Line Style: Lines
       Line Width: 0.025
       Name: Global Planning / JPS Search Path
@@ -209,48 +124,6 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /minco/raw_path
-      Value: true
-    - Alpha: 0.95
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 0; 255; 0
-      Enabled: true
-      Line Style: Lines
-      Line Width: 0.02
-      Name: MINCO Guide / Geometry Preprocessed
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0.03
-      Pose Color: 0; 255; 0
-      Pose Style: None
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /minco/preprocessed_guide
-      Value: true
-    - Alpha: 0.95
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 255; 145; 0
-      Enabled: true
-      Line Style: Lines
-      Line Width: 0.03
-      Name: MINCO Guide / ESDF Refined
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0.035
-      Pose Color: 255; 145; 0
-      Pose Style: None
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /minco/esdf_refined_guide
       Value: true
     - Alpha: 0.95
       Buffer Length: 1
@@ -316,6 +189,11 @@ Visualization Manager:
         Value: /ats_swerve_mpc/predicted_path
       Value: true
   Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
       Hide Inactive Objects: true
@@ -323,6 +201,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
     - Class: rviz_default_plugins/SetInitialPose
       Topic:
         Depth: 1
@@ -346,8 +225,17 @@ Views:
     Class: rviz_default_plugins/Orbit
     Distance: 18
     Focal Point:
-      X: -9
-      Y: 1
+      X: 0
+      Y: 0
       Z: 0
-    Pitch: 0.8
+    Name: Current View
+    Near Clip Distance: 0.01
+    Pitch: 1.0
+    Target Frame: <Fixed Frame>
     Yaw: 0.8
+  Saved: null
+Window Geometry:
+  Height: 1000
+  Width: 1600
+  X: 60
+  Y: 60

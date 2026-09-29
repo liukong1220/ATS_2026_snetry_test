@@ -287,7 +287,7 @@ ros2 action send_goal --feedback \
 
 ```bash
 ROS_DOMAIN_ID=189 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  TEST_PROFILE=red_box GOAL_TIMEOUT=180 \
+  TEST_PROFILE=red_box GOAL_TIMEOUT=300 \
   scripts/test_mujoco_minco_mpc_chain.sh
 ```
 

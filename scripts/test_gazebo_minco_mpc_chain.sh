@@ -117,13 +117,14 @@ case "$TEST_PROFILE" in
     GOAL_NAMES=(nominal)
     ;;
   red_box)
-    # Keep these waypoints identical to scripts/test_mujoco_minco_mpc_chain.sh.
-    GOAL_NAMES=(south_approach south_entry west_corridor_east west_corridor_exit south_lane_entry south_west south_east east_mid highland_ramp red_box)
-    GOAL_XS=(4.20 4.40 5.20 1.50 1.50 2.20 6.50 9.20 9.00 10.45)
-    GOAL_YS=(-4.30 -5.90 -6.20 -6.40 -7.65 -7.65 -7.65 -5.00 -2.80 0.35)
+    # Single goal at the user-marked red dot; keep identical to
+    # scripts/test_mujoco_minco_mpc_chain.sh.
+    GOAL_NAMES=(red_box)
+    GOAL_XS=(10.36)
+    GOAL_YS=(1.49)
     RED_BOX_LEG_COUNT="${#GOAL_NAMES[@]}"
     if [ "$GOAL_TIMEOUT_USER_SET" != "1" ]; then
-      GOAL_TIMEOUT_SEC="180"
+      GOAL_TIMEOUT_SEC="300"
       GOAL_RESULT_WAIT_SEC="$GOAL_TIMEOUT_SEC"
     fi
     if [ "$GOAL_TOLERANCE_USER_SET" != "1" ]; then

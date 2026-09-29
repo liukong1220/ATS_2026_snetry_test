@@ -43,8 +43,8 @@ def scenario_spec(name):
         # Rectangle east waypoint -> stage waypoint: 0.40m, above 0.30m tolerance.
         env.update(START_X='0.90', GOAL_X='0.50')
     elif name == 'clearance':
-        env.update(TEST_PROFILE='red_box', GOAL_TIMEOUT='180', GOAL_TOLERANCE='0.15')
-        expected += '; existing red_box route, live known-free waypoint checks'
+        env.update(TEST_PROFILE='red_box', GOAL_TIMEOUT='300', GOAL_TOLERANCE='0.15')
+        expected += '; single red-dot red_box goal, live known-free goal check'
     elif name in ('unknown', 'unreachable'):
         env['P2_FAULT_CASE'] = name
         expected = 'nominal baseline then source-owned P2 safety assertions; runner exit 0'

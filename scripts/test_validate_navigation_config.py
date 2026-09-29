@@ -60,7 +60,7 @@ class NavigationRvizContractTest(unittest.TestCase):
         )
         bounds["Name"] = "ROGMap Local Bounds"
 
-        with self.assertRaisesRegex(AssertionError, "three ROGMap bounds"):
+        with self.assertRaisesRegex(AssertionError, "local/update ROGMap bounds"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
     def test_mpc_reference_display_requires_reliable_qos(self):
@@ -92,14 +92,23 @@ class NavigationRvizContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "Z offset must be 0.12"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
-    def test_local_voxel_display_requires_producer_rgb(self):
+    def test_rog_map_voxel_cloud_display_is_rejected(self):
         rviz = copy.deepcopy(self.load_default_rviz())
-        local_voxel = VALIDATOR.single_display_for_topic(
-            rviz, "/rog_map/viz", "test RViz"
-        )
-        local_voxel["Color Transformer"] = "FlatColor"
+        rviz["Visualization Manager"]["Displays"].append({
+            "Class": "rviz_default_plugins/PointCloud2",
+            "Name": "ROGMap Local Voxel State",
+            "Topic": {"Value": "/rog_map/viz"},
+        })
 
-        with self.assertRaisesRegex(AssertionError, "preserve producer voxel-state colors"):
+        with self.assertRaisesRegex(AssertionError, "must not display /rog_map/viz"):
+            VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
+
+    def test_jps_path_display_must_be_enabled(self):
+        rviz = copy.deepcopy(self.load_default_rviz())
+        raw = VALIDATOR.single_display_for_topic(rviz, "/minco/raw_path", "test RViz")
+        raw["Enabled"] = False
+
+        with self.assertRaisesRegex(AssertionError, "/minco/raw_path must be enabled"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
     def test_global_fused_esdf_display_contract_passes(self):
@@ -122,15 +131,21 @@ class NavigationRvizContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "must be enabled"):
             VALIDATOR.assert_global_fused_esdf_display(rviz, "test RViz")
 
-    def test_minco_intermediate_guide_display_requires_reliable_qos(self):
+    def test_minco_intermediate_guide_display_is_rejected(self):
         rviz = copy.deepcopy(self.load_default_rviz())
-        guide = VALIDATOR.single_display_for_topic(
-            rviz, "/minco/preprocessed_guide", "test RViz"
-        )
-        guide["Topic"]["Reliability Policy"] = "Best Effort"
-        with self.assertRaisesRegex(AssertionError, "must use Reliable"):
-            VALIDATOR.assert_minco_guide_displays(rviz, "test RViz")
+        rviz["Visualization Manager"]["Displays"].append({
+            "Class": "rviz_default_plugins/Path",
+            "Name": "MINCO Guide / Geometry Preprocessed",
+            "Topic": {"Value": "/minco/preprocessed_guide"},
+        })
+        with self.assertRaisesRegex(AssertionError, "must not display /minco/preprocessed_guide"):
+            VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
+    def test_robot_model_must_use_global_tf(self):
+        rviz = copy.deepcopy(self.load_default_rviz())
+        VALIDATOR.named_display(rviz, "Robot Model")["TF Prefix"] = "red_standard_robot1"
+        with self.assertRaisesRegex(AssertionError, "global TF tree"):
+            VALIDATOR.assert_robot_model_display(rviz, "robot_description", "test RViz")
 
 if __name__ == "__main__":
     unittest.main()
