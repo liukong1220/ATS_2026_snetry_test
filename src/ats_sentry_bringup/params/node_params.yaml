@@ -955,6 +955,8 @@ minco_planner:
     esdf_obstacle_max_iterations: 6
     esdf_obstacle_control_point_spacing: 0.30
     guide_control_point_spacing: 0.30
+    # 稀疏 MINCO 航点（仿真已启用 1.0）；实车默认关闭，需实车证据后再开启。
+    guide_sparse_spacing: 0.0
     esdf_obstacle_max_step: 0.10
     esdf_obstacle_max_deviation: 0.35
     esdf_obstacle_trust_region: 0.10
