@@ -52,6 +52,10 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 `/rog_map/esdf` 是可视化点云，规划数值只通过
 `/rog_map/get_ground_projection` 与 RC-ESDF 接口传递，不能从点云反解析距离场。
 
+> 当前阶段（2026-10-01）：仿真 A 段（南侧走廊收尾验收）尚未通过，实车 B 段未开始；
+> `minco_planner` 新增的参考 yaw/时间参数化开关只在 MuJoCo profile 打开，实车 profile 尚未同步。
+> 阶段目标、已验证结果与通过标准以 [`docs/real_robot_stage_prompt.md`](docs/real_robot_stage_prompt.md) 为准。
+
 ## 📑 目录
 
 - [工作区与仓库边界](#工作区与仓库边界)
@@ -64,22 +68,27 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 - [关键接口与所有权](#关键接口与所有权)
 - [统一配置](#统一配置)
 - [验证状态与限制](#验证状态与限制)
+- [常见问题](#常见问题)
 - [目录结构](#目录结构)
 - [致谢与许可证](#致谢与许可证)
 
 ## 工作区与仓库边界
 
-本目录是 ROS 2 工作区根，也是三个独立 Git 仓库的编排与文档仓；提交、状态检查和推送建议
-逐仓执行。
+本目录是 ROS 2 工作区根，同时是编排与文档仓；`src/` 下的主要源码目录各自是独立 Git 仓库，
+提交、状态检查和推送建议逐仓执行（清单与分支见 `dependencies.repos`）。
 
-| 仓库 | 路径 | 主要职责 |
-| :--- | :--- | :--- |
-| 工作区根仓 | `.` | `docs/`、回归脚本、实机 bringup、总参数、地图与默认 RViz |
-| 导航仓 | `src/ats_sentry_nav` | 定位接入、ROGMap、adapter、RC-ESDF、JPS/MINCO、action 与 MPC |
-| MuJoCo 仓 | `src/sim/ats_mujoco_sim` | 四舵轮物理、传感器、场地、底盘 bridge 与仿真 launch |
+| 仓库 | 路径 | 分支 | 主要职责 |
+| :--- | :--- | :--- | :--- |
+| 工作区根仓 | `.` | `develop` | `docs/`、`scripts/` 回归与校验脚本、`src/ats_sentry_bringup`（实机 bringup、总参数、地图、默认 RViz） |
+| 导航仓 | `src/ats_sentry_nav` | `develop` | 定位接入、ROGMap、adapter、RC-ESDF、JPS/MINCO、action、MPC 与 `cmd_vel_arbiter` |
+| MuJoCo 仓 | `src/sim/ats_mujoco_sim` | `develop` | 四舵轮物理、传感器、场地、底盘 bridge、仿真 profile 与 launch |
+| Gazebo 仓 | `src/sim/gazebo_simulator` | `main` | `rmu_gazebo_simulator` 场地与 `ats_gazebo_nav.launch.py` |
+| loopback 仓 | `src/sim/loopback_sim` | `develop` | 轻量运动学/栅格/行为回归执行端 |
+| 串口桥仓 | `src/standard_robot_pp_ros2` | `develop` | 下位机串口、云台状态与最终速度入口 |
+| 视觉仓 | `src/sp_vision25` | `de` | 自瞄视觉 |
+| 其他 | `src/ats_sentry_behavior`、`src/ats_robot_description`、`src/interfaces`、`src/tools/*` | 见 `dependencies.repos` | 行为树、机器人描述、接口与工具 |
 
-其他 `src/` 包提供机器人描述、行为、接口或第三方依赖。`minco+mpc_reference/` 与
-`参考/` 仅用于算法/许可证溯源；它们不是活动构建输入。所有 `colcon` 命令都建议保留
+`参考/` 仅用于算法/许可证溯源，不是活动构建输入。所有 `colcon` 命令都建议保留
 `--base-paths src`，避免同名参考包进入构建图。
 
 ## ✨ 技术亮点
@@ -176,6 +185,16 @@ MAKEFLAGS=-j6 colcon build --base-paths src --symlink-install \
 source install/setup.bash
 ```
 
+日常改动只重建受影响包：
+
+```bash
+colcon build --base-paths src --symlink-install --packages-select minco_planner ats_mujoco_sim
+```
+
+- 不要用 `-UFETCHCONTENT_SOURCE_DIR_QDLDL` 重建 `ats_swerve_mpc`。
+- `scripts/test_mujoco_minco_mpc_chain.sh` 会检查运行产物是否比源码新；改源码后先重建再跑回归。
+- `source install/setup.bash` 时若未设置 `ROS_DOMAIN_ID`，`ats_sentry_bringup` 的 env-hook 会将其设为 `90`。
+
 检查正式入口的参数，不会驱动车辆：
 
 ```bash
@@ -191,7 +210,7 @@ ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py --show-args
 在允许执行任何运动命令前，建议确认：
 
 - `world` 对应的静态地图与 prior PCD 文件存在且坐标系匹配；
-- LiDAR/IMU、底盘串口、云台连接、波特率与 `node_params.yaml` 一致；
+- LiDAR/IMU、底盘串口、云台连接、波特率与 `node_params.yaml` 一致；串口桥 `cmd_vel_topic` 为 `/cmd_vel/selected`；
 - LiDAR 外参、`map -> odom`、`odom -> gimbal_yaw_odom` 与底盘 frame 已实测标定；
 - 物理急停、独立安全员和受限低速区域可用；
 - 没有其他节点发布竞争的关键 TF、`/cmd_vel/autonomy_raw`、`/cmd_vel/selected` 或底盘最终输入。
@@ -251,7 +270,7 @@ Point-LIO (/localization, /registered_scan)
 ### 直接启动（推荐）
 
 ```bash
-cd /home/kong/ATS_2026_snetry_test
+cd /home/ats/ATS_2026_snetry_test
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
@@ -266,7 +285,10 @@ ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
 #   use_viewer:=false show_viewer:=false use_rviz:=true
 ```
 
-`rmuc_2026_mujoco.launch.py` / `mujoco_navigation.launch.py` 均转发到同一正式编排；默认 `launch_physics:=true` 且 `launch_navigation:=true`。
+`rmuc_2026_mujoco.launch.py` 与 `mujoco_navigation.launch.py` 都是兼容入口，实际转发到
+`rmuc_2025_mujoco.launch.py`（RMUC 2025 场地、`rmuc_2025.yaml` 静态图与 `rmuc_2025.pcd` 先验）。
+默认值：`use_viewer:=true`、`show_viewer:=true`、`use_rviz:=false`、`launch_physics:=true`、
+`launch_navigation:=true`、`planning_grid_owner:=rog_map`、`solver_mode:=ilqr`。
 
 另开终端下发目标（会驱动仿真车，确认急停可用后再执行）：
 
@@ -283,12 +305,22 @@ ros2 action send_goal --feedback \
 
 ### 可选：自动化回归脚本
 
-红框 / 横移 / 故障注入用独立 `ROS_DOMAIN_ID` 跑脚本，**不是**日常开仿真的入口：
+单目标 / 矩形横移 / 南侧走廊 / 红点 / 故障注入用独立 `ROS_DOMAIN_ID` 跑脚本，**不是**日常开仿真的入口。
+`TEST_PROFILE` 取 `single`、`rectangle`、`south_corridor`、`red_box`；`red_box` 为单目标
+红点 map `(10.36, 1.49)`，默认 `GOAL_TIMEOUT=300`。`P2_FAULT_CASE` 取 `none`、`adapter_lease`、
+`service_timeout`、`input_stale`、`unknown`、`unreachable`、`freeze`。
 
 ```bash
-ROS_DOMAIN_ID=189 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  TEST_PROFILE=red_box GOAL_TIMEOUT=300 \
+ROS_DOMAIN_ID=71 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  TEST_PROFILE=red_box USE_RVIZ=true DISPLAY=:1 \
   scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+`USE_RVIZ=true` 需要 `DISPLAY` 以截取 RViz 截图。参考曲率指标（按弧长重采样，输出
+`k95`、`kmax`、`curvature_tv`、符号翻转的 JSON）从录制的 rosbag 计算：
+
+```bash
+python3 scripts/analyze_reference_curvature.py <rosbag2_dir> --brief
 ```
 
 ## 🧪 Gazebo 导航仿真
@@ -298,7 +330,7 @@ ROS_DOMAIN_ID=189 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
 ### 直接启动（推荐）
 
 ```bash
-cd /home/kong/ATS_2026_snetry_test
+cd /home/ats/ATS_2026_snetry_test
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
@@ -319,10 +351,10 @@ ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
 
 ### 可选：自动化回归 / P1 归因脚本
 
-名义直线、红框 10 航点、新鲜度分类器等用 `scripts/test_gazebo_*`，需要独立 `ROS_DOMAIN_ID`，不要与上面的交互式 launch 混成“日常开仿真”：
+名义直线、红点单目标（与 MuJoCo `red_box` 同一 map 坐标）、新鲜度分类器等用 `scripts/test_gazebo_*`，需要独立 `ROS_DOMAIN_ID`，不要与上面的交互式 launch 混成“日常开仿真”：
 
 ```bash
-ROS_DOMAIN_ID=198 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+ROS_DOMAIN_ID=91 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
   TEST_PROFILE=red_box scripts/test_gazebo_minco_mpc_chain.sh
 ```
 
@@ -336,8 +368,8 @@ ROS_DOMAIN_ID=198 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
 | `/planner/emergency_stop` | Goal Manager | MPC | heartbeat 急停状态 |
 | `/cmd_vel/autonomy_raw` | `ats_swerve_mpc` | 速度变换或 arbiter | 车体系 `[vx, vy, wz]` 的唯一自主源 |
 | `/cmd_vel` | 键鼠等手动源 | `cmd_vel_arbiter` | 保持 ROS 默认输入；新鲜时优先 |
-| `/cmd_vel/autonomy` | `chassis_vel_transform`（实机） | `cmd_vel_arbiter` | 经云台 yaw 坐标变换后的实机自主源 |
-| `/cmd_vel/selected` | `cmd_vel_arbiter` | 串口或仿真最终速度 bridge | 唯一最终 Twist；自动源需要新鲜执行租约 |
+| `/cmd_vel/autonomy` | `chassis_vel_transform`（实机） | `cmd_vel_arbiter` | 实机自主源：`autonomy_raw -> fake_vel_transform -> /cmd_vel/autonomy_gimbal -> chassis_vel_transform` |
+| `/cmd_vel/selected` | `cmd_vel_arbiter` | 串口桥（`cmd_vel_topic`）、MuJoCo `twist_to_motion_ctrl`、Gazebo/loopback 执行端 | 唯一最终 Twist；自动源需要新鲜执行租约 |
 
 `/planner/emergency_stop` 与 `/minco/reference_path` 是独立 DDS topic，不具备跨 topic
 原子顺序。Goal Manager 的提交点会重新校验地图 snapshot/heartbeat，并在同一临界区内先发布
@@ -358,8 +390,23 @@ ROS_DOMAIN_ID=198 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
 src/ats_sentry_bringup/params/node_params.yaml
 ```
 
-正式 launch 将同一 `params_file` 传给定位、地图、规划、控制、串口与行为节点；launch 仅覆盖
-`use_sim_time` 与资产/设备路径。ROGMap 的正式 profile 不接受
+它是实车 profile。正式 launch 将同一 `params_file` 传给定位、地图、规划、控制、串口与行为节点；
+实机 launch 仅覆盖 `use_sim_time` 与资产/设备路径。
+
+MuJoCo 在同一 `node_params.yaml` 之上叠加仿真 profile
+`src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml`（后加载者覆盖），覆盖范围为
+`ats_rog_map`、`ats_rog_map_adapter`、`minco_planner`、`ats_goal_manager` 与 `terrain_analysis_ext`；
+仿真 launch 另外以内联参数指定 `cmd_vel_arbiter` 等节点的 topic。
+
+车体足迹两份 profile 均为 `0.58 x 0.58 m`，差异在余量：
+
+| 参数 | 实车 `node_params.yaml` | 仿真 `rmuc_2025_navigation.yaml` |
+| :--- | :--- | :--- |
+| `footprint_safety_margin` | `0.05` | `0.02` |
+| `minco_planner.jps_safe_distance` | `0.54` | `0.44` |
+
+仿真 profile 的放宽项和仿真专用开关不能直接迁入实车；迁移评估见
+`docs/real_robot_stage_prompt.md` A 段第 5 步。ROGMap 的正式 profile 不接受
 `map_config_file` 与显式 ROS 参数同时生效。`static_map_publisher.py` 建议保留 `/map` 的
 frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
@@ -368,7 +415,29 @@ frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
 ## ✅ 验证状态与限制
 
-**当前算法与仿真契约（2026-09-14）：**
+**当前阶段（2026-10-01）：** 仿真 A 段未通过。红点目标 `(10.36, 1.49)` 的新方案尚未达到
+5/5 到达且零物理接触，南侧走廊仍有门禁拦停；实车 B 段（静态检查、定位、地图、开环规划、
+低速闭环）均未开始。逐次运行数据、推断与下一步见
+[`docs/real_robot_stage_prompt.md`](docs/real_robot_stage_prompt.md)。
+
+**本地验证命令（不驱动车辆）：**
+
+```bash
+cd /home/ats/ATS_2026_snetry_test
+# minco_planner GTest；排除 lint 类测试
+(cd build/minco_planner && \
+  ctest --output-on-failure -E 'copyright|cppcheck|cpplint|lint_cmake|pep257|xmllint|clang_format')
+# 正式参数、单一来源与 RViz 契约
+python3 scripts/validate_navigation_config.py
+# 参考曲率脚本单测
+python3 scripts/test_analyze_reference_curvature.py
+# 各仓分别检查空白错误
+git diff --check
+```
+
+`cpplint`、`clang_format` 等 lint 项存在既有历史失败，报告时只写“相关 GTest 通过”，不能写成全量测试通过。
+
+**算法与仿真契约（2026-09-14 记录）：**
 
 - 规划地图 owner 默认 `PLANNING_GRID_OWNER=rog_map`；RC-ESDF 数值经 adapter 发布，不从 `/rog_map/esdf` 点云反解析。
 - 速度链为车体系 `[vx, vy, wz]`；`/cmd_vel/selected` 由 `cmd_vel_arbiter` 唯一发布，实机/MuJoCo/Gazebo 执行端只订 selected。
@@ -383,20 +452,42 @@ frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
 以下仍是**未完成或未验证**项：连续 swept footprint、`PlanningMapSnapshot`/`PlannerCandidate` 原子契约全链迁移、受限低速实机导航，以及 P3 Nav2-free。仿真 footprint sample 只用于算法复核，不能替代实机数据。
 
+## 常见问题
+
+### CycloneDDS 报 `wlo1: does not match an available interface` 或 `rmw_create_node: failed to create domain`
+
+`$CYCLONEDDS_URI`（通常为 `~/.ros/cyclonedds.xml`）绑定的网卡当前不在线，节点无法创建 DDS
+domain。在该文件中把网卡标为非必需，并加回环兜底（CycloneDDS 0.10.5 支持）：
+
+```xml
+<Interfaces>
+  <NetworkInterface name="wlo1" multicast="true" presence_required="false"/>
+  <NetworkInterface name="lo" multicast="true"/>
+</Interfaces>
+```
+
+隔离测试的 `ROS_DOMAIN_ID` 建议取 `101` 及以下；本机曾在 `120` 创建 DDS domain 失败。
+
 ## 📂 目录结构
 
 ```text
 ATS_2026_snetry_test/
 ├── src/
-│   ├── ats_sentry_bringup/          # 实机总入口、总参数、地图、PCD、RViz
+│   ├── ats_sentry_bringup/          # 实机总入口、总参数、地图、PCD、RViz（根仓）
 │   ├── ats_sentry_nav/              # 独立导航 Git 仓库
 │   ├── ats_sentry_behavior/         # 行为树与 ATS action client
 │   ├── ats_robot_description/       # 机器人描述与模型资源
-│   ├── sim/ats_mujoco_sim/          # 独立 MuJoCo Git 仓库
-│   └── interfaces/                  # 底盘/业务 ROS 接口
-├── scripts/                          # 构建、配置与 MuJoCo 回归脚本
-├── docs/                             # 研发状态、验收边界与工程文档
-└── minco+mpc_reference/              # 参考工程，不参与活动构建
+│   ├── standard_robot_pp_ros2/      # 下位机串口桥
+│   ├── sp_vision25/                 # 自瞄视觉
+│   ├── interfaces/                  # 底盘/业务 ROS 接口
+│   ├── tools/                       # pcd2pgm、rosbag 录制、云台键盘遥控
+│   ├── dependencies/                # 源码构建的第三方依赖
+│   └── sim/
+│       ├── ats_mujoco_sim/          # 独立 MuJoCo Git 仓库
+│       ├── gazebo_simulator/        # Gazebo 场地与 ATS 导航入口
+│       └── loopback_sim/            # 轻量回归执行端
+├── scripts/                          # 配置校验、回归与分析脚本
+└── docs/                             # 研发状态、验收边界与工程文档
 ```
 
 ## 🙏 致谢与许可证
