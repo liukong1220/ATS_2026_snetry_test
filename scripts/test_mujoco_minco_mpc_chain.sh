@@ -924,7 +924,11 @@ assert_rviz_runtime_contract() {
   : >"${RVIZ_QOS_LOG}"
   wait_for_command "MuJoCo navigation RViz node" 30 \
     node_is_present /mujoco_navigation_rviz2
-  for topic in /rog_map/occ /rog_map/inf_occ /rog_map/viz /rog_map/bounds /localization; do
+  # 只断言 mujoco_navigation.rviz 实际订阅的 best-effort 传感器 topic。ats_mujoco_sim
+  # ca34d5f 起 RViz 不再显示 /rog_map/occ、/rog_map/inf_occ、/rog_map/viz，这里继续要求
+  # RViz 订阅它们会让每次 USE_RVIZ=true 运行都在发目标前失败。/rog_map/viz 的发布内容
+  # 仍由下面独立的 topic_field_* 检查覆盖。
+  for topic in /rog_map/bounds /localization; do
     assert_rviz_best_effort_observer "${topic}"
   done
   wait_for_command "non-empty ROGMap local voxel visualization" 30 \
@@ -940,7 +944,7 @@ capture_rviz_screenshot() {
   [[ -n "${DISPLAY:-}" ]] || fail "USE_RVIZ=true requires DISPLAY for screenshot capture"
   deadline=$((SECONDS + 20))
   while (( SECONDS < deadline )); do
-    window_id="$(xwininfo -root -tree 2>/dev/null | awk '/mujoco_navigation\.rviz - RViz/ {print $1; exit}')"
+    window_id="$(xwininfo -root -tree 2>/dev/null | awk '/mujoco_navigation\.rviz\*? - RViz/ {print $1; exit}')"
     [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]] && break
     sleep 0.5
   done
