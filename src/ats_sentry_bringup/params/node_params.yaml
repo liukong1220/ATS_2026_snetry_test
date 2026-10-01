@@ -605,6 +605,8 @@ small_gicp_relocalization:
 
     # 是否打印每次注册结果。联调建议开，比赛可关。
     log_registration_details: false
+    # 详细日志最短输出间隔，防止点云回调高频刷屏；CSV 诊断不受影响。
+    log_throttle_ms: 2000
     # localization_fusion 独占 map->odom，GICP 只发布观测。
     publish_tf: false
     # 连续两次一致结果才形成 accepted observation，单帧假匹配不改 map->odom。
@@ -926,6 +928,8 @@ minco_planner:
     # Projection publication jitter reaches 3.55 s in the measured CPU
     # profile; keep the lease fail-safe while allowing that bounded gap.
     map_ready_timeout_sec: 5.0
+    # 规划失败/地图刷新日志的最短输出间隔，关键字仍用于自动化证据解析。
+    log_throttle_ms: 2000
     emergency_stop_heartbeat_period_sec: 0.1
     runtime_safety_recheck_hz: 10.0
     runtime_safety_horizon_sec: 1.0
