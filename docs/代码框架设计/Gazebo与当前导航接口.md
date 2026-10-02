@@ -39,7 +39,7 @@ ROS_DOMAIN_ID=231 \
 
 ## 日志策略
 
-规划器、MPC、GICP 重定位和 Gazebo bridge 的运行日志使用中文说明，保留 `planned generation=`、`jps failed:`、`TRACE execution_command` 等结构化键供回归脚本解析。规划器和 GICP 的重复诊断默认 `log_throttle_ms=2000`，允许通过参数在 `250--60000 ms` 范围内调整；CSV 候选诊断仍逐候选写盘，不把高频文本日志当作遥测通道。急停、无效输入、TF 失败和安全拒绝使用节流后的错误/警告级别，状态恢复仍在状态变化或下一次允许输出时记录。
+规划器、MPC、GICP 重定位和 Gazebo bridge 的运行日志使用中文说明，保留 `planned generation=`、`TRACE execution_command` 等结构化键供回归脚本解析。规划器和 GICP 的重复诊断默认 `log_throttle_ms=2000`，允许通过参数在 `250--60000 ms` 范围内调整；CSV 候选诊断仍逐候选写盘，不把高频文本日志当作遥测通道。急停、无效输入、TF 失败和安全拒绝使用节流后的错误/警告级别，状态恢复仍在状态变化或下一次允许输出时记录。
 
 ## 验证命令
 

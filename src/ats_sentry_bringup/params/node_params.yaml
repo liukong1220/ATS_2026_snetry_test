@@ -453,12 +453,12 @@ chassis_vel_transform:
     #    原 max_linear_speed=4.6 高出物理能力 2.75 倍，是不可达的假限幅。
     # 2. 判据一致性。若出口比 MPC 松，则"MPC 限幅 = 底盘实际收到的限幅"不成立，
     #    统一判据 `/cmd_vel/selected=0 -> /motion_control=0` 的上界推导失去依据。
-    # 这里取 MPC 可行域数值：max_vx/vy=1.5、max_ax/ay=2.0、max_wz=2.0、max_awz=3.0。
+    # 这里取 MPC 可行域数值：max_vx/vy=1.5、max_ax/ay=2.0、max_wz=2.0、max_awz=2.0。
     # ATS 正式 profile 也经过本节点；出口限幅不得宽于 MPC 可行域。
     max_linear_speed: 1.5
     max_linear_accel: 2.0
     max_angular_speed: 2.0
-    max_angular_accel: 3.0
+    max_angular_accel: 2.0
     # 限制大 yaw 反馈进入速度坐标变换的变化率，避免关节角抖动直接变成底盘速度矢量跳变。
     max_yaw_transform_rate: 3.5
     # 若现场下位机在“都涵盖/底盘跟随云台”模式里已经做了大 yaw 解耦，
@@ -1132,13 +1132,15 @@ ats_swerve_mpc:
     state_weight: [18.0, 18.0, 10.0]
     terminal_weight: [28.0, 28.0, 8.0]
     control_weight: [0.12, 0.12, 0.08]
-    control_delta_weight: [0.7, 0.7, 0.25]
+    # 转角段提高 wz 增量惩罚，抑制相邻周期角速度突变；与 yaw_acceleration_limit 同步为 2.0。
+    control_delta_weight: [0.70, 0.70, 0.60]
     max_vx: 1.5
     max_vy: 1.5
     max_wz: 2.0
     max_ax: 2.0
     max_ay: 2.0
-    max_awz: 3.0
+    # 角加速度上限收紧，给舵轮和底盘执行器留出转角跟踪余量。
+    max_awz: 2.0
     wheel_base_x: 0.270
     wheel_base_y: 0.270
     wheel_radius: 0.0425
