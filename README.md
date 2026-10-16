@@ -136,7 +136,7 @@ Nav2 server、costmap、BT navigator，也不消费 `/plan`；这不改变 `Nav2
 
 ```bash
 git clone -b develop \
-  https://github.com/liukong1220/ATS_2026_snetry_test.git \
+  git@github.com:liukong1220/ATS_2026_snetry_test.git \
   /home/ats/ATS_2026_snetry_test
 cd /home/ats/ATS_2026_snetry_test
 vcs import --recursive --skip-existing . < dependencies.repos
