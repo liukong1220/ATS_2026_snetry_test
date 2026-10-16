@@ -7,11 +7,11 @@
 # because it owns the complete robot startup entrypoints, deployment parameters,
 # maps, PCD assets and RViz views. Do not add it here as a split repository.
 #
-# Public dependencies use HTTPS where possible. The user-owned Gazebo fork is
-# intentionally SSH-only so a clean import cannot resolve the original upstream
-# repository by accident. Upstream tools and dependencies are expected to be
-# forked under liukong1220 and tagged with the ats-nav topic for ATS_NAV project
-# grouping.
+# All liukong1220 repositories use SSH, matching the root remote
+# git@github.com:liukong1220/ATS_2026_snetry_test.git. Each repository keeps its
+# own name; do not point every origin at the root repository. Upstream tools and
+# dependencies are expected to be forked under liukong1220 and tagged with the
+# ats-nav topic for ATS_NAV project grouping.
 # Repository paths are grouped by domain:
 #   src/sim/*                  simulation repositories
 #   src/interfaces/*           message/interface repositories
@@ -38,55 +38,55 @@ repositories:
 
   src/sim/loopback_sim:
     type: git
-    url: https://github.com/liukong1220/loopback_sim.git
+    url: git@github.com:liukong1220/loopback_sim.git
     version: develop
 
   # Robot, behavior and self-developed navigation.
   src/ats_robot_description:
     type: git
-    url: https://github.com/liukong1220/ats_robot_description.git
+    url: git@github.com:liukong1220/ats_robot_description.git
     version: develop
 
   src/ats_sentry_behavior:
     type: git
-    url: https://github.com/liukong1220/ats_sentry_behavior.git
+    url: git@github.com:liukong1220/ats_sentry_behavior.git
     version: develop
 
   src/ats_sentry_nav:
     type: git
-    url: https://github.com/liukong1220/ats_sentry_nav.git
+    url: git@github.com:liukong1220/ats_sentry_nav.git
     version: develop
 
   src/ats_sentry_nav/sentry_chassis_vel_transform:
     type: git
-    url: https://github.com/liukong1220/sentry_chassis_vel_transform.git
+    url: git@github.com:liukong1220/sentry_chassis_vel_transform.git
     version: develop
 
   src/standard_robot_pp_ros2:
     type: git
-    url: https://github.com/liukong1220/standard_robot_pp_ros2.git
+    url: git@github.com:liukong1220/standard_robot_pp_ros2.git
     version: develop
 
   src/sp_vision25:
     type: git
-    url: https://github.com/liukong1220/sp_vision25.git
+    url: git@github.com:liukong1220/sp_vision25.git
     version: de
 
   # ATS messages. The interfaces repository owns ats_rm_interfaces and sp_msgs;
   # the two ignored chassis protocol directories remain separate repositories.
   src/interfaces:
     type: git
-    url: https://github.com/liukong1220/interfaces.git
+    url: git@github.com:liukong1220/interfaces.git
     version: develop
 
   src/interfaces/carstatemsgs:
     type: git
-    url: https://github.com/liukong1220/carstatemsgs.git
+    url: git@github.com:liukong1220/carstatemsgs.git
     version: develop
 
   src/interfaces/manda_can_control:
     type: git
-    url: https://github.com/liukong1220/manda_can_control.git
+    url: git@github.com:liukong1220/manda_can_control.git
     version: develop
 
   # Workspace tools.
@@ -97,34 +97,34 @@ repositories:
 
   src/tools/pcd2pgm:
     type: git
-    url: https://github.com/liukong1220/pcd2pgm.git
+    url: git@github.com:liukong1220/pcd2pgm.git
     version: main
 
   src/tools/rosbag2_composable_recorder:
     type: git
-    url: https://github.com/liukong1220/rosbag2_composable_recorder.git
+    url: git@github.com:liukong1220/rosbag2_composable_recorder.git
     version: main
 
   # Source dependencies that are patched or unavailable through the target
   # machine's rosdep/apt baseline.
   src/dependencies/sdformat_tools:
     type: git
-    url: https://github.com/liukong1220/sdformat_tools.git
+    url: git@github.com:liukong1220/sdformat_tools.git
     version: galactic
 
   src/dependencies/joint_state_publisher:
     type: git
-    url: https://github.com/liukong1220/joint_state_publisher.git
+    url: git@github.com:liukong1220/joint_state_publisher.git
     version: feat-offset-timestamp
 
   src/dependencies/rmoss_core:
     type: git
-    url: https://github.com/liukong1220/rmoss_core.git
+    url: git@github.com:liukong1220/rmoss_core.git
     version: humble
 
   src/dependencies/rmoss_interfaces:
     type: git
-    url: https://github.com/liukong1220/rmoss_interfaces.git
+    url: git@github.com:liukong1220/rmoss_interfaces.git
     version: humble
 
   # Gazebo-domain rmoss sources. They were previously carried by the nested
@@ -134,15 +134,15 @@ repositories:
   # Ignition system plugins used by the robot SDF.
   src/dependencies/rmoss_gazebo:
     type: git
-    url: https://github.com/liukong1220/rmoss_gazebo.git
+    url: git@github.com:liukong1220/rmoss_gazebo.git
     version: humble
 
   src/dependencies/rmoss_gz_resources:
     type: git
-    url: https://github.com/liukong1220/rmoss_gz_resources.git
+    url: git@github.com:liukong1220/rmoss_gz_resources.git
     version: humble
 
   src/dependencies/BehaviorTree.ROS2:
     type: git
-    url: https://github.com/liukong1220/BehaviorTree.ROS2.git
+    url: git@github.com:liukong1220/BehaviorTree.ROS2.git
     version: humble
