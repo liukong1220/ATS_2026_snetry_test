@@ -16,7 +16,7 @@ ROS_DOMAIN_ID=231 \
 
 `planning_grid_owner` 只在启动时选择 `rog_map` 或 `rc_esdf`，当前 P2 验收使用 `rog_map`。Gazebo 默认使用机器人自身的 `gimbal_odometry_gt` 和 LiDAR 真值中继，不会同时启动 Point-LIO 作为第二个 `/odometry` 所有者；设置 `use_gazebo_gt_odometry:=false` 才进入 Gazebo 的 Point-LIO 链。
 
-RMUC 2027 推荐使用专用入口，或在直接入口中显式传入 `world:=rmuc_2027`。当前 launch 会按 world 派生 `rmuc_2027.yaml`、`rmuc_2027.pcd`、出生点 `(13.40, 2.00, 0.0)` 和初始 `map->odom=(0,0,0)`；旧 RMUC 2025 默认值不能与 2027 world 混用。
+RMUC 2027 推荐使用专用入口，或在直接入口中显式传入 `world:=rmuc_2027`。当前 launch 会按 world 派生 `rmuc_2027.yaml`、`rmuc_2027.pcd`、出生点 `(13.40, 2.00, 0.0)` 和初始 `map->odom=(13.40,2.00,0)`；GT relay 将机器人出生点归一到 `odom=(0,0)`，所以该偏置必须保留。旧 RMUC 2025 默认值不能与 2027 world 混用。
 
 ```bash
 ROS_DOMAIN_ID=123 RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
@@ -77,13 +77,7 @@ MAKEFLAGS=-j1 colcon build --base-paths src --packages-select \
 - `localization_fusion` 正常创建并声明 `/localization`、`/localization/status` 和
   `/relocalization_observation` 接口。
 
-该旧运行在 20 s 后由测试超时主动发送 `SIGINT`，不能作为 2027 重定位证据。2027 直接入口复测
-（`ROS_DOMAIN_ID=231`、GT odometry、direct LiDAR bridge）确认 world、2027 map/PCD、出生点和 GICP
-prior 均被正确加载；但当前机器仍有 `libEGL warning: egl: failed to create dri2 screen`，
-`gazebo_gt_registered_scan_relay` 统计为 `成功=0`，随后 GICP 报 `localization status stamp is not increasing`。
-该拒绝是无有效 `/registered_scan`/仿真时钟推进的 fail-closed 结果，不应通过放宽状态单调性或 GICP
-质量阈值掩盖。应先修复 Gazebo GPU/EGL off-screen 渲染，再复核 `/registered_scan`、
-`/localization/status` 时间戳单调递增和 `/relocalization_observation` accepted 结果。
+该旧运行在 20 s 后由测试超时主动发送 `SIGINT`，不能作为 2027 重定位证据。2027 直接入口复测（`ROS_DOMAIN_ID=232`、GT odometry、direct LiDAR bridge、无 GUI）确认 world、2027 map/PCD、出生点和 GICP prior 均被正确加载；relay 持续发布 `/registered_scan`，GICP 出现 `refined>0` 与 `GICP对齐接受`，状态监视器在 38 s 内收到 `status_nonmono=0` 并观察到 `CONFIRMED`。停止产生新观测后，租约按配置进入 fail-closed LOST/DEGRADED，这不改变此前已经接受的重定位证据。Gazebo 完整导航红框和物理接触 evaluator 仍需单独验收。
 
 ## 当前边界
 

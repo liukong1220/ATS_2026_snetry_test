@@ -53,8 +53,7 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 `/rog_map/get_ground_projection` 与 RC-ESDF 接口传递，不能从点云反解析距离场。
 
 > 当前阶段（2026-10-17）：串口/视觉 ROS 2 桥、MuJoCo 2027 隧道 yaw 对齐和 Gazebo 2027
-> 入口已经实现。MuJoCo `tunnel_B` 回归通过；Gazebo 世界与 RViz 配置可启动，但当前机器的
-> GPU/EGL 渲染未产生 LiDAR 点云，完整 Gazebo 导航闭环保持未通过。阶段目标、已验证结果与通过标准以
+> 入口已经实现。MuJoCo `tunnel_B` 回归通过；Gazebo 2027 headless direct bridge、仿真 Mid360 TF、`/registered_scan` 和 GICP accepted/CONFIRMED 已实测。完整红框导航与物理接触仍需单独验收。阶段目标、已验证结果与通过标准以
 > [`docs/2027串口融合与隧道仿真移植方案.md`](docs/2027串口融合与隧道仿真移植方案.md) 为准。
 
 ## 📑 目录
@@ -383,8 +382,7 @@ ROS_DOMAIN_ID=123 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
   scripts/test_gazebo_minco_mpc_chain.sh
 ```
 
-该回归已实际启动 world、机器人、ROGMap 和 action server，但 `/registered_scan` 无消息，日志出现
-`libEGL ... failed to create dri2 screen`，因此 Gazebo 完整导航闭环仍是环境阻断；详见
+该回归入口已实际启动 world、机器人、ROGMap 和 action server；重定位专用 headless 验证已确认 `/registered_scan`、GICP accepted/CONFIRMED 和状态时间戳单调。红框导航仍需完整运行；详见
 [`docs/代码框架设计/Gazebo与当前导航接口.md`](docs/代码框架设计/Gazebo与当前导航接口.md)。
 
 ## 📡 关键接口与所有权
@@ -450,7 +448,7 @@ frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
 **当前阶段（2026-10-17）：** 串口 PTY 双向回环、视觉 ROS 2 构建、MuJoCo 2027 隧道回归和
 导航 yaw CTest 已通过。Gazebo 2027 world/SDF、依赖和 RViz 配置已通过静态/启动检查，但当前
-GPU/EGL 环境没有产生 `/registered_scan`，所以 Gazebo 导航、实车 HIL、物理接触 evaluator 和
+headless direct bridge 已产生 `/registered_scan` 并完成 GICP 重定位验收；Gazebo 红框导航、实车 HIL、物理接触 evaluator 和
 P3/P4 完整验收仍未完成。逐次证据见
 [`docs/2027串口融合与隧道仿真移植方案.md`](docs/2027串口融合与隧道仿真移植方案.md)。
 
