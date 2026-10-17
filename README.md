@@ -349,18 +349,47 @@ cd /home/ats/ATS_2026_snetry_test
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-# 有界面
+# RMUC 2027：只启动 RViz，Gazebo 使用 headless rendering（推荐日常算法测试）
 ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
-  world:=rmuc_2025 \
+  world:=rmuc_2027 \
   use_gazebo_gt_odometry:=true \
   use_rviz:=true
 
-# 无头（服务器/CI 本机联调）
+# 需要 Gazebo GUI 时显式关闭 headless，并保留 RViz
 # ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
-#   world:=rmuc_2025 use_gazebo_gt_odometry:=true headless:=true use_rviz:=false
+#   world:=rmuc_2027 use_gazebo_gt_odometry:=true \
+#   headless:=false use_viewer:=true use_rviz:=true
 ```
 
-常用参数：`world`、`map_yaml`、`params_file`、`robot_name`、`use_gazebo_gt_odometry`、`launch_small_gicp_relocalization`、`prior_pcd_file`。先用 `--show-args` 查看完整列表。
+服务器或只验证点云/重定位时，先设置可用的 EGL 渲染环境，再使用隔离 domain：
+
+```bash
+export DISPLAY=:0
+export EGL_PLATFORM=surfaceless
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+
+ROS_DOMAIN_ID=232 RMW_IMPLEMENTATION=rmw_fastrtps_cpp ROS_LOCALHOST_ONLY=1 \
+ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
+  world:=rmuc_2027 use_sim_time:=true \
+  headless:=true headless_rendering:=true use_viewer:=false use_rviz:=false \
+  enable_camera_sensors:=false use_gazebo_gt_odometry:=true \
+  launch_planning:=false launch_small_gicp_relocalization:=true \
+  prior_pcd_file:=src/ats_sentry_bringup/pcd/rmuc_2027.pcd
+```
+
+该命令用于确认 Gazebo world、仿真 Mid360、`/registered_scan` 和 GICP 重定位，不会启动规划器。启动后另开终端检查：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ROS_DOMAIN_ID=232 ros2 topic hz /registered_scan
+ROS_DOMAIN_ID=232 ros2 topic echo --once /relocalization_observation
+ROS_DOMAIN_ID=232 ros2 topic echo --once /localization
+```
+
+日常完整导航使用第一条命令；下发目标前确认 `/planner/emergency_stop`、`/cmd_vel/selected` 和 RViz 中的地图/定位状态正常。常用参数：`world`、`map_yaml`、`params_file`、`robot_name`、`use_gazebo_gt_odometry`、`launch_small_gicp_relocalization`、`prior_pcd_file`、`launch_planning`、`headless`、`headless_rendering`、`use_viewer`、`use_rviz`。先用 `--show-args` 查看完整列表。
 
 另开终端下发目标（命令与 MuJoCo 相同，仍是 `/ats_navigate_to_pose`）。
 
