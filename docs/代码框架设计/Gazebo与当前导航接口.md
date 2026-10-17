@@ -16,6 +16,15 @@ ROS_DOMAIN_ID=231 \
 
 `planning_grid_owner` 只在启动时选择 `rog_map` 或 `rc_esdf`，当前 P2 验收使用 `rog_map`。Gazebo 默认使用机器人自身的 `gimbal_odometry_gt` 和 LiDAR 真值中继，不会同时启动 Point-LIO 作为第二个 `/odometry` 所有者；设置 `use_gazebo_gt_odometry:=false` 才进入 Gazebo 的 Point-LIO 链。
 
+RMUC 2027 推荐使用专用入口，或在直接入口中显式传入 `world:=rmuc_2027`。当前 launch 会按 world 派生 `rmuc_2027.yaml`、`rmuc_2027.pcd`、出生点 `(13.40, 2.00, 0.0)` 和初始 `map->odom=(0,0,0)`；旧 RMUC 2025 默认值不能与 2027 world 混用。
+
+```bash
+ROS_DOMAIN_ID=123 RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  ros2 launch rmu_gazebo_simulator ats_gazebo_nav.launch.py \
+  world:=rmuc_2027 use_gazebo_gt_odometry:=true \
+  use_direct_gazebo_lidar_bridge:=true use_rviz:=true
+```
+
 ## 端到端接口账本
 
 | 阶段 | 唯一 producer | topic/接口 | frame 与时序约束 |
@@ -68,11 +77,16 @@ MAKEFLAGS=-j1 colcon build --base-paths src --packages-select \
 - `localization_fusion` 正常创建并声明 `/localization`、`/localization/status` 和
   `/relocalization_observation` 接口。
 
-该运行在 20 s 后由测试超时主动发送 `SIGINT`，只证明 Gazebo 传感器/定位接口能够启动并传输数据；
-规划器、MPC、底盘执行和红框终点仍需使用独立进程完成完整闭环验收。
+该旧运行在 20 s 后由测试超时主动发送 `SIGINT`，不能作为 2027 重定位证据。2027 直接入口复测
+（`ROS_DOMAIN_ID=231`、GT odometry、direct LiDAR bridge）确认 world、2027 map/PCD、出生点和 GICP
+prior 均被正确加载；但当前机器仍有 `libEGL warning: egl: failed to create dri2 screen`，
+`gazebo_gt_registered_scan_relay` 统计为 `成功=0`，随后 GICP 报 `localization status stamp is not increasing`。
+该拒绝是无有效 `/registered_scan`/仿真时钟推进的 fail-closed 结果，不应通过放宽状态单调性或 GICP
+质量阈值掩盖。应先修复 Gazebo GPU/EGL off-screen 渲染，再复核 `/registered_scan`、
+`/localization/status` 时间戳单调递增和 `/relocalization_observation` accepted 结果。
 
 ## 当前边界
 
 - Gazebo 接口已按当前自研导航 topic、frame、急停和唯一所有者契约接线；这不等于当前 revision 已通过 nominal/red-box 全闭环。
 - P3 Nav2-free 仍需单独证明：`launch_nav2:=false`、无 Nav2 server、目标入口不调用 `NavigateToPose`，并在自研入口下完成扩大矩形和红框验证。
-- 本轮只改善接口账本和可读性；物理接触、连续 swept footprint、实车动力学和实车运行仍未验证。
+- 物理接触、连续 swept footprint、实车动力学和实车运行仍未验证。

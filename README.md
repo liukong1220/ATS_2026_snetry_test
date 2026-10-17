@@ -52,9 +52,10 @@ LiDAR-Inertial 定位为状态来源，以 ROGMap 和 RC-ESDF 提供规划环境
 `/rog_map/esdf` 是可视化点云，规划数值只通过
 `/rog_map/get_ground_projection` 与 RC-ESDF 接口传递，不能从点云反解析距离场。
 
-> 当前阶段（2026-10-01）：仿真 A 段（南侧走廊收尾验收）尚未通过，实车 B 段未开始；
-> `minco_planner` 新增的参考 yaw/时间参数化开关只在 MuJoCo profile 打开，实车 profile 尚未同步。
-> 阶段目标、已验证结果与通过标准以 [`docs/real_robot_stage_prompt.md`](docs/real_robot_stage_prompt.md) 为准。
+> 当前阶段（2026-10-17）：串口/视觉 ROS 2 桥、MuJoCo 2027 隧道 yaw 对齐和 Gazebo 2027
+> 入口已经实现。MuJoCo `tunnel_B` 回归通过；Gazebo 世界与 RViz 配置可启动，但当前机器的
+> GPU/EGL 渲染未产生 LiDAR 点云，完整 Gazebo 导航闭环保持未通过。阶段目标、已验证结果与通过标准以
+> [`docs/2027串口融合与隧道仿真移植方案.md`](docs/2027串口融合与隧道仿真移植方案.md) 为准。
 
 ## 📑 目录
 
@@ -323,6 +324,21 @@ ROS_DOMAIN_ID=71 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
 python3 scripts/analyze_reference_curvature.py <rosbag2_dir> --brief
 ```
 
+### RMUC 2027 隧道回归
+
+RMUC 2027 使用独立场景、地图、PCD 和顶板碰撞体；隧道 yaw 对齐由 ESDF 估计轴线，固定让
+`0.571 m` 车体边正对隧道。`tunnel_B` 的入口/出口来自
+`src/sim/ats_mujoco_sim/config/tunnels_2027.yaml`：
+
+```bash
+ROS_DOMAIN_ID=101 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  SCENE=rmuc_2027 TEST_PROFILE=tunnel_2027 TUNNEL=tunnel_B \
+  GOAL_TIMEOUT=180 scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+当前证据：MuJoCo `tunnel_B` 已进入并通过，隧道内最大 yaw 误差约 `4.9e-12`，完整仿真 pytest
+为 `53 passed`。物理接触若没有独立 evaluator 仍须标记为未单独验证。
+
 ## 🧪 Gazebo 导航仿真
 
 同样先 `ros2 launch` 起完整导航链，再手动下发目标。Gazebo 默认 `use_gazebo_gt_odometry:=true`（底盘真值中继到 `/odometry`，并旁路 Point-LIO 位姿）；需要练 LIO 时再显式关掉。
@@ -358,6 +374,19 @@ ROS_DOMAIN_ID=91 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
   TEST_PROFILE=red_box scripts/test_gazebo_minco_mpc_chain.sh
 ```
 
+RMUC 2027 隧道入口使用新 world、地图和同风格 RViz：
+
+```bash
+ROS_DOMAIN_ID=123 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  TEST_PROFILE=tunnel_2027 TUNNEL=tunnel_B \
+  USE_DIRECT_GAZEBO_LIDAR_BRIDGE=true \
+  scripts/test_gazebo_minco_mpc_chain.sh
+```
+
+该回归已实际启动 world、机器人、ROGMap 和 action server，但 `/registered_scan` 无消息，日志出现
+`libEGL ... failed to create dri2 screen`，因此 Gazebo 完整导航闭环仍是环境阻断；详见
+[`docs/代码框架设计/Gazebo与当前导航接口.md`](docs/代码框架设计/Gazebo与当前导航接口.md)。
+
 ## 📡 关键接口与所有权
 
 | 接口 | 唯一权威 producer | 主要 consumer | 契约 |
@@ -370,6 +399,9 @@ ROS_DOMAIN_ID=91 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
 | `/cmd_vel` | 键鼠等手动源 | `cmd_vel_arbiter` | 保持 ROS 默认输入；新鲜时优先 |
 | `/cmd_vel/autonomy` | `chassis_vel_transform`（实机） | `cmd_vel_arbiter` | 实机自主源：`autonomy_raw -> fake_vel_transform -> /cmd_vel/autonomy_gimbal -> chassis_vel_transform` |
 | `/cmd_vel/selected` | `cmd_vel_arbiter` | 串口桥（`cmd_vel_topic`）、MuJoCo `twist_to_motion_ctrl`、Gazebo/loopback 执行端 | 唯一最终 Twist；自动源需要新鲜执行租约 |
+| `/serial/link_up` | `standard_robot_pp_ros2` | `cmd_vel_arbiter`、监控 | 50 ms 心跳；串口断开时为 `false` |
+| `/serial/gimbal_state` | `standard_robot_pp_ros2` | ROS 2 视觉 `GimbalTopicBridge` | 11 元数组，四元数顺序 `wxyz`，角度单位 rad |
+| `/serial/gimbal_cmd` | ROS 2 视觉 `GimbalTopicBridge` | `standard_robot_pp_ros2` | 7 元数组；桥接层校验长度、有限值和开火权限 |
 
 `/planner/emergency_stop` 与 `/minco/reference_path` 是独立 DDS topic，不具备跨 topic
 原子顺序。Goal Manager 的提交点会重新校验地图 snapshot/heartbeat，并在同一临界区内先发布
@@ -398,10 +430,11 @@ MuJoCo 在同一 `node_params.yaml` 之上叠加仿真 profile
 `ats_rog_map`、`ats_rog_map_adapter`、`minco_planner`、`ats_goal_manager` 与 `terrain_analysis_ext`；
 仿真 launch 另外以内联参数指定 `cmd_vel_arbiter` 等节点的 topic。
 
-车体足迹两份 profile 均为 `0.58 x 0.58 m`，差异在余量：
+当前 2027 车体足迹为 `0.571 x 0.581 m`；隧道模式只允许 `0.571 m` 面正对隧道，实车和仿真仍使用不同安全余量：
 
 | 参数 | 实车 `node_params.yaml` | 仿真 `rmuc_2025_navigation.yaml` |
 | :--- | :--- | :--- |
+| `footprint_length/width` | `0.571 / 0.581` | `0.571 / 0.581` |
 | `footprint_safety_margin` | `0.05` | `0.02` |
 | `minco_planner.jps_safe_distance` | `0.54` | `0.44` |
 
@@ -415,10 +448,11 @@ frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
 ## ✅ 验证状态与限制
 
-**当前阶段（2026-10-01）：** 仿真 A 段未通过。红点目标 `(10.36, 1.49)` 的新方案尚未达到
-5/5 到达且零物理接触，南侧走廊仍有门禁拦停；实车 B 段（静态检查、定位、地图、开环规划、
-低速闭环）均未开始。逐次运行数据、推断与下一步见
-[`docs/real_robot_stage_prompt.md`](docs/real_robot_stage_prompt.md)。
+**当前阶段（2026-10-17）：** 串口 PTY 双向回环、视觉 ROS 2 构建、MuJoCo 2027 隧道回归和
+导航 yaw CTest 已通过。Gazebo 2027 world/SDF、依赖和 RViz 配置已通过静态/启动检查，但当前
+GPU/EGL 环境没有产生 `/registered_scan`，所以 Gazebo 导航、实车 HIL、物理接触 evaluator 和
+P3/P4 完整验收仍未完成。逐次证据见
+[`docs/2027串口融合与隧道仿真移植方案.md`](docs/2027串口融合与隧道仿真移植方案.md)。
 
 **本地验证命令（不驱动车辆）：**
 
@@ -445,6 +479,10 @@ git diff --check
 - Gazebo P1：动态 TF age/staleness 双门禁 + `p1_delay_attribution` 分层（upstream / bridge / dds）；分类器单测与 runner contract 已覆盖。
 
 **已验证的库级/门禁回归：** `test_mujoco_contact_gate`、`test_gazebo_freshness_classifier`（含 delay attribution）、`test_gazebo_dynamic_tf_gate`、`test_gazebo_runner_contract`。
+
+本轮新增证据：串口功能 GTest 为 `14/14 + 10/10 + 2/2`，MuJoCo pytest 为 `53 passed`，视觉 ROS 2
+CTest 为 `2/2`，`minco_planner` 隧道 yaw 相关 CTest 为 `3/3`。串口包级版权/格式 lint 仍有既有失败，
+不能写成全包 lint 通过。
 
 **历史运行证据（迁移前，不能直接证明当前 `/cmd_vel/selected` 链）：** 2026-08-02 S1 rectangle domain `184/186`；P2/P3 故障注入曾记录到急停与 `/cmd_vel_mpc=0`。当前 revision 的红框/归因闭环以本轮 `scripts/test_*_minco_mpc_chain.sh` 产物为准。
 
