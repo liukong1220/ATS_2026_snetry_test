@@ -561,7 +561,11 @@ small_gicp_relocalization:
     # 候选调度预算：每次扫描只评估一段，剩余候选由 cursor 延续到下一次扫描，
     # 保证方向/yaw/半径覆盖公平，而不是固定只算格网一侧的前 N 个。
     multi_guess.time_budget_s: 1.5
+    # 粗筛稀疏云至少保留一段时间给完整点云 fine 对齐；0.0 使用自动保守值。
+    multi_guess.fine_time_reserve_s: 0.35
     multi_guess.max_candidates_per_scan: 48
+    # 0 表示按 min_inliers 的四分之一自动设置，避免稀疏筛选云永远达不到全云门限。
+    multi_guess.screen_min_inliers: 0
     # 候选级诊断 CSV（离线 replay 用）。空字符串关闭；实车默认不写盘。
     multi_guess.candidate_log_path: ""
     multi_guess.log_candidates: false
