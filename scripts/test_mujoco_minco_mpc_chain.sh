@@ -114,6 +114,8 @@ GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
 # 回归路线：single、rectangle（验证横移）、south_corridor（RMUC 横墙窄回归）、
 # red_box（用户红点单目标，中央高地北侧）。
 TEST_PROFILE="${TEST_PROFILE:-single}"
+SCENE="${SCENE:-rmuc_2025}"
+TUNNEL="${TUNNEL:-}"
 # RViz must be optional in the same scenario runner so a display-only change
 # can be checked against the identical closed-loop route and fault gates.
 USE_RVIZ="${USE_RVIZ:-false}"
@@ -302,8 +304,30 @@ case "${TEST_PROFILE}" in
       GOAL_TIMEOUT="300"
     fi
     ;;
+  tunnel_2027)
+    [[ "${SCENE}" == "rmuc_2027" ]] || SCENE="rmuc_2027"
+    [[ -n "${TUNNEL}" ]] || { echo "TUNNEL is required for TEST_PROFILE=tunnel_2027" >&2; exit 2; }
+    TUNNEL_VALUES="$({ python3 - "${WORKSPACE_DIR}/src/sim/ats_mujoco_sim/config/tunnels_2027.yaml" "${TUNNEL}" <<'PY'
+import sys, yaml
+config = yaml.safe_load(open(sys.argv[1], encoding='utf-8'))
+for tunnel in config.get('tunnels', []):
+    if tunnel.get('name') == sys.argv[2]:
+        e, x = tunnel['entry'], tunnel['exit']
+        print(*e, *x)
+        break
+else:
+    raise SystemExit('unknown tunnel: ' + sys.argv[2])
+PY
+  } )" || { echo "invalid tunnel configuration" >&2; exit 2; }
+    read -r START_X START_Y START_YAW GOAL_X GOAL_Y GOAL_YAW <<<"${TUNNEL_VALUES}"
+    START_Z="${START_Z:-0.330}"
+    GOAL_TIMEOUT="${GOAL_TIMEOUT:-180}"
+    GOAL_NAMES=("${TUNNEL}")
+    GOAL_XS=("${GOAL_X}")
+    GOAL_YS=("${GOAL_Y}")
+    ;;
   *)
-    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', 'south_corridor', or 'red_box'."
+    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', 'south_corridor', 'red_box', or 'tunnel_2027'."
     exit 2
     ;;
 esac
@@ -2333,7 +2357,7 @@ export_control_telemetry() {
 
 LAUNCH_ARGS=(
   ats_mujoco_sim
-  rmuc_2025_mujoco.launch.py
+  "${SCENE}_mujoco.launch.py"
   use_viewer:=false
   show_viewer:=false
   use_rviz:="${USE_RVIZ}"
