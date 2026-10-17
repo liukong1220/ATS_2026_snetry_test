@@ -805,8 +805,22 @@ def main():
 
     gazebo_rviz_path = workspace / "src/sim/gazebo_simulator/rmu_gazebo_simulator/rviz/ats_gazebo_nav.rviz"
     gazebo_rviz = load_yaml(gazebo_rviz_path)
-    assert_navigation_rviz_contract(gazebo_rviz, rog_map["map_frame"], "Gazebo RViz")
-    assert_global_fused_esdf_display(gazebo_rviz, "Gazebo RViz")
+    # Gazebo and MuJoCo intentionally share the same navigation view: odometry
+    # is the pose witness, the color ESDF cloud is the active map layer, and
+    # the four path displays use the white-background MuJoCo palette. Gazebo
+    # additionally exposes the namespaced robot_description published by
+    # spawn_robots.launch.py.
+    assert_navigation_rviz_contract(
+        gazebo_rviz, rog_map["map_frame"], "Gazebo RViz", MUJOCO_PATH_DISPLAY_STYLE
+    )
+    assert_global_fused_esdf_display(gazebo_rviz, "Gazebo RViz", expect_enabled=False)
+    esdf_cloud = single_display_for_topic(gazebo_rviz, "/rc_esdf/esdf_cloud", "Gazebo RViz")
+    assert esdf_cloud["Class"] == "rviz_default_plugins/PointCloud2"
+    assert esdf_cloud["Enabled"] is True
+    localization_displays = displays_for_topic(gazebo_rviz, "/localization")
+    assert len(localization_displays) == 1, "Gazebo RViz must have one localization display"
+    assert localization_displays[0]["Class"] == "rviz_default_plugins/Odometry"
+    assert localization_displays[0]["Topic"]["Reliability Policy"] == "Best Effort"
     # spawn_robots.launch.py namespaces robot_state_publisher under the robot.
     assert_robot_model_display(
         gazebo_rviz, "/red_standard_robot1/robot_description", "Gazebo RViz"

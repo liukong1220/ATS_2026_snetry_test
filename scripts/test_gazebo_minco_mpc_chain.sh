@@ -24,6 +24,10 @@
 #   ROS_DOMAIN_ID=<new> PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
 #   TEST_PROFILE=red_box GOAL_TIMEOUT_SEC=180 \
 #   scripts/test_gazebo_minco_mpc_chain.sh
+# Tunnel profile (uses rmuc_2027 world/map and the same tunnel geometry as MuJoCo):
+#   ROS_DOMAIN_ID=<new> PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+#   TEST_PROFILE=tunnel_2027 TUNNEL=tunnel_B GOAL_TIMEOUT_SEC=180 \
+#   scripts/test_gazebo_minco_mpc_chain.sh
 
 set -u -o pipefail
 
@@ -49,9 +53,14 @@ OBSERVE_GAZEBO_TRANSPORT_LIDAR="${OBSERVE_GAZEBO_TRANSPORT_LIDAR:-false}"
 USE_DIRECT_GAZEBO_LIDAR_BRIDGE="${USE_DIRECT_GAZEBO_LIDAR_BRIDGE:-false}"
 LIDAR_BRIDGE_PUBLISHER_DEPTH="${LIDAR_BRIDGE_PUBLISHER_DEPTH:-10}"
 LIDAR_BRIDGE_PUBLISHER_RELIABILITY="${LIDAR_BRIDGE_PUBLISHER_RELIABILITY:-reliable}"
+WORLD_USER_SET=0
+MAP_YAML_USER_SET=0
+[[ -v WORLD ]] && WORLD_USER_SET=1
+[[ -v MAP_YAML ]] && MAP_YAML_USER_SET=1
 WORLD="${WORLD:-rmuc_2025}"
 WORLD_SDF_PATH="${WORLD_SDF_PATH:-}"
 MAP_YAML="${MAP_YAML:-src/ats_sentry_bringup/map/rmuc_2025.yaml}"
+TUNNEL="${TUNNEL:-}"
 ROBOT_NAME="${ROBOT_NAME:-red_standard_robot1}"
 SOLVER_MODE="${SOLVER_MODE:-ilqr}"
 
@@ -105,6 +114,10 @@ RED_BOX_START_X="${RED_BOX_START_X:-1.17}"
 RED_BOX_START_Y="${RED_BOX_START_Y:--0.44}"
 # /localization from fusion/Point-LIO is odom-framed near (0,0) at spawn.
 # Map-frame goals/prev use initial_map_to_odom (= RED_BOX_START for rmuc_2025).
+INITIAL_MAP_X_USER_SET=0
+INITIAL_MAP_Y_USER_SET=0
+[[ -v INITIAL_MAP_TO_ODOM_X ]] && INITIAL_MAP_X_USER_SET=1
+[[ -v INITIAL_MAP_TO_ODOM_Y ]] && INITIAL_MAP_Y_USER_SET=1
 INITIAL_MAP_TO_ODOM_X="${INITIAL_MAP_TO_ODOM_X:-$RED_BOX_START_X}"
 INITIAL_MAP_TO_ODOM_Y="${INITIAL_MAP_TO_ODOM_Y:-$RED_BOX_START_Y}"
 GOAL_NAMES=()
@@ -133,8 +146,36 @@ case "$TEST_PROFILE" in
       GOAL_TOLERANCE_M="0.50"
     fi
     ;;
+  tunnel_2027)
+    [[ -n "$TUNNEL" ]] || {
+      echo "TUNNEL is required for TEST_PROFILE=tunnel_2027 (for example tunnel_B)." >&2
+      exit 2
+    }
+    [ "$WORLD_USER_SET" = "1" ] || WORLD="rmuc_2027"
+    [ "$MAP_YAML_USER_SET" = "1" ] || MAP_YAML="src/ats_sentry_bringup/map/rmuc_2027.yaml"
+    TUNNEL_VALUES="$({ python3 - "src/sim/ats_mujoco_sim/config/tunnels_2027.yaml" "$TUNNEL" <<'PY'
+import sys
+import yaml
+
+config = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+for tunnel in config.get("tunnels", []):
+    if tunnel.get("name") == sys.argv[2]:
+        print(*(tunnel["entry"] + tunnel["exit"]))
+        break
+else:
+    raise SystemExit(f"unknown tunnel: {sys.argv[2]}")
+PY
+    } )" || exit 2
+    read -r RED_BOX_START_X RED_BOX_START_Y START_YAW GOAL_X GOAL_Y GOAL_YAW <<<"$TUNNEL_VALUES"
+    [ "$INITIAL_MAP_X_USER_SET" = "1" ] || INITIAL_MAP_TO_ODOM_X="0.0"
+    [ "$INITIAL_MAP_Y_USER_SET" = "1" ] || INITIAL_MAP_TO_ODOM_Y="0.0"
+    GOAL_NAMES=("$TUNNEL")
+    GOAL_XS=("$GOAL_X")
+    GOAL_YS=("$GOAL_Y")
+    [ "$GOAL_TIMEOUT_USER_SET" = "1" ] || GOAL_TIMEOUT_SEC="180"
+    ;;
   *)
-    echo "Unsupported TEST_PROFILE='$TEST_PROFILE'; use 'nominal' or 'red_box'." >&2
+    echo "Unsupported TEST_PROFILE='$TEST_PROFILE'; use 'nominal', 'red_box', or 'tunnel_2027'." >&2
     exit 2
     ;;
 esac
@@ -356,6 +397,7 @@ MAP_IMAGE="$(dirname "$MAP_YAML")/$MAP_IMAGE_REL"
   echo "P2_FAULT_CASE         : $P2_FAULT_CASE"
   echo "PLANNING_GRID_OWNER   : $PLANNING_GRID_OWNER"
   echo "WORLD                 : $WORLD"
+  echo "TUNNEL                : ${TUNNEL:-<none>}"
   echo "WORLD_SDF_PATH        : ${WORLD_SDF_PATH:-<world-default>}"
   echo "MAP_YAML              : $MAP_YAML"
   echo "MAP_PGM               : $MAP_IMAGE"
@@ -654,6 +696,8 @@ setsid env --default-signal=INT ros2 launch rmu_gazebo_simulator ats_gazebo_nav.
   lidar_bridge_publisher_reliability:="$LIDAR_BRIDGE_PUBLISHER_RELIABILITY" \
   planning_grid_owner:="$PLANNING_GRID_OWNER" \
   robot_name:="$ROBOT_NAME" \
+  initial_map_to_odom_x:="$INITIAL_MAP_TO_ODOM_X" \
+  initial_map_to_odom_y:="$INITIAL_MAP_TO_ODOM_Y" \
   solver_mode:="$SOLVER_MODE" \
   use_gazebo_gt_odometry:="$USE_GAZEBO_GT_ODOMETRY" \
   "${EXTRA_LAUNCH_ARGS[@]}" \
