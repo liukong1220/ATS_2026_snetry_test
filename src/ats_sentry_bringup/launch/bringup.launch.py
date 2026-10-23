@@ -79,8 +79,11 @@ def generate_launch_description():
         DeclareLaunchArgument("launch_rosbag_recorder", default_value="False"),
         DeclareLaunchArgument("launch_small_gicp_relocalization", default_value="True"),
         DeclareLaunchArgument("launch_localization_fusion", default_value="True"),
-        DeclareLaunchArgument("launch_fake_vel_transform", default_value="True"),
-        DeclareLaunchArgument("launch_chassis_vel_transform", default_value="True"),
+        # Lidar moved onto the chassis (report 2.1.8, AGENTS.md 2.3): navigation now runs
+        # in the chassis frame, so both velocity compatibility layers default off while the
+        # topic, TF and velocity-frame contracts stay intact (zero-rotation compat TF kept).
+        DeclareLaunchArgument("launch_fake_vel_transform", default_value="False"),
+        DeclareLaunchArgument("launch_chassis_vel_transform", default_value="False"),
         DeclareLaunchArgument(
             "fake_vel_output_topic",
             default_value=IfElseSubstitution(launch_chassis_vel_transform, "/cmd_vel/autonomy_gimbal", "/cmd_vel/autonomy"),
@@ -106,14 +109,17 @@ def generate_launch_description():
         DeclareLaunchArgument("require_gimbal_status", default_value="True"),
         DeclareLaunchArgument("launch_behavior", default_value="True"),
         DeclareLaunchArgument("launch_lidar_static_tf", default_value="True"),
-        # Must match the livox mount in ats_sentry_robot.sdf.xmacro:
-        # "-0.1 0.245 0.325 ${75*pi/180} 0 -${161*pi/180}" relative to gimbal_yaw_odom.
-        DeclareLaunchArgument("lidar_static_tf_x", default_value="-0.1"),
-        DeclareLaunchArgument("lidar_static_tf_y", default_value="0.245"),
-        DeclareLaunchArgument("lidar_static_tf_z", default_value="0.325"),
-        DeclareLaunchArgument("lidar_static_tf_roll", default_value="1.3089969389957472"),
-        DeclareLaunchArgument("lidar_static_tf_pitch", default_value="0.0"),
-        DeclareLaunchArgument("lidar_static_tf_yaw", default_value="-2.8099800957108707"),
+        # Chassis-mounted Mid360 (report 2.1.8, 2026-10-23): 0.05 m inside the middle of the
+        # 0.571 m front edge, optical centre 0.20 m above ground, pitched 30 deg towards the
+        # front. gimbal_yaw_odom is now the chassis frame, origin at the chassis bottom centre
+        # 0.07 m above ground [interpretation to confirm on the vehicle], so z = 0.20 - 0.07.
+        # The old gimbal pose was "-0.1 0.245 0.325 75deg 0 -161deg".
+        DeclareLaunchArgument("lidar_static_tf_x", default_value="0.2405"),
+        DeclareLaunchArgument("lidar_static_tf_y", default_value="0.0"),
+        DeclareLaunchArgument("lidar_static_tf_z", default_value="0.13"),
+        DeclareLaunchArgument("lidar_static_tf_roll", default_value="0.0"),
+        DeclareLaunchArgument("lidar_static_tf_pitch", default_value="0.5235987755982988"),
+        DeclareLaunchArgument("lidar_static_tf_yaw", default_value="0.0"),
         DeclareLaunchArgument("use_respawn", default_value="True"),
         DeclareLaunchArgument("log_level", default_value="info"),
     ]

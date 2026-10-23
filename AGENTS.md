@@ -51,10 +51,13 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 - 四舵轮控制为车体系 `[vx, vy, wz]`，状态为世界系 `[x, y, yaw]`；建议避免迁入差速/ICR/`vy=0` 约束。
 - 建议避免从 `/rog_map/esdf` 可视化 `PointCloud2` 反解析数值距离场。
 
-### 2.3 云台雷达与速度链
+### 2.3 雷达安装与速度链
 
-- 实机主入口默认保持 `launch_fake_vel_transform:=True`。
-- 实机主入口默认保持 `launch_chassis_vel_transform:=True`。
+2026-10-23 起雷达固定在底盘上（报告 2.1.8）：`gimbal_yaw_odom` 保留名字，语义是底盘系（原点取底盘底面中心）。导航不再依赖云台 yaw，因此：
+
+- 实机主入口默认 `launch_fake_vel_transform:=False`。
+- 实机主入口默认 `launch_chassis_vel_transform:=False`。
+- 云台仍然存在（自瞄用）；需要云台坐标系速度的旧链路可以显式把两个参数设回 `True`。
 - fake-yaw 关闭时保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF。
 - 建议避免引入重复的 `base_footprint -> base_link` TF 发布者。
 - 下游仍要求底盘坐标速度时，建议避免只关闭 chassis transform。
@@ -205,7 +208,9 @@ P3 标记条件为同时满足以下各项：
 推荐次序：
 
 ```bash
-MAKEFLAGS=-j1 colcon build --base-paths src --packages-select <targets> --parallel-workers 1
+# 并发按当前机器计算：总任务数 = min(nproc, MemAvailable / 1.5 GiB)；整仓构建用 ./build.sh（自动计算）
+JOBS=$(awk -v n="$(nproc)" '/^MemAvailable:/ {j=int($2/1024/1536); if (j>n) j=n; if (j<1) j=1; print j}' /proc/meminfo)
+MAKEFLAGS=-j${JOBS} colcon build --base-paths src --packages-select <targets> --parallel-workers 1
 colcon test --base-paths src --packages-select <targets>
 colcon test-result --test-result-base build/<package> --verbose
 python3 -m py_compile <changed_launch_files>

@@ -3,6 +3,10 @@
 
 CSV input columns: x,y,yaw.  The evaluator intentionally checks polygon entry and
 heading during the passage, so reaching the goal by going around the tunnel fails.
+
+Axis convention (2026-10-23): vehicle +x is the heading and the short 0.571 m
+face is the front, so the vehicle drives along the tunnel axis with yaw equal to
+axis_yaw (modulo pi).  Before that correction the target was axis_yaw + pi/2.
 """
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ def main() -> None:
     with Path(args.trajectory).open(newline="", encoding="utf-8") as stream:
         samples = [(float(row["x"]), float(row["y"]), float(row["yaw"])) for row in csv.DictReader(stream)]
     in_tunnel = [sample for sample in samples if inside(sample[0], sample[1], tunnel["polygon"])]
-    target = float(tunnel["axis_yaw"]) + math.pi / 2.0
+    target = float(tunnel["axis_yaw"])
     yaw_tolerance = args.yaw_tolerance
     if yaw_tolerance is None:
         # Use the same geometric bound as the planning design for 2 cm tunnel margin.
