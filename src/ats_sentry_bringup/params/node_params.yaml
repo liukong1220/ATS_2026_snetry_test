@@ -297,8 +297,11 @@ point_lio:
       plane_thr: 0.1                                    # 0.05, the threshold for plane criteria, the smaller, the flatter a plane
       match_s: 81.0
       ivox_grid_resolution: 0.5
-      gravity: [-0.145  ,-9.168 ,-3.407]                         # gravity to be aligned
-      gravity_init: [-0.145  ,-9.168 ,-3.407]            # preknown gravity in the first IMU body frame, use when imu_en is False or start from a non-stationary state
+      # Chassis-mounted Mid360 pitched 30 deg towards the front (report 2.1.8): a stationary
+      # IMU sees gravity (g sin30, 0, -g cos30). Computed from the mount, not measured:
+      # replace with the static IMU mean once the vehicle is available.
+      gravity: [4.905, 0.0, -8.496]                      # gravity to be aligned
+      gravity_init: [4.905, 0.0, -8.496]                 # preknown gravity in the first IMU body frame, use when imu_en is False or start from a non-stationary state
       extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
       extrinsic_R: [ 1.0, 0.0, 0.0,
                      0.0, 1.0, 0.0,
@@ -326,10 +329,11 @@ loam_interface:
     odom_frame: "odom"
     base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
-    # gimbal_yaw_odom 距地面高度 = chassis_height(0.11) + gimbal_yaw_height(0.04)，
-    # 与 ats_sentry_robot.sdf.xmacro 一致。odom 原点锚定在其正下方地面，
+    # 雷达已改装到底盘（报告 2.1.8）：gimbal_yaw_odom 现在表示底盘系，原点取底盘底面中心，
+    # 离地 0.07 m [解读，待上车确认]。odom 原点锚定在其正下方地面，
     # 保证 odom z=0 即地面，ROGMap 投影高度带与规划轨迹都以地面为基准。
-    base_frame_height: 0.15
+    # 旧云台构型为 0.15（chassis_height 0.11 + gimbal_yaw_height 0.04）。
+    base_frame_height: 0.07
 
 # TF 权威（P6 零.5 / 三.2）：本节点是实车 `odom->gimbal_yaw_odom` 与
 # `odom->base_footprint` 的唯一发布者，但它的 `odometryHandler` 在
@@ -807,7 +811,7 @@ ats_rog_map:
     core.pcd_name: map.pcd
     core.map_sliding.enable: true
     core.map_sliding.threshold: 1.0
-    # odom 原点在地面（loam_interface.base_frame_height=0.15），以下 z 相关参数
+    # odom 原点在地面（loam_interface.base_frame_height=0.07），以下 z 相关参数
     # 统一比旧的 gimbal_yaw_odom 原点上移 0.15 m，保持实车感知高度带不变。
     core.fix_map_origin: [0.0, 0.0, 0.65]
     core.frontier_extraction_enable: false
@@ -898,8 +902,8 @@ ats_rog_map_adapter:
     unknown_is_obstacle: true
     input_timeout_sec: 2.0
     signed_distance_max_m: 2.0
-    footprint_length: 0.58
-    footprint_width: 0.58
+    footprint_length: 0.581
+    footprint_width: 0.571
     footprint_safety_margin: 0.05
     robot_frame: gimbal_yaw_odom
     robot_unknown_clear_radius: 0.0
@@ -1011,8 +1015,17 @@ minco_planner:
     narrow_clearance_enter: 1.20
     narrow_clearance_exit: 1.40
     terminal_yaw_sample_period: 0.10
-    footprint_length: 0.58
-    footprint_width: 0.58
+    yaw_tunnel_enabled: false
+    yaw_tunnel_yaw_offset: 0.0
+    yaw_tunnel_clearance_enter: 0.45
+    yaw_tunnel_clearance_exit: 0.50
+    yaw_tunnel_max_width: 0.90
+    yaw_tunnel_axis_window: 0.30
+    yaw_tunnel_axis_min_coherence: 0.80
+    yaw_tunnel_pre_align_distance: 0.53
+    yaw_tunnel_post_release_distance: 0.31
+    footprint_length: 0.581
+    footprint_width: 0.571
     footprint_safety_margin: 0.05
     swept_max_corner_step_cells: 0.5
     body_yaw_follow_clearance: 0.55
@@ -1071,8 +1084,8 @@ ats_goal_manager:
     replan_stall_timeout_sec: 4.0
     replan_min_interval_sec: 2.0
     max_consecutive_replans: 2
-    footprint_length: 0.58
-    footprint_width: 0.58
+    footprint_length: 0.581
+    footprint_width: 0.571
     footprint_safety_margin: 0.05
 
 

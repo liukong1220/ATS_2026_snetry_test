@@ -36,6 +36,12 @@ repositories:
     url: git@github.com:liukong1220/ats_mujoco_sim.git
     version: develop
 
+  # PointCloud2 -> livox CustomMsg adapter shared by the MuJoCo and Gazebo simulators.
+  src/sim/ats_livox_adapter:
+    type: git
+    url: git@github.com:liukong1220/ats_livox_adapter.git
+    version: main
+
   src/sim/loopback_sim:
     type: git
     url: git@github.com:liukong1220/loopback_sim.git

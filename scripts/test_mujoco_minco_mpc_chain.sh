@@ -2383,6 +2383,15 @@ LAUNCH_ARGS=(
   log_level:="${LOG_LEVEL}"
 )
 
+# 额外的 launch 参数（空格分隔的 name:=value），例如 LIO 模式：
+#   EXTRA_LAUNCH_ARGS="localization_source:=lio lidar_downsample:=1 lidar_rate_hz:=20.0 sim_rate_hz:=400.0"
+# 默认为空，保持原有 launch 行为不变。
+if [[ -n "${EXTRA_LAUNCH_ARGS:-}" ]]; then
+  read -r -a EXTRA_LAUNCH_ARGS_ARRAY <<<"${EXTRA_LAUNCH_ARGS}"
+  LAUNCH_ARGS+=("${EXTRA_LAUNCH_ARGS_ARRAY[@]}")
+  echo "NOTE: extra launch arguments: ${EXTRA_LAUNCH_ARGS}"
+fi
+
 # 测试故障注入授权门禁默认关闭。只有隔离的 P2_FAULT_CASE=unknown 运行才显式
 # 打开它；nominal、其它故障用例、真车配置与默认 launch 一律保持 false，
 # 因此未授权的 test_reset_to_unknown / test_mask_secondary_evidence 请求会被
