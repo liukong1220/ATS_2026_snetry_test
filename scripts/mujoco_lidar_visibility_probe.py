@@ -40,10 +40,10 @@ BASE_X_HALF, BASE_Y_HALF = 0.2905, 0.2855      # body envelope after the axis co
 BASE_Z_MIN, BASE_Z_MAX = -BASE_LINK_HEIGHT, 0.062   # wheel contact plane .. envelope top
 STRIP = [
     r"<hfield\b[^>]*?/>",
-    r'<mesh name="rmuc_2025_field_stl"[^>]*?/>',
+    r'<mesh name="rmuc_2027_field_stl"[^>]*?/>',
     r'<geom name="floor"[^>]*?/>',
-    r'<geom name="rmuc_2025_field_visual"[^>]*?/>',
-    r'<geom name="rmuc_2025_field"[^>]*?/>',
+    r'<geom name="rmuc_2027_field_visual"[^>]*?/>',
+    r'<geom name="rmuc_2027_field"[^>]*?/>',
     r'<include file="rmuc_2027_roof_boxes.xml"/>',
 ]
 

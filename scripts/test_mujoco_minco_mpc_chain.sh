@@ -111,6 +111,31 @@ if [[ -v GOAL_TIMEOUT ]]; then
   GOAL_TIMEOUT_USER_SET="1"
 fi
 GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
+# 仿真时间门限。lio 模式下 CPU 追踪 12000 射线/帧，仿真只有 0.2~0.6 倍实时，所有节点按
+# /clock 运行；墙钟门限会在仿真还没走完启动阶段时到期（曾在 tracking 门以 30 s 墙钟 =
+# 16 s 仿真时间超时）。启用后 wait_for_command 的秒数按 /clock 计，目标动作的墙钟兜底
+# 放大 GOAL_WALL_PER_SIM 倍（目标本身的超时由目标管理器按仿真时间裁决）。
+#   SIM_TIME_GATES=auto  EXTRA_LAUNCH_ARGS 含 localization_source:=lio 时启用（默认）
+#   SIM_TIME_GATES=1|0   强制启用（要求 /clock 在发布）/ 强制关闭
+# truth 模式不发布 /clock，行为与改动前逐位一致。
+SIM_TIME_GATES="${SIM_TIME_GATES:-auto}"
+SIM_GATE_WALL_CAP_S="${SIM_GATE_WALL_CAP_S:-1800}"
+SIM_GATE_STALL_S="${SIM_GATE_STALL_S:-90}"
+GOAL_WALL_PER_SIM="${GOAL_WALL_PER_SIM:-6}"
+SIM_TIME_GATES_ACTIVE=0
+case "${SIM_TIME_GATES}" in
+  auto|0|1) ;;
+  *)
+    echo "SIM_TIME_GATES must be auto, 0, or 1." >&2
+    exit 2
+    ;;
+esac
+for sim_gate_value in "${SIM_GATE_WALL_CAP_S}" "${SIM_GATE_STALL_S}" "${GOAL_WALL_PER_SIM}"; do
+  if ! [[ "${sim_gate_value}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "SIM_GATE_WALL_CAP_S, SIM_GATE_STALL_S and GOAL_WALL_PER_SIM must be positive integers." >&2
+    exit 2
+  fi
+done
 # 回归路线：single、rectangle（验证横移）、south_corridor（RMUC 横墙窄回归）、
 # red_box（用户红点单目标，中央高地北侧）。
 TEST_PROFILE="${TEST_PROFILE:-single}"
@@ -135,7 +160,27 @@ if [ -n "${GOAL_TOLERANCE:-}" ]; then
   GOAL_TOLERANCE_USER_SET="1"
 fi
 GOAL_TOLERANCE="${GOAL_TOLERANCE:-0.30}"
-LIDAR_DOWNSAMPLE="${LIDAR_DOWNSAMPLE:-24}"
+# truth 模式沿用降采样 24（约 500 射线/帧，只喂 /local_pointcloud）。lio 模式必须每帧约
+# 12000 射线（降采样 1）：24 只给 Point-LIO 500 个点，里程计几秒内发散（位姿跳变
+# 21~91 m、registered_scan 无有限点），tracking 永远到不了。未显式给出时按模式取值。
+LIO_MODE=0
+if [[ " ${EXTRA_LAUNCH_ARGS:-} " == *" localization_source:=lio "* ]]; then
+  LIO_MODE=1
+fi
+if [[ -z "${LIDAR_DOWNSAMPLE:-}" ]]; then
+  if [[ "${LIO_MODE}" == "1" ]]; then
+    LIDAR_DOWNSAMPLE=1
+  else
+    LIDAR_DOWNSAMPLE=24
+  fi
+fi
+# /odometry 的唯一发布者：truth 模式是仿真节点本身；lio 模式由 Point-LIO 链末端的
+# sensor_scan_generation 发布，仿真节点只发 /simulation/ground_truth/odometry。
+if [[ "${LIO_MODE}" == "1" ]]; then
+  ODOMETRY_OWNER=sensor_scan_generation
+else
+  ODOMETRY_OWNER=ats_mujoco_sim
+fi
 # 故障注入必须单独启动一套 MuJoCo，避免目标与机器人状态跨用例污染。
 P2_FAULT_CASE="${P2_FAULT_CASE:-none}"
 # unknown 前置目标的距离上限。下界由故障注入延迟决定：ready=false 落在注入后
@@ -320,14 +365,68 @@ else:
 PY
   } )" || { echo "invalid tunnel configuration" >&2; exit 2; }
     read -r START_X START_Y START_YAW GOAL_X GOAL_Y GOAL_YAW <<<"${TUNNEL_VALUES}"
-    START_Z="${START_Z:-0.330}"
+    # 入口在隧道西侧高台面（x=12.9 处网格高 0.343 m）上：轮底偏置 0.180 m，再留 2.7 cm 落差。
+    # 旧值 0.330 是按旧估算的口袋底 0.15 m 取的，在真实地形上会让底盘出生在地里。
+    START_Z="${START_Z:-0.550}"
     GOAL_TIMEOUT="${GOAL_TIMEOUT:-180}"
     GOAL_NAMES=("${TUNNEL}")
     GOAL_XS=("${GOAL_X}")
     GOAL_YS=("${GOAL_Y}")
     ;;
+  red_box_2027)
+    # 2027 地图上的红框：从西侧开阔平地出发，到中央高地北侧。2025 的红点 (10.36, 1.49) 是 2025 地图的
+    # 像素坐标，不能搬过来。起点 (5.0, 8.0) 在 0.299 m 的平台上（平整度 1.1 cm、离 PGM 障碍 1.8 m），
+    # 出生高度 = 平台 0.299 + 轮底偏置 0.180 + 落差 0.03；目标 (14.0, 11.6) 在高地顶面 0.507 m 上
+    # （平整度 2.4 cm、离 PGM 障碍 1.68 m）。可用 RED_BOX_2027_START / RED_BOX_2027_GOAL="x y" 覆盖；
+    # 改起点时同时给 START_Z（平台高 + 0.21）。
+    [[ "${SCENE}" == "rmuc_2027" ]] || SCENE="rmuc_2027"
+    read -r START_X START_Y <<<"${RED_BOX_2027_START:-5.0 8.0}"
+    read -r GOAL_X GOAL_Y <<<"${RED_BOX_2027_GOAL:-14.0 11.6}"
+    START_YAW="${START_YAW:-0.0}"
+    START_Z="${START_Z:-0.510}"
+    if [ "${GOAL_TIMEOUT_USER_SET}" != "1" ]; then
+      GOAL_TIMEOUT="300"
+    fi
+    GOAL_NAMES=(red_box_2027)
+    GOAL_XS=("${GOAL_X}")
+    GOAL_YS=("${GOAL_Y}")
+    # 先验 PGM 能否从起点走到目标：腐蚀半个车宽（0.30 m）后看连通性。不通就立刻说明原因，
+    # 不要等 300 s 的 unreachable。
+    python3 - "${WORKSPACE_DIR}/src/ats_sentry_bringup/map/rmuc_2027.yaml" \
+      "${START_X}" "${START_Y}" "${GOAL_X}" "${GOAL_Y}" <<'PY' || exit 2
+import sys
+from pathlib import Path
+import cv2
+import numpy as np
+import yaml
+yaml_path = Path(sys.argv[1])
+sx, sy, gx, gy = (float(v) for v in sys.argv[2:6])
+meta = yaml.safe_load(yaml_path.read_text(encoding='utf-8'))
+image = cv2.imread(str(yaml_path.parent / meta['image']), cv2.IMREAD_GRAYSCALE)
+resolution = float(meta['resolution'])
+free = (image >= 200).astype(np.uint8)
+radius_cells = int(np.ceil(0.30 / resolution))
+eroded = cv2.erode(free, np.ones((3, 3), np.uint8), iterations=radius_cells)
+_, labels = cv2.connectedComponents(eroded, connectivity=8)
+def cell(x, y):
+    return image.shape[0] - 1 - int(round((y - meta['origin'][1]) / resolution)), int(round((x - meta['origin'][0]) / resolution))
+start, goal = cell(sx, sy), cell(gx, gy)
+for name, (row, col) in (('start', start), ('goal', goal)):
+    if not (0 <= row < image.shape[0] and 0 <= col < image.shape[1]) or labels[row, col] == 0:
+        print(f'red_box_2027 preflight: {name} ({sx if name == "start" else gx}, {sy if name == "start" else gy}) '
+              f'is not free space in {yaml_path.name} after a 0.30 m footprint erosion.', file=sys.stderr)
+        raise SystemExit(1)
+if labels[start] != labels[goal]:
+    print(f'red_box_2027 preflight: goal ({gx}, {gy}) is not reachable from start ({sx}, {sy}) in {yaml_path.name} '
+          f'after a {radius_cells * resolution:.2f} m footprint erosion (it is separate in the raw map too): the static map encloses it '
+          '(the central highland outline is drawn as a closed line). Open the ramp in the PGM or pick another goal '
+          'with RED_BOX_2027_GOAL.', file=sys.stderr)
+    raise SystemExit(1)
+print(f'red_box_2027 preflight OK: start and goal share a {radius_cells * resolution:.2f} m-eroded free component.')
+PY
+    ;;
   *)
-    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', 'south_corridor', 'red_box', or 'tunnel_2027'."
+    echo "Unsupported TEST_PROFILE='${TEST_PROFILE}'; use 'default', 'single', 'rectangle', 'south_corridor', 'red_box', 'red_box_2027', or 'tunnel_2027'."
     exit 2
     ;;
 esac
@@ -517,10 +616,102 @@ fail() {
   exit 1
 }
 
+# 当前仿真时间（s，/clock）。best_effort 订阅者可以匹配 reliable 与 best_effort 的发布者。
+sim_clock_now() {
+  timeout 6 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
+    --field clock /clock 2>/dev/null |
+    awk '/^sec:/ {s = $2} /^nanosec:/ {n = $2}
+      END {if (s == "") exit 1; printf "%.3f\n", s + n / 1e9}'
+}
+
+# 仿真时间门限启用后，shell 侧的目标客户端仍需要墙钟兜底；兜底只防挂死，真正的超时
+# 由目标管理器按仿真时间判定。
+goal_wall_timeout_s() {
+  local sim_budget_s="$1"
+  if [[ "${SIM_TIME_GATES_ACTIVE}" == "1" ]]; then
+    echo $((sim_budget_s * GOAL_WALL_PER_SIM))
+  else
+    echo "${sim_budget_s}"
+  fi
+}
+
+# launch 起来后调用一次：决定后续 wait_for_command 的秒数按仿真时间还是墙钟计。
+enable_sim_time_gates() {
+  case "${SIM_TIME_GATES}" in
+    0) return 0 ;;
+    auto)
+      [[ " ${EXTRA_LAUNCH_ARGS:-} " == *" localization_source:=lio "* ]] || return 0
+      ;;
+  esac
+  local deadline=$((SECONDS + 120))
+  local clock_now
+  while (( SECONDS < deadline )); do
+    if clock_now="$(sim_clock_now)"; then
+      SIM_TIME_GATES_ACTIVE=1
+      echo "OK: simulation-time gates active (/clock=${clock_now} s, wall cap ${SIM_GATE_WALL_CAP_S} s, clock stall limit ${SIM_GATE_STALL_S} s, goal wall factor ${GOAL_WALL_PER_SIM}x)"
+      return 0
+    fi
+    if ! kill -0 "${LAUNCH_PID}" 2>/dev/null; then
+      fail "launch exited while waiting for /clock"
+    fi
+    sleep 1
+  done
+  fail "SIM_TIME_GATES=${SIM_TIME_GATES} requires /clock but nothing published it within 120 s"
+}
+
+# wait_for_command 的仿真时间版本：timeout_sec 是仿真秒。两道墙钟保险只防挂死——
+# /clock 连续 SIM_GATE_STALL_S 墙钟秒不前进（仿真卡死，与「慢」区分），或总墙钟超过
+# SIM_GATE_WALL_CAP_S。
+wait_for_command_sim_time() {
+  local label="$1"
+  local timeout_sec="$2"
+  shift 2
+  local wall_start=$SECONDS
+  local last_advance_wall=$SECONDS
+  local sim_start="" sim_now="" last_sim="" elapsed=""
+  sim_start="$(sim_clock_now)" || sim_start=""
+  last_sim="${sim_start}"
+  while true; do
+    if "$@" >/tmp/ats_minco_mpc_check.out 2>/tmp/ats_minco_mpc_check.err; then
+      echo "OK: ${label} (sim ${elapsed:-0} s, wall $((SECONDS - wall_start)) s)"
+      return 0
+    fi
+    if ! kill -0 "${LAUNCH_PID}" 2>/dev/null; then
+      fail "launch exited while waiting for ${label}"
+    fi
+    sim_now="$(sim_clock_now)" || sim_now=""
+    if [[ -n "${sim_now}" ]]; then
+      [[ -n "${sim_start}" ]] || { sim_start="${sim_now}"; last_sim="${sim_now}"; }
+      elapsed="$(awk -v a="${sim_now}" -v b="${sim_start}" 'BEGIN {printf "%.1f", a - b}')"
+      if awk -v e="${elapsed}" -v t="${timeout_sec}" 'BEGIN {exit !(e >= t)}'; then
+        cat /tmp/ats_minco_mpc_check.err || true
+        fail "timeout waiting for ${label} (sim ${elapsed} s >= ${timeout_sec} s, wall $((SECONDS - wall_start)) s)"
+      fi
+      if awk -v a="${sim_now}" -v b="${last_sim}" 'BEGIN {exit !(a > b)}'; then
+        last_sim="${sim_now}"
+        last_advance_wall=$SECONDS
+      fi
+    fi
+    if (( SECONDS - last_advance_wall >= SIM_GATE_STALL_S )); then
+      cat /tmp/ats_minco_mpc_check.err || true
+      fail "simulation clock stalled for $((SECONDS - last_advance_wall)) s while waiting for ${label} (/clock=${last_sim:-none})"
+    fi
+    if (( SECONDS - wall_start >= SIM_GATE_WALL_CAP_S )); then
+      cat /tmp/ats_minco_mpc_check.err || true
+      fail "wall-clock cap ${SIM_GATE_WALL_CAP_S} s hit while waiting for ${label} (sim ${elapsed:-unknown} s of ${timeout_sec} s)"
+    fi
+    sleep 1
+  done
+}
+
 wait_for_command() {
   local label="$1"
   local timeout_sec="$2"
   shift 2
+  if [[ "${SIM_TIME_GATES_ACTIVE}" == "1" ]]; then
+    wait_for_command_sim_time "${label}" "${timeout_sec}" "$@"
+    return
+  fi
   local deadline=$((SECONDS + timeout_sec))
   while (( SECONDS < deadline )); do
     if "$@" >/tmp/ats_minco_mpc_check.out 2>/tmp/ats_minco_mpc_check.err; then
@@ -1166,7 +1357,7 @@ send_fault_goal() {
   local timeout_sec="${5:-30}"
   FAULT_ACTION_OUTPUT="/tmp/ats_p3_fault_${label}_action.out"
   FAULT_ACTION_ERROR="/tmp/ats_p3_fault_${label}_action.err"
-  timeout "$((timeout_sec + 10))" ros2 action send_goal --feedback /ats_navigate_to_pose \
+  timeout "$(goal_wall_timeout_s "$((timeout_sec + 10))")" ros2 action send_goal --feedback /ats_navigate_to_pose \
     ats_navigation_interfaces/action/NavigateToPose \
     "{goal_pose: {header: {frame_id: ${frame}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {w: 1.0}}}, timeout: {sec: ${timeout_sec}, nanosec: 0}}" \
     >"${FAULT_ACTION_OUTPUT}" 2>"${FAULT_ACTION_ERROR}" &
@@ -1805,7 +1996,7 @@ wait_for_pose_near_goal() {
   local goal_x="$2"
   local goal_y="$3"
   local output_file="$4"
-  local deadline=$((SECONDS + GOAL_TIMEOUT))
+  local deadline=$((SECONDS + $(goal_wall_timeout_s "${GOAL_TIMEOUT}")))
   local final_x final_y error
   while (( SECONDS < deadline )); do
     if capture_pose "${output_file}"; then
@@ -1894,7 +2085,7 @@ start_topic_capture() {
   # The event-driven diagnostic and authorization topics must have a live
   # observer before the next execute cycle is published. Providing the type
   # avoids ros2cli graph discovery being the condition for creating it.
-  timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon --qos-reliability reliable "${topic}" \
+  timeout "$(goal_wall_timeout_s "${GOAL_TIMEOUT}")" ros2 topic echo --no-daemon --qos-reliability reliable "${topic}" \
     "${message_type}" \
     >"${output_file}" 2>/dev/null &
   STARTED_CAPTURE_PID=$!
@@ -2254,7 +2445,7 @@ run_navigation_goal() {
     CAPTURE_PIDS+=("${pid}")
     topic_pids+=("${pid}:${topic}:${expected_frame}:${output_file}")
   done
-  timeout "${GOAL_TIMEOUT}" ros2 topic echo --no-daemon "${SELECTED_CMD_VEL_TOPIC}" >"${command_output}" 2>/dev/null &
+  timeout "$(goal_wall_timeout_s "${GOAL_TIMEOUT}")" ros2 topic echo --no-daemon "${SELECTED_CMD_VEL_TOPIC}" >"${command_output}" 2>/dev/null &
   local leg_command_pid=$!
   CAPTURE_PIDS+=("${leg_command_pid}")
 
@@ -2267,13 +2458,13 @@ run_navigation_goal() {
   start_nav_tracking_recorder "${name} leg" "${tracking_dir}"
 
   ACTION_STATUS=running
-  timeout "${GOAL_TIMEOUT}" ros2 action send_goal --feedback /ats_navigate_to_pose \
+  timeout "$(goal_wall_timeout_s "${GOAL_TIMEOUT}")" ros2 action send_goal --feedback /ats_navigate_to_pose \
     ats_navigation_interfaces/action/NavigateToPose \
     "{goal_pose: {header: {frame_id: ${P3_GOAL_FRAME}}, pose: {position: {x: ${goal_x}, y: ${goal_y}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: ${GOAL_YAW_Z}, w: ${GOAL_YAW_W}}}}, timeout: {sec: ${GOAL_TIMEOUT}, nanosec: 0}}" \
     >"${goal_output}" 2>"${goal_error}" &
   GOAL_PID=$!
 
-  local goal_deadline=$((SECONDS + GOAL_TIMEOUT + 5))
+  local goal_deadline=$((SECONDS + $(goal_wall_timeout_s "$((GOAL_TIMEOUT + 5))")))
   while kill -0 "${GOAL_PID}" 2>/dev/null && (( SECONDS < goal_deadline )); do
     if ! kill -0 "${LAUNCH_PID}" 2>/dev/null; then
       fail "launch exited while ${name} goal was active"
@@ -2406,6 +2597,7 @@ fi
 start_launch ros2 launch "${LAUNCH_ARGS[@]}"
 
 wait_for_command "node graph" 60 timeout 4 ros2 node list --no-daemon
+enable_sim_time_gates
 wait_for_topic_once /localization 70 best_effort
 wait_for_topic_once /odometry 30 best_effort
 wait_for_topic_once /localization/status 30
@@ -2417,7 +2609,7 @@ wait_for_command "MuJoCo map->odom disabled" 30 \
 wait_for_command "fusion map->odom enabled" 30 \
   timeout --kill-after=1 4 bash -c \
   "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
-assert_topic_ownership /odometry ats_mujoco_sim localization_fusion
+assert_topic_ownership /odometry "${ODOMETRY_OWNER}" localization_fusion
 assert_topic_ownership /localization localization_fusion
 assert_topic_ownership /localization/status localization_fusion
 echo "OK: /odometry -> fusion -> /localization contract is active"
