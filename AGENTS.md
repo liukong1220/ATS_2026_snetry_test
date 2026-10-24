@@ -147,7 +147,7 @@ generation 的证据建议区分 `ROGMap source generation`、adapter publicatio
 1. 先运行最窄构建与单测；失败先定位再扩大范围。
 2. 运行 launch Python 语法和 `ros2 launch ... --show-args`。
 3. 运行三个仓库各自的 `git diff --check`。
-4. 在隔离 `ROS_DOMAIN_ID` 下运行无 viewer/RViz MuJoCo。
+4. 在隔离 `ROS_DOMAIN_ID` 下运行 MuJoCo 闭环，并带 RViz（见 7.1）：2026-10-25 起用户每次测试都要现场观察 RViz。
 5. 保存失败日志并修复后重跑；建议避免把 topic 存在写成闭环通过。
 6. 最后一次影响地图、规划、安全或控制行为的源码修改后，建议重跑对应闭环；建议避免沿用该修改前的 MuJoCo 结果作为最终证据。
 7. 文档内容以已有源码与本轮实际运行证据为依据。
@@ -234,6 +234,19 @@ git diff --check
 - stale/unknown/unreachable 安全停机结果；
 - 未执行测试与残余风险；
 - 三个仓库的基线/最终 commit ID 和 push 结果。
+
+### 7.1 每次测试都带 RViz（2026-10-25 起）
+
+用户每次测试都要在 RViz 里观察效果，所以闭环、故障注入、性能采集默认带 RViz，不再默认无头：
+
+- 用 `USE_RVIZ=true`（`RVIZ_DELAY_SEC` 默认 18 s）运行 `scripts/test_mujoco_minco_mpc_chain.sh`；runner 会拉起
+  `src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz` 并把窗口截图存到 `/tmp/ats_minco_mpc_<profile>_<domain>_rviz.png`。
+  需要 `DISPLAY`（本机为 `:0`）。该配置已显示 `/localization`（红箭头）、`/odometry`（Point-LIO，绿箭头）、
+  `/simulation/ground_truth/odometry`（仿真真值，蓝箭头）、`/registered_scan`、静态图、规划栅格、ESDF、ROGMap 范围、
+  MINCO 路径、MPC 参考与预测、TF；新增话题时同步加进这个 `.rviz` 文件。
+- 启动前先告诉用户命令、`ROS_DOMAIN_ID` 和预计时长（`lio` 模式 8 线程约 0.5 倍实时）；测试进行时不修改正在被脚本读取的文件。
+- 结束后读取截图，在报告里分开写「RViz 上应该看到什么」和「实际看到什么」；截图只是单帧，不能替代终点测量与话题证据。
+- 只有批量故障矩阵等无法带显示的测试才无头运行，并在报告里写明哪些结果没有经过 RViz 观察。
 
 ## 8. 提交与推送
 
