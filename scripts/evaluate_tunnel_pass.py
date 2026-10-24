@@ -46,7 +46,9 @@ def main() -> None:
         raise SystemExit(f"unknown tunnel: {args.tunnel}")
     with Path(args.trajectory).open(newline="", encoding="utf-8") as stream:
         samples = [(float(row["x"]), float(row["y"]), float(row["yaw"])) for row in csv.DictReader(stream)]
-    in_tunnel = [sample for sample in samples if inside(sample[0], sample[1], tunnel["polygon"])]
+    # The roof slab is only a short lintel; yaw alignment is judged over the walled corridor.
+    window = tunnel.get("corridor_polygon", tunnel["polygon"])
+    in_tunnel = [sample for sample in samples if inside(sample[0], sample[1], window)]
     target = float(tunnel["axis_yaw"])
     yaw_tolerance = args.yaw_tolerance
     if yaw_tolerance is None:
