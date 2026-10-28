@@ -213,14 +213,18 @@ def single_display_for_topic(document, topic: str, context: str):
 
 
 def assert_navigation_rviz_contract(
-    document, fixed_frame: str, context: str, path_style_overrides=None
+    document, fixed_frame: str, context: str, path_style_overrides=None,
+    allow_rog_map_voxel_topics: bool = False,
 ):
     manager = document["Visualization Manager"]
     assert manager["Global Options"]["Fixed Frame"] == fixed_frame, (
         f"{context} fixed frame must match ROGMap frame {fixed_frame!r}"
     )
 
-    for topic in (*ROG_MAP_VOXEL_TOPICS, *MINCO_GUIDE_TOPICS):
+    # The MuJoCo view is a simulation tool and may draw ROG-Map's native voxel clouds
+    # (assert_rog_map_native_displays pins how); the shipped views stay minimal.
+    hidden = (() if allow_rog_map_voxel_topics else ROG_MAP_VOXEL_TOPICS) + tuple(MINCO_GUIDE_TOPICS)
+    for topic in hidden:
         assert not displays_for_topic(document, topic), (
             f"{context} must not display {topic}; the navigation view is minimal"
         )
@@ -296,6 +300,28 @@ def assert_global_fused_esdf_display(document, context: str, expect_enabled: boo
     assert display["Enabled"] is expect_enabled, (
         f"{context} global fused ESDF must be {'enabled' if expect_enabled else 'disabled'}"
     )
+
+
+def assert_rog_map_native_displays(document, context: str):
+    """ROG-Map's own voxel/ESDF clouds in the simulation view: right class, Best Effort, one each.
+
+    The node publishes these with Best Effort QoS; a Reliable RViz subscription would show nothing.
+    occ / inf_occ / unk / esdf start enabled; the /rog_map/viz debug cloud is available but off.
+    """
+    for topic in ROG_MAP_VOXEL_TOPICS:
+        display = single_display_for_topic(document, topic, context)
+        assert display["Class"] == "rviz_default_plugins/PointCloud2", (
+            f"{context} {topic} must be a PointCloud2 display"
+        )
+        assert display["Topic"]["Reliability Policy"] == "Best Effort", (
+            f"{context} {topic} must use Best Effort (the ROGMap debug publishers are Best Effort)"
+        )
+        assert display["Topic"]["Durability Policy"] == "Volatile", f"{context} {topic} must be Volatile"
+        assert display["Enabled"] is (topic != "/rog_map/viz"), (
+            f"{context} {topic} must be {'off' if topic == '/rog_map/viz' else 'enabled'}"
+        )
+    esdf = single_display_for_topic(document, "/rog_map/esdf", context)
+    assert esdf["Color Transformer"] == "Intensity", f"{context} /rog_map/esdf colours by distance"
 
 
 def assert_robot_model_display(document, description_topic: str, context: str):
@@ -780,8 +806,12 @@ def main():
         "MuJoCo RViz config missing /rc_esdf/planning_grid"
     )
     assert_navigation_rviz_contract(
-        mujoco_rviz, rog_map["map_frame"], "MuJoCo RViz", MUJOCO_PATH_DISPLAY_STYLE
+        mujoco_rviz, rog_map["map_frame"], "MuJoCo RViz", MUJOCO_PATH_DISPLAY_STYLE,
+        allow_rog_map_voxel_topics=True,
     )
+    assert_rog_map_native_displays(mujoco_rviz, "MuJoCo RViz")
+    # The vehicle shape comes from robot_state_publisher (ats_mujoco_sim/robot_description.py).
+    assert_robot_model_display(mujoco_rviz, "robot_description", "MuJoCo RViz")
     # MuJoCo 视图用彩色 ESDF 点云代替 costmap 栅格(两者叠加会互相遮挡),栅格保留但默认关闭。
     assert_global_fused_esdf_display(mujoco_rviz, "MuJoCo RViz", expect_enabled=False)
     esdf_cloud = single_display_for_topic(mujoco_rviz, "/rc_esdf/esdf_cloud", "MuJoCo RViz")
@@ -790,8 +820,6 @@ def main():
     )
     assert esdf_cloud["Enabled"] is True, "MuJoCo RViz ESDF cloud must be enabled"
     mujoco_rviz_text = mujoco_rviz_path.read_text(encoding="utf-8")
-    # MuJoCo publishes no robot_description; the /localization pose stands in
-    # for the robot model.
     localization_displays = displays_for_topic(mujoco_rviz, "/localization")
     assert len(localization_displays) == 1, "MuJoCo RViz must have one localization display"
     assert all(

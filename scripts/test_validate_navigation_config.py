@@ -103,6 +103,31 @@ class NavigationRvizContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "must not display /rog_map/viz"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
+    def load_mujoco_rviz(self):
+        return VALIDATOR.load_yaml(WORKSPACE / "src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz")
+
+    def test_mujoco_view_may_show_rog_map_native_clouds_but_the_default_view_may_not(self):
+        mujoco = self.load_mujoco_rviz()
+        VALIDATOR.assert_rog_map_native_displays(mujoco, "MuJoCo RViz")
+        VALIDATOR.assert_navigation_rviz_contract(
+            mujoco, "odom", "MuJoCo RViz", VALIDATOR.MUJOCO_PATH_DISPLAY_STYLE,
+            allow_rog_map_voxel_topics=True)
+        with self.assertRaisesRegex(AssertionError, "must not display /rog_map/occ"):
+            VALIDATOR.assert_navigation_rviz_contract(
+                mujoco, "odom", "MuJoCo RViz", VALIDATOR.MUJOCO_PATH_DISPLAY_STYLE)
+
+    def test_rog_map_native_displays_need_best_effort_and_must_be_enabled(self):
+        rviz = copy.deepcopy(self.load_mujoco_rviz())
+        occ = VALIDATOR.single_display_for_topic(rviz, "/rog_map/occ", "MuJoCo RViz")
+        occ["Topic"]["Reliability Policy"] = "Reliable"
+        with self.assertRaisesRegex(AssertionError, "Best Effort"):
+            VALIDATOR.assert_rog_map_native_displays(rviz, "MuJoCo RViz")
+        rviz = copy.deepcopy(self.load_mujoco_rviz())
+        unknown = VALIDATOR.single_display_for_topic(rviz, "/rog_map/unk", "MuJoCo RViz")
+        unknown["Enabled"] = False
+        with self.assertRaisesRegex(AssertionError, "enabled"):
+            VALIDATOR.assert_rog_map_native_displays(rviz, "MuJoCo RViz")
+
     def test_jps_path_display_must_be_enabled(self):
         rviz = copy.deepcopy(self.load_default_rviz())
         raw = VALIDATOR.single_display_for_topic(rviz, "/minco/raw_path", "test RViz")
