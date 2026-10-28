@@ -244,6 +244,13 @@ git diff --check
   需要 `DISPLAY`（本机为 `:0`）。该配置已显示 `/localization`（红箭头）、`/odometry`（Point-LIO，绿箭头）、
   `/simulation/ground_truth/odometry`（仿真真值，蓝箭头）、`/registered_scan`、静态图、规划栅格、ESDF、ROGMap 范围、
   MINCO 路径、MPC 参考与预测、TF；新增话题时同步加进这个 `.rviz` 文件。
+- `USE_RVIZ=true` 时 runner 同时打开 MuJoCo 自带的 3D 窗口（`USE_MUJOCO_VIEWER` 默认等于 `USE_RVIZ`，可显式设为 `false`）。
+  关闭这个窗口会让仿真停止；Wayland 会话里它是原生 Wayland 窗口，`xwd` 抓不到，runner 只在 X11 窗口存在时才保存
+  `/tmp/ats_minco_mpc_<profile>_<domain>_mujoco.png`，否则打印 NOTE。`mujoco_navigation.rviz` 现在还显示车辆模型（RobotModel，
+  由 `ats_robot_description/urdf/ats_sentry.urdf.xacro` 生成，不发布 TF）和 ROG-Map 原生的 occ / inf_occ / unk / esdf 点云（仅仿真视图）。
+- 桌面锁屏（`loginctl` 的 `LockedHint=yes`）时 MuJoCo 的原生 Wayland 窗口出不来（窗口线程一直在等合成器，日志只有"正在后台打开窗口"，没有"已启动"），RViz 的 X11 窗口虽然还能被 `xwd` 截图，但没有人能现场观察；
+  这样的运行要在报告里写明"无人现场观察"，窗口的画面和稳定性记为未验证。runner 的"当前位姿"（终点判据、故障注入的起点查询）在 `lio` 模式读 map 系的 `/simulation/ground_truth/odometry`，
+  不读 `/localization`（`lio` 下它是 Point-LIO 的 odom 系直通，原点在出生点下方的地面）；truth 模式仍读 `/localization`。
 - 启动前先告诉用户命令、`ROS_DOMAIN_ID` 和预计时长（`lio` 模式 8 线程约 0.5 倍实时）；测试进行时不修改正在被脚本读取的文件。
 - 结束后读取截图，在报告里分开写「RViz 上应该看到什么」和「实际看到什么」；截图只是单帧，不能替代终点测量与话题证据。
 - 只有批量故障矩阵等无法带显示的测试才无头运行，并在报告里写明哪些结果没有经过 RViz 观察。
