@@ -16,7 +16,7 @@ extract_function() {
     inside && $0 == "}" {exit}
   ' "${RUNNER}"
 }
-for name in sim_clock_now goal_wall_timeout_s enable_sim_time_gates wait_for_command_sim_time wait_for_command; do
+for name in sim_clock_now goal_wall_timeout_s enable_sim_time_gates wait_for_command_sim_time wait_for_command capture_pose pose_axis; do
   body="$(extract_function "${name}")"
   if [[ -z "${body}" ]]; then
     echo "FAIL: ${name} is not defined in ${RUNNER}"
@@ -30,6 +30,12 @@ cat >"${WORK_DIR}/bin/ros2" <<'STUB'
 #!/usr/bin/env bash
 # Prints builtin_interfaces/Time like `ros2 topic echo --once --field clock /clock`.
 # STUB_CLOCK_STEP simulated seconds are added per call; STUB_NO_CLOCK=1 publishes nothing.
+# capture_pose: record which topic was asked for and answer like `--field pose.pose.position`.
+if [[ " $* " == *" pose.pose.position "* ]]; then
+  echo "$*" >"${STUB_STATE}/pose_args"
+  printf 'x: 1.5\ny: 2.5\nz: 0.0\n---\n'
+  exit 0
+fi
 [[ "${STUB_NO_CLOCK:-0}" == "1" ]] && exit 1
 calls_file="${STUB_STATE}/clock_calls"
 calls=$(( $(cat "${calls_file}" 2>/dev/null || echo 0) + 1 ))
@@ -118,6 +124,22 @@ run_case goal_wall_backstop_scaled 0 "active=1800" -- STUB_CLOCK_STEP=1
 CASE_BODY='wait_for_command "wall legacy" 5 flaky'
 # Inactive gate keeps the original wall-clock path (no simulated-time suffix).
 run_case inactive_gate_uses_wall_clock 0 "OK: wall legacy" -- STUB_CLOCK_STEP=1
+
+# The pose used for "did the robot reach the goal" and for the planning-grid queries must be in the
+# map frame.  /localization is Point-LIO's odom-frame pass-through in lio mode (report 5.1.4): with
+# the start at (4.5, 6.25) the old check reported 7.76 m of error for a goal reached to 0.03 m.
+POSE_BLOCK="$(awk '/^POSE_TOPIC=\/localization$/ {inside = 1} inside {print} inside && /^fi$/ {exit}' "${RUNNER}")"
+if [[ -z "${POSE_BLOCK}" ]]; then
+  echo "FAIL: POSE_TOPIC block not found in ${RUNNER}"
+  exit 1
+fi
+CASE_BODY='LIO_MODE=1; '"${POSE_BLOCK}"'
+capture_pose "${STUB_STATE}/pose.txt" && cat "${STUB_STATE}/pose_args" && echo "x=$(pose_axis "${STUB_STATE}/pose.txt" x)"'
+run_case lio_pose_is_the_map_frame_ground_truth 0 "best_effort /simulation/ground_truth/odometry --field pose.pose.position" -- STUB_CLOCK_STEP=1
+CASE_BODY='LIO_MODE=0; '"${POSE_BLOCK}"'
+capture_pose "${STUB_STATE}/pose.txt" && cat "${STUB_STATE}/pose_args" && echo "x=$(pose_axis "${STUB_STATE}/pose.txt" x)"'
+run_case truth_pose_stays_on_localization 0 "best_effort /localization --field pose.pose.position" -- STUB_CLOCK_STEP=1
+run_case pose_axis_reads_x 0 "x=1.5" -- STUB_CLOCK_STEP=1
 
 if (( FAILURES > 0 )); then
   echo "${FAILURES} simulation-time gate case(s) failed"
