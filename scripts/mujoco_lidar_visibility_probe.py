@@ -303,7 +303,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["self", "tunnel"])
     parser.add_argument("--tilt-direction", choices=["front", "left"], default="front")
-    parser.add_argument("--tilt-deg", type=float, default=35.0)
+    parser.add_argument("--tilt-deg", type=float, default=30.0)
     parser.add_argument("--mount-x", type=float, default=0.2405)
     parser.add_argument("--mount-y", type=float, default=0.0)
     parser.add_argument("--mount-height", type=float, default=0.20)
