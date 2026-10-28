@@ -80,6 +80,14 @@ START_Y="${START_Y:-0.06}"
 # RMUC 2025 field height at the nominal start is 0.20097 m. The MuJoCo
 # base_link-to-wheel-bottom offset is 0.180 m, so the grounded root qpos is
 # 0.38097 m. Keep this override aligned with rmuc_2025_mujoco.launch.py.
+# Remember whether the caller chose a height: the 2027 profiles below pick their own spawn height
+# unless START_Z was given. (They used `START_Z="${START_Z:-0.550}"` after this line had already set
+# it, so every 2027 run spawned at 0.381 m: 14 cm inside the 0.343 m tunnel platform, where the
+# contact solver throws the chassis out and Point-LIO then wanders by metres at standstill.)
+START_Z_USER_SET="0"
+if [[ -n "${START_Z:-}" ]]; then
+  START_Z_USER_SET="1"
+fi
 START_Z="${START_Z:-0.381}"
 START_YAW="${START_YAW:-0.0}"
 GOAL_X="${GOAL_X:-1.0}"
@@ -149,6 +157,16 @@ if [[ "${USE_RVIZ}" == "true" ]]; then
 else
   RVIZ_DELAY_SEC="${RVIZ_DELAY_SEC:-1000.0}"
 fi
+# MuJoCo's own 3D window, shown next to RViz whenever someone watches the test (AGENTS.md 7.1).
+# USE_MUJOCO_VIEWER=false keeps RViz only. Closing that window stops the simulation.
+USE_MUJOCO_VIEWER="${USE_MUJOCO_VIEWER:-${USE_RVIZ}}"
+case "${USE_MUJOCO_VIEWER}" in
+  true|false) ;;
+  *)
+    echo "Unsupported USE_MUJOCO_VIEWER='${USE_MUJOCO_VIEWER}'; use 'true' or 'false'."
+    exit 2
+    ;;
+esac
 # 每一段至少应产生的位姿位移（m），低于此值视为控制未真正跟随。
 MIN_LEG_PROGRESS="${MIN_LEG_PROGRESS:-0.20}"
 # 每段终点的平面位置误差门限（m）。red_box profile 在下方 case 中收紧到
@@ -173,6 +191,16 @@ if [[ -z "${LIDAR_DOWNSAMPLE:-}" ]]; then
   else
     LIDAR_DOWNSAMPLE=24
   fi
+fi
+# 取"当前位姿"（终点判据、故障注入的起点查询）用哪个话题。truth 模式 odom 与 map 重合，
+# /localization 就是 map 系位姿。lio 模式下 /localization 是 Point-LIO 里程计的直通（odom 系，
+# 原点在出生点下方的地面，5.1.3 D），而目标与规划栅格都在 map 系：起点不在原点的场景
+# （red_box_2027 的 (4.5, 6.25)）里，终点判据把 odom 系位姿当 map 系位姿，目标已到达
+# （goal manager 报 succeeded，距目标 0.03 m）也会报 7.76 m 误差而失败（5.1.4）。lio 模式改读
+# map 系的仿真真值；这是物理位姿，用它判"到没到"比用估计更严。
+POSE_TOPIC=/localization
+if [[ "${LIO_MODE}" == "1" ]]; then
+  POSE_TOPIC=/simulation/ground_truth/odometry
 fi
 # /odometry 的唯一发布者：truth 模式是仿真节点本身；lio 模式由 Point-LIO 链末端的
 # sensor_scan_generation 发布，仿真节点只发 /simulation/ground_truth/odometry。
@@ -317,6 +345,28 @@ if [[ "${FORCE_BODY_YAW_FOLLOW,,}" == "true" &&
 fi
 P3_GOAL_FRAME="${P3_GOAL_FRAME:-map}"
 
+# The 2027 static map is generated from the field mesh (scripts/generate_rmuc_2027_map.py).
+# A hand-edited or stale PGM would make every 2027 result unreproducible, so refuse to start.
+require_static_map_current() {
+  [[ "${STATIC_MAP_CHECKED:-0}" == "1" ]] && return 0
+  python3 -I "${WORKSPACE_DIR}/scripts/generate_rmuc_2027_map.py" --check >&2 || {
+    echo "rmuc_2027.pgm no longer matches its generator; run scripts/generate_rmuc_2027_map.py" \
+      "(or restore the PGM) before testing the 2027 scene." >&2
+    exit 2
+  }
+  # The launch loads the map from install/, which is a copy: regenerating without rebuilding
+  # would test the previous map while the check above passes.
+  local installed="${WORKSPACE_DIR}/install/ats_sentry_bringup/share/ats_sentry_bringup/map" file
+  for file in rmuc_2027.pgm rmuc_2027.yaml; do
+    if ! cmp -s "${WORKSPACE_DIR}/src/ats_sentry_bringup/map/${file}" "${installed}/${file}"; then
+      echo "install/ats_sentry_bringup holds a different ${file} than src/ats_sentry_bringup/map;" \
+        "run: colcon build --base-paths src --packages-select ats_sentry_bringup" >&2
+      exit 2
+    fi
+  done
+  STATIC_MAP_CHECKED=1
+}
+
 case "${TEST_PROFILE}" in
   default|single)
     GOAL_NAMES=(single)
@@ -351,6 +401,7 @@ case "${TEST_PROFILE}" in
     ;;
   tunnel_2027)
     [[ "${SCENE}" == "rmuc_2027" ]] || SCENE="rmuc_2027"
+    require_static_map_current
     [[ -n "${TUNNEL}" ]] || { echo "TUNNEL is required for TEST_PROFILE=tunnel_2027" >&2; exit 2; }
     TUNNEL_VALUES="$({ python3 - "${WORKSPACE_DIR}/src/sim/ats_mujoco_sim/config/tunnels_2027.yaml" "${TUNNEL}" <<'PY'
 import sys, yaml
@@ -367,7 +418,9 @@ PY
     read -r START_X START_Y START_YAW GOAL_X GOAL_Y GOAL_YAW <<<"${TUNNEL_VALUES}"
     # 入口在隧道西侧高台面（x=12.9 处网格高 0.343 m）上：轮底偏置 0.180 m，再留 2.7 cm 落差。
     # 旧值 0.330 是按旧估算的口袋底 0.15 m 取的，在真实地形上会让底盘出生在地里。
-    START_Z="${START_Z:-0.550}"
+    if [[ "${START_Z_USER_SET}" != "1" ]]; then
+      START_Z="0.550"
+    fi
     GOAL_TIMEOUT="${GOAL_TIMEOUT:-180}"
     GOAL_NAMES=("${TUNNEL}")
     GOAL_XS=("${GOAL_X}")
@@ -375,15 +428,19 @@ PY
     ;;
   red_box_2027)
     # 2027 地图上的红框：从西侧开阔平地出发，到中央高地北侧。2025 的红点 (10.36, 1.49) 是 2025 地图的
-    # 像素坐标，不能搬过来。起点 (5.0, 8.0) 在 0.299 m 的平台上（平整度 1.1 cm、离 PGM 障碍 1.8 m），
-    # 出生高度 = 平台 0.299 + 轮底偏置 0.180 + 落差 0.03；目标 (14.0, 11.6) 在高地顶面 0.507 m 上
-    # （平整度 2.4 cm、离 PGM 障碍 1.68 m）。可用 RED_BOX_2027_START / RED_BOX_2027_GOAL="x y" 覆盖；
-    # 改起点时同时给 START_Z（平台高 + 0.21）。
+    # 像素坐标，不能搬过来。数字取自 2026-10-25 重新生成的 PGM（scripts/generate_rmuc_2027_map.py）：
+    # 起点 (4.5, 6.25) 在 0.255 m 的地面上（0.6 m 窗口内起伏 1.6 cm、离 PGM 障碍 1.64 m）；旧起点
+    # (5.0, 8.0) 离六边形台 0.48 m，已弃用。出生高度 = 地面 0.255 + 0.21 = 0.465（0.180 轮底偏置 + 落差 0.03）。
+    # 目标 (14.0, 11.6) 在高地顶面 0.507 m 上（离 PGM 障碍 1.83 m）。
+    # 可用 RED_BOX_2027_START / RED_BOX_2027_GOAL="x y" 覆盖；改起点时同时给 START_Z（地面高 + 0.21）。
     [[ "${SCENE}" == "rmuc_2027" ]] || SCENE="rmuc_2027"
-    read -r START_X START_Y <<<"${RED_BOX_2027_START:-5.0 8.0}"
+    require_static_map_current
+    read -r START_X START_Y <<<"${RED_BOX_2027_START:-4.5 6.25}"
     read -r GOAL_X GOAL_Y <<<"${RED_BOX_2027_GOAL:-14.0 11.6}"
     START_YAW="${START_YAW:-0.0}"
-    START_Z="${START_Z:-0.510}"
+    if [[ "${START_Z_USER_SET}" != "1" ]]; then
+      START_Z="0.465"
+    fi
     if [ "${GOAL_TIMEOUT_USER_SET}" != "1" ]; then
       GOAL_TIMEOUT="300"
     fi
@@ -419,7 +476,7 @@ for name, (row, col) in (('start', start), ('goal', goal)):
 if labels[start] != labels[goal]:
     print(f'red_box_2027 preflight: goal ({gx}, {gy}) is not reachable from start ({sx}, {sy}) in {yaml_path.name} '
           f'after a {radius_cells * resolution:.2f} m footprint erosion (it is separate in the raw map too): the static map encloses it '
-          '(the central highland outline is drawn as a closed line). Open the ramp in the PGM or pick another goal '
+          '(see the connectivity numbers of scripts/generate_rmuc_2027_map.py --evaluate). Pick another goal '
           'with RED_BOX_2027_GOAL.', file=sys.stderr)
     raise SystemExit(1)
 print(f'red_box_2027 preflight OK: start and goal share a {radius_cells * resolution:.2f} m-eroded free component.')
@@ -430,6 +487,9 @@ PY
     exit 2
     ;;
 esac
+if [[ "${SCENE}" == "rmuc_2027" ]]; then
+  require_static_map_current
+fi
 case "${USE_RVIZ}" in
   true|false) ;;
   *)
@@ -1139,10 +1199,10 @@ assert_rviz_runtime_contract() {
   : >"${RVIZ_QOS_LOG}"
   wait_for_command "MuJoCo navigation RViz node" 30 \
     node_is_present /mujoco_navigation_rviz2
-  # 只断言 mujoco_navigation.rviz 实际订阅的 best-effort 传感器 topic。ats_mujoco_sim
-  # ca34d5f 起 RViz 不再显示 /rog_map/occ、/rog_map/inf_occ、/rog_map/viz，这里继续要求
-  # RViz 订阅它们会让每次 USE_RVIZ=true 运行都在发目标前失败。/rog_map/viz 的发布内容
-  # 仍由下面独立的 topic_field_* 检查覆盖。
+  # 只断言 /rog_map/bounds 与 /localization 的 best-effort 观察者。2026-10-25 起
+  # mujoco_navigation.rviz 又显示 /rog_map/occ、inf_occ、unk、esdf（默认开，viz 默认关），
+  # 它们的发布者本来就是 best-effort，QoS 由 validate_navigation_config.py 锁定，这里不重复断言。
+  # /rog_map/viz 的发布内容由下面独立的 topic_field_* 检查覆盖（runner 自己订阅它）。
   for topic in /rog_map/bounds /localization; do
     assert_rviz_best_effort_observer "${topic}"
   done
@@ -1153,13 +1213,69 @@ assert_rviz_runtime_contract() {
   echo "OK: RViz runtime QoS contract saved to ${RVIZ_QOS_LOG}"
 }
 
+# Several simulations may show the same RViz config on one display (a hand-started session next to
+# a test). Take the window whose process belongs to this run's launch process group. A window that
+# cannot be attributed (no _NET_WM_PID at all) is used only when it is the single candidate.
+# $1 is an awk regular expression for the window title line of `xwininfo -root -tree`.
+window_id_for_run() {
+  local window pid pgid candidates=() match="" attributed=0
+  while read -r window; do
+    [[ "${window}" =~ ^0x[[:xdigit:]]+$ ]] && candidates+=("${window}")
+  done < <(xwininfo -root -tree 2>/dev/null | WINDOW_TITLE_PATTERN="$1" awk '$0 ~ ENVIRON["WINDOW_TITLE_PATTERN"] {print $1}')
+  for window in "${candidates[@]}"; do
+    pid="$(xprop -id "${window}" _NET_WM_PID 2>/dev/null | awk '{print $NF}')"
+    [[ "${pid}" =~ ^[0-9]+$ ]] || continue
+    attributed=$((attributed + 1))
+    pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d ' ')"
+    if [[ "${pgid}" == "${LAUNCH_PID:-}" ]]; then
+      match="${window}"
+      break
+    fi
+  done
+  if [[ -z "${match}" && "${attributed}" -eq 0 && "${#candidates[@]}" -eq 1 ]]; then
+    match="${candidates[0]}"
+  fi
+  printf '%s\n' "${match}"
+}
+
+rviz_window_id_for_run() {
+  window_id_for_run 'mujoco_navigation\.rviz\*? - RViz'
+}
+
+# The MuJoCo passive viewer titles its window "MuJoCo : <model>".
+mujoco_window_id_for_run() {
+  window_id_for_run '^ *0x[0-9a-f]+ "MuJoCo'
+}
+
+# Best effort: the viewer is a convenience for whoever watches the test, so a missing window or a
+# failed grab is a NOTE, never a test failure.
+capture_mujoco_screenshot() {
+  local window_id xwd_file
+  [[ "${USE_MUJOCO_VIEWER}" == "true" ]] || return 0
+  window_id="$(mujoco_window_id_for_run)"
+  if ! [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]]; then
+    echo "NOTE: no X11 MuJoCo viewer window belongs to this run; viewer screenshot skipped" \
+      "(under Wayland (XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-unset}) the viewer is a native Wayland" \
+      "window: it is on screen, but xwd cannot see it)"
+    return 0
+  fi
+  xwd_file="${MUJOCO_SCREENSHOT%.png}.xwd"
+  if xwd -id "${window_id}" -silent -out "${xwd_file}" &&
+    ffmpeg -y -v error -f xwd_pipe -i "${xwd_file}" -frames:v 1 "${MUJOCO_SCREENSHOT}" &&
+    [[ -s "${MUJOCO_SCREENSHOT}" ]]; then
+    echo "OK: MuJoCo viewer screenshot saved to ${MUJOCO_SCREENSHOT}"
+  else
+    echo "NOTE: MuJoCo viewer window ${window_id} could not be captured"
+  fi
+}
+
 capture_rviz_screenshot() {
   local window_id xwd_file deadline
   [[ "${USE_RVIZ}" == "true" ]] || return
   [[ -n "${DISPLAY:-}" ]] || fail "USE_RVIZ=true requires DISPLAY for screenshot capture"
   deadline=$((SECONDS + 20))
   while (( SECONDS < deadline )); do
-    window_id="$(xwininfo -root -tree 2>/dev/null | awk '/mujoco_navigation\.rviz\*? - RViz/ {print $1; exit}')"
+    window_id="$(rviz_window_id_for_run)"
     [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]] && break
     sleep 0.5
   done
@@ -1184,7 +1300,7 @@ capture_pose() {
   # domain 185 even though the chain itself was healthy.
   for attempt in 1 2 3 4 5 6; do
     timeout 5 ros2 topic echo --no-daemon --once --qos-reliability best_effort \
-      /localization --field pose.pose.position \
+      "${POSE_TOPIC}" --field pose.pose.position \
       >"${output_file}" 2>/dev/null || true
     if grep -q '^x:' "${output_file}" && grep -q '^y:' "${output_file}"; then
       return 0
@@ -2549,8 +2665,8 @@ export_control_telemetry() {
 LAUNCH_ARGS=(
   ats_mujoco_sim
   "${SCENE}_mujoco.launch.py"
-  use_viewer:=false
-  show_viewer:=false
+  use_viewer:="${USE_MUJOCO_VIEWER}"
+  show_viewer:="${USE_MUJOCO_VIEWER}"
   use_rviz:="${USE_RVIZ}"
   launch_mujoco_rviz:=false
   force_body_yaw_follow:="${FORCE_BODY_YAW_FOLLOW}"
@@ -2609,7 +2725,14 @@ wait_for_command "MuJoCo map->odom disabled" 30 \
 wait_for_command "fusion map->odom enabled" 30 \
   timeout --kill-after=1 4 bash -c \
   "ros2 param get --no-daemon /localization_fusion publish_tf | grep -q 'Boolean value is: True'"
-assert_topic_ownership /odometry "${ODOMETRY_OWNER}" localization_fusion
+# mujoco_navigation.rviz shows /odometry (Point-LIO, green arrow). RViz starts ~18 s after launch and
+# was racing this check: a run where it connected first failed with a second /odometry subscriber
+# (2026-10-25). It is a named, read-only observer, so the check allows exactly it.
+if [[ "${USE_RVIZ}" == "true" ]]; then
+  assert_topic_ownership /odometry "${ODOMETRY_OWNER}" localization_fusion mujoco_navigation_rviz2
+else
+  assert_topic_ownership /odometry "${ODOMETRY_OWNER}" localization_fusion
+fi
 assert_topic_ownership /localization localization_fusion
 assert_topic_ownership /localization/status localization_fusion
 echo "OK: /odometry -> fusion -> /localization contract is active"
@@ -2677,8 +2800,10 @@ CAPTURE_PIDS+=("${CMD_STREAM_PID}")
 EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
 RVIZ_QOS_LOG="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz_qos.out"
 RVIZ_SCREENSHOT="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz.png"
+MUJOCO_SCREENSHOT="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_mujoco.png"
 assert_rviz_runtime_contract
 capture_rviz_screenshot
+capture_mujoco_screenshot
 ensure_topic_capture_ready "P3 ExecutionCommand" /planner/execution_command \
   ats_navigation_interfaces/msg/ExecutionCommand "${EXECUTION_STREAM}" EXECUTION_STREAM_PID
 CAPTURE_PIDS+=("${EXECUTION_STREAM_PID}")
