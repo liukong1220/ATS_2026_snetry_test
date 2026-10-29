@@ -878,9 +878,11 @@ assert_topic_ownership() {
   local expected_subscriber="${3:-}"
   local allowed_observer="${4:-}"
   local topic_info publisher_block subscription_block deadline
-  deadline=$((SECONDS + 30))
+  # On a loaded 8-core machine a fresh `ros2 topic info` process needs more than 5 s to discover the
+  # graph (domain 97 printed nothing), so each call and the whole wait get more time.
+  deadline=$((SECONDS + 60))
   while (( SECONDS < deadline )); do
-    topic_info="$(timeout 5 ros2 topic info --no-daemon --verbose "${topic}" 2>/dev/null || true)"
+    topic_info="$(timeout 15 ros2 topic info --no-daemon --verbose "${topic}" 2>/dev/null || true)"
     publisher_block="$(sed -n '/^Publisher count:/,/^Subscription count:/p' <<<"${topic_info}")"
     if ! grep -q '^Publisher count: 1$' <<<"${topic_info}" ||
       ! grep -q "Node name: ${expected_publisher}$" <<<"${publisher_block}"
@@ -906,10 +908,14 @@ assert_topic_ownership() {
         return
       fi
     fi
+    # Same _NODE_NAME_UNKNOWN_ allowance as above for the expected subscriber next to the observer
+    # (domain 101: ats_swerve_mpc listed as unknown while it exposed the endpoint).
     if [[ -n "${allowed_observer}" ]] &&
       grep -q '^Subscription count: 2$' <<<"${topic_info}" &&
-      [[ "$(grep -c "^Node name: ${expected_subscriber}$" <<<"${subscription_block}")" -eq 1 ]] &&
-      [[ "$(grep -c "^Node name: ${allowed_observer}$" <<<"${subscription_block}")" -eq 1 ]]
+      [[ "$(grep -c "^Node name: ${allowed_observer}$" <<<"${subscription_block}")" -eq 1 ]] &&
+      { [[ "$(grep -c "^Node name: ${expected_subscriber}$" <<<"${subscription_block}")" -eq 1 ]] ||
+        { [[ "$(grep -c '^Node name: _NODE_NAME_UNKNOWN_$' <<<"${subscription_block}")" -eq 1 ]] &&
+          node_exposes_endpoint "/${expected_subscriber}" "${topic}"; }; }
     then
       echo "OK: ${topic} ownership ${expected_publisher} -> ${expected_subscriber}; observer ${allowed_observer} is read-only"
       return
