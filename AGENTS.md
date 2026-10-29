@@ -147,7 +147,7 @@ generation 的证据建议区分 `ROGMap source generation`、adapter publicatio
 1. 先运行最窄构建与单测；失败先定位再扩大范围。
 2. 运行 launch Python 语法和 `ros2 launch ... --show-args`。
 3. 运行三个仓库各自的 `git diff --check`。
-4. 在隔离 `ROS_DOMAIN_ID` 下运行 MuJoCo 闭环，并带 RViz（见 7.1）：2026-10-25 起用户每次测试都要现场观察 RViz。
+4. 在隔离 `ROS_DOMAIN_ID` 下运行 MuJoCo 闭环；是否带 RViz 见 7.1。
 5. 保存失败日志并修复后重跑；建议避免把 topic 存在写成闭环通过。
 6. 最后一次影响地图、规划、安全或控制行为的源码修改后，建议重跑对应闭环；建议避免沿用该修改前的 MuJoCo 结果作为最终证据。
 7. 文档内容以已有源码与本轮实际运行证据为依据。
@@ -235,9 +235,11 @@ git diff --check
 - 未执行测试与残余风险；
 - 三个仓库的基线/最终 commit ID 和 push 结果。
 
-### 7.1 每次测试都带 RViz（2026-10-25 起）
+### 7.1 RViz 与 MuJoCo 窗口
 
-用户每次测试都要在 RViz 里观察效果，所以闭环、故障注入、性能采集默认带 RViz，不再默认无头：
+2026-10-29 起用户允许闭环测试不开 RViz 和 MuJoCo 窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`），由代理在后台看日志、话题和录制器；
+报告里写明"未带 RViz"，车模颜色、画面这类只能看屏幕的项仍记为未验证，不用日志代替。启动前仍告诉用户命令、`ROS_DOMAIN_ID` 和预计时长。
+用户要现场观察时按下面的方式带 RViz：
 
 - 用 `USE_RVIZ=true`（`RVIZ_DELAY_SEC` 默认 18 s）运行 `scripts/test_mujoco_minco_mpc_chain.sh`；runner 会拉起
   `src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz` 并把窗口截图存到 `/tmp/ats_minco_mpc_<profile>_<domain>_rviz.png`。
@@ -247,11 +249,11 @@ git diff --check
 - `USE_RVIZ=true` 时 runner 同时打开 MuJoCo 自带的 3D 窗口（`USE_MUJOCO_VIEWER` 默认等于 `USE_RVIZ`，可显式设为 `false`）。
   关闭这个窗口会让仿真停止；Wayland 会话里它是原生 Wayland 窗口，`xwd` 抓不到，runner 只在 X11 窗口存在时才保存
   `/tmp/ats_minco_mpc_<profile>_<domain>_mujoco.png`，否则打印 NOTE。`mujoco_navigation.rviz` 现在还显示车辆模型（RobotModel，
-  由 `ats_robot_description/urdf/ats_sentry.urdf.xacro` 生成，不发布 TF）和 ROG-Map 原生的 occ / inf_occ / unk / esdf 点云（仅仿真视图）。
+  由 `ats_robot_description/urdf/ats_sentry.urdf.xacro` 生成，只在 `/tf_static` 发布 `gimbal_yaw_odom -> part_*` 恒等边）和 ROG-Map 原生的 occ / inf_occ / unk / esdf 点云（仅仿真视图）。
 - 桌面锁屏（`loginctl` 的 `LockedHint=yes`）时 MuJoCo 的原生 Wayland 窗口出不来（窗口线程一直在等合成器，日志只有"正在后台打开窗口"，没有"已启动"），RViz 的 X11 窗口虽然还能被 `xwd` 截图，但没有人能现场观察；
   这样的运行要在报告里写明"无人现场观察"，窗口的画面和稳定性记为未验证。runner 的"当前位姿"（终点判据、故障注入的起点查询）在 `lio` 模式读 map 系的 `/simulation/ground_truth/odometry`，
   不读 `/localization`（`lio` 下它是 Point-LIO 的 odom 系直通，原点在出生点下方的地面）；truth 模式仍读 `/localization`。
-- 启动前先告诉用户命令、`ROS_DOMAIN_ID` 和预计时长（`lio` 模式 8 线程约 0.5 倍实时）；测试进行时不修改正在被脚本读取的文件。
+- 启动前先告诉用户命令、`ROS_DOMAIN_ID` 和预计时长（`lio` 模式 32 线程机器 8 线程约 0.4 倍实时，8 核机器 4 线程约 0.06 到 0.1 倍）；测试进行时不修改正在被脚本读取的文件。
 - 结束后读取截图，在报告里分开写「RViz 上应该看到什么」和「实际看到什么」；截图只是单帧，不能替代终点测量与话题证据。
 - 只有批量故障矩阵等无法带显示的测试才无头运行，并在报告里写明哪些结果没有经过 RViz 观察。
 
