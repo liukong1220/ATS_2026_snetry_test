@@ -210,7 +210,8 @@ P3 标记条件为同时满足以下各项：
 ```bash
 # 并发按当前机器计算：总任务数 = min(nproc, MemAvailable / 1.5 GiB)；整仓构建用 ./build.sh（自动计算）
 JOBS=$(awk -v n="$(nproc)" '/^MemAvailable:/ {j=int($2/1024/1536); if (j>n) j=n; if (j<1) j=1; print j}' /proc/meminfo)
-MAKEFLAGS=-j${JOBS} colcon build --base-paths src --packages-select <targets> --parallel-workers 1
+# 单包构建必须带 Release：不带时 CMAKE_BUILD_TYPE 为空，节点是 -O0（2026-10-30 实测，报告 5.1.6 H）；./build.sh 已带。
+MAKEFLAGS=-j${JOBS} colcon build --base-paths src --packages-select <targets> --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=Release
 colcon test --base-paths src --packages-select <targets>
 colcon test-result --test-result-base build/<package> --verbose
 python3 -m py_compile <changed_launch_files>
