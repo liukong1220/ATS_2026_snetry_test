@@ -666,9 +666,8 @@ localization_fusion:
     odom_timeout_s: 0.5
     observation_timeout_s: 3.0
     observation_lost_timeout_s: 10.0
-    # 接收时刻与观测 stamp 的独立 freshness 门；不以 odom history 尚未淘汰代替时序健康。
-    observation_stamp_max_age_s: 1.0
-    observation_stamp_max_future_s: 0.25
+    # 观测 stamp 的新旧由 odom 历史窗口约束：stamp 必须落在 [最旧样本 - 容差, 最新样本 + 容差]，
+    # 窗口 history_duration_s 之外或比最新 odom 还新的观测按 "outside fresh odometry history" 拒绝。
     history_duration_s: 5.0
     history_boundary_tolerance_s: 0.10
     maximum_interpolation_gap_s: 0.20
