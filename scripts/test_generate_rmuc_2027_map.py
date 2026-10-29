@@ -131,6 +131,17 @@ class RuleTest(unittest.TestCase):
         self.assertTrue(boxed[8:16, 10:18].all())
         self.assertEqual(int(boxed.sum()), 8 * 8)
 
+    def test_step_on_a_cell_boundary_between_two_reachable_floors_is_an_edge(self):
+        """0.20 m platform whose face lies exactly on the x = 1.00 m cell boundary, both floors seeded.
+
+        The wall rule only inspects a cell's own column, so neither side holds a solid in its
+        height band; the cliff rule marks the top edge (x 1.00-1.05) and nothing else.
+        """
+        solids = [solid(0, 2, 0, 1.6, 0, 0.10), solid(1.00, 2.00, 0, 1.6, 0.10, 0.30)]
+        occ = build(solids, small_rules(seeds=((0.25, 0.8), (1.5, 0.8))))["occupied"]
+        self.assertTrue(occ[:, 20].all())
+        self.assertFalse(occ[:, :20].any() or occ[:, 21:].any())
+
     def test_step_height_limit(self):
         self.assertFalse(self.occupied(curb=0.03)[:, 14:18].any())
         self.assertTrue(self.occupied(curb=0.06)[:, 14:18].all())
