@@ -945,12 +945,19 @@ minco_planner:
     obstacle_value_threshold: 50
     unknown_is_obstacle: true
     allow_diagonal: true
-    search_algorithm: jps
+    # 离墙代价是软约束,JPS 只支持均匀代价,所以用 A*。硬净空 0.54 会让搜索绕开所有
+    # 0.48~0.54 m 的通道(minco_sandbox 实测:sparse seed 1730726772 路径 11.12 m -> 9.90 m);
+    # 改为硬下限取全 yaw 半径、居中交给离墙代价后,机器人尺寸随机图 50 张平均路径 -10%、
+    # 时长 -8%,成功率 45 -> 46。MuJoCo 配置 rmuc_2025_navigation.yaml 同一做法但取 4.0/1.0,
+    # 在上面的 sparse 场景仍绕到 11.40 m,所以实车取 2.0/0.8。
+    search_algorithm: astar
+    search_clearance_cost_weight: 2.0
+    search_clearance_cost_distance: 0.8
     astar_fallback: true
     jps_max_expanded_nodes: -1
-    # 实车 58x58 cm 足迹 + 0.05 m 余量的全 yaw 半径 hypot(0.34, 0.34) = 0.4808 m;
-    # 保留原 0.70x0.55 配置时 0.57 - 0.5154 = 0.055 m 的额外搜索余量 -> 0.54。
-    jps_safe_distance: 0.54
+    # 实车 58x58 cm 足迹 + 0.05 m 余量的全 yaw 半径 hypot(0.34, 0.34) = 0.4808 m。
+    # 节点会把低于全 yaw 半径的值抬到该半径,所以这里直接写 0.48。
+    jps_safe_distance: 0.48
     publish_unsafe_trajectory: false
     reference_speed: 1.5
     min_segment_time: 0.05
@@ -995,7 +1002,7 @@ minco_planner:
     # 仅无 ESDF（如 JPS 无 ESDF 候选）时启用的引导管道：偏离加密引导 > 0.10 m 按三次铰链罚。
     joint_guide_weight: 1000000.0
     joint_guide_max_deviation: 0.10
-    # 中心净空目标与 jps_safe_distance(0.54) 对齐；足迹采样点（已含 safety_margin）净空目标 0.03 m。
+    # 中心净空目标 0.54（原与 jps_safe_distance 对齐；降到 0.45 时成功率下降，保留）；足迹采样点（已含 safety_margin）净空目标 0.03 m。
     joint_center_clearance: 0.54
     joint_footprint_clearance: 0.03
     joint_footprint_edge_samples: 1
