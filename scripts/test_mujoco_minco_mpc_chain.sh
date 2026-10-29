@@ -122,7 +122,10 @@ GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
 # 仿真时间门限。lio 模式下 CPU 追踪 12000 射线/帧，仿真只有 0.2~0.6 倍实时，所有节点按
 # /clock 运行；墙钟门限会在仿真还没走完启动阶段时到期（曾在 tracking 门以 30 s 墙钟 =
 # 16 s 仿真时间超时）。启用后 wait_for_command 的秒数按 /clock 计，目标动作的墙钟兜底
-# 放大 GOAL_WALL_PER_SIM 倍（目标本身的超时由目标管理器按仿真时间裁决）。
+# 放大 GOAL_WALL_PER_SIM 倍。目标本身的超时由目标管理器按节点时钟裁决（use_sim_time 下是
+# /clock，goal_deadline.hpp；2026-10-30 之前按墙钟，0.057 倍实时下 600 s 只有约 34 仿真秒）。
+# 墙钟兜底必须不短于 GOAL_TIMEOUT / 仿真墙钟比，否则先于目标管理器杀掉客户端：
+# 32 线程机器约 0.4 倍实时，默认 6 够用；8 核机器约 0.057 倍，要设 GOAL_WALL_PER_SIM=20。
 #   SIM_TIME_GATES=auto  EXTRA_LAUNCH_ARGS 含 localization_source:=lio 时启用（默认）
 #   SIM_TIME_GATES=1|0   强制启用（要求 /clock 在发布）/ 强制关闭
 # truth 模式不发布 /clock，行为与改动前逐位一致。
@@ -684,8 +687,8 @@ sim_clock_now() {
       END {if (s == "") exit 1; printf "%.3f\n", s + n / 1e9}'
 }
 
-# 仿真时间门限启用后，shell 侧的目标客户端仍需要墙钟兜底；兜底只防挂死，真正的超时
-# 由目标管理器按仿真时间判定。
+# 仿真时间门限启用后，shell 侧的目标客户端仍需要墙钟兜底；兜底只防挂死（例如 /clock
+# 停走时目标管理器的超时不会触发），真正的超时由目标管理器按节点时钟（/clock）判定。
 goal_wall_timeout_s() {
   local sim_budget_s="$1"
   if [[ "${SIM_TIME_GATES_ACTIVE}" == "1" ]]; then
