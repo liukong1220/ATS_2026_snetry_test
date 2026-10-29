@@ -8,9 +8,9 @@
     "tunnels": "src/sim/ats_mujoco_sim/config/tunnels_2027.yaml",
     "tunnels_sha256": "733bbe44c85e395959c17f4265665c16d159be1b4bc288360f3754a327b42a26"
   },
-  "occupied_cells": 32578,
+  "occupied_cells": 33387,
   "outputs": {
-    "rmuc_2027.pgm": "e20419ee66f382be0ce52778ef2c8224048a362c5021ac37e58184eb075715b5",
+    "rmuc_2027.pgm": "fa6696b06b56e4dd0a477f8803d35eb2003fb389cd27eea520ac3027fe8bdfd5",
     "rmuc_2027.yaml": "a93feb59474dca194d190ff28707a55bd6e5ad5f12b740a60efa0b1049854a25"
   },
   "rules": {

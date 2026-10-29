@@ -18,6 +18,11 @@ built with these rules (report 9.1.2, confirmed 2026-10-25):
   (the top of a wall or platform that cannot be climbed).
 * A map cell is occupied when at least `occupied_coverage` (50 %) of its sub-cells are
   not free, which keeps the 0.795 m tunnel 16 cells (0.80 m) wide.
+* Cliff edge: when two 4-neighbour free cells stand on floors that differ by more than
+  `step_max`, the higher cell is occupied.  The wall rule only looks inside a cell's own
+  column, so a step whose face lies on a cell boundary used to leave both sides free; the
+  0.19 m slab edge at y 2.5, x 7.7-10 (south of the red-box start) was drawn free and the
+  planner routed across it (report 5.1.6).
 * Keep-out: the two undulating-road sections (`Rules.keep_out`) are drawn occupied.  The waves are
   free floor in the mesh but too tall for the wheels; delete the entry to let the planner try them.
 
@@ -433,7 +438,25 @@ def occupancy(layers, z, reach, support, rules, coverage=None):
     free[column[blocking]] = False
     free_count = free.reshape(Hc, S, Wc, S).sum(axis=(1, 3))
     occupied = (S * S - free_count) >= coverage * S * S - 1e-9
-    return occupied, floor
+    return occupied | cliff_edges(occupied, floor, rules), floor
+
+
+def cliff_edges(occupied, floor, rules):
+    """Free cells that sit more than `step_max` above a free 4-neighbour (the top edge of a step)."""
+    cliff = np.zeros_like(occupied)
+    open_floor = ~occupied & np.isfinite(floor)
+    for axis in (0, 1):
+        n = floor.shape[axis]
+        lo = [slice(None)] * 2
+        hi = [slice(None)] * 2
+        lo[axis], hi[axis] = slice(0, n - 1), slice(1, n)
+        lo, hi = tuple(lo), tuple(hi)
+        both = open_floor[lo] & open_floor[hi]
+        with np.errstate(invalid="ignore"):
+            dz = floor[hi] - floor[lo]
+        cliff[hi] |= both & (dz > rules.step_max)
+        cliff[lo] |= both & (-dz > rules.step_max)
+    return cliff
 
 
 def build_map(mesh_path, tunnels_path, rules, mesh_scale=1.0, keys=None):
