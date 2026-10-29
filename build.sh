@@ -23,13 +23,25 @@ set +u
 source "${ROS_SETUP}"
 set -u
 
-# 低性能机器默认使用“单包、双核”强度：
-# - colcon 同一时间只构建 1 个包
-# - 单个 CMake 包内部最多使用 2 个编译任务
+# 并发按当前机器自动计算：总编译任务数 = min(逻辑核数, MemAvailable / 每任务内存预算)。
+# PCL/Eigen/IKFoM 重型编译单元峰值约 1–2 GiB，默认每任务按 1536 MiB 预算。
+# - colcon 并行包数取总任务数的 1/4（1–4 之间）
+# - 单个 CMake 包内部任务数 = 总任务数 / 并行包数
 # 如需临时调整，可在命令前覆盖：
 #   COLCON_WORKERS=2 BUILD_THREADS=4 ./build.sh
-COLCON_WORKERS="${COLCON_WORKERS:-1}"
-BUILD_THREADS="${BUILD_THREADS:-2}"
+#   BUILD_MEM_PER_JOB_MB=2048 ./build.sh
+BUILD_MEM_PER_JOB_MB="${BUILD_MEM_PER_JOB_MB:-1536}"
+CPU_COUNT="$(nproc)"
+MEM_AVAILABLE_MB="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)"
+TOTAL_JOBS=$(( MEM_AVAILABLE_MB / BUILD_MEM_PER_JOB_MB ))
+(( TOTAL_JOBS > CPU_COUNT )) && TOTAL_JOBS="${CPU_COUNT}"
+(( TOTAL_JOBS < 1 )) && TOTAL_JOBS=1
+AUTO_WORKERS=$(( TOTAL_JOBS / 4 ))
+(( AUTO_WORKERS < 1 )) && AUTO_WORKERS=1
+(( AUTO_WORKERS > 4 )) && AUTO_WORKERS=4
+COLCON_WORKERS="${COLCON_WORKERS:-${AUTO_WORKERS}}"
+BUILD_THREADS="${BUILD_THREADS:-$(( TOTAL_JOBS / COLCON_WORKERS > 0 ? TOTAL_JOBS / COLCON_WORKERS : 1 ))}"
+echo "[build] cpu: ${CPU_COUNT}, mem available: ${MEM_AVAILABLE_MB} MiB, budget/job: ${BUILD_MEM_PER_JOB_MB} MiB, total jobs: ${TOTAL_JOBS}"
 CMAKE_CLEAN_CACHE="${CMAKE_CLEAN_CACHE:-0}"
 export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-${BUILD_THREADS}}"
 export MAKEFLAGS="${MAKEFLAGS:--j${BUILD_THREADS}}"
