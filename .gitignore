@@ -63,6 +63,7 @@ src/ats_sentry_bringup/**/*.pyc
 src/sp_vision25/
 *.pdf
 参考*
+2027_map*
 minco+mpc_reference*
 
 # 本地研发过程文档：保留在工作区，不纳入版本库。
