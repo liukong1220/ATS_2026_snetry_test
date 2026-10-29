@@ -57,8 +57,9 @@ def undulating_road(x0, x1, y0, y1, base, amplitude, wavelength, step=0.0125):
 
 
 def small_rules(**changes):
-    return dataclasses.replace(GEN.Rules(), width_cells=40, height_cells=32, border_cells=0,
-                               seeds=((0.25, 0.8),), **changes)
+    settings = dict(width_cells=40, height_cells=32, border_cells=0, seeds=((0.25, 0.8),), keep_out=())
+    settings.update(changes)
+    return dataclasses.replace(GEN.Rules(), **settings)
 
 
 def corridor(x0, x1, y0, y1):
@@ -109,17 +110,26 @@ class RuleTest(unittest.TestCase):
         # The first two columns are the toe, which is no steeper than a 5 cm step there.
         self.assertTrue(self.occupied(ramp_degrees=25.0)[:, 21:38].all())
 
-    def test_undulating_road_is_drivable_but_tall_waves_are_not(self):
+    def test_floor_rule_alone_lets_the_waves_through_and_blocks_tall_ones(self):
         """RMUC undulating road: 6.7 cm peak-to-valley every 24.5 cm, 41 deg on the steepest flank.
 
-        Judged per 5 cm cell those flanks look like walls; the chassis sees about 12 deg over its
-        0.32 m wheelbase.  Waves three times as tall are an obstacle.
+        Judged per 5 cm cell those flanks look like walls; the +-0.15 m plane fit sees about 12 deg.
+        Waves three times as tall are an obstacle.  The 4.25 cm wheels still stick
+        on the 6.7 cm waves, so the committed map lists them in `Rules.keep_out` (CommittedMapTest).
         """
         ground = solid(0, 2, 0, 1.6, 0, 0.10)
         for amplitude, drivable in ((0.0335, True), (0.10, False)):
             occ = build([ground, undulating_road(0.80, 1.52, 0, 1.6, 0.10, amplitude, 0.245)], small_rules())["occupied"]
             band = occ[2:30, 18:29]          # x 0.90-1.45 m, inside the waves
             assert (not band.any()) if drivable else band.mean() > 0.9, (amplitude, float(band.mean()))
+
+    def test_keep_out_box_is_occupied_on_whole_cells_and_nothing_else_changes(self):
+        ground = solid(0, 2, 0, 1.6, 0, 0.10)
+        plain = build([ground], small_rules())["occupied"]
+        boxed = build([ground], small_rules(keep_out=((0.50, 0.90, 0.40, 0.80),)))["occupied"]
+        self.assertFalse(plain.any())
+        self.assertTrue(boxed[8:16, 10:18].all())
+        self.assertEqual(int(boxed.sum()), 8 * 8)
 
     def test_step_height_limit(self):
         self.assertFalse(self.occupied(curb=0.03)[:, 14:18].any())
@@ -256,17 +266,18 @@ class CommittedMapTest(unittest.TestCase):
         self.assertEqual(int(labels[self.cell(5.0, 8.0)]), int(labels[self.cell(14.0, 11.6)]))
         self.assertEqual(int(labels[self.cell(23.0, 8.0)]), int(labels[self.cell(14.0, 11.6)]))
 
-    def test_the_two_undulating_road_sections_are_free_and_connected(self):
-        """The 2.4 x 2.1 m corrugated plateaus (x 5.3-7.7 / mirrored) are drivable, not obstacles."""
+    def test_the_two_undulating_road_sections_are_obstacles_and_both_ends_stay_reachable(self):
+        """The waves (x 5.3-7.7 / mirrored, 6.8 cm crest to trough) stick the wheels: drawn occupied."""
         sections = {"lower-left": (5.3, 7.7, 0.7, 2.5), "upper-right": (20.3, 22.7, 13.5, 15.3)}
         for name, (x0, x1, y0, y1) in sections.items():
             block = self.occupied[int(y0 / RES):int(y1 / RES), int(x0 / RES):int(x1 / RES)]
-            assert float(block.mean()) < 0.02, f"{name} undulating road is drawn as an obstacle"
+            self.assertTrue(block.all(), f"{name} undulating road is drawn as drivable")
         labels = GEN.free_labels(self.occupied, int(round(0.30 / RES)))
         spawn = int(labels[self.cell(5.0, 8.0)])
-        assert spawn >= 0
-        for point in ((6.5, 1.5), (21.5, 14.5)):
-            assert int(labels[self.cell(*point)]) == spawn, point
+        self.assertGreaterEqual(spawn, 0)
+        # Both sides of each section and the tunnel mouths are reached around the waves, not across them.
+        for point in ((4.6, 1.6), (8.4, 1.6), (19.6, 14.4), (23.4, 14.4), (12.9, 2.043), (15.1, 13.957)):
+            self.assertEqual(int(labels[self.cell(*point)]), spawn, point)
 
     def test_both_tunnels_keep_the_795_mm_channel_under_and_beside_the_lintel(self):
         widths = GEN.tunnel_widths(self.occupied, self.tunnels, self.rules)

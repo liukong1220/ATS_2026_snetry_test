@@ -8,15 +8,29 @@
     "tunnels": "src/sim/ats_mujoco_sim/config/tunnels_2027.yaml",
     "tunnels_sha256": "733bbe44c85e395959c17f4265665c16d159be1b4bc288360f3754a327b42a26"
   },
-  "occupied_cells": 28370,
+  "occupied_cells": 32578,
   "outputs": {
-    "rmuc_2027.pgm": "078c34b55fdf147d8418a7af080c61931f13cca44579d6be81095dccbcef1129",
+    "rmuc_2027.pgm": "e20419ee66f382be0ce52778ef2c8224048a362c5021ac37e58184eb075715b5",
     "rmuc_2027.yaml": "a93feb59474dca194d190ff28707a55bd6e5ad5f12b740a60efa0b1049854a25"
   },
   "rules": {
     "border_cells": 1,
     "height_cells": 320,
     "interface_gap": 0.012,
+    "keep_out": [
+      [
+        5.25,
+        7.75,
+        0.5,
+        2.7
+      ],
+      [
+        20.25,
+        22.75,
+        13.3,
+        15.5
+      ]
+    ],
     "layer_gap": 0.03,
     "max_layers": 8,
     "merge_gap": 0.008,
