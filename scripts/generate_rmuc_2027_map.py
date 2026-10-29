@@ -18,6 +18,8 @@ built with these rules (report 9.1.2, confirmed 2026-10-25):
   (the top of a wall or platform that cannot be climbed).
 * A map cell is occupied when at least `occupied_coverage` (50 %) of its sub-cells are
   not free, which keeps the 0.795 m tunnel 16 cells (0.80 m) wide.
+* Keep-out: the two undulating-road sections (`Rules.keep_out`) are drawn occupied.  The waves are
+  free floor in the mesh but too tall for the wheels; delete the entry to let the planner try them.
 
 Only numpy and PyYAML are required, so the output is bit-identical on every Python that
 runs the repository (`python3` and `python3 -I`).
@@ -68,8 +70,8 @@ class Rules:
     supersample: int = 4            # sub-cells per cell edge
     vehicle_height: float = 0.242   # RMUC vehicle, report 2.1.8 / user 2026-10-25
     step_max: float = 0.04          # about one wheel radius (0.0425 m)
-    slope_max_deg: float = 15.0     # highland ramp ~12 deg, tunnel ramp ~9 deg; judged over the wheelbase
-    slope_window_cells: int = 3     # +-0.15 m plane fit (wheelbase 0.32 m)
+    slope_max_deg: float = 15.0     # highland ramp ~12 deg, tunnel ramp ~9 deg
+    slope_window_cells: int = 3     # +-0.15 m plane fit, shorter than the 0.54 m wheel spacing
     smooth_window_cells: int = 1    # 0.15 m mean before the step test
     same_surface_tolerance: float = 0.05   # above the 4.35 cm hop of the waves, below a 6 cm step
     occupied_coverage: float = 0.5
@@ -81,6 +83,11 @@ class Rules:
     max_layers: int = 8
     border_cells: int = 1           # the official mesh has no perimeter fence; keep planners inside
     seeds: tuple = ((5.0, 8.0), (23.0, 8.0))
+    # Undulating-road sections (terrain reference: 70 mm bumps, 240 mm pitch).  Measured on the mesh the waves are
+    # 6.8 cm crest to trough with flanks up to 41 deg, which the 4.25 cm wheels cannot climb, so the vehicle
+    # sticks.  The mesh rasterises them as free floor, hence they are drawn here as obstacles.  Boxes are
+    # (x0, x1, y0, y1) in metres; the second is the first one reflected through the field centre (14, 8).
+    keep_out: tuple = ((5.25, 7.75, 0.50, 2.70), (20.25, 22.75, 13.30, 15.50))
 
 
 def _read_obj(path):
@@ -291,12 +298,13 @@ def build_nodes(layers, rules):
 
 
 def vehicle_scale_surface(z, valid, rules):
-    """Floor height smoothed over 0.15 m and slope of the plane fit over +-0.15 m (the wheelbase).
+    """Floor height smoothed over 0.15 m and slope of the plane fit over +-0.15 m.
 
     Only neighbouring floor layers within `same_surface_tolerance` of the centre count, so a wall
     or a platform edge never mixes levels.  The undulating-road waves (6.7 cm peak to valley every
-    25 cm, 41 deg at the steepest flank) read about 12 deg over the wheelbase, like the real
-    chassis sees them; a ramp steeper than `slope_max_deg` still reads steeper.
+    25 cm, 41 deg at the steepest flank) read about 12 deg over that window, so this rule lets them
+    through; `Rules.keep_out` draws them as obstacles.  A ramp steeper than `slope_max_deg` still
+    reads steeper.
     """
     K, H, W = z.shape
     R, S, step = rules.slope_window_cells, rules.smooth_window_cells, rules.resolution
@@ -447,10 +455,19 @@ def build_map_from_keys(keys, tunnels, rules, extra_seeds=()):
         seeds += [tuple(tunnel["entry"][:2]), tuple(tunnel["exit"][:2])]
     reach = reachable_floor(smooth, valid, support, rules, seeds)
     occupied, floor = occupancy(layers, z, reach, support, rules)
-    return {"occupied": apply_border(occupied, rules.border_cells), "floor": floor, "layers": layers,
+    return {"occupied": apply_border(apply_keep_out(occupied, rules), rules.border_cells), "floor": floor,
+            "layers": layers,
             "dropped_layers": int((nodes["rank"] >= rules.max_layers).sum()),
             "nodes": nodes, "z": z, "valid": valid, "support": support, "reach": reach, "keys": keys,
             "tunnels": tunnels}
+
+
+def apply_keep_out(occupied, rules):
+    """Mark every `Rules.keep_out` box occupied."""
+    occupied, res = occupied.copy(), rules.resolution
+    for x0, x1, y0, y1 in rules.keep_out:
+        occupied[int(round(y0 / res)):int(round(y1 / res)), int(round(x0 / res)):int(round(x1 / res))] = True
+    return occupied
 
 
 def apply_border(occupied, cells):
