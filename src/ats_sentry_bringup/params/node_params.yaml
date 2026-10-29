@@ -1009,6 +1009,12 @@ minco_planner:
     joint_g_epsilon: 0.00001
     joint_max_iterations: 200
     joint_time_budget_ms: 15.0
+    # 联合优化的距离场：legacy 的距离取原始场、梯度取平滑场，两者不是同一个函数，线搜索失败率约 40%；
+    # bicubic 拷出原始场做 Catmull-Rom 插值，值与梯度同源（线搜索失败 0%，每次求解 14 -> 9 ms）。
+    joint_distance_field: bicubic
+    # 障碍罚用 C1 平滑 L1（调研报告 A.22.1）：4000 代价/m，mu=0.01 m。
+    joint_obstacle_smooth_l1_weight: 4000.0
+    joint_obstacle_smooth_l1_mu: 0.01
     path_duplicate_epsilon: 0.000001
     path_collinear_lateral_tolerance: 0.025
     path_short_segment_length: 0.05
@@ -1017,7 +1023,20 @@ minco_planner:
     path_fillet_radius: 0.35
     path_fillet_arc_samples: 3
     yaw_mode: clearance_aware
-    yaw_rate_limit: 2.5
+    # 与 ats_swerve_mpc 的 max_wz / max_awz（均为 2.0）对齐。2.5 超过 MPC 的 max_wz，MPC 会把整个 Twist
+    # 等比缩小（v、wz 同比例），沙盒实测参考 yaw 速率峰值 2.46 -> 1.31 rad/s。不设 yaw_acceleration_limit
+    # 时 applyGoalHeading 的五次曲线峰值角加速度 5.7735*|delta|/T^2 无上限，小角度转向会远超 max_awz。
+    yaw_rate_limit: 2.0
+    yaw_acceleration_limit: 2.0
+    # 单轮线速度时间缩放（wheel_speed_time_scaling.hpp）：四轮中心速度 = hypot(vx - wz*y_i, vy + wz*x_i)，
+    # 与 ats_swerve_mpc maxModuleSpeed 同式（半轴 0.27/0.27，wheel_radius 不参与）。MPC 的 max_wheel_speed 为
+    # 1.6689711 m/s；v=1.5 时转向余量只剩 0.169 m/s（|wz|<=0.44 rad/s），超限时 MPC 会按 lim/wheel 等比缩小
+    # 整个 Twist，yaw 滞后再超调。取 1.60 给跟踪修正留 0.07 m/s（4%）余量。三个键必须同时配置：
+    # offset_x/y 缺省 0 时"轮速"退化为平移速度 1.5 < 1.60，缩放永不触发（静默失效）。
+    wheel_speed_time_scaling_limit: 1.60
+    wheel_speed_time_scaling_offset_x: 0.27
+    wheel_speed_time_scaling_offset_y: 0.27
+    wheel_speed_time_scaling_change_rate: 1.0
     narrow_clearance_enter: 1.20
     narrow_clearance_exit: 1.40
     terminal_yaw_sample_period: 0.10
