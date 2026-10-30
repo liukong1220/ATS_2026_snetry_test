@@ -55,8 +55,9 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 
 2026-10-23 起雷达固定在底盘上（报告 2.1.8）：`gimbal_yaw_odom` 保留名字，语义是底盘系（原点取底盘底面中心）。导航不再依赖云台 yaw，因此：
 
-- 实机主入口默认 `launch_fake_vel_transform:=False`。
-- 实机主入口默认 `launch_chassis_vel_transform:=False`。
+- 两个速度兼容层的默认值按入口不同：
+  - `ats_sentry_bringup/launch/bringup.launch.py` 默认 `launch_fake_vel_transform:=False`、`launch_chassis_vel_transform:=False`；
+  - `ats_sentry_bringup/launch/real_robot_navigation.launch.py` 默认两个都是 `True`，`scripts/validate_navigation_config.py` 锁定这一默认。小陀螺继续用 fake yaw 稳定导航（用户 2026-10-30），所以这个入口没有关掉它们。
 - 云台仍然存在（自瞄用）；需要云台坐标系速度的旧链路可以显式把两个参数设回 `True`。
 - fake-yaw 关闭时保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF。
 - 建议避免引入重复的 `base_footprint -> base_link` TF 发布者。
