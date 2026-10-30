@@ -308,7 +308,7 @@ point_lio:
                      0.0, 0.0, 1.0 ]
 
     odometry:
-      publish_odometry_without_downsample: True
+      publish_odometry_without_downsample: False
 
     publish:
       path_en: False                                    # False: close the path output
