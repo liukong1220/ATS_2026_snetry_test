@@ -922,6 +922,25 @@ minco_planner:
     emergency_stop_heartbeat_period_sec: 0.1
     runtime_safety_recheck_hz: 10.0
     runtime_safety_horizon_sec: 1.0
+    # 地图变化分级处理（调研报告 9.4 第 1 项，取值与 MuJoCo rmuc_2025_navigation.yaml 一致）。
+    # 新 snapshot 仍让参考前 retain_reference_horizon_sec 秒通过同一套矩形足迹门禁时改绑继续执行，
+    # 不再每次地图刷新都作废参考、急停约 2 s 后重派（仿真 239 s 中 117 s 静止）；不通过照旧作废。
+    retain_safe_reference_on_snapshot_change: true
+    # 只看前 4 s：完整剩余段在远端地图抖动下频繁被判不安全；远端冲突交给下面两项与 10 Hz 复检。
+    retain_reference_horizon_sec: 4.0
+    # 保留检查与运行期复检窗口以车沿参考的实际推进为锚点，而不是墙钟：MPC 按几何投影跟踪，
+    # 拐角减速后车落后墙钟 1~2 s，墙钟窗口会漏检车前方未走的段、误作废仍在执行的参考。
+    reference_window_from_robot_progress: true
+    # 远端冲突、近端（runtime_safety_horizon_sec 内）安全时不作废参考，发 FAILURE_REPLAN_ADVISED
+    # 由 GoalManager 无停车重规划；近端冲突仍 RUNTIME_UNSAFE 急停。必须与 ats_goal_manager 的
+    # replan_without_stop_enabled 成对打开，单开一边会退回"建议重规划即急停"。
+    replan_advisory_enabled: true
+    # 无停车重规划的新参考起点取旧参考上"车的推进位置 + plan_lead"处的 p/v/a/yaw（调研报告 A.3），
+    # 不再用请求时的实测位姿；只对 replan_advisory_enabled 触发的重规划生效。plan_lead [s] 要覆盖
+    # 规划耗时与提交链路，偏小则新起点仍落在车后面。
+    plan_lead: 0.15
+    # 车离旧参考 >= deviation_max [m]、定位 epoch 不同或旧参考已撤销（急停）时退回实测起点；<=0 关闭。
+    deviation_max: 0.5
     global_frame: odom
     robot_frame: gimbal_yaw_odom
     obstacle_value_threshold: 50
@@ -1060,6 +1079,11 @@ ats_goal_manager:
     map_ready_timeout_sec: 5.0
     localization_status_timeout_sec: 1.0
     require_localization_status: true
+    # 与 minco_planner.replan_advisory_enabled 成对（调研报告 9.4 第 1 项）：收到建议重规划时不急停，
+    # 旧参考继续执行到新参考替换；替换失败或旧参考近端失效时照原路径急停挂起。
+    replan_without_stop_enabled: true
+    # 进度按"沿已提交参考的剩余弧长"计。绕墙路线直线距离先增后减，旧判据会在车正常跟随时判停滞。
+    progress_along_reference: true
     require_map_status: true
     emergency_stop_heartbeat_period_sec: 0.1
     # Producer lease is conservatively backdated to absorb independent /clock
