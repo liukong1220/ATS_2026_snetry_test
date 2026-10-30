@@ -57,7 +57,7 @@ HEAVY_PACKAGES=(
 
 has_package() {
   local pkg="$1"
-  colcon list --names-only | grep -Fxq "${pkg}"
+  colcon list --base-paths src --names-only | grep -Fxq "${pkg}"
 }
 
 # 启动前先确认关键重包都在当前工作区里，避免脚本跑偏。
@@ -70,8 +70,9 @@ for pkg in "${HEAVY_PACKAGES[@]}"; do
   fi
 done
 
-# 所有构建阶段都复用这一组通用参数。
+# 所有构建阶段都复用这一组通用参数。参考/ 里有同名包（AGENTS.md 4.1），只扫描 src。
 COMMON_ARGS=(
+  --base-paths src
   --symlink-install
   --cmake-args
   -DCMAKE_BUILD_TYPE=Release
