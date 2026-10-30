@@ -465,8 +465,8 @@ MuJoCo 在同一 `node_params.yaml` 之上叠加仿真 profile
 | `footprint_safety_margin` | `0.05` | `0.02` |
 | `minco_planner.jps_safe_distance` | `0.54` | `0.44` |
 
-仿真 profile 的放宽项和仿真专用开关不能直接迁入实车；迁移评估见
-`docs/real_robot_stage_prompt.md` A 段第 5 步。ROGMap 的正式 profile 不接受
+仿真 profile 的放宽项和仿真专用开关不能直接迁入实车，每迁一项都要有仿真证据；已迁入实车的项见
+`docs/调研/无先验地图钻洞高速导航优化调研报告.md` 5.1.6 F 与 5.1.7 E。ROGMap 的正式 profile 不接受
 `map_config_file` 与显式 ROS 参数同时生效。`static_map_publisher.py` 建议保留 `/map` 的
 frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
