@@ -265,10 +265,12 @@ run_runtime_preflight() {
     return 1
   fi
   # loam_interface / sensor_scan_generation run inside lidar_odom_container
-  # (comm component_conta), so that one is matched by its __node remap.
+  # (comm component_conta), so that one is matched by its __node remap.  The
+  # bracket keeps this awk process, whose own args hold the pattern text, from
+  # matching itself (it did, and every run stopped here: domain 141).
   residual_processes="$(ps -eo pid=,comm=,args= | awk '
     $2 ~ /^(ign|gazebo|gzserver|gzclient|mujoco|pointlio|loam_interface|sensor_scan_gene|localization_fu|ats_rog_map|ats_navigation|gz_livox_bridge|gz_clock_relay|gz_chassis_cmd)/ ||
-    $0 ~ /__node:=lidar_odom_container/ {print}
+    $0 ~ /__node:=lidar_odom_containe[r]/ {print}
   ')"
   binary_freshness="$({
     runtime_binary_is_fresh \
