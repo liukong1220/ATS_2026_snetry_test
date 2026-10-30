@@ -1028,15 +1028,7 @@ minco_planner:
     # 时 applyGoalHeading 的五次曲线峰值角加速度 5.7735*|delta|/T^2 无上限，小角度转向会远超 max_awz。
     yaw_rate_limit: 2.0
     yaw_acceleration_limit: 2.0
-    # 单轮线速度时间缩放（wheel_speed_time_scaling.hpp）：四轮中心速度 = hypot(vx - wz*y_i, vy + wz*x_i)，
-    # 与 ats_swerve_mpc maxModuleSpeed 同式（半轴 0.27/0.27，wheel_radius 不参与）。MPC 的 max_wheel_speed 为
-    # 1.6689711 m/s；v=1.5 时转向余量只剩 0.169 m/s（|wz|<=0.44 rad/s），超限时 MPC 会按 lim/wheel 等比缩小
-    # 整个 Twist，yaw 滞后再超调。取 1.60 给跟踪修正留 0.07 m/s（4%）余量。三个键必须同时配置：
-    # offset_x/y 缺省 0 时"轮速"退化为平移速度 1.5 < 1.60，缩放永不触发（静默失效）。
-    wheel_speed_time_scaling_limit: 1.60
-    wheel_speed_time_scaling_offset_x: 0.27
-    wheel_speed_time_scaling_offset_y: 0.27
-    wheel_speed_time_scaling_change_rate: 1.0
+    # 单轮线速度时间缩放（wheel_speed_*）不启用：用户 2026-10-30 决定，速度曲线优先平滑（启用时 TV 0.50 -> 0.77，报告 5.1.6 F）。
     narrow_clearance_enter: 1.20
     narrow_clearance_exit: 1.40
     terminal_yaw_sample_period: 0.10
