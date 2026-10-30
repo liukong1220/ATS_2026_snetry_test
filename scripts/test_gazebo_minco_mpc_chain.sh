@@ -59,6 +59,9 @@ MAP_YAML_USER_SET=0
 [[ -v MAP_YAML ]] && MAP_YAML_USER_SET=1
 WORLD="${WORLD:-rmuc_2025}"
 WORLD_SDF_PATH="${WORLD_SDF_PATH:-}"
+# World-matched prior PCD for GICP. Empty keeps the launch default pcd/<WORLD>.pcd; rmuc_2025 has no
+# checked-in PCD, so a Point-LIO run (USE_GAZEBO_GT_ODOMETRY=false) on that world must pass one here.
+PRIOR_PCD_FILE="${PRIOR_PCD_FILE:-}"
 MAP_YAML="${MAP_YAML:-src/ats_sentry_bringup/map/rmuc_2025.yaml}"
 TUNNEL="${TUNNEL:-}"
 ROBOT_NAME="${ROBOT_NAME:-red_standard_robot1}"
@@ -404,6 +407,7 @@ MAP_IMAGE="$(dirname "$MAP_YAML")/$MAP_IMAGE_REL"
   echo "WORLD                 : $WORLD"
   echo "TUNNEL                : ${TUNNEL:-<none>}"
   echo "WORLD_SDF_PATH        : ${WORLD_SDF_PATH:-<world-default>}"
+  echo "PRIOR_PCD_FILE        : ${PRIOR_PCD_FILE:-<launch-default>}"
   echo "MAP_YAML              : $MAP_YAML"
   echo "MAP_PGM               : $MAP_IMAGE"
   echo "SOLVER_MODE           : $SOLVER_MODE"
@@ -452,6 +456,14 @@ FAULT_EXECUTED="yes"
 # resolve the normal world name unless an A/B explicitly supplies an SDF file.
 if [ -n "$WORLD_SDF_PATH" ]; then
   EXTRA_LAUNCH_ARGS+=("world_sdf_path:=$WORLD_SDF_PATH")
+fi
+# An unreadable prior makes the launch raise after Gazebo is already up; refuse before starting anything.
+if [ -n "$PRIOR_PCD_FILE" ]; then
+  if [ ! -r "$PRIOR_PCD_FILE" ]; then
+    echo "PRIOR_PCD_FILE is not readable: $PRIOR_PCD_FILE" >&2
+    exit 2
+  fi
+  EXTRA_LAUNCH_ARGS+=("prior_pcd_file:=$PRIOR_PCD_FILE")
 fi
 
 case "$P2_FAULT_CASE" in
@@ -569,15 +581,18 @@ stop_launch_gazebo_server() {
     return 1
   fi
   GAZEBO_STOP_STATUS=acknowledged_waiting_exit
+  local acknowledged_at=$SECONDS
   while (( SECONDS < deadline )); do
     if [ -z "$(gazebo_session_server_pids "$sid")" ] && \
       grep -Eq '\[ign gazebo-[0-9]+\]: process has finished cleanly' "$LAUNCH_LOG"; then
       GAZEBO_STOP_STATUS=passed
+      log "gazebo native stop: server exited $((SECONDS - acknowledged_at)) s after the acknowledged request (budget $((deadline - acknowledged_at)) s)"
       return 0
     fi
     sleep 0.1
   done
   GAZEBO_STOP_STATUS=clean_exit_timeout
+  log "gazebo native stop: server still alive $((SECONDS - acknowledged_at)) s after the acknowledged request"
   return 1
 }
 
