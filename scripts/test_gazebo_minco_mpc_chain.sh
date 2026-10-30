@@ -264,8 +264,11 @@ run_runtime_preflight() {
     fail "runtime_invalid_ros_domain_${ROS_DOMAIN_ID}"
     return 1
   fi
+  # loam_interface / sensor_scan_generation run inside lidar_odom_container
+  # (comm component_conta), so that one is matched by its __node remap.
   residual_processes="$(ps -eo pid=,comm=,args= | awk '
-    $2 ~ /^(ign|gazebo|gzserver|gzclient|mujoco|pointlio|loam_interface|sensor_scan_gene|localization_fu|ats_rog_map|ats_navigation|gz_livox_bridge|gz_clock_relay|gz_chassis_cmd)/ {print}
+    $2 ~ /^(ign|gazebo|gzserver|gzclient|mujoco|pointlio|loam_interface|sensor_scan_gene|localization_fu|ats_rog_map|ats_navigation|gz_livox_bridge|gz_clock_relay|gz_chassis_cmd)/ ||
+    $0 ~ /__node:=lidar_odom_container/ {print}
   ')"
   binary_freshness="$({
     runtime_binary_is_fresh \
@@ -2966,7 +2969,7 @@ capture_launch_process_resources() {
       # participant in the chain.
       ps -eo pid=,sid=,args= | awk -v sid="$sid" '
         $2 == sid &&
-        $0 ~ /(parameter_bridge|gz_livox_bridge_node|pointlio_mapping|loam_interface_node|sensor_scan_generation_node|localization_fusion_node|ats_rog_map_node|ats_rog_map_adapter_node|ign gazebo)/ {
+        $0 ~ /(parameter_bridge|gz_livox_bridge_node|pointlio_mapping|lidar_odom_container|loam_interface_node|sensor_scan_generation_node|localization_fusion_node|ats_rog_map_node|ats_rog_map_adapter_node|ign gazebo)/ {
           pid = $1
           $1 = ""
           $2 = ""
