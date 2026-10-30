@@ -597,6 +597,10 @@ stop_capture_process() {
   local pid="$1"
   local deadline
   [[ -n "${pid}" ]] || return
+  if [[ "${pid}" == capd_* ]]; then
+    capture_daemon_close "${pid#capd_}"
+    return
+  fi
   kill -TERM "${pid}" 2>/dev/null || true
   deadline=$((SECONDS + 3))
   while kill -0 "${pid}" 2>/dev/null && (( SECONDS < deadline )); do
@@ -641,6 +645,7 @@ cleanup() {
     if [[ -n "${GOAL_PID:-}" ]]; then
       stop_capture_process "${GOAL_PID}"
     fi
+    stop_capture_daemon
     teardown_launch || CLEANUP_STATUS=1
     [[ "${RECORDER_STATUS}" != failed ]] || CLEANUP_STATUS=1
     update_recorder_evidence_status
@@ -2194,8 +2199,8 @@ wait_for_capture() {
       assert_path_visualization_frame "${label}" "${output_file}" "${expected_frame}"
       return
     fi
-    if ! kill -0 "${pid}" 2>/dev/null; then
-      wait "${pid}" 2>/dev/null || true
+    if ! capture_is_alive "${pid}"; then
+      [[ "${pid}" == capd_* ]] || wait "${pid}" 2>/dev/null || true
       break
     fi
     sleep 0.2
@@ -2204,15 +2209,109 @@ wait_for_capture() {
   fail "${label} did not publish a non-empty path after the goal"
 }
 
+# 目标窗口里的话题抓取默认放在同一个 rclpy 进程里（scripts/runner_topic_capture.py）：
+# 原来每个抓取一个 `ros2 topic echo`，目标期间最多 9 个，在 8 核机器上各占 45–47% 单核
+# （报告 5.1.7 B/I），既拖慢仿真也压低被测节点的 CPU。文件格式与 echo 相同，下面的 awk 门禁不变；
+# Path 话题只写首条和 (frame_id, 是否为空) 变化的那几条，其余只计数（<file>.count）。
+# RUNNER_CAPTURE=cli 恢复每个抓取一个 ros2 topic echo 的旧行为（用于改前改后的对照）。
+RUNNER_CAPTURE="${RUNNER_CAPTURE:-inprocess}"
+CAPTURE_DAEMON_PID=""
+CAPTURE_DAEMON_FIFO=""
+CAPTURE_DAEMON_ACK=""
+CAPTURE_DAEMON_SEQ=0
+
+start_capture_daemon() {
+  [[ -z "${CAPTURE_DAEMON_PID}" ]] || return 0
+  CAPTURE_DAEMON_FIFO="${LOG_DIR}/capture_${ROS_DOMAIN_ID}.fifo"
+  CAPTURE_DAEMON_ACK="${LOG_DIR}/capture_${ROS_DOMAIN_ID}.ack"
+  rm -f "${CAPTURE_DAEMON_FIFO}" "${CAPTURE_DAEMON_ACK}"
+  mkfifo "${CAPTURE_DAEMON_FIFO}" || fail "cannot create capture control FIFO"
+  : >"${CAPTURE_DAEMON_ACK}"
+  python3 "${WORKSPACE_DIR}/scripts/runner_topic_capture.py" \
+    --control "${CAPTURE_DAEMON_FIFO}" --ack "${CAPTURE_DAEMON_ACK}" \
+    >"${LOG_DIR}/capture_${ROS_DOMAIN_ID}.log" 2>&1 &
+  CAPTURE_DAEMON_PID=$!
+  capture_daemon_wait_ack ready 30 || fail "in-process topic capture did not start"
+}
+
+capture_daemon_wait_ack() {
+  local expected="$1" timeout_s="$2"
+  local deadline=$((SECONDS + timeout_s))
+  while (( SECONDS < deadline )); do
+    grep -qxF "${expected}" "${CAPTURE_DAEMON_ACK}" 2>/dev/null && return 0
+    kill -0 "${CAPTURE_DAEMON_PID}" 2>/dev/null || return 1
+    sleep 0.1
+  done
+  return 1
+}
+
+# A writer to a FIFO blocks while no reader has it open, and a builtin write to a
+# broken pipe would SIGPIPE the runner itself; the short-lived child takes both.
+capture_daemon_send() {
+  timeout 5 sh -c 'printf "%s\n" "$1" >"$2"' _ "$1" "${CAPTURE_DAEMON_FIFO}"
+}
+
+capture_daemon_open() {
+  local topic="$1" message_type="$2" output_file="$3" mode="$4" reliability="$5"
+  local id
+  start_capture_daemon
+  CAPTURE_DAEMON_SEQ=$((CAPTURE_DAEMON_SEQ + 1))
+  id="c${CAPTURE_DAEMON_SEQ}"
+  : >"${output_file}"
+  capture_daemon_send "open ${id} ${topic} ${message_type} ${output_file} ${mode} ${reliability}" &&
+    capture_daemon_wait_ack "ok ${id}" 10 || return 1
+  STARTED_CAPTURE_PID="capd_${id}"
+}
+
+capture_daemon_close() {
+  local id="$1"
+  [[ -n "${CAPTURE_DAEMON_PID}" ]] || return 0
+  kill -0 "${CAPTURE_DAEMON_PID}" 2>/dev/null || return 0
+  grep -qxF "ok ${id}" "${CAPTURE_DAEMON_ACK}" 2>/dev/null || return 0
+  grep -qE "^(closed|err) ${id}\$" "${CAPTURE_DAEMON_ACK}" 2>/dev/null && return 0
+  capture_daemon_send "close ${id}" >/dev/null 2>&1 || true
+  capture_daemon_wait_ack "closed ${id}" 3 || true
+}
+
+stop_capture_daemon() {
+  [[ -n "${CAPTURE_DAEMON_PID}" ]] || return 0
+  if kill -0 "${CAPTURE_DAEMON_PID}" 2>/dev/null; then
+    capture_daemon_send quit >/dev/null 2>&1 || true
+  fi
+  stop_capture_process "${CAPTURE_DAEMON_PID}"
+  CAPTURE_DAEMON_PID=""
+  rm -f "${CAPTURE_DAEMON_FIFO}"
+}
+
+capture_is_alive() {
+  local pid="$1"
+  if [[ "${pid}" == capd_* ]]; then
+    [[ -n "${CAPTURE_DAEMON_PID}" ]] && kill -0 "${CAPTURE_DAEMON_PID}" 2>/dev/null
+    return
+  fi
+  kill -0 "${pid}" 2>/dev/null
+}
+
 start_topic_capture() {
   local topic="$1"
   local message_type="$2"
   local output_file="$3"
+  local reliability="${4:-reliable}"
+  local mode=all
+  if [[ "${RUNNER_CAPTURE}" == inprocess ]]; then
+    [[ "${message_type}" == nav_msgs/msg/Path ]] && mode=path
+    STARTED_CAPTURE_PID=""
+    capture_daemon_open "${topic}" "${message_type}" "${output_file}" "${mode}" "${reliability}" ||
+      STARTED_CAPTURE_PID="capd_failed"
+    return 0
+  fi
   : >"${output_file}"
   # The event-driven diagnostic and authorization topics must have a live
   # observer before the next execute cycle is published. Providing the type
   # avoids ros2cli graph discovery being the condition for creating it.
-  timeout "$(goal_wall_timeout_s "${GOAL_TIMEOUT}")" ros2 topic echo --no-daemon --qos-reliability reliable "${topic}" \
+  local -a qos_args=(--qos-reliability "${reliability}")
+  [[ "${reliability}" != auto ]] || qos_args=()
+  timeout "$(goal_wall_timeout_s "${GOAL_TIMEOUT}")" ros2 topic echo --no-daemon "${qos_args[@]}" "${topic}" \
     "${message_type}" \
     >"${output_file}" 2>/dev/null &
   STARTED_CAPTURE_PID=$!
@@ -2226,7 +2325,12 @@ ensure_topic_capture_ready() {
   local pid_variable="$5"
   local attempt
   for attempt in 1 2 3; do
-    start_topic_capture "${topic}" "${message_type}" "${output_file}"
+    start_topic_capture "${topic}" "${message_type}" "${output_file}" "${6:-reliable}"
+    if [[ "${STARTED_CAPTURE_PID}" == capd_c* ]]; then
+      printf -v "${pid_variable}" '%s' "${STARTED_CAPTURE_PID}"
+      return 0
+    fi
+    [[ "${STARTED_CAPTURE_PID}" != capd_failed ]] || { sleep 1; continue; }
     # ros2cli can lose a one-shot graph discovery race even when the producer
     # was verified earlier. Detect that exit before issuing the goal; a retry
     # after the event-driven volatile publication would be too late.
@@ -2572,8 +2676,10 @@ run_navigation_goal() {
     CAPTURE_PIDS+=("${pid}")
     topic_pids+=("${pid}:${topic}:${expected_frame}:${output_file}")
   done
-  timeout "$(goal_wall_timeout_s "${GOAL_TIMEOUT}")" ros2 topic echo --no-daemon "${SELECTED_CMD_VEL_TOPIC}" >"${command_output}" 2>/dev/null &
-  local leg_command_pid=$!
+  # 不指定可靠性时按发布者 QoS 选（与原来不带 --qos 的 ros2 topic echo 相同）。
+  local leg_command_pid
+  ensure_topic_capture_ready "${name} ${SELECTED_CMD_VEL_TOPIC}" "${SELECTED_CMD_VEL_TOPIC}" \
+    geometry_msgs/msg/Twist "${command_output}" leg_command_pid auto
   CAPTURE_PIDS+=("${leg_command_pid}")
 
   # MINCO 路径为事件触发发布；先等待 DDS 单次订阅发现完成，
