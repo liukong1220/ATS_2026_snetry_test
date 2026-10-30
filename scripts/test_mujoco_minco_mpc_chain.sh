@@ -125,14 +125,16 @@ GOAL_TIMEOUT="${GOAL_TIMEOUT:-60}"
 # 放大 GOAL_WALL_PER_SIM 倍。目标本身的超时由目标管理器按节点时钟裁决（use_sim_time 下是
 # /clock，goal_deadline.hpp；2026-10-30 之前按墙钟，0.057 倍实时下 600 s 只有约 34 仿真秒）。
 # 墙钟兜底必须不短于 GOAL_TIMEOUT / 仿真墙钟比，否则先于目标管理器杀掉客户端：
-# 32 线程机器约 0.4 倍实时，默认 6 够用；8 核机器约 0.057 倍，要设 GOAL_WALL_PER_SIM=20。
+# 32 线程机器约 0.4 倍实时，6 够用；8 核机器约 0.057 倍，要 20。未设置时按 nproc 取（<=8 取 20）。
 #   SIM_TIME_GATES=auto  EXTRA_LAUNCH_ARGS 含 localization_source:=lio 时启用（默认）
 #   SIM_TIME_GATES=1|0   强制启用（要求 /clock 在发布）/ 强制关闭
 # truth 模式不发布 /clock，行为与改动前逐位一致。
 SIM_TIME_GATES="${SIM_TIME_GATES:-auto}"
 SIM_GATE_WALL_CAP_S="${SIM_GATE_WALL_CAP_S:-1800}"
 SIM_GATE_STALL_S="${SIM_GATE_STALL_S:-90}"
-GOAL_WALL_PER_SIM="${GOAL_WALL_PER_SIM:-6}"
+if [[ -z "${GOAL_WALL_PER_SIM:-}" ]]; then
+  if (( $(nproc) <= 8 )); then GOAL_WALL_PER_SIM=20; else GOAL_WALL_PER_SIM=6; fi
+fi
 SIM_TIME_GATES_ACTIVE=0
 case "${SIM_TIME_GATES}" in
   auto|0|1) ;;
