@@ -960,7 +960,10 @@ minco_planner:
     # 节点会把低于全 yaw 半径的值抬到该半径,所以这里直接写 0.48。
     jps_safe_distance: 0.48
     publish_unsafe_trajectory: false
-    reference_speed: 1.5
+    # 1.2 m/s 与 yaw_rate_limit 1.22 成对取（2026-10-31 用户决定；沙盒 5 预设 x 30 张，报告 5.1.8 C）：
+    # 1.5 / 2.0 时 14% 的运动时长单轮速超过 MPC 的 max_wheel_speed 1.669（MPC 等比缩小整个 Twist），
+    # 1.2 / 1.22 时最大轮速 1.52、超限 0%、成功率 141/150（现状 142/150，少 1 张）、速度全变差 0.53 -> 0.35，代价是用时 +15%。
+    reference_speed: 1.2
     min_segment_time: 0.05
     sample_spacing: 0.12
     max_velocity: 2.0
@@ -1024,10 +1027,13 @@ minco_planner:
     path_fillet_radius: 0.35
     path_fillet_arc_samples: 3
     yaw_mode: clearance_aware
-    # 与 ats_swerve_mpc 的 max_wz / max_awz（均为 2.0）对齐。2.5 超过 MPC 的 max_wz，MPC 会把整个 Twist
-    # 等比缩小（v、wz 同比例），沙盒实测参考 yaw 速率峰值 2.46 -> 1.31 rad/s。不设 yaw_acceleration_limit
-    # 时 applyGoalHeading 的五次曲线峰值角加速度 5.7735*|delta|/T^2 无上限，小角度转向会远超 max_awz。
-    yaw_rate_limit: 2.0
+    # 参考 yaw 速率不能超过 ats_swerve_mpc 的 max_wz（2.0），否则 MPC 会把整个 Twist 等比缩小
+    # （v、wz 同比例，沙盒实测参考 yaw 速率峰值 2.46 -> 1.31 rad/s）。这里取 1.22，比 max_wz 更紧：
+    # 旋转越快单轮线速度越大，1.22 与 reference_speed 1.2 配合才能把轮速压在 1.669 以内（沙盒 5.1.8 C）。
+    # 只降 yaw 速率（0.44）会多出 23 个 FOOTPRINT 失败，只降平移速度（0.90）用时多 40%，所以两项成对。
+    # 不设 yaw_acceleration_limit 时 applyGoalHeading 的五次曲线峰值角加速度 5.7735*|delta|/T^2 无上限，
+    # 小角度转向会远超 max_awz。
+    yaw_rate_limit: 1.22
     yaw_acceleration_limit: 2.0
     # 单轮线速度时间缩放（wheel_speed_*）不启用：用户 2026-10-30 决定，速度曲线优先平滑（启用时 TV 0.50 -> 0.77，报告 5.1.6 F）。
     narrow_clearance_enter: 1.20
