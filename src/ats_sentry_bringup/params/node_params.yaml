@@ -507,8 +507,10 @@ gimbal_yaw_status_bridge:
 small_gicp_relocalization:
   ros__parameters:
     use_sim_time: false
-    # GICP 并行线程数。大：更快；小：更省 CPU。
-    num_threads: 3
+    # GICP 线程数：跟踪期单线程（报告 9.3 第 5 项）；LOST 多猜测、恢复中的粗配准与启动时
+    # 全局地图预处理用 recovery_num_threads（<=0 时与 num_threads 相同）。
+    num_threads: 1
+    recovery_num_threads: 3
     # 协方差估计邻域点数。大：更稳；小：更灵敏但更噪。
     num_neighbors: 20
     # 触发一次注册前，累积源点云的最低点数。
@@ -607,7 +609,8 @@ small_gicp_relocalization:
     confirmation_motion_translation_tolerance: 0.25
     confirmation_motion_yaw_tolerance: 0.15
     # 定时器周期。表示“最频繁多久尝试一次注册”，不代表每次都真的执行。
-    registration_interval_s: 0.35
+    # 0.5 而不是 1.0：1.0 时已接受观测的间隔是 2–4 s，会撞 fusion 的 observation_timeout_s 3.0。
+    registration_interval_s: 0.5
     # 最短点云累积窗口。太短时跳过注册，避免点还没积够就配。
     max_accumulation_age_s: 0.30
     # 相对上次成功/手动重置后，平移至少变化这么多才允许再次注册。
