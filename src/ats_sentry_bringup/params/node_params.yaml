@@ -1135,6 +1135,9 @@ cmd_vel_arbiter:
     link_timeout_ms: 300
     execution_command_timeout: 0.5
     control_rate_hz: 20.0
+    # 换代宽限（报告 5.1.10 第 2 项），与 ats_swerve_mpc.supersede_grace_sec 必须相同：
+    # 同一 epoch 的新 generation 就绪后，旧授权最多再保留 0.4 s 等新 generation 的 EXECUTE。
+    supersede_grace_sec: 0.4
 
 ats_swerve_mpc:
   ros__parameters:
@@ -1166,6 +1169,11 @@ ats_swerve_mpc:
     # 0.5 m 时直线 domain 193/194 以 1.17 m/s 进区，仍冲过 0.14-0.15 m。
     terminal_approach_time_constant: 1.2
     terminal_approach_radius: 1.0
+    # 换代宽限（报告 5.1.10 第 2 项）：同一定位 epoch 内 MINCO 新 generation 的 REFERENCE_READY
+    # 不立即作废当前命令，最多再执行 0.4 s（plan_lead 0.15 s + 规划到提交 10-190 ms + 余量），
+    # 新 generation 的 EXECUTE 到达后沿用 last_control_ 与 warm start；FAILED、MAP_UNREADY、
+    # epoch 变化照旧立即停车。0 = 旧行为。必须小于 execution_command_timeout。
+    supersede_grace_sec: 0.4
     publish_debug_paths: true
     # 默认滚动诊断；QP profile 仅通过 launch 显式设为固定采样窗口。
     telemetry_sampling_window_cycles: 0
