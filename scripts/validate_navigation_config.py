@@ -471,6 +471,9 @@ def main():
     )
     assert mpc["max_vy"] > 0.0
     assert abs(mpc["dt"] - 1.0 / mpc["control_rate_hz"]) < 1e-9
+    # 终点区限速必须比底盘约 0.4 s 的响应滞后的 e 倍更慢，且只覆盖终点附近（报告 5.1.10）。
+    assert mpc["terminal_approach_time_constant"] >= 1.1
+    assert mpc["goal_position_tolerance"] < mpc["terminal_approach_radius"] <= 1.0
     assert behavior_server["action_name"] == "ats_sentry_behavior"
     assert behavior_server["decision"]["inputs"]["planning_grid"]["topic"] == "/rc_esdf/planning_grid"
     assert behavior_server["decision"]["inputs"]["localization"]["topic"] == "/localization"
