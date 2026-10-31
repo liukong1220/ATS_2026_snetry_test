@@ -474,6 +474,10 @@ def main():
     # 终点区限速必须比底盘约 0.4 s 的响应滞后的 e 倍更慢，且只覆盖终点附近（报告 5.1.10）。
     assert mpc["terminal_approach_time_constant"] >= 1.1
     assert mpc["goal_position_tolerance"] < mpc["terminal_approach_radius"] <= 1.0
+    # 换代宽限：MPC 与 arbiter 必须一致，否则一侧放行、另一侧撤销；且不得长于执行授权租约。
+    assert mpc["supersede_grace_sec"] == arbiter["supersede_grace_sec"]
+    assert 0.0 <= mpc["supersede_grace_sec"] < mpc["execution_command_timeout"]
+    assert arbiter["supersede_grace_sec"] < arbiter["execution_command_timeout"]
     assert behavior_server["action_name"] == "ats_sentry_behavior"
     assert behavior_server["decision"]["inputs"]["planning_grid"]["topic"] == "/rc_esdf/planning_grid"
     assert behavior_server["decision"]["inputs"]["localization"]["topic"] == "/localization"
