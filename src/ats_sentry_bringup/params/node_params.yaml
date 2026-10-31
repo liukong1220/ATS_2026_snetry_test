@@ -1159,6 +1159,11 @@ ats_swerve_mpc:
     trajectory_timeout: 0.5
     goal_position_tolerance: 0.08
     goal_yaw_tolerance: 0.15
+    # 终点区限速 |v| <= d / tau（报告 5.1.10 第 1 项）：底盘对指令的响应滞后约 0.4 s（MuJoCo
+    # 2025 红框 171/172 指令与真值速度互相关），容差圆内单靠降速出口仍会冲出 0.3-0.4 m 再拉回；
+    # 一阶趋近在 tau > e * 滞后（约 1.1 s）时不过冲。只在 0.5 m 内、reference 终点速度为零时生效。
+    terminal_approach_time_constant: 1.2
+    terminal_approach_radius: 0.5
     publish_debug_paths: true
     # 默认滚动诊断；QP profile 仅通过 launch 显式设为固定采样窗口。
     telemetry_sampling_window_cycles: 0
