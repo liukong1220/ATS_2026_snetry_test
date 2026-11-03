@@ -340,7 +340,8 @@ ROS_DOMAIN_ID=101 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
 
 ### 自己跑红框验收（`lio` 定位，与报告同一口径）
 
-验收用真实定位链（Point-LIO + GICP），不是仿真真值。下面的命令就是报告 5.1.12 里数字的来源，
+验收用真实定位链（Point-LIO + GICP），不是仿真真值。下面的命令就是报告 5.1.2 里基线数字的来源
+（逐轮记录已从报告里移出，见 git e514d2f 的旧报告），
 `ROS_DOMAIN_ID` 取 0–232 内没人用的值（CycloneDDS 端口上限，233 起 runner 直接拒绝）。
 
 先构建。`ats_mujoco_sim` 在本机是拷贝安装，改了它的 yaml 或 launch 后必须重建这个包才生效；
@@ -387,21 +388,36 @@ ROS_DOMAIN_ID=111 ROS_LOCALHOST_ONLY=0 USE_RVIZ=false USE_MUJOCO_VIEWER=false \
 - 动作是否成功：runner 日志里的 `Goal finished with status: SUCCEEDED` 与
   `RESULT: ... leg final=(x, y) goal=(...) error=... m`（`lio` 模式下终点用仿真真值判）。
 - `runner_exit` 非 0 不一定是没到：nav tracking 门（`NAV_TRACKING_GATE=1`，默认开）把"实际足迹压进规划栅格"
-  当成失败。目前 2025 与 2027 红框动作能成功，但这个门还过不了（报告 5.1.12），所以多数运行是
+  当成失败。这个门在 2025 与 2027 红框上都还过不了（报告 5.1.2、8.2），所以到达目标的运行多数是
   `SUCCEEDED` 且 `runner_exit=1`。只想看能不能到，可以加 `NAV_TRACKING_GATE=0`（只用于取证，不算验收）。
+  2027 红框在 2026-11-03 的 HEAD 上 13 次只有 1 次到达，其余停在板北侧（板通道被地形层的格子闪烁堵住，
+  规划器改走走不通的北线，见报告 8.2），所以 2027 红框的成败不能当作回归信号；2027 的终点判据
+  用开阔地短程跑（见下）。
 - 录制器产物默认在 `/tmp/ats_nav_evidence/nav_tracking_<TEST_PROFILE>_<domain>/goal_<n>_<name>/`
   （`NAV_TRACKING_DIR` 可改；`/tmp` 重启会清空，要留就指到别处）：`samples.jsonl`
   是 50 Hz 的位姿、参考、MPC 指令与底盘遥测，`verdict.json` 是门禁结论与第一个冲突点。
 - 速度平稳性：MPC 指令在 `samples.jsonl` 的 `autonomy_raw`，仿真实际执行的在 `telemetry.command_*`，
   底盘测得的在 `telemetry.measured_*`。
 
-仿真专用的几项参数（实车 `node_params.yaml` 都没开，见报告 5.1.11/5.1.12）：
+2027 开阔地短程（只测终点判据，约 2 分钟一次；起点 `(4.5, 6.25)`，目标 `(8.0, 6.25)`，直线 3.5 m）：
+
+```bash
+ROS_DOMAIN_ID=170 ROS_LOCALHOST_ONLY=0 USE_RVIZ=false USE_MUJOCO_VIEWER=false \
+  PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
+  SCENE=rmuc_2027 TEST_PROFILE=red_box_2027 RED_BOX_2027_GOAL="8.0 6.25" GOAL_TIMEOUT=120 \
+  EXTRA_LAUNCH_ARGS="localization_source:=lio lidar_threads:=8" \
+  scripts/test_mujoco_minco_mpc_chain.sh
+```
+
+仿真专用的几项参数（实车 `node_params.yaml` 都没开，见报告 5.1.2）：
 
 | 参数 | 文件 | 值 | 作用 |
 | --- | --- | --- | --- |
 | `traversabilityOverheadHeight` | `ats_mujoco_sim/config/rmuc_2027_navigation.yaml`（只 2027 场景） | 0.255 m | 地形层忽略离地高于车高 + 1.3 cm 的头顶面，悬空板下不再被标成障碍 |
 | `yaw_narrow_start_hold_length` | `ats_mujoco_sim/config/rmuc_2025_navigation.yaml` | 0.3 m | 起点已在窄通道里时先保持起点 yaw 平移，再对齐切线；只在足迹冲突不更多时采用 |
 | `wheel_speed_time_scaling_change_rate` | 同上 | 0.6 /s（原 2.0） | 窄通道转向限速与净空限速的放慢系数变化更缓，参考速度更平滑 |
+| `terminal_velocity_window_sec` | 同上（`ats_goal_manager` 段） | 0.5 s | 终点"已停稳"用最近 0.5 s 的位姿位移折算平均速度，不再用里程计瞬时 twist（静止时 twist 噪声中位数 0.064 m/s） |
+| `contact_hold_enabled` / `contact_hold_max_depth` / `contact_hold_max_sec` | 同上（`ats_goal_manager` 段） | true / 0.12 m / 1.5 s | 足迹检查不变；接触深度 ≤ 0.12 m、有参考、急停未置位时，最多 1.5 s 不因看门狗急停挂起 |
 | 脱困、目标准入、保留参考等 | 同上 | — | 见 yaml 里的注释 |
 
 想对照改前行为，把对应键改回（或删掉）后重建 `ats_mujoco_sim` 再跑。
