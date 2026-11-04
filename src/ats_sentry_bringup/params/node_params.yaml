@@ -854,6 +854,9 @@ ats_rog_map:
     odom_layer.dynamic_hold_seconds: 3.0
     odom_layer.max_frame_dt_seconds: 0.25
     odom_layer.save_persistence_ratio: 0.8
+    # Hits count only between these heights above the base plane (floor and ceiling echoes excluded).
+    odom_layer.hit_z_min: 0.15
+    odom_layer.hit_z_max: 0.70
 
 ats_rog_map_adapter:
   ros__parameters:
