@@ -47,6 +47,8 @@ def generate_launch_description():
     lidar_static_tf_yaw = LaunchConfiguration("lidar_static_tf_yaw")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
+    slam = LaunchConfiguration("slam")
+    localization_prior = IfElseSubstitution(slam, "False", launch_small_gicp_relocalization)
 
     lidar_static_tf_enabled = PythonExpression([
         "'", use_sim_time, "'.lower() == 'false' and '", launch_lidar_static_tf,
@@ -122,12 +124,14 @@ def generate_launch_description():
         DeclareLaunchArgument("lidar_static_tf_yaw", default_value="0.0"),
         DeclareLaunchArgument("use_respawn", default_value="True"),
         DeclareLaunchArgument("log_level", default_value="info"),
+        DeclareLaunchArgument("slam", default_value="False"),
     ]
     prior_preflight = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(navigation_bringup_dir, "launch", "prior_pcd_preflight.launch.py")),
+        condition=UnlessCondition(slam),
         launch_arguments={
             "world": world, "prior_pcd_file": prior_pcd_file,
-            "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+            "launch_small_gicp_relocalization": localization_prior,
         }.items(),
     )
     serial_driver = IncludeLaunchDescription(
@@ -177,7 +181,8 @@ def generate_launch_description():
             "namespace": namespace, "use_sim_time": use_sim_time, "params_file": params_file,
             "use_robot_state_pub": use_robot_state_pub, "use_rviz": "False",
             "launch_joy_teleop": launch_joy_teleop,
-            "launch_small_gicp_relocalization": launch_small_gicp_relocalization,
+            "launch_small_gicp_relocalization": localization_prior,
+            "slam": slam,
             "launch_localization_fusion": launch_localization_fusion,
             "launch_fake_vel_transform": launch_fake_vel_transform,
             "launch_chassis_vel_transform": launch_chassis_vel_transform,

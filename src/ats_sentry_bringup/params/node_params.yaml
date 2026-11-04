@@ -843,6 +843,17 @@ ats_rog_map:
     # service and ineffective at the reset site, so the map is never cleared.
     enable_test_fault_injection: false
     test_reset_to_unknown: false
+    # Fixed global static layer: 40 x 30 m at 0.1 m.  The mapping start is
+    # (0, 0), so the lower-left storage origin leaves 20 m / 15 m margin.
+    odom_layer.origin_x: -20.0
+    odom_layer.origin_y: -15.0
+    odom_layer.resolution: 0.10
+    odom_layer.width: 400
+    odom_layer.height: 300
+    odom_layer.static_promotion_seconds: 3.0
+    odom_layer.dynamic_hold_seconds: 3.0
+    odom_layer.max_frame_dt_seconds: 0.25
+    odom_layer.save_persistence_ratio: 0.8
 
 ats_rog_map_adapter:
   ros__parameters:
@@ -881,6 +892,11 @@ ats_rog_map_adapter:
     slope_grid_max_degrees: 45.0
     slope_obstacle_degrees: 28.0
     unknown_is_obstacle: true
+    # P2 contract: static walls block planning.  Set false only after the odom
+    # global layer feeds the planning grid (S3).  A missing PGM fails closed
+    # unless allow_missing_static_map is true (mapping mode only).
+    use_static_map_obstacles: true
+    allow_missing_static_map: false
     input_timeout_sec: 2.0
     signed_distance_max_m: 2.0
     footprint_length: 0.581
