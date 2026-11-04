@@ -37,6 +37,7 @@ V1 目标链为：
 当前阶段建议明确区分：
 
 - P2：ROGMap 地面适配、terrain/static wall/unknown 融合、规划地图唯一所有权、MINCO 单次规划本地不可变 snapshot 和安全停机；
+- S3（P2 之后，未实现）：建图模式与无先验导航，要求见 6.4。当前规划栅格仍需要静态 PGM，建图模式也仍走先验定位链；
 - P3：自研 goal/action 状态机与 Nav2-free 启动；
 - P4：连续 swept footprint、实车动力学约束与实车验证。
 
@@ -50,6 +51,8 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 - JPS、MINCO S3、独立 yaw、footprint gate、Local Collision Repair 和 `ats_swerve_mpc` 属于稳定架构边界。
 - 四舵轮控制为车体系 `[vx, vy, wz]`，状态为世界系 `[x, y, yaw]`；建议避免迁入差速/ICR/`vy=0` 约束。
 - 建议避免从 `/rog_map/esdf` 可视化 `PointCloud2` 反解析数值距离场。
+- Point-LIO 当前是激光惯性里程计，代码中没有回环检测或位姿图。建图模式的漂移校正采用地图匹配（见 6.4），不引入回环后端，除非用户另行决定。
+- ZLIO（z-localization）为 GPL-2.0，只借鉴思路，不拷贝代码，不整套接入，除非用户先确认许可与 A/B 决策。
 
 ### 2.3 雷达安装与速度链
 
@@ -116,6 +119,7 @@ colcon test --base-paths src ...
 | ownership | planning grid、TF、速度、急停和底盘输入均有唯一权威 |
 | request | ROGMap projection 使用 steady-clock deadline；超时移除 client pending request、清除 pending 状态并允许重试；单调 epoch 丢弃迟到回调 |
 | fallback | map unready/stale、无路、unsafe trajectory、MPC 失败均输出确定性零速度 |
+| map（建图模式，目标要求） | 全局静态层固定 40×30 m、0.1 m、原点为建图起点；12×12 m 计算窗口不是地图存储；超出全局范围的观测计数丢弃并记录，不静默丢弃 |
 
 重要结论优先用两类独立证据交叉验证，例如“实现 + 单测”“launch + ROS graph”“日志 + 终点测量”。只有单一来源时明确标记 `[Confidence: Medium/Low]` 与限制。
 
@@ -165,7 +169,7 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 - `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 非空；
 - adapter 直接消费 ROGMap 数值服务，不订阅 `/rog_map/esdf`；
 - `/rc_esdf/planning_grid` publisher 数为 1 且 owner 为 adapter；
-- 任一有效来源 occupied 保持 occupied；任一新鲜来源的明确 free 可消解其他来源 unknown；所有来源均无 free/occupied 证据时输出最终 unknown，并默认按障碍处理；静态细栅格到 planning grid 优先按输出 footprint 保守聚合；真值表、非整除分辨率、平移 origin 与 yaw 建议由单测锁定；
+- 任一有效来源 occupied 保持 occupied；任一新鲜来源的明确 free 可消解其他来源 unknown；所有来源均无 free/occupied 证据时输出最终 unknown，并默认按障碍处理（建图模式例外见 6.4）；静态细栅格到 planning grid 优先按输出 footprint 保守聚合；真值表、非整除分辨率、平移 origin 与 yaw 建议由单测锁定；
 - ROGMap 投影几何范围只定义其数据范围；范围外和 terrain/slope 的 `-1` 都表示缺少该来源证据，建议避免凭空覆盖另一来源的明确 free；
 - static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。完成带 yaw 的 `0.70 x 0.55 m + margin` 定向矩形栅格化及边界测试后，可评估启用；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
 - `ROGMap source generation` 持续递增、adapter 发布保持新鲜、单次规划固定 `MINCO local snapshot generation`；当前证据不支持三者编号端到端一致的结论；
@@ -203,6 +207,33 @@ P3 标记条件为同时满足以下各项：
 - 目标入口不调用 `nav2_msgs/action/NavigateToPose`；
 - 自研 goal/action 支持 feedback、result、cancel、preempt、timeout；
 - 扩大矩形与红框均在自研入口下通过。
+
+### 6.4 建图模式与无先验导航（S3，部分实现，验收未通过）
+
+当前状态（2026-11-04，详见报告 0.5）：`slam:=true` 已接入 MuJoCo 启动链；odom 系全局层与保存链路已实现并有单测。射线清除未接入节点，全局层未进入规划栅格。无先验时 adapter 因 localization 未 TRACKING 而不 ready，2025 与 2027 烟测均未通过。下列要求在验收通过前，不得在报告或提交中声称无图可用或全场建图完成。
+
+- 定位：建图期间 Point-LIO 持续提供位姿，并累积扫描形成地图。“无先验”只表示不加载先验 PCD，不表示没有定位。
+- 漂移校正：采用地图匹配（方式 3）。当前扫描与增长中的全局点云地图配准，修正写入 `map->odom`，经 `localization_fusion` 门控接受或拒绝。本阶段不做回环检测、位姿图和关键帧存储。
+- 全局静态层：固定大数组，建图模式 40×30 m、0.1 m 分辨率，原点为建图起点，留出外延和漂移余量。超出范围的观测计数并记录。
+- 计算窗口：12×12 m，跟随机器人，只服务 ESDF、JPS、MINCO。窗口移出时全局层保留，不随窗口丢弃。
+- 场地尺寸：比赛场地 28×15 m。10×10 m 只用于建图和测试场地。所有尺寸参数化，比赛配置与测试配置分开。
+- unknown：参数 `allow_unknown_goal`，只在建图模式生效，默认 `false`。开启时，目标和引导段可以穿过 unknown；已提交段必须 known-free。比赛模式保持 6.1 的 unknown 规则。
+- 保存：只写静态层中未被射线清除、且观测占比达到阈值的格，输出 PGM+YAML（符合 map_server 契约）和 PCD。动态层不保存。
+- 比赛（定位）模式：加载建图保存的 PCD 与静态层，`small_gicp_relocalization` 做先验重定位，输出 `map->odom`。比赛起点固定，重定位初值为建图起点。先验静态层只用于全局引导和场地边界，障碍仍由实时点云决定。
+- 测试：无先验测试必须使用显式的 TEST_PROFILE。不得改变现有 profile 对 PGM 和 PCD 的要求。
+- 验收（MuJoCo `lio` 模式，无 PGM、无 PCD）：
+  - 建图中导航到目标，终点真值误差 ≤ 0.08 m，离散 footprint 冲突采样数为 0。物理接触单独记为未验证，除非有独立接触评估；
+  - `/rc_esdf/planning_grid` 发布者数为 1，owner 为 adapter；
+  - 新障碍到规划器可见的延迟 p95 < 150 ms；
+  - 地图修正前后不出现无法解释的跳变；
+  - 保存地图与场景真值比对，报告漏检和误检格数；动态障碍不写入保存地图；
+  - 地图失效、无路、unsafe 轨迹时 `/planner/emergency_stop=true`，速度为零。
+- S3 实施后，6.1 中“static wall 可阻断规划”的条目需要修订，同时更新对应单测。
+
+已定事项（用户 2026-11-04 确认）：
+- 静态层坐标系采用混合方案：内部仍按 odom 系存储，修正 `map->odom` 时不搬移，障碍不跳动；保存时一次性变换到 map 系，输出 PGM、YAML 和三维 PCD，并记录保存时的 `map->odom`。规划链的坐标系在门 1 中单独决定。
+- 规划链坐标系采用 odom 系。ESDF、JPS、MINCO、MPC 在 odom 中完成，控制器位姿使用 Point-LIO 的 odom。目标点和全局引导路径在每次重规划时用当前 `map->odom` 转换到 odom。修正只改变目标在 odom 中的位置，障碍和位姿同源，不跳动。
+- 比赛起点固定。同一起点的下一场可直接复用建图地图。
 
 ## 7. 测试与结果报告
 
@@ -269,6 +300,7 @@ git diff --check
 [安全] 固化MINCO地图快照并收敛规划急停状态
 [仿真] 切换MuJoCo规划地图唯一所有权并扩展红框验收
 [文档] 记录P2已验证边界与未完成范围
+[建图] 增加建图模式全局静态层与地图匹配校正
 [规范] 建立ATS多仓导航闭环研发与验收规则
 ```
 
