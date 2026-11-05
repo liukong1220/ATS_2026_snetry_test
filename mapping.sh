@@ -7,7 +7,8 @@ USE_RVIZ="${USE_RVIZ:-True}"
 PID_FILE="$WORKSPACE_DIR/.ros/mapping_sh.pid"
 MAP_OUTPUT_PREFIX="$WORKSPACE_DIR/src/ats_sentry_bringup/map/$MAP_NAME"
 PCD_OUTPUT_FILE="$WORKSPACE_DIR/src/ats_sentry_bringup/pcd/$MAP_NAME.pcd"
-PCD_GLOB="$WORKSPACE_DIR/src/ats_sentry_nav/point_lio/PCD/scans_*.pcd"
+PCD_SOURCE_DIR="$WORKSPACE_DIR/src/ats_sentry_nav/point_lio/PCD"
+SESSION_START_UNIX="$(date +%s)"
 PCD_WAIT_TIMEOUT="${PCD_WAIT_TIMEOUT:-5}"
 PCD_WAIT_INTERVAL="${PCD_WAIT_INTERVAL:-1}"
 STOP_REQUESTED=0
@@ -34,7 +35,7 @@ prompt_map_name() {
 
 print_save_hints() {
   echo "建图模式已配置，地图名: $MAP_NAME"
-  echo "按 Ctrl+C 结束时，脚本会先询问是否保存地图，然后自动停止建图并复制最新 PCD。"
+  echo "按 Ctrl+C 结束时，通过服务保存 map 系地图与三维 PCD，然后停止并归档本次全部原始分段。"
   echo "地图输出前缀: $MAP_OUTPUT_PREFIX"
   echo "PCD 输出文件: $PCD_OUTPUT_FILE"
 }
@@ -69,7 +70,7 @@ confirm_yes() {
 
 save_map() {
   echo "正在保存栅格地图到 $MAP_OUTPUT_PREFIX"
-  if ! ros2 run nav2_map_server map_saver_cli -f "$MAP_OUTPUT_PREFIX"; then
+  if ! python3 "$WORKSPACE_DIR/scripts/save_s3_map.py" --prefix "$MAP_OUTPUT_PREFIX" --pcd-output "$PCD_OUTPUT_FILE"; then
     echo "地图保存失败，请确认建图节点仍在运行并检查终端日志"
     return 1
   fi
@@ -77,36 +78,9 @@ save_map() {
   echo "地图已保存: ${MAP_OUTPUT_PREFIX}.yaml / ${MAP_OUTPUT_PREFIX}.pgm"
 }
 
-copy_latest_pcd() {
-  local latest_pcd
-  latest_pcd="$(ls -t $PCD_GLOB 2>/dev/null | head -n 1)"
-
-  if [[ -z "$latest_pcd" ]]; then
-    echo "未找到生成的 PCD 文件，跳过复制"
-    return 1
-  fi
-
-  cp "$latest_pcd" "$PCD_OUTPUT_FILE"
-  echo "最新 PCD 已复制: $latest_pcd -> $PCD_OUTPUT_FILE"
-}
-
-wait_for_latest_pcd() {
-  local waited=0
-  local latest_pcd
-
-  while (( waited < PCD_WAIT_TIMEOUT )); do
-    latest_pcd="$(ls -t $PCD_GLOB 2>/dev/null | head -n 1)"
-    if [[ -n "$latest_pcd" ]]; then
-      echo "检测到最新 PCD: $latest_pcd"
-      return 0
-    fi
-
-    sleep "$PCD_WAIT_INTERVAL"
-    waited=$(( waited + PCD_WAIT_INTERVAL ))
-  done
-
-  echo "等待 $PCD_WAIT_TIMEOUT 秒后仍未检测到 PCD 文件"
-  return 1
+archive_pcd_segments() {
+  # Raw camera_init segments never overwrite the transformed map-frame PCD.
+  python3 "$WORKSPACE_DIR/scripts/save_s3_map.py" --archive-source "$PCD_SOURCE_DIR" --archive-output "${MAP_OUTPUT_PREFIX}_raw_segments" --since "$SESSION_START_UNIX"
 }
 
 stop_launch() {
@@ -148,10 +122,7 @@ handle_shutdown() {
 
   stop_launch || true
 
-  if confirm_yes "是否复制最新 PCD 为地图同名文件"; then
-    wait_for_latest_pcd || true
-    copy_latest_pcd || true
-  fi
+  archive_pcd_segments || echo "原始 PCD 分段归档失败，请检查日志" >&2
 
   exit 0
 }
@@ -186,7 +157,7 @@ watch_commands() {
 prompt_map_name
 
 declare -a commands=(
-  "ros2 launch ats_sentry_bringup bringup.launch.py world:=$MAP_NAME slam:=True use_rviz:=$USE_RVIZ"
+  "ros2 launch ats_sentry_bringup bringup.launch.py world:=$MAP_NAME slam:=True use_identified_odometry:=True use_rviz:=$USE_RVIZ"
 )
 
 MAP_OUTPUT_PREFIX="$WORKSPACE_DIR/src/ats_sentry_bringup/map/$MAP_NAME"
