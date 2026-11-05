@@ -11,190 +11,231 @@ Panels:
 Visualization Manager:
   Class: ''
   Displays:
-    - Alpha: 0.25
-      Cell Size: 1
-      Class: rviz_default_plugins/Grid
-      Color: 160; 160; 164
+    - Class: rviz_common/Group
+      Displays:
+        - Alpha: 0.25
+          Cell Size: 1
+          Class: rviz_default_plugins/Grid
+          Color: 160; 160; 164
+          Enabled: true
+          Line Style:
+            Line Width: 0.03
+            Value: Lines
+          Name: Grid
+          Normal Cell Count: 0
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0
+          Plane: XY
+          Plane Cell Count: 30
+          Reference Frame: <Fixed Frame>
+          Value: true
+        - Alpha: 1
+          Class: rviz_default_plugins/RobotModel
+          Description Source: Topic
+          Description Topic:
+            Depth: 1
+            Durability Policy: Transient Local
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: robot_description
+          Enabled: true
+          Name: Robot Model
+          TF Prefix: ''
+          Value: true
+        - Class: rviz_default_plugins/TF
+          Enabled: false
+          Frame Timeout: 15
+          Marker Scale: 0.5
+          Name: TF
+          Show Arrows: false
+          Show Axes: true
+          Show Names: false
+          Value: false
       Enabled: true
-      Line Style:
-        Line Width: 0.03
-        Value: Lines
-      Name: Grid
-      Normal Cell Count: 0
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0
-      Plane: XY
-      Plane Cell Count: 30
-      Reference Frame: <Fixed Frame>
+      Name: 定位
       Value: true
-    - Alpha: 1
-      Class: rviz_default_plugins/RobotModel
-      Description Source: Topic
-      Description Topic:
-        Depth: 1
-        Durability Policy: Transient Local
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: robot_description
+    - Class: rviz_common/Group
+      Displays: []
       Enabled: true
-      Name: Robot Model
-      TF Prefix: ''
+      Name: 点云
       Value: true
-    - Class: rviz_default_plugins/TF
-      Enabled: false
-      Frame Timeout: 15
-      Marker Scale: 0.5
-      Name: TF
-      Show Arrows: false
-      Show Axes: true
-      Show Names: false
-      Value: false
-    - Alpha: 1
-      Autocompute Intensity Bounds: true
-      Class: rviz_default_plugins/PointCloud2
-      Color Transformer: RGB8
-      Decay Time: 0
+    - Class: rviz_common/Group
+      Displays:
+        - Class: rviz_default_plugins/MarkerArray
+          Enabled: true
+          Name: 'ROGMap Bounds: Orange Local / Green Update'
+          Namespaces: {}
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Best Effort
+            Value: /rog_map/bounds
+          Value: true
+        - Alpha: 0.7
+          Class: rviz_default_plugins/Map
+          Color Scheme: map
+          Draw Behind: true
+          Enabled: false
+          Name: Planning Grid (JPS occupancy)
+          Topic:
+            Depth: 1
+            Durability Policy: Transient Local
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /rog_map_adapter/viz/planning_grid
+          Use Timestamp: false
+          Value: false
+        - Alpha: 0.3
+          Class: rviz_default_plugins/Map
+          Color Scheme: map
+          Draw Behind: true
+          Enabled: false
+          Name: Static Map
+          Topic:
+            Depth: 1
+            Durability Policy: Transient Local
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /map
+          Use Timestamp: false
+          Value: false
       Enabled: true
-      Name: 'ESDF Cloud: Magenta Obstacle / Orange Footprint Band / Green Clearance / Violet Terrain'
-      # Signed distance of the planning snapshot that JPS/MINCO use; encoded only while subscribed.
-      Position Transformer: XYZ
-      Selectable: false
-      Size (Pixels): 3
-      Size (m): 0.1
-      Style: Boxes
-      Topic:
-        Depth: 1
-        Durability Policy: Transient Local
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /rog_map_adapter/viz/esdf_cloud
-      Use Fixed Frame: true
-      Use rainbow: false
+      Name: 局部规划窗口
       Value: true
-    - Alpha: 0.7
-      Class: rviz_default_plugins/Map
-      Color Scheme: map
-      Draw Behind: true
-      Enabled: false
-      Name: Planning Grid (JPS occupancy)
-      Topic:
-        Depth: 1
-        Durability Policy: Transient Local
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /rog_map_adapter/viz/planning_grid
-      Use Timestamp: false
-      Value: false
-    - Alpha: 0.3
-      Class: rviz_default_plugins/Map
-      Color Scheme: map
-      Draw Behind: true
-      Enabled: false
-      Name: Static Map
-      Topic:
-        Depth: 1
-        Durability Policy: Transient Local
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /map
-      Use Timestamp: false
-      Value: false
-    - Class: rviz_default_plugins/MarkerArray
+    - Class: rviz_common/Group
+      Displays:
+        - Alpha: 1
+          Autocompute Intensity Bounds: true
+          Class: rviz_default_plugins/PointCloud2
+          Color Transformer: RGB8
+          Decay Time: 0
+          Enabled: true
+          Name: 'ESDF Cloud: Black Obstacle / Red Inside Circumscribed Radius / Yellow-Green Clearance / Grey Unknown'
+          # Signed distance of the planning snapshot that JPS/MINCO use; encoded only while subscribed.
+          Position Transformer: XYZ
+          Selectable: false
+          Size (Pixels): 3
+          Size (m): 0.1
+          Style: Boxes
+          Topic:
+            Depth: 1
+            Durability Policy: Transient Local
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /rog_map_adapter/viz/esdf_cloud
+          Use Fixed Frame: true
+          Use rainbow: false
+          Value: true
+        - Class: rviz_default_plugins/MarkerArray
+          Enabled: true
+          Name: 'Clearance Contours: Inscribed / Circumscribed'
+          Namespaces: {}
+          Topic:
+            Depth: 1
+            Durability Policy: Transient Local
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /rog_map_adapter/viz/clearance_contours
+          Value: true
       Enabled: true
-      Name: 'ROGMap Bounds: Orange Local / Green Update'
-      Namespaces: {}
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /rog_map/bounds
+      Name: 距离场
       Value: true
-    - Alpha: 0.85
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 0; 220; 255
+    - Class: rviz_common/Group
+      Displays:
+        - Alpha: 0.85
+          Buffer Length: 1
+          Class: rviz_default_plugins/Path
+          Color: 0; 220; 255
+          Enabled: true
+          Line Style: Lines
+          Line Width: 0.025
+          Name: Global Planning / JPS Search Path
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.02
+          Pose Color: 0; 220; 255
+          Pose Style: None
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /minco/raw_path
+          Value: true
+        - Alpha: 0.95
+          Buffer Length: 1
+          Class: rviz_default_plugins/Path
+          Color: 50; 255; 80
+          Enabled: true
+          Line Style: Lines
+          Line Width: 0.05
+          Name: Local Control / MINCO Timed Reference
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.04
+          Pose Color: 50; 255; 80
+          Pose Style: None
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /minco/reference_path
+          Value: true
+        - Alpha: 0.95
+          Buffer Length: 1
+          Class: rviz_default_plugins/Path
+          Color: 255; 196; 0
+          Enabled: true
+          Line Style: Lines
+          Line Width: 0.03
+          Name: MPC Follow / Active Reference Horizon
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.08
+          Pose Color: 255; 196; 0
+          Pose Style: None
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /ats_swerve_mpc/reference_horizon
+          Value: true
+        - Alpha: 0.9
+          Buffer Length: 1
+          Class: rviz_default_plugins/Path
+          Color: 255; 80; 255
+          Enabled: true
+          Line Style: Billboards
+          Line Width: 0.075
+          Name: MPC Prediction / iLQR Follow Rollout
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.12
+          Pose Color: 255; 80; 255
+          Pose Style: None
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /ats_swerve_mpc/predicted_path
+          Value: true
       Enabled: true
-      Line Style: Lines
-      Line Width: 0.025
-      Name: Global Planning / JPS Search Path
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0.02
-      Pose Color: 0; 220; 255
-      Pose Style: None
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /minco/raw_path
+      Name: 路径
       Value: true
-    - Alpha: 0.95
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 50; 255; 80
+    - Class: rviz_common/Group
+      Displays: []
       Enabled: true
-      Line Style: Lines
-      Line Width: 0.05
-      Name: Local Control / MINCO Timed Reference
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0.04
-      Pose Color: 50; 255; 80
-      Pose Style: None
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /minco/reference_path
-      Value: true
-    - Alpha: 0.95
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 255; 196; 0
-      Enabled: true
-      Line Style: Lines
-      Line Width: 0.03
-      Name: MPC Follow / Active Reference Horizon
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0.08
-      Pose Color: 255; 196; 0
-      Pose Style: None
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /ats_swerve_mpc/reference_horizon
-      Value: true
-    - Alpha: 0.9
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 255; 80; 255
-      Enabled: true
-      Line Style: Billboards
-      Line Width: 0.075
-      Name: MPC Prediction / iLQR Follow Rollout
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0.12
-      Pose Color: 255; 80; 255
-      Pose Style: None
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /ats_swerve_mpc/predicted_path
+      Name: 安全
       Value: true
   Enabled: true
   Global Options:
