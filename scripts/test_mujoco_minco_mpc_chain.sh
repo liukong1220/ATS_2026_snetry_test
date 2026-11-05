@@ -985,6 +985,13 @@ verify_rog_map_planning_interface() {
     topic_field_positive /rc_esdf/planning_grid info.height
 
   assert_topic_ownership /rc_esdf/planning_grid ats_rog_map_adapter
+  # MINCO plans on this numeric snapshot, not on the grid above.
+  assert_topic_ownership /rog_map_adapter/planning_snapshot ats_rog_map_adapter
+  if [[ -z "${PLANNING_SNAPSHOT_FRAME}" ]]; then
+    PLANNING_SNAPSHOT_FRAME="$(read_topic_field /rog_map_adapter/planning_snapshot header.frame_id)"
+    [[ -n "${PLANNING_SNAPSHOT_FRAME}" ]] || fail "cannot read /rog_map_adapter/planning_snapshot frame"
+  fi
+  echo "OK: planning snapshot frame ${PLANNING_SNAPSHOT_FRAME}"
   wait_for_command "ats_rog_map node" 30 node_is_present /ats_rog_map
   wait_for_command "ats_rog_map_adapter node" 30 node_is_present /ats_rog_map_adapter
   node_list="$(ros2 node list --no-daemon)"
@@ -2456,15 +2463,22 @@ nav_tracking_footprint_param() {
   printf '%s' "${value}"
 }
 
+# recorder 必须用规划快照实际所在的坐标系做 ready_snapshot 判据；写死默认值 map 时，
+# 一旦快照改在 odom 发布，初始证据永远不满足（domain 153）。值在图检查阶段读取。
+PLANNING_SNAPSHOT_FRAME="${PLANNING_SNAPSHOT_FRAME:-}"
+
 start_nav_tracking_recorder() {
   local label="$1" dir="$2"
   [[ "${NAV_TRACKING_RECORDER}" == "1" ]] || return 0
   mkdir -p "${dir}"
   [[ "${RECORDER_STATUS}" == failed ]] || RECORDER_STATUS=running
   NAV_TRACKING_LEG_DIR="${dir}"
+  local grid_frame="${NAV_TRACKING_GRID_FRAME:-${PLANNING_SNAPSHOT_FRAME}}"
+  [[ -n "${grid_frame}" ]] || fail "planning snapshot frame unknown; cannot start nav tracking recorder"
   python3 "${WORKSPACE_DIR}/scripts/nav_tracking_recorder.py" \
     --output-dir "${dir}" --rate-hz "${NAV_TRACKING_RATE_HZ}" \
     --startup-timeout-sec "${NAV_TRACKING_START_TIMEOUT}" \
+    --grid-frame "${grid_frame}" \
     >"${dir}/recorder.out" 2>&1 &
   NAV_TRACKING_PID=$!
   CAPTURE_PIDS+=("${NAV_TRACKING_PID}")
