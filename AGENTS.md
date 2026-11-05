@@ -117,7 +117,7 @@ colcon test --base-paths src ...
 | generation | JPS、MINCO clearance、footprint gate、repair 使用同一不可变快照 |
 | QoS | reliability、durability、depth、late joiner 行为 |
 | ownership | planning grid、TF、速度、急停和底盘输入均有唯一权威 |
-| request | ROGMap projection 使用 steady-clock deadline；超时移除 client pending request、清除 pending 状态并允许重试；单调 epoch 丢弃迟到回调 |
+| request | adapter 已并入 `ats_rog_map` 进程内（M3/M4），不再有投影 service 与 client pending request；规划地图只由 `/rog_map_adapter/planning_snapshot` 单消息发布，消费者按 `publication_sequence`、`source_generation`、`localization_epoch` 与 steady-clock 租约判断新鲜度，旧 epoch 与迟到数据丢弃 |
 | fallback | map unready/stale、无路、unsafe trajectory、MPC 失败均输出确定性零速度 |
 | map（建图模式，目标要求） | 全局静态层固定 40×30 m、0.1 m、原点为建图起点；12×12 m 计算窗口不是地图存储；超出全局范围的观测计数丢弃并记录，不静默丢弃 |
 
@@ -164,11 +164,11 @@ generation 的证据建议区分 `ROGMap source generation`、adapter publicatio
 
 P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 
-- P2 有效参数建议落在受版本控制且由实际 launch 加载的 `ats_rog_map/config/rog_map_ground_planning_mujoco.yaml` 与 `ats_rog_map_adapter/config/rog_map_ground_planning.yaml`；高度带建议排除有运行证据的地面回波，同时保留墙体和低矮障碍的 terrain 语义；
-- `planning_grid_owner` 的取值范围为 `rc_esdf|rog_map`；`rog_map` 对应启动 adapter 并抑制 `rc_esdf_map`，`rc_esdf` 对应相反选择；显式 arbiter 完成前，默认不做运行中热切换；
+- P2 有效参数建议落在受版本控制且由实际 launch 加载的 `ats_rog_map/config/rog_map_ground_planning_mujoco.yaml` 与 `ats_rog_map/config/rog_map_ground_planning.yaml`（adapter 已并入 `ats_rog_map`，原 `ats_rog_map_adapter` 包不再是活动构建输入）；高度带建议排除有运行证据的地面回波，同时保留墙体和低矮障碍的 terrain 语义；
+- 规划地图唯一所有者是 `ats_rog_map` 进程内的 adapter；`planning_grid_owner` 与 `rc_esdf_map` 的二选一入口已随 M3/M4 移除，`PLANNING_GRID_OWNER=rog_map` 仅作为测试脚本的兼容取值保留；
 - `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 非空；
-- adapter 直接消费 ROGMap 数值服务，不订阅 `/rog_map/esdf`；
-- `/rc_esdf/planning_grid` publisher 数为 1 且 owner 为 adapter；
+- adapter 在进程内直接读取 ROGMap 数值状态，不订阅 `/rog_map/esdf`；
+- `/rog_map_adapter/planning_snapshot` publisher 数为 1 且 owner 为 adapter，`/rc_esdf/*` 话题不存在；
 - 任一有效来源 occupied 保持 occupied；任一新鲜来源的明确 free 可消解其他来源 unknown；所有来源均无 free/occupied 证据时输出最终 unknown，并默认按障碍处理（建图模式例外见 6.4）；静态细栅格到 planning grid 优先按输出 footprint 保守聚合；真值表、非整除分辨率、平移 origin 与 yaw 建议由单测锁定；
 - ROGMap 投影几何范围只定义其数据范围；范围外和 terrain/slope 的 `-1` 都表示缺少该来源证据，建议避免凭空覆盖另一来源的明确 free；
 - static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。完成带 yaw 的 `0.70 x 0.55 m + margin` 定向矩形栅格化及边界测试后，可评估启用；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
@@ -177,8 +177,8 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 - `/cmd_vel_mpc` 只有一个 publisher，bridge 只有一个 subscriber；
 - `/motion_control` 只有一个 publisher，MuJoCo/底盘只有一个 subscriber；
 - map unready/stale、全 unknown、goal unreachable 时 `/planner/emergency_stop=true`，速度为零；unsafe trajectory 不进入发布链并保持或触发急停，未做专用运行注入时标为未验证门禁；
-- 名义路线固定 `P2_FAULT_CASE=none`；adapter lease、projection service timeout、Point-LIO input stale、真实 unknown cell 和 unreachable 目标建议使用新 `ROS_DOMAIN_ID` 与新 MuJoCo launch 分别注入，建议避免在一次仿真中串行污染机器人状态；
-- 使用 `SIGSTOP` 或输入中断分别注入 projection service 无响应、Point-LIO 输入 stale 和 adapter ready heartbeat 中断；建议在配置 deadline/lease 内观察 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`；恢复后 generation 继续递增，没有新目标时迟到 response、旧 generation 和急停前 reference 保持失效；
+- 名义路线固定 `P2_FAULT_CASE=none`；adapter lease、进程内 projection 超时（service_timeout）、Point-LIO input stale、真实 unknown cell 和 unreachable 目标建议使用新 `ROS_DOMAIN_ID` 与新 MuJoCo launch 分别注入，建议避免在一次仿真中串行污染机器人状态；
+- 使用 `SIGSTOP` 或输入中断分别注入进程内 projection 停滞、Point-LIO 输入 stale 和 adapter ready heartbeat 中断；建议在配置 deadline/lease 内观察 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`；恢复后 generation 继续递增，没有新目标时迟到 response、旧 generation 和急停前 reference 保持失效；
 - `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子顺序；P2 建议验证提交点重定时与恢复后旧轨迹不复活，并把结构化原子安全契约保留为后续加固项；
 - 成功到达时记录终点坐标、位置误差、MINCO 离散 footprint 冲突采样数、MuJoCo 物理接触评估结果、规划点数、reference 点数和失败/恢复次数；无独立 contact evaluator 时建议把物理接触写为“未验证”，建议避免由 `footprint_collisions=0` 推导物理碰撞为零。
 
@@ -223,7 +223,7 @@ P3 标记条件为同时满足以下各项：
 - 测试：无先验测试必须使用显式的 TEST_PROFILE。不得改变现有 profile 对 PGM 和 PCD 的要求。
 - 验收（MuJoCo `lio` 模式，无 PGM、无 PCD）：
   - 建图中导航到目标，终点真值误差 ≤ 0.08 m，离散 footprint 冲突采样数为 0。物理接触单独记为未验证，除非有独立接触评估；
-  - `/rc_esdf/planning_grid` 发布者数为 1，owner 为 adapter；
+  - `/rog_map_adapter/planning_snapshot` 发布者数为 1，owner 为 adapter；
   - 新障碍到规划器可见的延迟 p95 < 150 ms；
   - 地图修正前后不出现无法解释的跳变；
   - 保存地图与场景真值比对，报告漏检和误检格数；动态障碍不写入保存地图；
