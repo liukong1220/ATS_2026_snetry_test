@@ -399,6 +399,11 @@ def main():
     assert "global_plan_topic" not in minco
     assert minco["goal_request_topic"] == "/ats_goal_manager/planner_goal"
     assert minco["map_ready_topic"] == "/rog_map_adapter/ready"
+    # MINCO consumes the owner's numeric snapshot and refuses one whose blocking
+    # policy differs from its own, so the two parameter sets must agree.
+    assert minco["planning_snapshot_topic"] == adapter["planning_snapshot_topic"]
+    assert minco["obstacle_value_threshold"] == adapter["terrain_obstacle_value_threshold"]
+    assert minco["unknown_is_obstacle"] == adapter["unknown_is_obstacle"]
     assert minco["unknown_is_obstacle"] is True
     assert minco["publish_unsafe_trajectory"] is False
     assert minco["raw_path_topic"] == "minco/raw_path"

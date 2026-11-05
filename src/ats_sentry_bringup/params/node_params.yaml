@@ -933,6 +933,9 @@ ats_rog_map_adapter:
 minco_planner:
   ros__parameters:
     use_sim_time: false
+    # 规划输入是地图所有者的数值快照（占据 + 带符号距离场），规划器不再重算距离变换。
+    # grid_topic 只在 planning_snapshot_topic 为空时使用（离线 sandbox）。
+    planning_snapshot_topic: /rog_map_adapter/planning_snapshot
     grid_topic: /rc_esdf/planning_grid
     goal_topic: ""
     goal_request_topic: /ats_goal_manager/planner_goal
