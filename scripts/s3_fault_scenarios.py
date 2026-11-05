@@ -221,8 +221,21 @@ def dynamic_save(probe):
     marker = fixture_position(probe, site["world_position"])
     require(probe, lambda: any(v >= 50 for v in obstacle_region(
         probe.latest["/rog_map_adapter/planning_snapshot"][0], site)), 10, "physical dynamic obstacle visible")
-    require(probe, lambda: probe.sim_time() >= marker["sim_s"] + 7.0, 30,
-            "dynamic object exceeds unchanged 3 second promotion interval")
+    trace_last = [-1.0]
+
+    def promoted_and_traced():
+        # Per-second region values of the planning snapshot and the odom layer, to
+        # show whether the fixture cells flicker before the save eligibility check.
+        now = probe.sim_time()
+        if now - trace_last[0] >= 1.0:
+            trace_last[0] = now
+            probe.event("dynamic_region_trace", {
+                "sim_s": now,
+                "planning": [int(v) for v in obstacle_region(probe.latest["/rog_map_adapter/planning_snapshot"][0], site)],
+                "odom_layer": [int(v) for v in obstacle_region(probe.latest["/rog_map/odom_layer"][0], site)]})
+        return now >= marker["sim_s"] + 7.0
+
+    require(probe, promoted_and_traced, 30, "dynamic object exceeds unchanged 3 second promotion interval")
     before = probe.save_map("before_dynamic_removal")
 
     initial = saved_fixture_counts(probe.directory / "before_dynamic_removal", site["world_position"])

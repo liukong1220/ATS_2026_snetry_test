@@ -199,6 +199,8 @@ class Probe:
             (RelocalizationObservation, "/relocalization_observation", 10, None),
             (PlanningMapSnapshot, PLANNING_SNAPSHOT_TOPIC, durable, None),
             (OccupancyGrid, "/rog_map/odom_layer", durable, None),
+            (OccupancyGrid, "/traversability_grid", 10, None),
+            (OccupancyGrid, "/traversability_slope_grid", 10, None),
             (PlanningMapStatus, "/rog_map_adapter/status", durable, None),
             (Bool, "/rog_map_adapter/ready", durable, None),
             (Bool, "/planner/emergency_stop", durable, None),
@@ -298,6 +300,18 @@ class Probe:
     def on_planner_status(self, msg):
         self.planner_statuses.append(msg)
         self.event("planner_status", self.message_dict(msg))
+        if msg.state == msg.STATE_REFERENCE_READY and msg.gate_collision_count > 0:
+            # Keep the exact grid the committed reference was gated on, plus the
+            # reference and pose, so a READY collision can be traced afterwards.
+            name = f"collision_g{msg.goal_id}_s{msg.plan_request_sequence}"
+            self.save_grid(name, ('/rog_map_adapter/planning_snapshot', '/rog_map/odom_layer',
+                                  '/traversability_grid', '/traversability_slope_grid'))
+            reference = self.latest.get("/minco/reference_path")
+            pose = self.latest.get("/localization")
+            (self.directory / f"{name}_context.json").write_text(json.dumps({
+                "indices": msg.gate_collision_indices,
+                "reference": self.message_dict(reference[0]) if reference else None,
+                "localization": self.message_dict(pose[0]) if pose else None}) + "\n")
 
     def on_execution(self, msg):
         if msg.mode == msg.MODE_EXECUTE:
@@ -380,9 +394,9 @@ class Probe:
         if response.result_code != NavigateToPose.Result.RESULT_SUCCEEDED or error > 0.08:
             raise RuntimeError(f"goal failed independent truth gate: {record}")
 
-    def save_grid(self, name):
+    def save_grid(self, name, topics=("/rog_map_adapter/planning_snapshot", "/rog_map/odom_layer")):
         import numpy as np
-        for topic in ("/rog_map_adapter/planning_snapshot", "/rog_map/odom_layer"):
+        for topic in topics:
             if topic not in self.latest:
                 continue
             grid = self.latest[topic][0]
