@@ -214,6 +214,28 @@ def single_display_for_topic(document, topic: str, context: str):
     return displays[0]
 
 
+RVIZ_DISPLAY_GROUPS = ("定位", "点云", "局部规划窗口", "距离场", "路径", "安全")
+CLEARANCE_CONTOURS_TOPIC = "/rog_map_adapter/viz/clearance_contours"
+
+
+def assert_rviz_groups_and_clearance_contours(document, context: str):
+    top_level = [
+        display.get("Name")
+        for display in document["Visualization Manager"]["Displays"]
+        if display.get("Class") == "rviz_common/Group"
+    ]
+    for group in RVIZ_DISPLAY_GROUPS:
+        assert group in top_level, f"{context} missing top-level display group {group!r}"
+    assert [name for name in top_level if name in RVIZ_DISPLAY_GROUPS] == list(RVIZ_DISPLAY_GROUPS), (
+        f"{context} display groups must be ordered {RVIZ_DISPLAY_GROUPS}"
+    )
+    contours = displays_for_topic(document, CLEARANCE_CONTOURS_TOPIC)
+    assert len(contours) == 1, f"{context} must have exactly one {CLEARANCE_CONTOURS_TOPIC} display"
+    assert contours[0]["Class"] == "rviz_default_plugins/MarkerArray", (
+        f"{context} clearance contours must be a MarkerArray display"
+    )
+
+
 def assert_navigation_rviz_contract(
     document, fixed_frame: str, context: str, path_style_overrides=None,
     allow_rog_map_voxel_topics: bool = False,
@@ -807,6 +829,7 @@ def main():
     assert_esdf_cloud_display(rviz, "default RViz")
     assert_no_removed_rc_esdf_topics(rviz, "default RViz")
     assert_robot_model_display(rviz, "robot_description", "default RViz")
+    assert_rviz_groups_and_clearance_contours(rviz, "default RViz")
     rviz_text = (
         workspace / "src/ats_sentry_bringup/rviz/sentry_default_view.rviz"
     ).read_text(encoding="utf-8")
@@ -830,6 +853,7 @@ def main():
     # The vehicle shape comes from robot_state_publisher (ats_mujoco_sim/robot_description.py).
     assert_robot_model_display(mujoco_rviz, "robot_description", "MuJoCo RViz")
     assert_esdf_cloud_display(mujoco_rviz, "MuJoCo RViz")
+    assert_rviz_groups_and_clearance_contours(mujoco_rviz, "MuJoCo RViz")
     mujoco_rviz_text = mujoco_rviz_path.read_text(encoding="utf-8")
     localization_displays = displays_for_topic(mujoco_rviz, "/localization")
     assert len(localization_displays) == 1, "MuJoCo RViz must have one localization display"
