@@ -435,7 +435,9 @@ def run(args):
         parameters["minco_planner"]["ros__parameters"]["map_commit_trace_enabled"] = True
         parameters["ats_rog_map"]["ros__parameters"]["map_update_trace_enabled"] = True
     extra, scene = prepare_scene(profile, directory, fixture=fixture_case, barrier=args.case == "no_path")
-    if args.case == "unknown":
+    # service_timeout stalls the in-process projection through a guarded test
+    # parameter, so it needs the same startup authorization as unknown.
+    if args.case in ("unknown", "service_timeout"):
         extra.append("enable_test_fault_injection:=true")
     parameter_path = directory / "params.yaml"
     parameter_path.write_text(yaml.safe_dump(parameters, sort_keys=False))

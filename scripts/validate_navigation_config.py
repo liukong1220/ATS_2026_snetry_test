@@ -390,7 +390,8 @@ def main():
     assert rog_map["core.raycasting.p_miss"] == 0.30
     assert rog_map["core.map_size"] == [10.0, 10.0, 1.0]
     assert "map_config_file" not in rog_map
-    assert adapter["projection_service"] == "/rog_map/get_ground_projection"
+    # M3: the projection is an in-process call; no service name is configurable.
+    assert "projection_service" not in adapter
     assert adapter["planning_grid_topic"] == "/rc_esdf/planning_grid"
     assert adapter["unknown_is_obstacle"] is True
     assert adapter["require_localization_status"] is True
@@ -507,7 +508,9 @@ def main():
     ):
         assert forbidden not in root_text, f"formal root launch retains {forbidden}"
     assert 'executable="ats_rog_map_node"' in root_text
-    assert 'executable="ats_rog_map_adapter_node"' in root_text
+    # The planning-map owner runs inside ats_rog_map_node (M3).
+    assert "ats_rog_map_adapter_node" not in root_text
+    assert 'package="ats_rog_map_adapter"' not in root_text
     assert "rog_map_params_file" not in root_text
     assert "rog_map_adapter_params_file" not in root_text
     assert "parameters=[params_file" in root_text

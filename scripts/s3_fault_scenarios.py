@@ -260,7 +260,7 @@ def sustained_zero(samples, after, duration, tolerance=1e-6):
 
 
 def owned_process(launch_pid, name):
-    if name not in ("ats_rog_map_node", "ats_rog_map_adapter_node", "small_gicp_relocalization_node"):
+    if name not in ("ats_rog_map_node", "small_gicp_relocalization_node"):
         raise ValueError("not an allowed S3 process fixture")
     domain = str(os.environ["ROS_DOMAIN_ID"])
     if domain == "77":
@@ -529,13 +529,16 @@ def safety_case(case, probe, launch):
                 abs(probe.latest["/cmd_vel/selected"][0].linear.x) > 0.05,
                 25, "active execution before safety injection")
         fault_at = time.monotonic()
-    paused = None
+    stalled = False
     status_begin = len(probe.planner_statuses)
     try:
         if case == "service_timeout":
-            paused, command = owned_process(launch.pid, "ats_rog_map_node")
-            probe.event("stop_projection_process", {"pid": paused, "command": command})
-            os.kill(paused, signal.SIGSTOP)
+            # The projection runs in-process now. Stopping ats_rog_map_node would
+            # also stop the planning publisher (that is the adapter-lease fault);
+            # this stalls only the projection so the request deadline fires.
+            set_parameters(probe, "/ats_rog_map_adapter", {"test_stall_projection": True})
+            stalled = True
+            probe.event("stall_projection", {"node": "/ats_rog_map_adapter"})
         elif case == "unknown":
             set_parameters(probe, "/ats_rog_map_adapter", {"test_mask_secondary_evidence": True})
             set_parameters(probe, "/ats_rog_map", {"test_reset_to_unknown": True})
@@ -570,8 +573,8 @@ def safety_case(case, probe, launch):
     finally:
         cancel = handle.cancel_goal_async()
         require(probe, cancel.done, 5, "cancel faulted goal")
-        if paused is not None:
-            os.kill(paused, signal.SIGCONT)
+        if stalled:
+            set_parameters(probe, "/ats_rog_map_adapter", {"test_stall_projection": False})
 
 
 def belongs_to(pid, ancestor):

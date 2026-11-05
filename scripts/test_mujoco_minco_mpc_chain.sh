@@ -51,15 +51,11 @@ check_runtime_binary_freshness() {
       "${WORKSPACE_DIR}/build/ats_rog_map/ats_rog_map_node" \
       "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map" \
       "${WORKSPACE_DIR}/build/ats_rog_map/ats_rog_map_node"
-    runtime_binary_is_fresh ats_rog_map_adapter \
-      "${WORKSPACE_DIR}/build/ats_rog_map_adapter/ats_rog_map_adapter_node" \
-      "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rog_map_adapter" \
-      "${WORKSPACE_DIR}/build/ats_rog_map_adapter/ats_rog_map_adapter_node"
     linked_library_is_propagated ats_rc_esdf \
       "${WORKSPACE_DIR}/build/ats_rc_esdf/libats_rc_esdf.a" \
       "${WORKSPACE_DIR}/src/ats_sentry_nav/ats_rc_esdf" \
       "${WORKSPACE_DIR}/build/minco_planner/libminco_planner.so" \
-      "${WORKSPACE_DIR}/build/ats_rog_map_adapter/ats_rog_map_adapter_node"
+      "${WORKSPACE_DIR}/build/ats_rog_map/ats_rog_map_node"
   } 2>&1)"
   printf 'critical_runtime_binary_freshness:\n%s\n' "${freshness}"
   if printf '%s\n' "${freshness}" | \
@@ -998,13 +994,11 @@ verify_rog_map_planning_interface() {
   if grep -q '^/rc_esdf_map$' <<<"${node_list}"; then
     fail "rc_esdf_map must not run while ROGMap owns the planning grid"
   fi
-  wait_for_command "ROGMap numeric projection client" 30 \
-    node_exposes_endpoint /ats_rog_map_adapter /rog_map/get_ground_projection
-  # Discovery can briefly lose a node between the presence and endpoint checks
-  # under the CPU-heavy MuJoCo/ROGMap startup.  Retry the same bounded query
-  # instead of treating that DDS window as an adapter contract failure.
-  wait_for_command "ROGMap adapter node info" 30 \
-    node_exposes_endpoint /ats_rog_map_adapter /rog_map/get_ground_projection
+  # M3: the adapter runs inside ats_rog_map_node and calls the projection
+  # in-process; the former projection service must not come back.
+  if timeout 6 ros2 service list --no-daemon 2>/dev/null | grep -q '^/rog_map/get_ground_projection$'; then
+    fail "/rog_map/get_ground_projection must not exist; the projection is in-process"
+  fi
   node_info=""
   local node_info_deadline=$((SECONDS + 30))
   while (( SECONDS < node_info_deadline )); do
@@ -1016,41 +1010,38 @@ verify_rog_map_planning_interface() {
   if grep -q '/rog_map/esdf' <<<"${node_info}"; then
     fail "ats_rog_map_adapter must not subscribe to the ROGMap visualization ESDF cloud"
   fi
-  echo "OK: adapter consumes the numeric projection service without /rog_map/esdf subscription"
+  echo "OK: adapter consumes the in-process numeric projection without /rog_map/esdf subscription"
 
   generation="$(read_positive_topic_field /rog_map_adapter/generation data 30)" || \
     fail "cannot read ROGMap adapter generation"
   wait_for_generation_advance "${generation}" 30
 }
 
-# 数值投影一律经由结构化客户端读取，绝不再用文本 awk 扫描 `-1`：一个
-# 局部未知的栅格里也会出现 `-1`，把它当成 all-unknown 就是假阳性。
-query_rog_projection() {
-  local output_file="$1"
-  shift
-  timeout 20 python3 "${WORKSPACE_DIR}/scripts/query_rog_projection.py" \
-    --service /rog_map/get_ground_projection \
-    --min-height 0.1 --max-height 0.8 --resolution 0.1 --timeout 12 \
-    "$@" >"${output_file}" 2>&1
-}
-
+# ROGMap 数值投影的 source generation：adapter 每次处理投影都把它写进
+# /rog_map_adapter/status.rog_generation（ready=false 心跳也一样）。
 read_rog_numeric_projection_generation() {
-  local output_file="${1:-/tmp/ats_p2_rog_numeric_projection.out}"
-  query_rog_projection "${output_file}" --mode generation || return 1
-  awk '{for (i = 1; i <= NF; i++) if ($i ~ /^generation=[0-9]+$/) {sub(/^generation=/, "", $i); print $i; exit}}' \
-    "${output_file}" | grep -E '^[0-9]+$'
+  read_positive_topic_field /rog_map_adapter/status rog_generation 10
 }
 
-# 严格 all-unknown：结构合法（ready/stale/frame/stamp/resolution/尺寸/数组
-# 长度一致）、每个 cell 恰为 -1、数值数组全 NaN，且 generation 必须超过故障
-# 前基线。混合 free/occupied 会被显式拒绝并给出计数。
+# 严格 all-unknown：在 enable_test_fault_injection 下，adapter 对每次原始投影
+# （融合与遮蔽之前）跑同一个结构化判据并打印
+# "P2 rog numeric projection structurally_valid=. all_unknown=. ... generation=N"：
+# ready/stale/frame/stamp/resolution/尺寸/数组长度一致、每个 cell 恰为 -1、数值
+# 数组全 NaN。这里只接受 generation 超过故障前基线的那一行，混合 free/occupied
+# 的行带计数留在日志里。不在文本里扫描 `-1`。
 read_rog_numeric_unknown_generation() {
   local output_file="${1:-/tmp/ats_p2_rog_numeric_unknown.out}"
   local baseline="${2:--1}"
-  query_rog_projection "${output_file}" --mode all-unknown \
-    --baseline-generation "${baseline}" || return 1
-  awk '{for (i = 1; i <= NF; i++) if ($i ~ /^generation=[0-9]+$/) {sub(/^generation=/, "", $i); print $i; exit}}' \
-    "${output_file}" | grep -E '^[0-9]+$'
+  grep -a 'P2 rog numeric projection ' "${LAUNCH_LOG}" | tail -n 200 >"${output_file}" || true
+  awk -v baseline="${baseline}" '
+    / structurally_valid=1 all_unknown=1 / {
+      for (i = 1; i <= NF; i++) if ($i ~ /^generation=[0-9]+$/) {
+        value = substr($i, 12)
+        if (value + 0 > baseline + 0) {found = value}
+      }
+    }
+    END {if (found == "") exit 1; print found}
+  ' "${output_file}"
 }
 
 wait_for_rog_numeric_unknown() {
@@ -1660,8 +1651,10 @@ run_p2_fault_injection() {
 
   case "${fault_case}" in
     adapter_lease)
-      process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_rog_map_adapter_node' | head -n 1 || true)"
-      [[ -n "${process_pid}" ]] || fail "cannot locate adapter process for fault injection"
+      # The adapter lives in ats_rog_map_node (M3); stopping that process stops
+      # its ready heartbeat, and MINCO's map lease must fail closed.
+      process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_rog_map/ats_rog_map_node' | head -n 1 || true)"
+      [[ -n "${process_pid}" ]] || fail "cannot locate ROGMap/adapter process for fault injection"
       publish_relative_fault_goal adapter_lease
       baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
         fail "cannot read generation before adapter lease fault"
@@ -1677,14 +1670,16 @@ run_p2_fault_injection() {
       capture_zero_outputs adapter_lease_recovery
       ;;
     service_timeout)
-      process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_rog_map_node' | head -n 1 || true)"
-      [[ -n "${process_pid}" ]] || fail "cannot locate ROGMap process for fault injection"
+      # In-process equivalent of an unanswered projection service: the guarded
+      # test_stall_projection parameter holds the projection worker, so the
+      # adapter's request deadline fires while the map node keeps running.
       publish_relative_fault_goal service_timeout
       baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
         fail "cannot read generation before service timeout"
       log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
-      kill -STOP "${process_pid}" || fail "cannot pause ROGMap process"
-      STOPPED_PIDS+=("${process_pid}")
+      timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_stall_projection true \
+        >/tmp/ats_p2_fault_service_timeout_stall.out 2>&1 || \
+        fail "cannot stall the in-process ROGMap projection"
       wait_for_command "ROGMap service timeout publishes adapter not-ready" 10 \
         topic_field_equals /rog_map_adapter/ready data false
       wait_for_command "ROGMap service timeout is logged" 6 \
@@ -1692,7 +1687,9 @@ run_p2_fault_injection() {
       wait_for_command "ROGMap service timeout triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
       capture_zero_outputs service_timeout
-      resume_process "${process_pid}" ROGMap
+      timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_stall_projection false \
+        >/tmp/ats_p2_fault_service_timeout_resume.out 2>&1 || \
+        fail "cannot release the in-process ROGMap projection stall"
       wait_for_command "ROGMap service recovers adapter ready" 15 \
         topic_field_equals /rog_map_adapter/ready data true
       wait_for_generation_advance "${baseline}" 15
@@ -2830,13 +2827,13 @@ if [[ -n "${EXTRA_LAUNCH_ARGS:-}" ]]; then
   echo "NOTE: extra launch arguments: ${EXTRA_LAUNCH_ARGS}"
 fi
 
-# 测试故障注入授权门禁默认关闭。只有隔离的 P2_FAULT_CASE=unknown 运行才显式
-# 打开它；nominal、其它故障用例、真车配置与默认 launch 一律保持 false，
-# 因此未授权的 test_reset_to_unknown / test_mask_secondary_evidence 请求会被
-# 节点显式拒绝，不会静默清图。
-if [[ "${P2_FAULT_CASE}" == "unknown" ]]; then
+# 测试故障注入授权门禁默认关闭。只有隔离的 P2_FAULT_CASE=unknown 与
+# service_timeout 运行才显式打开它；nominal、其它故障用例、真车配置与默认 launch
+# 一律保持 false，因此未授权的 test_reset_to_unknown / test_mask_secondary_evidence
+# / test_stall_projection 请求会被节点显式拒绝，不会静默清图或停投影。
+if [[ "${P2_FAULT_CASE}" == "unknown" || "${P2_FAULT_CASE}" == "service_timeout" ]]; then
   LAUNCH_ARGS+=(enable_test_fault_injection:=true)
-  echo "NOTE: P2_FAULT_CASE=unknown explicitly authorizes test fault injection"
+  echo "NOTE: P2_FAULT_CASE=${P2_FAULT_CASE} explicitly authorizes test fault injection"
 else
   LAUNCH_ARGS+=(enable_test_fault_injection:=false)
 fi
