@@ -143,8 +143,8 @@ ats_sentry_behavior_server:
         resupply_exit_ammo: 100
         require_valid_ammo_before_resupply: true
       inputs:
-        planning_grid:
-          topic: /rc_esdf/planning_grid
+        planning_snapshot:
+          topic: /rog_map_adapter/planning_snapshot
           qos_depth: 1
           qos_reliable: true
           qos_transient_local: true
@@ -888,9 +888,10 @@ ats_rog_map_adapter:
     static_map_topic: /map
     traversability_grid_topic: /traversability_grid
     traversability_slope_grid_topic: /traversability_slope_grid
-    planning_grid_topic: /rc_esdf/planning_grid
-    signed_distance_grid_topic: /rc_esdf/signed_distance_grid
-    footprint_clearance_grid_topic: /rc_esdf/footprint_clearance_grid
+    # 只给 RViz 的 snapshot 占据视图，有订阅者时才编码；规划与安全链只读 planning_snapshot。
+    planning_grid_viz_topic: /rog_map_adapter/viz/planning_grid
+    # 同一快照的彩色距离点云（RViz），同样只在有订阅者时编码。
+    esdf_cloud_topic: /rog_map_adapter/viz/esdf_cloud
     ready_topic: /rog_map_adapter/ready
     generation_topic: /rog_map_adapter/generation
     map_status_topic: /rog_map_adapter/status
@@ -933,9 +934,7 @@ minco_planner:
   ros__parameters:
     use_sim_time: false
     # 规划输入是地图所有者的数值快照（占据 + 带符号距离场），规划器不再重算距离变换。
-    # grid_topic 只在 planning_snapshot_topic 为空时使用（离线 sandbox）。
     planning_snapshot_topic: /rog_map_adapter/planning_snapshot
-    grid_topic: /rc_esdf/planning_grid
     goal_topic: ""
     goal_request_topic: /ats_goal_manager/planner_goal
     planner_status_topic: /minco/planning_status

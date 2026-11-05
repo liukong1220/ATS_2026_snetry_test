@@ -51,19 +51,27 @@ Visualization Manager:
       Show Axes: true
       Show Names: false
       Value: false
-    - Alpha: 0.62
-      Class: rviz_default_plugins/Map
-      Color Scheme: costmap
-      Draw Behind: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: rviz_default_plugins/PointCloud2
+      Color Transformer: RGB8
+      Decay Time: 0
       Enabled: true
-      Name: Global Fused RC-ESDF (ROGMap + Static + Terrain)
+      Name: 'ESDF Cloud: Magenta Obstacle / Orange Footprint Band / Green Clearance / Violet Terrain'
+      # Signed distance of the planning snapshot that JPS/MINCO use; encoded only while subscribed.
+      Position Transformer: XYZ
+      Selectable: false
+      Size (Pixels): 3
+      Size (m): 0.1
+      Style: Boxes
       Topic:
         Depth: 1
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /rc_esdf/signed_distance_grid
-      Use Timestamp: false
+        Value: /rog_map_adapter/viz/esdf_cloud
+      Use Fixed Frame: true
+      Use rainbow: false
       Value: true
     - Alpha: 0.7
       Class: rviz_default_plugins/Map
@@ -76,7 +84,7 @@ Visualization Manager:
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /rc_esdf/planning_grid
+        Value: /rog_map_adapter/viz/planning_grid
       Use Timestamp: false
       Value: false
     - Alpha: 0.3
