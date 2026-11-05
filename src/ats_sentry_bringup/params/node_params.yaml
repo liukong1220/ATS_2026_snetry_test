@@ -908,7 +908,10 @@ ats_rog_map_adapter:
     # global layer feeds the planning grid (S3).  A missing PGM fails closed
     # unless allow_missing_static_map is true (mapping mode only).
     use_static_map_obstacles: true
-    output_in_projection_frame: true
+    # 比赛模式：规划栅格沿用静态图的范围与坐标系，覆盖全场。设为 true 会把栅格缩到
+    # ROGMap 投影窗口（10x10 m），全场目标落在栅格外（domain 154 红框 "goal is outside
+    # grid"）。建图模式由 adapter 强制为 true（odom 全局层就是规划范围）。
+    output_in_projection_frame: false
     allow_missing_static_map: false
     input_timeout_sec: 2.0
     signed_distance_max_m: 2.0
