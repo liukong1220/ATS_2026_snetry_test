@@ -16,7 +16,6 @@
   <exec_depend>ats_nav_bringup</exec_depend>
   <exec_depend>ats_rog_map</exec_depend>
   <!-- bringup.launch.py 直接启动 adapter 节点并从这些包的 share 目录取权威参数文件。 -->
-  <exec_depend>ats_rog_map_adapter</exec_depend>
   <exec_depend>minco_planner</exec_depend>
   <exec_depend>ats_goal_manager</exec_depend>
   <exec_depend>ats_swerve_mpc</exec_depend>

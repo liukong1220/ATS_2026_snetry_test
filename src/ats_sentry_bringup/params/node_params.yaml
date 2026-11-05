@@ -870,7 +870,6 @@ ats_rog_map:
 ats_rog_map_adapter:
   ros__parameters:
     use_sim_time: false
-    projection_service: /rog_map/get_ground_projection
     # The 100 x 100 x 7 numerical projection takes 0.9--3.2 s in the
     # MuJoCo CPU profile.  Do not queue another request while its immutable
     # snapshot is still being built; the service's own 2.0 s input-health

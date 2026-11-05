@@ -162,28 +162,24 @@ def generate_launch_description():
         condition=IfCondition(require_gimbal_status), output="screen", respawn=use_respawn, respawn_delay=2.0,
         parameters=[params_file, {"use_sim_time": use_sim_time}], arguments=["--ros-args", "--log-level", log_level],
     )
+    # One process runs /ats_rog_map and the planning-map owner /ats_rog_map_adapter
+    # (in-process projection). Without `name=` the override dict lands under '/**'
+    # so both nodes receive it; the shared key require_odom_identity means the same
+    # in both, and YAML sections stay keyed by node name.
     rog_map = Node(
-        package="ats_rog_map", executable="ats_rog_map_node", name="ats_rog_map", namespace=namespace,
+        package="ats_rog_map", executable="ats_rog_map_node", namespace=namespace,
         output="screen", respawn=use_respawn, respawn_delay=2.0,
         parameters=[params_file, {
             "use_sim_time": use_sim_time,
             "require_odom_identity": ParameterValue(use_identified_odometry, value_type=bool),
-        }],
-        arguments=["--ros-args", "--log-level", log_level],
-    )
-    rog_map_adapter = Node(
-        package="ats_rog_map_adapter", executable="ats_rog_map_adapter_node", name="ats_rog_map_adapter", namespace=namespace,
-        output="screen", respawn=use_respawn, respawn_delay=2.0,
-        parameters=[params_file, {
-            "use_sim_time": use_sim_time,
             "require_localization_status": launch_localization_fusion,
             "mapping_mode": ParameterValue(slam, value_type=bool),
-            "require_odom_identity": ParameterValue(use_identified_odometry, value_type=bool),
             "allow_missing_static_map": ParameterValue(slam, value_type=bool),
             "robot_unknown_clear_footprint": ParameterValue(slam, value_type=bool),
             "use_static_map_obstacles": ParameterValue(
                 PythonExpression(["'", slam, "'.lower() != 'true'"]), value_type=bool),
-        }], arguments=["--ros-args", "--log-level", log_level],
+        }],
+        arguments=["--ros-args", "--log-level", log_level],
     )
     navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(navigation_bringup_dir, "launch", "rm_navigation_reality_launch.py")),
@@ -240,7 +236,7 @@ def generate_launch_description():
     for declaration in declarations:
         ld.add_action(declaration)
     ld.add_action(prior_preflight)
-    for action in (serial_driver, lidar_static_tf, gimbal_status_bridge, rog_map, rog_map_adapter,
+    for action in (serial_driver, lidar_static_tf, gimbal_status_bridge, rog_map,
                    navigation, behavior, rviz, rosbag):
         ld.add_action(action)
     return ld
