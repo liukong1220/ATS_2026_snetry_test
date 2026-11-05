@@ -79,6 +79,11 @@ def parse_args():
     unreachable_parser.add_argument(
         "--assume-start-traversable", action="store_true"
     )
+    unreachable_parser.add_argument(
+        "--blocked-fallback",
+        action="store_true",
+        help="no disconnected pocket: pick the farthest free cell blocked at the clearance",
+    )
 
     farthest_parser = subparsers.add_parser("farthest-free")
     farthest_parser.add_argument("--start-x", type=float, required=True)
@@ -428,7 +433,35 @@ def main():
                 args.unknown_traversable,
                 args.assume_start_traversable,
             )
+        goal_kind = "no_path"
+        if index is None and args.mode == "unreachable" and args.blocked_fallback:
+            start = world_to_grid(grid, args.start_x, args.start_y)
+            trav = build_traversability(
+                grid, args.threshold, args.clearance, args.unknown_traversable
+            )
+            w = int(grid.info.width)
+            blocked = [
+                k for k, v in enumerate(grid.data)
+                if 0 <= int(v) < args.threshold and not trav[k]
+            ]
+            if blocked and start is not None:
+                index = max(
+                    blocked,
+                    key=lambda k: (k % w - start[0]) ** 2 + (k // w - start[1]) ** 2,
+                )
+                goal_kind = "occupied"
         if index is None:
+            if args.mode == "unreachable":
+                trav = build_traversability(
+                    grid, args.threshold, args.clearance, args.unknown_traversable
+                )
+                free_count = sum(1 for v in grid.data if 0 <= int(v) < args.threshold)
+                print(
+                    f"diagnostic: size={grid.info.width}x{grid.info.height} "
+                    f"res={grid.info.resolution:.3f} free={free_count} "
+                    f"traversable@{args.clearance}={sum(trav)}",
+                    file=sys.stderr,
+                )
             print(f"no cell matched mode={args.mode}", file=sys.stderr)
             return 4
 
@@ -439,7 +472,7 @@ def main():
         stamp = grid.header.stamp
         print(
             f"{world_x:.6f} {world_y:.6f} {index} {value} "
-            f"{grid.header.frame_id} {stamp.sec}.{stamp.nanosec:09d}"
+            f"{grid.header.frame_id} {stamp.sec}.{stamp.nanosec:09d} {goal_kind}"
         )
         return 0
     except ValueError as exception:

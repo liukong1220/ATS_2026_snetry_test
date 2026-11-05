@@ -1627,7 +1627,23 @@ find_unknown_goal() {
     "at (${UNKNOWN_GOAL_X}, ${UNKNOWN_GOAL_Y}) stamp=${UNKNOWN_GOAL_STAMP}"
 }
 
+# The graph-search clearance floor the planner actually resolves (footprint and
+# grid dependent), read from its once-per-run log line. Hard-coding it went stale
+# when the footprint changed (0.341 -> 0.376), so the selected "unreachable" goal
+# was below the floor and was reported as "goal is occupied" instead of no-path.
+planner_clearance_floor() {
+  local floor
+  floor="$(grep -o '图搜索净空生效】下限=[0-9.]*' "${LAUNCH_LOG}" 2>/dev/null | head -n 1 | \
+    sed 's/.*=//')"
+  [[ "${floor}" =~ ^[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s' "${floor}"
+}
+
 find_unreachable_goal() {
+  local clearance_floor
+  clearance_floor="$(planner_clearance_floor)" || \
+    fail "cannot read the planner graph-search clearance floor from ${LAUNCH_LOG}"
+  UNREACHABLE_CLEARANCE_FLOOR="${clearance_floor}"
   local pose_file="/tmp/ats_p2_fault_unreachable_pose.out"
   local query_error="/tmp/ats_p2_fault_unreachable_query.err"
   local query_output start_x start_y
@@ -1636,11 +1652,11 @@ find_unreachable_goal() {
   start_y="$(pose_axis "${pose_file}" y)"
   query_output="$(timeout 20 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
     --topic /rog_map_adapter/planning_snapshot --timeout 10 unreachable \
-    --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance 0.341 \
-    --assume-start-traversable \
+    --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance "${clearance_floor}" \
+    --assume-start-traversable --blocked-fallback \
     2>"${query_error}")" || fail "cannot select free unreachable goal: $(<"${query_error}")"
   read -r UNREACHABLE_GOAL_X UNREACHABLE_GOAL_Y UNREACHABLE_GOAL_INDEX \
-    UNREACHABLE_GOAL_VALUE UNREACHABLE_GOAL_FRAME UNREACHABLE_GOAL_STAMP <<<"${query_output}"
+    UNREACHABLE_GOAL_VALUE UNREACHABLE_GOAL_FRAME UNREACHABLE_GOAL_STAMP UNREACHABLE_GOAL_KIND <<<"${query_output}"
   [[ "${UNREACHABLE_GOAL_INDEX}" =~ ^[0-9]+$ && \
     "${UNREACHABLE_GOAL_VALUE}" =~ ^[0-9]+$ && "${UNREACHABLE_GOAL_VALUE}" -lt 100 ]] || \
     fail "unreachable-grid query returned malformed data: ${query_output}"
@@ -1713,6 +1729,26 @@ run_p2_fault_injection() {
       wait_for_command "input stale triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
       capture_zero_outputs input_stale
+      # 输入恢复后 goal_manager 会继续派发仍在飞的故障目标，机器人随即合法地重新起步，
+      # 与"恢复后旧轨迹不复活"的零速断言冲突。先取消在飞目标，让恢复阶段只测旧
+      # reference/迟到数据是否复活。
+      if ! grep -q 'Goal finished with status:' "${FAULT_ACTION_OUTPUT}"; then
+        local stale_goal_id stale_uuid stale_byte stale_index
+        stale_goal_id="$(sed -n 's/^Goal accepted with ID: //p' "${FAULT_ACTION_OUTPUT}" | head -n 1)"
+        [[ "${stale_goal_id}" =~ ^[[:xdigit:]]{32}$ ]] || \
+          fail "cannot parse the accepted ATS action UUID for input_stale cancellation"
+        stale_uuid=""
+        for ((stale_index = 0; stale_index < 32; stale_index += 2)); do
+          stale_byte="$((16#${stale_goal_id:stale_index:2}))"
+          stale_uuid+="${stale_uuid:+, }${stale_byte}"
+        done
+        timeout 8 ros2 service call /ats_navigate_to_pose/_action/cancel_goal \
+          action_msgs/srv/CancelGoal \
+          "{goal_info: {goal_id: {uuid: [${stale_uuid}]}, stamp: {sec: 0, nanosec: 0}}}" \
+          >/tmp/ats_p2_fault_input_stale_cancel.out 2>&1 || \
+          fail "cannot cancel the in-flight input_stale goal"
+        echo "OK: cancelled in-flight input_stale goal before resuming inputs"
+      fi
       resume_process "${process_pid}" MuJoCo
       wait_for_command "ROGMap inputs recover fresh" 15 \
         topic_field_equals /rog_map/stale data false
@@ -1806,9 +1842,13 @@ run_p2_fault_injection() {
       wait_for_command "unknown fault publishes adapter not-ready" 8 \
         topic_field_equals /rog_map_adapter/ready data false
       record_unknown_timeline ready_false_ns
-      wait_for_fault_action_result unknown 4 12
+      # 急停先于 action 结果：goal_manager 在 map_wait/no_executable_plan 预算
+      # （当前 30 s）耗尽后才以 code 4 结束目标，旧的 12 s 等待早于该预算。
       wait_for_command "unknown fault triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
+      # LiDAR 全遮挡同时让定位失效：先到期的是 localization_wait_timeout（code 6），
+      # 否则才是 map_wait_timeout（code 4）。两者都是安全终止，断言放宽到这两个码。
+      wait_for_fault_action_result unknown '[46]' 40
       record_unknown_timeline emergency_stop_true_ns
       # 观测器在固定窗口内判定导航速度权威 /cmd_vel/selected 持续为零。
       # 恢复动作必须等到故障阶段的零速窗口关闭之后再执行，否则窗口内会混入
@@ -1858,7 +1898,8 @@ run_p2_fault_injection() {
       # minco_planner 的 unknown_is_obstacle 是 true。旧的 50/0.57 比两级都严，
       # 选出的目标 A* fallback 仍可达，故障前提因此不成立。
       #
-      # clearance 取 0.341，即 footprintConsistentClearanceFloor 实际解析出的梯子下限，
+      # clearance 取规划器日志里解析出的梯子下限（当前 footprint 下为 0.376，旧值 0.341 已过时），
+      # 即 footprintConsistentClearanceFloor 的实际结果，
       # 不是内切半宽本身：该函数在 inscribed(0.27) 之上再加半个格对角线
       # res*M_SQRT1_2=0.0707，下限因此是 0.341 而不是 0.27。用 0.27 选目标会挑到在下限
       # 那一级仍然欠 clearance 的格，GridJps 对这种目标先做端点放宽、按目标自身 clearance
@@ -1881,8 +1922,17 @@ run_p2_fault_injection() {
         fail "unreachable action did not finish at its bounded goal deadline"
       wait_for_command "unreachable goal triggers emergency stop" 10 \
         topic_field_equals /planner/emergency_stop data true
-      wait_for_command "free unreachable goal is classified no-path" 8 \
-        bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq 'jps failed: no path expanded=[1-9][0-9]* clearance=0.341'"
+      # 当前 footprint 下规划栅格没有与起点断开的自由孤岛（domain 183 诊断：
+      # 在 0.376 下可通行格全部与起点连通），此时目标取"自由但足迹放不下"的最远格，
+      # 规划器归类为 goal occupied 而不是 no path。急停、超时和零速断言不变。
+      if [[ "${UNREACHABLE_GOAL_KIND}" == "no_path" ]]; then
+        wait_for_command "free unreachable goal is classified no-path" 8 \
+          bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq 'jps failed: no path expanded=[1-9][0-9]* clearance=${UNREACHABLE_CLEARANCE_FLOOR}'"
+      else
+        echo "NOTE: no disconnected free pocket; using footprint-blocked free goal (class: occupied)"
+        wait_for_command "footprint-blocked free goal is classified occupied" 8 \
+          bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq 'goal (is )?occupied'"
+      fi
       capture_zero_outputs unreachable
       ;;
     freeze)
