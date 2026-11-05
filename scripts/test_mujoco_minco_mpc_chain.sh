@@ -2529,6 +2529,7 @@ start_nav_tracking_recorder() {
     --output-dir "${dir}" --rate-hz "${NAV_TRACKING_RATE_HZ}" \
     --startup-timeout-sec "${NAV_TRACKING_START_TIMEOUT}" \
     --grid-frame "${grid_frame}" \
+    --max-layer-payloads "${NAV_TRACKING_MAX_LAYER_PAYLOADS:-200}" \
     >"${dir}/recorder.out" 2>&1 &
   NAV_TRACKING_PID=$!
   CAPTURE_PIDS+=("${NAV_TRACKING_PID}")
