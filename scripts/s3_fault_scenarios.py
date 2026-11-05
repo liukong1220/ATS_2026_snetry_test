@@ -110,7 +110,7 @@ def obstacle_region(grid, site=None):
 
 
 def region_free(probe):
-    entry = probe.latest.get("/rc_esdf/planning_grid")
+    entry = probe.latest.get("/rog_map_adapter/planning_snapshot")
     if not entry:
         return False
     values = obstacle_region(entry[0], probe.fixture_site)
@@ -129,7 +129,7 @@ def prepare_fixture_site(probe):
             position = fixture_position_for_pose(
                 probe.scene_model, [truth.position.x, truth.position.y, yaw(truth.orientation) + offset], distance)
             site = fixture_site(position, probe.message_dict(transform.transform))
-            values = obstacle_region(probe.latest["/rc_esdf/planning_grid"][0], site)
+            values = obstacle_region(probe.latest["/rog_map_adapter/planning_snapshot"][0], site)
             candidates.append({"site": site, "values": values})
             if values and all(0 <= value < 50 for value in values):
                 site["map_from_odom"] = probe.message_dict(transform)
@@ -161,7 +161,7 @@ def obstacle_latency(probe):
         observed = {}
 
         def new_occupied():
-            for received, grid in probe.history.get("/rc_esdf/planning_grid", []):
+            for received, grid in probe.history.get("/rog_map_adapter/planning_snapshot", []):
                 if received < marker_s or not any(v >= 50 for v in obstacle_region(grid, site)):
                     continue
                 stamp_ns = grid.header.stamp.sec * 10**9 + grid.header.stamp.nanosec
@@ -220,7 +220,7 @@ def dynamic_save(probe):
     require(probe, lambda: region_free(probe), 30, "known-free dynamic obstacle site")
     marker = fixture_position(probe, site["world_position"])
     require(probe, lambda: any(v >= 50 for v in obstacle_region(
-        probe.latest["/rc_esdf/planning_grid"][0], site)), 10, "physical dynamic obstacle visible")
+        probe.latest["/rog_map_adapter/planning_snapshot"][0], site)), 10, "physical dynamic obstacle visible")
     require(probe, lambda: probe.sim_time() >= marker["sim_s"] + 7.0, 30,
             "dynamic object exceeds unchanged 3 second promotion interval")
     before = probe.save_map("before_dynamic_removal")
@@ -409,7 +409,7 @@ def correction_case(probe, launch, delta):
     try:
         require(probe, probe.ready, 30, "first synthetic acceptance and mapping ready")
         graph = probe.graph()
-        if graph["/rc_esdf/planning_grid"]["publishers"] != ["ats_rog_map_adapter"]:
+        if graph["/rog_map_adapter/planning_snapshot"]["publishers"] != ["ats_rog_map_adapter"]:
             raise RuntimeError("planning grid ownership changed")
         require(probe, lambda: probe.last_execute is not None and
                 probe.latest["/simulation/ground_truth/odometry"][0].pose.pose.position.x > 0.15 and
@@ -502,7 +502,7 @@ def safety_case(case, probe, launch):
             "search_clearance_floor", "obstacle_value_threshold"])
         selected = {}
         def visible_unreachable():
-            grid = probe.latest["/rc_esdf/planning_grid"][0]
+            grid = probe.latest["/rog_map_adapter/planning_snapshot"][0]
             position = probe.latest["/localization"][0].pose.pose.position
             clearance = effective_search_floor(semantics, grid.info.resolution)
             index = find_unreachable(grid, position.x, position.y,

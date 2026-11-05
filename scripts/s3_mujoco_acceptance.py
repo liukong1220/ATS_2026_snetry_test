@@ -164,7 +164,8 @@ class Probe:
         from rclpy.qos import QoSProfile, DurabilityPolicy, qos_profile_sensor_data
         from rclpy.action import ActionClient
         from ats_navigation_interfaces.action import NavigateToPose
-        from ats_navigation_interfaces.msg import ExecutionCommand, LocalizationStatus, PlanningMapStatus, PlannerGoal, PlannerStatus, RelocalizationObservation
+        from ats_navigation_interfaces.msg import ExecutionCommand, LocalizationStatus, PlanningMapStatus, PlannerGoal, PlannerStatus, RelocalizationObservation, PlanningMapSnapshot
+        from planning_snapshot_grid import PLANNING_SNAPSHOT_TOPIC, snapshot_to_grid
         from nav_msgs.msg import Odometry, OccupancyGrid, Path as PathMessage
         from geometry_msgs.msg import Twist
         from manda_can_control.msg import MotionCtrl
@@ -196,7 +197,7 @@ class Probe:
             (Odometry, "/localization", qos_profile_sensor_data, None),
             (LocalizationStatus, "/localization/status", durable, None),
             (RelocalizationObservation, "/relocalization_observation", 10, None),
-            (OccupancyGrid, "/rc_esdf/planning_grid", durable, None),
+            (PlanningMapSnapshot, PLANNING_SNAPSHOT_TOPIC, durable, None),
             (OccupancyGrid, "/rog_map/odom_layer", durable, None),
             (PlanningMapStatus, "/rog_map_adapter/status", durable, None),
             (Bool, "/rog_map_adapter/ready", durable, None),
@@ -214,6 +215,8 @@ class Probe:
         ]
         for kind, topic, qos, callback in topics:
             def receive(msg, topic=topic, callback=callback):
+                if topic == PLANNING_SNAPSHOT_TOPIC:
+                    msg = snapshot_to_grid(msg)
                 received = time.monotonic()
                 self.latest[topic] = (msg, received)
                 self.counts[topic] = self.counts.get(topic, 0) + 1
@@ -225,7 +228,7 @@ class Probe:
                 elif topic == "/rog_map_adapter/ready":
                     self.history.setdefault(topic, []).append((received, msg.data))
                     self.event(topic, {"ready": msg.data})
-                elif topic == "/rc_esdf/planning_grid":
+                elif topic == "/rog_map_adapter/planning_snapshot":
                     self.history.setdefault(topic, []).append((received, msg))
                     # Retain enough transitions for fault evidence without keeping
                     # every full grid throughout a long field coverage route.
@@ -324,14 +327,14 @@ class Probe:
     def ready(self):
         loc = self.latest.get("/localization/status")
         map_status = self.latest.get("/rog_map_adapter/status")
-        grid = self.latest.get("/rc_esdf/planning_grid")
+        grid = self.latest.get("/rog_map_adapter/planning_snapshot")
         return bool(loc and map_status and grid and stamp(loc[0].last_observation_stamp) > 0 and
                     map_status[0].ready and loc[0].epoch == map_status[0].localization_epoch and
                     grid[0].header.frame_id == "odom" and time.monotonic() - map_status[1] < 5.0)
 
     def graph(self):
         result = {}
-        for topic in ("/rc_esdf/planning_grid", "/cmd_vel/autonomy_raw",
+        for topic in ("/rog_map_adapter/planning_snapshot", "/cmd_vel/autonomy_raw",
                       "/cmd_vel/selected", "/motion_control", "/simulation/ground_truth/odometry"):
             result[topic] = {
                 "publishers": [x.node_name for x in self.node.get_publishers_info_by_topic(topic)],
@@ -379,7 +382,7 @@ class Probe:
 
     def save_grid(self, name):
         import numpy as np
-        for topic in ("/rc_esdf/planning_grid", "/rog_map/odom_layer"):
+        for topic in ("/rog_map_adapter/planning_snapshot", "/rog_map/odom_layer"):
             if topic not in self.latest:
                 continue
             grid = self.latest[topic][0]
@@ -475,7 +478,7 @@ def run(args):
         if not probe.spin_until(probe.ready, args.startup_timeout, "accepted localization and odom planning map"):
             raise RuntimeError("startup failed: " + json.dumps(probe.health_summary()))
         graph = probe.graph()
-        assert graph["/rc_esdf/planning_grid"]["publishers"] == ["ats_rog_map_adapter"], graph
+        assert graph["/rog_map_adapter/planning_snapshot"]["publishers"] == ["ats_rog_map_adapter"], graph
         summary["A"] = True
         print("A ready; graph", json.dumps(graph), flush=True)
         if args.case != "route":

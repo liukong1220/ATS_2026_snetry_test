@@ -975,14 +975,17 @@ verify_rog_map_planning_interface() {
     topic_field_equals /rog_map_adapter/ready data true
   wait_for_command "positive ROGMap adapter generation" 30 \
     topic_field_positive /rog_map_adapter/generation data
-  wait_for_command "non-empty planning grid width" 30 \
-    topic_field_positive /rc_esdf/planning_grid info.width
-  wait_for_command "non-empty planning grid height" 30 \
-    topic_field_positive /rc_esdf/planning_grid info.height
+  wait_for_command "non-empty planning snapshot width" 30 \
+    topic_field_positive /rog_map_adapter/planning_snapshot info.width
+  wait_for_command "non-empty planning snapshot height" 30 \
+    topic_field_positive /rog_map_adapter/planning_snapshot info.height
 
-  assert_topic_ownership /rc_esdf/planning_grid ats_rog_map_adapter
-  # MINCO plans on this numeric snapshot, not on the grid above.
+  # M4: the numeric snapshot is the only planning-map contract (MINCO, goal
+  # manager, behavior and these tools all read it); /rc_esdf/* is gone.
   assert_topic_ownership /rog_map_adapter/planning_snapshot ats_rog_map_adapter
+  local removed_topics
+  removed_topics="$(timeout 6 ros2 topic list --no-daemon 2>/dev/null | grep '^/rc_esdf/' || true)"
+  [[ -z "${removed_topics}" ]] || fail "removed /rc_esdf topics are back: ${removed_topics//$'\n'/ }"
   if [[ -z "${PLANNING_SNAPSHOT_FRAME}" ]]; then
     PLANNING_SNAPSHOT_FRAME="$(read_topic_field /rog_map_adapter/planning_snapshot header.frame_id)"
     [[ -n "${PLANNING_SNAPSHOT_FRAME}" ]] || fail "cannot read /rog_map_adapter/planning_snapshot frame"
@@ -1570,7 +1573,7 @@ publish_farthest_free_fault_goal() {
   # 距离上限见 FARTHEST_GOAL_MAX_DISTANCE：无上限时"最远可达"会退化成全场最远
   # 角，其 JPS 路径过不了 MINCO 的矩形足迹门禁，前置段于是零控制量。
   query_output="$(timeout 30 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-    --topic /rc_esdf/planning_grid --timeout 10 farthest-free \
+    --topic /rog_map_adapter/planning_snapshot --timeout 10 farthest-free \
     --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance 0.42 \
     --max-distance "${FARTHEST_GOAL_MAX_DISTANCE}" \
     2>"${query_error}")" || \
@@ -1610,7 +1613,7 @@ find_unknown_goal() {
   local attempt
   for attempt in $(seq 1 12); do
     if query_output="$(timeout 15 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-      --topic /rc_esdf/planning_grid --timeout 10 value --value -1 2>"${query_error}")"; then
+      --topic /rog_map_adapter/planning_snapshot --timeout 10 value --value -1 2>"${query_error}")"; then
       break
     fi
     sleep 0.5
@@ -1632,7 +1635,7 @@ find_unreachable_goal() {
   start_x="$(pose_axis "${pose_file}" x)"
   start_y="$(pose_axis "${pose_file}" y)"
   query_output="$(timeout 20 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-    --topic /rc_esdf/planning_grid --timeout 10 unreachable \
+    --topic /rog_map_adapter/planning_snapshot --timeout 10 unreachable \
     --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance 0.341 \
     --assume-start-traversable \
     2>"${query_error}")" || fail "cannot select free unreachable goal: $(<"${query_error}")"
@@ -1786,16 +1789,16 @@ run_p2_fault_injection() {
       timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_mask_secondary_evidence true \
         >/tmp/ats_p2_fault_unknown_mask_enable.out 2>&1 || \
         fail "cannot enable adapter secondary-evidence mask"
-      # 下游 blocked 证据：融合后的规划栅格全 -1 只说明下游被正确阻断，
+      # 下游 blocked 证据：规划快照 ready=false（占据视图全 -1）只说明下游被正确阻断，
       # 它绝不是融合 all-unknown 的证据来源，因此不再作为门禁的判定依据。
       if timeout 6 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-        --topic /rc_esdf/planning_grid --timeout 4 all-value --value -1 \
+        --topic /rog_map_adapter/planning_snapshot --timeout 4 all-value --value -1 \
         >"${downstream_grid}" 2>&1; then
         record_unknown_timeline downstream_planning_grid_all_unknown true
-        echo "OK: downstream /rc_esdf/planning_grid blocked all-unknown (secondary evidence only)"
+        echo "OK: downstream planning snapshot blocked all-unknown (secondary evidence only)"
       else
         record_unknown_timeline downstream_planning_grid_all_unknown false
-        echo "NOTE: downstream /rc_esdf/planning_grid not all-unknown; see ${downstream_grid}"
+        echo "NOTE: downstream planning snapshot not all-unknown; see ${downstream_grid}"
       fi
       # ready / publication_sequence / localization_epoch / source_generation 的
       # 同一性与推进关系全部交由观测器在同一条 PlanningMapStatus 上判定，并与
@@ -2615,7 +2618,7 @@ from query_occupancy_grid import (
     GridCapture, cell_is_traversable, rclpy, validate_grid, world_to_grid,
 )
 rclpy.init()
-node = GridCapture('/rc_esdf/planning_grid')
+node = GridCapture('/rog_map_adapter/planning_snapshot')
 try:
     deadline = time.monotonic() + 10.0
     while node.grid is None and time.monotonic() < deadline:
@@ -2865,7 +2868,7 @@ assert_topic_ownership /localization localization_fusion
 assert_topic_ownership /localization/status localization_fusion
 echo "OK: /odometry -> fusion -> /localization contract is active"
 wait_for_topic_once /traversability_grid 120
-wait_for_topic_once /rc_esdf/planning_grid 120
+wait_for_topic_once /rog_map_adapter/planning_snapshot 120
 assert_p3_process_graph
 
 verify_rog_map_planning_interface

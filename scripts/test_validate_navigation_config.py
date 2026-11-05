@@ -136,25 +136,35 @@ class NavigationRvizContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "/minco/raw_path must be enabled"):
             VALIDATOR.assert_navigation_rviz_contract(rviz, "odom", "test RViz")
 
-    def test_global_fused_esdf_display_contract_passes(self):
-        VALIDATOR.assert_global_fused_esdf_display(self.load_default_rviz(), "test RViz")
+    def test_esdf_cloud_display_contract_passes(self):
+        VALIDATOR.assert_esdf_cloud_display(self.load_default_rviz(), "test RViz")
 
-    def test_global_fused_esdf_rejects_volatile_qos_and_hidden_layer(self):
+    def test_esdf_cloud_rejects_volatile_qos_and_hidden_layer(self):
         rviz = copy.deepcopy(self.load_default_rviz())
         display = VALIDATOR.single_display_for_topic(
-            rviz, VALIDATOR.GLOBAL_FUSED_ESDF_TOPIC, "test RViz"
+            rviz, VALIDATOR.ESDF_CLOUD_VIZ_TOPIC, "test RViz"
         )
         display["Topic"]["Durability Policy"] = "Volatile"
         with self.assertRaisesRegex(AssertionError, "Transient Local"):
-            VALIDATOR.assert_global_fused_esdf_display(rviz, "test RViz")
+            VALIDATOR.assert_esdf_cloud_display(rviz, "test RViz")
 
         rviz = copy.deepcopy(self.load_default_rviz())
         display = VALIDATOR.single_display_for_topic(
-            rviz, VALIDATOR.GLOBAL_FUSED_ESDF_TOPIC, "test RViz"
+            rviz, VALIDATOR.ESDF_CLOUD_VIZ_TOPIC, "test RViz"
         )
         display["Enabled"] = False
         with self.assertRaisesRegex(AssertionError, "must be enabled"):
-            VALIDATOR.assert_global_fused_esdf_display(rviz, "test RViz")
+            VALIDATOR.assert_esdf_cloud_display(rviz, "test RViz")
+
+    def test_removed_rc_esdf_display_is_rejected(self):
+        rviz = copy.deepcopy(self.load_default_rviz())
+        rviz["Visualization Manager"]["Displays"].append({
+            "Class": "rviz_default_plugins/Map",
+            "Name": "old planning grid",
+            "Topic": {"Value": "/rc_esdf/planning_grid"},
+        })
+        with self.assertRaisesRegex(AssertionError, "removed topics"):
+            VALIDATOR.assert_no_removed_rc_esdf_topics(rviz, "test RViz")
 
     def test_minco_intermediate_guide_display_is_rejected(self):
         rviz = copy.deepcopy(self.load_default_rviz())

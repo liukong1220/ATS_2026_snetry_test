@@ -15,7 +15,7 @@ from ats_navigation_interfaces.msg import PlanningMapStatus
 from geometry_msgs.msg import Twist
 from ats_navigation_interfaces.msg import PlanningMapSnapshot
 from nav_msgs.msg import Odometry
-from nav_msgs.msg import OccupancyGrid
+from planning_snapshot_grid import snapshot_to_grid
 from query_occupancy_grid import cell_is_traversable, validate_grid, world_to_grid
 from rcl_interfaces.srv import SetParameters
 import rclpy
@@ -87,8 +87,6 @@ class UnsafeTrajectoryEvaluator(Node):
             self.transient_qos,
         )
         self.create_subscription(Twist, "/cmd_vel/selected", self._on_command, qos_profile_sensor_data)
-        self.create_subscription(OccupancyGrid, '/rc_esdf/planning_grid',
-                                 self._on_grid, self.transient_qos)
         self.create_subscription(
             PlanningMapSnapshot, '/rog_map_adapter/planning_snapshot',
             self._on_snapshot, self.transient_qos)
@@ -106,6 +104,7 @@ class UnsafeTrajectoryEvaluator(Node):
         return stamp.sec * 1_000_000_000 + stamp.nanosec
 
     def _on_snapshot(self, message):
+        self.grid = snapshot_to_grid(message)
         # Keep identity and target-cell evidence, not copies of the full numeric map.
         grid = SimpleNamespace(header=message.header, info=message.info, data=message.occupancy)
         cell = world_to_grid(grid, 1.0, 0.06) if validate_grid(grid) else None
@@ -115,9 +114,6 @@ class UnsafeTrajectoryEvaluator(Node):
             stamp=self.stamp_ns(message.header.stamp),
             occupied=(message.header.frame_id == 'map' and cell is not None and
                       message.occupancy[cell[1] * message.info.width + cell[0]] >= 100)))
-
-    def _on_grid(self, message):
-        self.grid = message
 
     def nominal_goal_cell(self):
         if self.grid is None or not validate_grid(self.grid) or self.grid.header.frame_id != 'map':

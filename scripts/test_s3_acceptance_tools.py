@@ -31,7 +31,7 @@ class EvidenceTools(unittest.TestCase):
 
         profile = yaml.safe_load((s3.SIM / "config/s3_mapping_routes.yaml").read_text())["rmuc_2025"]
         probe = Mock()
-        probe.graph.return_value = {"/rc_esdf/planning_grid": {"publishers": ["ats_rog_map_adapter"]}}
+        probe.graph.return_value = {"/rog_map_adapter/planning_snapshot": {"publishers": ["ats_rog_map_adapter"]}}
         probe.path = [profile["start"][:2], profile["waypoints"][0][:2]]
         probe.goals = [(0, True)]
         probe.endpoint_results = [{"truth_error_m": 0.01}]

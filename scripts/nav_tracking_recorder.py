@@ -383,11 +383,11 @@ class NavTrackingRecorder(Node):
             PlanningMapSnapshot, args.planning_snapshot_topic, self._on_snapshot,
             latched_qos())
         # Source layers, for per-cell provenance of a first conflict.  The static
-        # map and the fused planning grid are latched; the terrain and slope grids
-        # are volatile streams from terrain_analysis_ext.
+        # map is latched; the terrain and slope grids are volatile streams from
+        # terrain_analysis_ext.  The fused planning occupancy is already recorded
+        # by the planning snapshot subscription above.
         for topic, latched in (
                 (args.static_map_topic, True),
-                (args.planning_grid_topic, True),
                 (args.traversability_grid_topic, False),
                 (args.slope_grid_topic, False)):
             if not topic:
@@ -939,8 +939,7 @@ class NavTrackingRecorder(Node):
             args.execution_command_topic, args.emergency_stop_topic,
             args.map_ready_topic, args.map_status_topic,
             args.planning_snapshot_topic, args.static_map_topic,
-            args.planning_grid_topic, args.traversability_grid_topic,
-            args.slope_grid_topic,
+            args.traversability_grid_topic, args.slope_grid_topic,
         ]
         if args.candidate_reference_topic:
             topics.append(args.candidate_reference_topic)
@@ -983,7 +982,6 @@ def parse_args(argv=None):
     parser.add_argument("--planning-snapshot-topic",
                         default="/rog_map_adapter/planning_snapshot")
     parser.add_argument("--static-map-topic", default="/map")
-    parser.add_argument("--planning-grid-topic", default="/rc_esdf/planning_grid")
     parser.add_argument("--traversability-grid-topic", default="/traversability_grid")
     parser.add_argument("--slope-grid-topic", default="/traversability_slope_grid")
     parser.add_argument("--max-snapshot-payloads", type=int, default=400,

@@ -4,13 +4,18 @@ import argparse
 import copy
 import math
 import sys
+import os
 import time
 from collections import deque
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rclpy
 from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+from planning_snapshot_grid import PLANNING_SNAPSHOT_TOPIC, snapshot_to_grid
 
 
 class GridCapture(Node):
@@ -23,18 +28,37 @@ class GridCapture(Node):
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
-        self.subscription = self.create_subscription(
-            OccupancyGrid, topic, self._on_grid, qos
-        )
+        if topic == PLANNING_SNAPSHOT_TOPIC:
+            from ats_navigation_interfaces.msg import PlanningMapSnapshot
+
+            self.subscription = self.create_subscription(
+                PlanningMapSnapshot, topic, self._on_snapshot, qos
+            )
+        else:
+            self.subscription = self.create_subscription(
+                OccupancyGrid, topic, self._on_grid, qos
+            )
 
     def _on_grid(self, message):
         if self.grid is None:
             self.grid = message
 
+    def _on_snapshot(self, message):
+        if self.grid is None:
+            self.grid = snapshot_to_grid(message)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--topic", default="/rc_esdf/planning_grid")
+    parser.add_argument(
+        "--topic",
+        default=PLANNING_SNAPSHOT_TOPIC,
+        help=(
+            "Topic to read. %s is read as PlanningMapSnapshot and converted to "
+            "an OccupancyGrid (all -1 while not ready); any other topic is read "
+            "as nav_msgs/OccupancyGrid." % PLANNING_SNAPSHOT_TOPIC
+        ),
+    )
     parser.add_argument("--timeout", type=float, default=10.0)
     subparsers = parser.add_subparsers(dest="mode", required=True)
 

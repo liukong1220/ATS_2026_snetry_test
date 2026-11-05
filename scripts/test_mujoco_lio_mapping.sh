@@ -66,7 +66,7 @@ wait_node /ats_rog_map
 wait_node /ats_rog_map_adapter
 wait_topic /registered_scan
 wait_topic /localization
-wait_topic /rc_esdf/planning_grid
+wait_topic /rog_map_adapter/planning_snapshot
 wait_topic /rog_map_adapter/ready
 
 if ros2 node list --no-daemon | grep -qx '/static_map_publisher'; then
@@ -78,12 +78,13 @@ if ros2 node list --no-daemon | grep -qx '/small_gicp_relocalization'; then
   exit 1
 fi
 
-timeout 45 ros2 topic echo --once --no-daemon /rc_esdf/planning_grid >"${LOG_DIR}/planning_grid.txt" || {
-  echo "ERROR: no planning grid message within 45 seconds" >&2
+timeout 45 ros2 topic echo --once --no-daemon /rog_map_adapter/planning_snapshot \
+  --field header.frame_id >"${LOG_DIR}/planning_grid.txt" || {
+  echo "ERROR: no planning snapshot message within 45 seconds" >&2
   exit 1
 }
-grep -q 'frame_id: odom' "${LOG_DIR}/planning_grid.txt" || {
-  echo "ERROR: planning grid is not in odom frame" >&2
+grep -qx 'odom' "${LOG_DIR}/planning_grid.txt" || {
+  echo "ERROR: planning snapshot is not in odom frame" >&2
   cat "${LOG_DIR}/planning_grid.txt" >&2
   exit 1
 }
@@ -100,12 +101,12 @@ if ! grep -q 'data: true' "${LOG_DIR}/ready.txt"; then
 fi
 
 for _ in $(seq 1 10); do
-  ros2 topic info --no-daemon /rc_esdf/planning_grid >"${LOG_DIR}/planning_grid_info.txt" || true
+  ros2 topic info --no-daemon /rog_map_adapter/planning_snapshot >"${LOG_DIR}/planning_grid_info.txt" || true
   grep -q 'Publisher count: 1' "${LOG_DIR}/planning_grid_info.txt" && break
   sleep 1
 done
 grep -q 'Publisher count: 1' "${LOG_DIR}/planning_grid_info.txt" || {
-  echo "ERROR: planning grid does not have exactly one publisher" >&2
+  echo "ERROR: planning snapshot does not have exactly one publisher" >&2
   cat "${LOG_DIR}/planning_grid_info.txt" >&2
   exit 1
 }

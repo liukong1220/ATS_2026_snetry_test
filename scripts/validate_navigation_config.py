@@ -10,8 +10,10 @@ import yaml
 
 
 ROG_MAP_BOUNDS_DISPLAY_NAME = "ROGMap Bounds: Orange Local / Green Update"
-GLOBAL_FUSED_ESDF_DISPLAY_NAME = "Global Fused RC-ESDF (ROGMap + Static + Terrain)"
-GLOBAL_FUSED_ESDF_TOPIC = "/rc_esdf/signed_distance_grid"
+# M4: the planning snapshot is the only planning-map contract; RViz draws
+# subscriber-gated views of it. /rc_esdf/* topics no longer exist.
+ESDF_CLOUD_VIZ_TOPIC = "/rog_map_adapter/viz/esdf_cloud"
+PLANNING_GRID_VIZ_TOPIC = "/rog_map_adapter/viz/planning_grid"
 # Voxel point clouds stay available for ros2 topic echo / ad-hoc RViz, but the
 # shipped navigation views draw the local ROGMap as its range boxes only.
 ROG_MAP_VOXEL_TOPICS = (
@@ -267,39 +269,29 @@ def assert_navigation_rviz_contract(
         assert display["Enabled"] is True, f"{context} {topic} must be enabled"
 
 
-def assert_global_fused_esdf_display(document, context: str, expect_enabled: bool = True):
-    """Lock the display-only global RC-ESDF layer without changing ESDF ownership."""
-    display = single_display_for_topic(document, GLOBAL_FUSED_ESDF_TOPIC, context)
-    assert display["Class"] == "rviz_default_plugins/Map", (
-        f"{context} global fused ESDF must be a Map display"
-    )
-    assert display["Name"] == GLOBAL_FUSED_ESDF_DISPLAY_NAME, (
-        f"{context} global fused ESDF display name must be {GLOBAL_FUSED_ESDF_DISPLAY_NAME!r}"
+def assert_esdf_cloud_display(document, context: str):
+    """Lock the display-only signed-distance cloud of the planning snapshot."""
+    display = single_display_for_topic(document, ESDF_CLOUD_VIZ_TOPIC, context)
+    assert display["Class"] == "rviz_default_plugins/PointCloud2", (
+        f"{context} {ESDF_CLOUD_VIZ_TOPIC} must be a PointCloud2 display"
     )
     assert display["Topic"]["Reliability Policy"] == "Reliable", (
-        f"{context} global fused ESDF must use Reliable"
+        f"{context} ESDF cloud must use Reliable"
     )
     assert display["Topic"]["Durability Policy"] == "Transient Local", (
-        f"{context} global fused ESDF must use Transient Local"
+        f"{context} ESDF cloud must use Transient Local"
     )
     assert display["Topic"]["History Policy"] == "Keep Last", (
-        f"{context} global fused ESDF must keep only the latest grid"
+        f"{context} ESDF cloud must keep only the latest cloud"
     )
-    assert display["Topic"]["Depth"] == 1, (
-        f"{context} global fused ESDF depth must be one"
-    )
-    assert display["Color Scheme"] == "costmap", (
-        f"{context} global fused ESDF must use costmap colors"
-    )
-    assert display["Alpha"] >= 0.55 and display["Alpha"] <= 0.70, (
-        f"{context} global fused ESDF alpha must stay in [0.55, 0.70]"
-    )
-    assert display["Draw Behind"] is True, (
-        f"{context} global fused ESDF must draw behind local diagnostics"
-    )
-    assert display["Enabled"] is expect_enabled, (
-        f"{context} global fused ESDF must be {'enabled' if expect_enabled else 'disabled'}"
-    )
+    assert display["Topic"]["Depth"] == 1, f"{context} ESDF cloud depth must be one"
+    assert display["Enabled"] is True, f"{context} ESDF cloud must be enabled"
+
+
+def assert_no_removed_rc_esdf_topics(document, context: str):
+    removed = sorted(topic for topic in collect_topic_values(document)
+                     if str(topic).startswith("/rc_esdf/"))
+    assert not removed, f"{context} still displays removed topics: {removed}"
 
 
 def assert_rog_map_native_displays(document, context: str):
@@ -392,7 +384,12 @@ def main():
     assert "map_config_file" not in rog_map
     # M3: the projection is an in-process call; no service name is configurable.
     assert "projection_service" not in adapter
-    assert adapter["planning_grid_topic"] == "/rc_esdf/planning_grid"
+    for removed in ("planning_grid_topic", "signed_distance_grid_topic",
+                    "footprint_clearance_grid_topic"):
+        assert removed not in adapter, f"adapter retains removed parameter {removed}"
+    assert adapter["planning_grid_viz_topic"] == PLANNING_GRID_VIZ_TOPIC
+    assert adapter["esdf_cloud_topic"] == ESDF_CLOUD_VIZ_TOPIC
+    assert "grid_topic" not in minco, "MINCO plans on planning_snapshot only"
     assert adapter["unknown_is_obstacle"] is True
     assert adapter["require_localization_status"] is True
     assert_planning_snapshot_lease_contract(adapter, goal_manager)
@@ -485,7 +482,10 @@ def main():
     assert 0.0 <= mpc["supersede_grace_sec"] < mpc["execution_command_timeout"]
     assert arbiter["supersede_grace_sec"] < arbiter["execution_command_timeout"]
     assert behavior_server["action_name"] == "ats_sentry_behavior"
-    assert behavior_server["decision"]["inputs"]["planning_grid"]["topic"] == "/rc_esdf/planning_grid"
+    assert "planning_grid" not in behavior_server["decision"]["inputs"]
+    assert behavior_server["decision"]["inputs"]["planning_snapshot"]["topic"] == (
+        "/rog_map_adapter/planning_snapshot"
+    )
     assert behavior_server["decision"]["inputs"]["localization"]["topic"] == "/localization"
     assert behavior_server["decision"]["pose"]["expected_frame"] == "map"
     assert behavior_server["decision"]["decision_config"]["ats_action_server"] == "/ats_navigate_to_pose"
@@ -804,7 +804,8 @@ def main():
 
     rviz = load_yaml(workspace / "src/ats_sentry_bringup/rviz/sentry_default_view.rviz")
     assert_navigation_rviz_contract(rviz, rog_map["map_frame"], "default RViz")
-    assert_global_fused_esdf_display(rviz, "default RViz")
+    assert_esdf_cloud_display(rviz, "default RViz")
+    assert_no_removed_rc_esdf_topics(rviz, "default RViz")
     assert_robot_model_display(rviz, "robot_description", "default RViz")
     rviz_text = (
         workspace / "src/ats_sentry_bringup/rviz/sentry_default_view.rviz"
@@ -817,9 +818,10 @@ def main():
 
     mujoco_rviz_path = workspace / "src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz"
     mujoco_rviz = load_yaml(mujoco_rviz_path)
-    assert "/rc_esdf/planning_grid" in set(collect_topic_values(mujoco_rviz)), (
-        "MuJoCo RViz config missing /rc_esdf/planning_grid"
+    assert PLANNING_GRID_VIZ_TOPIC in set(collect_topic_values(mujoco_rviz)), (
+        f"MuJoCo RViz config missing {PLANNING_GRID_VIZ_TOPIC}"
     )
+    assert_no_removed_rc_esdf_topics(mujoco_rviz, "MuJoCo RViz")
     assert_navigation_rviz_contract(
         mujoco_rviz, rog_map["map_frame"], "MuJoCo RViz", MUJOCO_PATH_DISPLAY_STYLE,
         allow_rog_map_voxel_topics=True,
@@ -827,13 +829,7 @@ def main():
     assert_rog_map_native_displays(mujoco_rviz, "MuJoCo RViz")
     # The vehicle shape comes from robot_state_publisher (ats_mujoco_sim/robot_description.py).
     assert_robot_model_display(mujoco_rviz, "robot_description", "MuJoCo RViz")
-    # MuJoCo 视图用彩色 ESDF 点云代替 costmap 栅格(两者叠加会互相遮挡),栅格保留但默认关闭。
-    assert_global_fused_esdf_display(mujoco_rviz, "MuJoCo RViz", expect_enabled=False)
-    esdf_cloud = single_display_for_topic(mujoco_rviz, "/rc_esdf/esdf_cloud", "MuJoCo RViz")
-    assert esdf_cloud["Class"] == "rviz_default_plugins/PointCloud2", (
-        "MuJoCo RViz /rc_esdf/esdf_cloud must be a PointCloud2 display"
-    )
-    assert esdf_cloud["Enabled"] is True, "MuJoCo RViz ESDF cloud must be enabled"
+    assert_esdf_cloud_display(mujoco_rviz, "MuJoCo RViz")
     mujoco_rviz_text = mujoco_rviz_path.read_text(encoding="utf-8")
     localization_displays = displays_for_topic(mujoco_rviz, "/localization")
     assert len(localization_displays) == 1, "MuJoCo RViz must have one localization display"
@@ -856,10 +852,8 @@ def main():
     assert_navigation_rviz_contract(
         gazebo_rviz, rog_map["map_frame"], "Gazebo RViz", MUJOCO_PATH_DISPLAY_STYLE
     )
-    assert_global_fused_esdf_display(gazebo_rviz, "Gazebo RViz", expect_enabled=False)
-    esdf_cloud = single_display_for_topic(gazebo_rviz, "/rc_esdf/esdf_cloud", "Gazebo RViz")
-    assert esdf_cloud["Class"] == "rviz_default_plugins/PointCloud2"
-    assert esdf_cloud["Enabled"] is True
+    # The Gazebo repository is not migrated to the M4 topics yet (follow-up);
+    # its ESDF displays are not checked here.
     localization_displays = displays_for_topic(gazebo_rviz, "/localization")
     assert len(localization_displays) == 1, "Gazebo RViz must have one localization display"
     assert localization_displays[0]["Class"] == "rviz_default_plugins/Odometry"

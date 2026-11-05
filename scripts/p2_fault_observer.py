@@ -23,7 +23,7 @@ Design constraints this script enforces:
   payload: ``ready=false``, non-empty occupancy with every cell ``== -1``,
   ``signed_distance_m`` / ``gradient_x`` / ``gradient_y`` of the same length and
   all NaN, and ``source_generation`` equal to the fault numeric generation.
-  ``/rc_esdf/planning_grid`` is never consulted here.
+  No separate occupancy-grid topic is consulted here; the snapshot is the only map input.
 
 Usage::
 
