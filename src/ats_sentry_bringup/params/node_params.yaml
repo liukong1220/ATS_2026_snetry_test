@@ -308,6 +308,10 @@ loam_interface:
     odom_frame: "odom"
     base_frame: "gimbal_yaw_odom"
     lidar_frame: "front_mid360"
+    # Point-LIO pose belongs to the IMU; the registered cloud uses that initial
+    # IMU world. Keep this T_imu<-lidar equal to point_lio.mapping.extrinsic_T/R.
+    state_to_lidar_translation: [-0.011, -0.02329, 0.04412]
+    state_to_lidar_rpy: [0.0, 0.0, 0.0]
     # 雷达已改装到底盘（报告 2.1.8）：gimbal_yaw_odom 现在表示底盘系，原点取底盘底面中心，
     # 离地 0.07 m [解读，待上车确认]。odom 原点锚定在其正下方地面，
     # 保证 odom z=0 即地面，ROGMap 投影高度带与规划轨迹都以地面为基准。
@@ -854,9 +858,14 @@ ats_rog_map:
     odom_layer.dynamic_hold_seconds: 3.0
     odom_layer.max_frame_dt_seconds: 0.25
     odom_layer.save_persistence_ratio: 0.8
-    # Hits count only between these heights above the base plane (floor and ceiling echoes excluded).
-    odom_layer.hit_z_min: 0.15
-    odom_layer.hit_z_max: 0.70
+    # Heights are relative to connected local ground, including ramps.
+    odom_layer.surface_max: 0.10
+    odom_layer.robot_height: 0.255
+    odom_layer.top_margin: 0.05
+    odom_layer.max_ground_slope: 0.6
+    odom_layer.base_ground_offset: 0.07
+    odom_layer.window_x: 12.0
+    odom_layer.window_y: 12.0
 
 ats_rog_map_adapter:
   ros__parameters:
@@ -899,6 +908,7 @@ ats_rog_map_adapter:
     # global layer feeds the planning grid (S3).  A missing PGM fails closed
     # unless allow_missing_static_map is true (mapping mode only).
     use_static_map_obstacles: true
+    output_in_projection_frame: true
     allow_missing_static_map: false
     input_timeout_sec: 2.0
     signed_distance_max_m: 2.0
@@ -1107,6 +1117,10 @@ ats_goal_manager:
     # 与 minco_planner.replan_advisory_enabled 成对（调研报告 9.4 第 1 项）：收到建议重规划时不急停，
     # 旧参考继续执行到新参考替换；替换失败或旧参考近端失效时照原路径急停挂起。
     replan_without_stop_enabled: true
+    require_accepted_localization: true
+    planner_start_in_planning_frame: true
+    retarget_threshold: 0.03
+    map_transform_timeout_sec: 1.0
     # 进度按"沿已提交参考的剩余弧长"计。绕墙路线直线距离先增后减，旧判据会在车正常跟随时判停滞。
     progress_along_reference: true
     require_map_status: true

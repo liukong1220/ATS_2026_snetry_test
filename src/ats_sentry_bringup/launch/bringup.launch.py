@@ -7,6 +7,7 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import IfElseSubstitution, LaunchConfiguration, PythonExpression, TextSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -19,6 +20,7 @@ def generate_launch_description():
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     namespace = LaunchConfiguration("namespace")
     use_sim_time = LaunchConfiguration("use_sim_time")
+    use_identified_odometry = LaunchConfiguration("use_identified_odometry")
     params_file = LaunchConfiguration("params_file")
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     rviz_force_software = LaunchConfiguration("rviz_force_software")
@@ -55,6 +57,7 @@ def generate_launch_description():
         "'.lower() == 'true'",
     ])
     declarations = [
+        DeclareLaunchArgument("use_identified_odometry", default_value="false"),
         DeclareLaunchArgument("robot_name", default_value="ats_sentry_robot"),
         DeclareLaunchArgument("world", default_value="rmuc_2025"),
         DeclareLaunchArgument(
@@ -162,7 +165,10 @@ def generate_launch_description():
     rog_map = Node(
         package="ats_rog_map", executable="ats_rog_map_node", name="ats_rog_map", namespace=namespace,
         output="screen", respawn=use_respawn, respawn_delay=2.0,
-        parameters=[params_file, {"use_sim_time": use_sim_time}],
+        parameters=[params_file, {
+            "use_sim_time": use_sim_time,
+            "require_odom_identity": ParameterValue(use_identified_odometry, value_type=bool),
+        }],
         arguments=["--ros-args", "--log-level", log_level],
     )
     rog_map_adapter = Node(
@@ -171,6 +177,12 @@ def generate_launch_description():
         parameters=[params_file, {
             "use_sim_time": use_sim_time,
             "require_localization_status": launch_localization_fusion,
+            "mapping_mode": ParameterValue(slam, value_type=bool),
+            "require_odom_identity": ParameterValue(use_identified_odometry, value_type=bool),
+            "allow_missing_static_map": ParameterValue(slam, value_type=bool),
+            "robot_unknown_clear_footprint": ParameterValue(slam, value_type=bool),
+            "use_static_map_obstacles": ParameterValue(
+                PythonExpression(["'", slam, "'.lower() != 'true'"]), value_type=bool),
         }], arguments=["--ros-args", "--log-level", log_level],
     )
     navigation = IncludeLaunchDescription(
@@ -183,6 +195,7 @@ def generate_launch_description():
             "launch_joy_teleop": launch_joy_teleop,
             "launch_small_gicp_relocalization": localization_prior,
             "slam": slam,
+            "use_identified_odometry": use_identified_odometry,
             "launch_localization_fusion": launch_localization_fusion,
             "launch_fake_vel_transform": launch_fake_vel_transform,
             "launch_chassis_vel_transform": launch_chassis_vel_transform,
