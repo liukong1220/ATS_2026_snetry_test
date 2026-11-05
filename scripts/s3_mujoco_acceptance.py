@@ -338,13 +338,15 @@ class Probe:
                 ("/localization/status", "/rog_map_adapter/status", "/planner/emergency_stop")
                 if topic in self.latest}
 
+    expected_grid_frame = "odom"
+
     def ready(self):
         loc = self.latest.get("/localization/status")
         map_status = self.latest.get("/rog_map_adapter/status")
         grid = self.latest.get("/rog_map_adapter/planning_snapshot")
         return bool(loc and map_status and grid and stamp(loc[0].last_observation_stamp) > 0 and
                     map_status[0].ready and loc[0].epoch == map_status[0].localization_epoch and
-                    grid[0].header.frame_id == "odom" and time.monotonic() - map_status[1] < 5.0)
+                    grid[0].header.frame_id == self.expected_grid_frame and time.monotonic() - map_status[1] < 5.0)
 
     def graph(self):
         result = {}
@@ -482,6 +484,8 @@ def run(args):
     rclpy.init()
     probe = Probe(directory, observe_obstacle_clouds=fixture_case)
     probe.scene_model = scene
+    # Mapping publishes the planning grid in odom; a reload (competition mode) in map.
+    probe.expected_grid_frame = "map" if args.reload else "odom"
     summary = {"profile": args.profile, "reload": args.reload, "passed": False}
     try:
         if args.case.startswith("correction_"):
