@@ -86,12 +86,12 @@ echo "[build] workspace: ${WORKSPACE_DIR}"
 echo "[build] ros distro: ${ROS_DISTRO_NAME}"
 echo "[build] colcon workers: ${COLCON_WORKERS}, cmake parallel: ${CMAKE_BUILD_PARALLEL_LEVEL}, makeflags: ${MAKEFLAGS}, clean cache: ${CMAKE_CLEAN_CACHE}"
 
-# 第一阶段先编译重包，降低 OOM 和长链路失败后重头来过的概率。
+# 第一阶段先按拓扑顺序编译重包及其依赖。干净工作区不能假定接口包已经安装。
 echo "[build] step 1/2: heavy packages"
 colcon build \
   "${COMMON_ARGS[@]}" \
   --parallel-workers "${COLCON_WORKERS}" \
-  --packages-select "${HEAVY_PACKAGES[@]}"
+  --packages-up-to "${HEAVY_PACKAGES[@]}"
 
 # 第二阶段再编译剩余包，这时依赖链已经更稳定，可适当提高并发。
 echo "[build] step 2/2: remaining packages"
