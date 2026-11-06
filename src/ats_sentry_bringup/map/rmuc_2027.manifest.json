@@ -6,7 +6,7 @@
     "mesh": "src/sim/ats_mujoco_sim/models/meshes/rmuc_2027.obj",
     "mesh_sha256": "601d69b7dd6fb5144051f8dedafca594b02f487c1611ac327273c3e0f0dcb33c",
     "tunnels": "src/sim/ats_mujoco_sim/config/tunnels_2027.yaml",
-    "tunnels_sha256": "6538170bd35a98342856c4232bf2dab38bd97e68a951396d6625a7be589884f1"
+    "tunnels_sha256": "19ba02b4cccf22c9ec270e4b31344e308aa86e0fb6e390951d5b0a106f7a0729"
   },
   "occupied_cells": 33387,
   "outputs": {
