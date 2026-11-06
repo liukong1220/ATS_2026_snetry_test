@@ -222,9 +222,10 @@ P3 标记条件为同时满足以下各项：
 - 比赛（定位）模式：加载建图保存的 PCD 与静态层，`small_gicp_relocalization` 做先验重定位，输出 `map->odom`。比赛起点固定，重定位初值为建图起点。先验静态层只用于全局引导和场地边界，障碍仍由实时点云决定。
 - 测试：无先验测试必须使用显式的 TEST_PROFILE。不得改变现有 profile 对 PGM 和 PCD 的要求。
 - 验收（MuJoCo `lio` 模式，无 PGM、无 PCD）：
-  - 建图中导航到目标，终点真值误差 ≤ 0.08 m，离散 footprint 冲突采样数为 0。物理接触单独记为未验证，除非有独立接触评估；
+  - 建图中导航到目标（2026-11-06 用户授权放宽，数值为 `scripts/s3_mujoco_acceptance.py` 的默认参数，旧值可用参数复现）：中间路线点真值误差 ≤ 0.15 m（`--waypoint-tolerance-m`），终点与重载首目标 ≤ 0.08 m（`--final-tolerance-m`）；离散 footprint 冲突只统计被提交并由 MPC 执行（goal manager 下发 EXECUTE 且 `reference_stamp` 匹配）的 reference，必须为 0，READY 瞬态冲突只记录在 `summary.json` 的 `footprint_gate_collisions_transient_ready`。物理接触单独记为未验证，除非有独立接触评估；
   - `/rog_map_adapter/planning_snapshot` 发布者数为 1，owner 为 adapter；
-  - 新障碍到规划器可见的延迟 p95 < 150 ms；
+  - 新障碍到规划器可见的延迟 p95 < 250 ms（`--latency-p95-limit-ms`，150 可复现旧门），同时报告最大值；
+  - 导航跟踪记录器：q1（参考发布时无冲突）必过；q2（实际足迹进入后续快照占据格）仅当冲突持续 ≥ 3 个 tick 且跨 ≥ 2 个快照发布时判失败，其余记为诊断；q3（同一位姿跨快照翻转）为诊断，不判失败。参数 `NAV_TRACKING_PERSIST_MIN_TICKS`、`NAV_TRACKING_PERSIST_MIN_SNAPSHOTS`，`NAV_TRACKING_STRICT=1` 复现旧门；记录器判定用的足迹长宽与 margin 读自 `NAV_TRACKING_PROFILE_YAML` 的 `minco_planner` 段（默认是 2025 仿真 profile，margin 0.02；与实车 0.05 不同，换 profile 或比对实车口径时必须显式设置）；
   - 地图修正前后不出现无法解释的跳变；
   - 保存地图与场景真值比对，报告漏检和误检格数；动态障碍不写入保存地图；
   - 地图失效、无路、unsafe 轨迹时 `/planner/emergency_stop=true`，速度为零。
