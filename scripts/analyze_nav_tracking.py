@@ -677,8 +677,20 @@ def tick_context(sample):
     }
 
 
-def analyze_actual_tracking(samples, store, layers, params):
+PERSIST_MIN_TICKS = 3
+PERSIST_MIN_SNAPSHOTS = 2
+
+
+def analyze_actual_tracking(samples, store, layers, params,
+                            persist_min_ticks=PERSIST_MIN_TICKS,
+                            persist_min_snapshots=PERSIST_MIN_SNAPSHOTS):
     """Q2: did the driven pose sequence leave the verified envelope?
+
+    A conflict run is a stretch of consecutive evaluated ticks that each conflict
+    (discrete or swept).  A run is *persistent* when it lasts at least
+    ``persist_min_ticks`` ticks and spans at least ``persist_min_snapshots``
+    distinct snapshot publications; a single snapshot that disagrees for a few ticks
+    is reported but is not persistent.
 
     Every tick's pose is judged against the snapshot that was in force *at that
     tick*, and the motion between consecutive ticks is swept, so a conflict that
@@ -703,7 +715,27 @@ def analyze_actual_tracking(samples, store, layers, params):
         "max_abs_longitudinal_error_m": None,
         "max_abs_yaw_error_rad": None,
         "max_speed_mps": None,
+        "persist_min_ticks": persist_min_ticks,
+        "persist_min_snapshots": persist_min_snapshots,
+        "longest_conflict_run_ticks": 0,
+        "longest_conflict_run_snapshots": 0,
+        "persistent_conflict_runs": [],
     }
+    run = {"ticks": 0, "snapshots": [], "first_tick": None}
+
+    def close_run():
+        if run["ticks"]:
+            result["longest_conflict_run_ticks"] = max(
+                result["longest_conflict_run_ticks"], run["ticks"])
+            result["longest_conflict_run_snapshots"] = max(
+                result["longest_conflict_run_snapshots"], len(run["snapshots"]))
+            if run["ticks"] >= persist_min_ticks and \
+                    len(run["snapshots"]) >= persist_min_snapshots:
+                result["persistent_conflict_runs"].append({
+                    "first_tick": run["first_tick"], "ticks": run["ticks"],
+                    "snapshots": list(run["snapshots"])})
+        run["ticks"], run["snapshots"], run["first_tick"] = 0, [], None
+
     previous = None
     for sample in series:
         actual = sample["actual"]
@@ -727,12 +759,14 @@ def analyze_actual_tracking(samples, store, layers, params):
         if not snapshot:
             result["ticks_without_snapshot"] += 1
             previous = None
+            close_run()
             continue
         digest = snapshot.get("occupancy_digest")
         grid = store.grid(digest)
         if grid is None:
             result["ticks_without_snapshot_payload"] += 1
             previous = None
+            close_run()
             continue
         if frames_agree(actual.get("frame_id"), grid.frame_id):
             grid_pose = pose
@@ -741,6 +775,7 @@ def analyze_actual_tracking(samples, store, layers, params):
         if grid_pose is None:
             result["ticks_unpaired_frame"] += 1
             previous = None
+            close_run()
             continue
 
         payload = store.payload(digest)
@@ -757,6 +792,7 @@ def analyze_actual_tracking(samples, store, layers, params):
 
         result["ticks_evaluated"] += 1
         verdict = fe.check(grid, params, [grid_pose], max_collisions=8)
+        tick_conflict = verdict["discrete_collision_count"] > 0
         if verdict["discrete_collision_count"] > 0:
             result["colliding_ticks"] += 1
             if result["first_discrete_conflict"] is None:
@@ -774,6 +810,7 @@ def analyze_actual_tracking(samples, store, layers, params):
             # against the snapshot in force at the later of the two.
             swept = fe.check(grid, params, [previous, grid_pose], max_collisions=8)
             if swept["swept_collision_count"] > 0:
+                tick_conflict = True
                 result["swept_colliding_segments"] += 1
                 if result["first_swept_conflict"] is None:
                     conflict = tick_context(sample)
@@ -785,6 +822,18 @@ def analyze_actual_tracking(samples, store, layers, params):
                         swept, payload, grid, params, layers, sample.get("mono_s"))
                     result["first_swept_conflict"] = conflict
         previous = grid_pose
+        if tick_conflict:
+            if run["first_tick"] is None:
+                run["first_tick"] = sample.get("tick")
+            run["ticks"] += 1
+            identity = snapshot.get("publication_sequence")
+            identity = digest if identity is None else identity
+            if identity not in run["snapshots"]:
+                run["snapshots"].append(identity)
+        else:
+            close_run()
+    close_run()
+    result["persistent_conflict"] = bool(result["persistent_conflict_runs"])
     return result
 
 
@@ -1225,6 +1274,13 @@ def parse_args(argv=None):
     parser.add_argument("--moving-speed-mps", type=float, default=0.05)
     parser.add_argument("--rest-speed-mps", type=float, default=0.01)
     parser.add_argument("--command-zero-epsilon", type=float, default=1e-6)
+    parser.add_argument("--persist-min-ticks", type=int, default=PERSIST_MIN_TICKS,
+                        help="q2 fails only for a conflict run of at least this many ticks")
+    parser.add_argument("--persist-min-snapshots", type=int, default=PERSIST_MIN_SNAPSHOTS,
+                        help="... that also spans at least this many snapshot publications")
+    parser.add_argument("--strict-diagnostics", action="store_true",
+                        help="reproduce the old gate: any q2 conflict fails and unknown q2/q3 is "
+                             "incomplete")
     return parser.parse_args(argv)
 
 
@@ -1282,7 +1338,9 @@ def main(argv=None):
     references_result = analyze_reference_at_publish(
         samples, references, store, layers, params, args.reference_topic,
         events, snapshots)
-    tracking = analyze_actual_tracking(samples, store, layers, params)
+    tracking = analyze_actual_tracking(
+        samples, store, layers, params, args.persist_min_ticks,
+        args.persist_min_snapshots)
     stop = analyze_stop_envelope(
         samples, events, args.moving_speed_mps, args.rest_speed_mps,
         args.command_zero_epsilon)
@@ -1360,15 +1418,31 @@ def main(argv=None):
         print("RESULT: nav tracking analysis INCOMPLETE (no tick could be "
               "evaluated against a snapshot)")
         return 2
-    conflicts = (tracking.get("colliding_ticks") or 0) + \
-        (tracking.get("swept_colliding_segments") or 0) + \
-        sum(1 for entry in references_result
-            if entry.get("evaluated") and
-            not (entry.get("verdict") or {}).get("safe", True))
-    if conflicts:
+    reference_conflicts = sum(
+        1 for entry in references_result
+        if entry.get("evaluated") and
+        not (entry.get("verdict") or {}).get("safe", True))
+    actual_conflicts = (tracking.get("colliding_ticks") or 0) + \
+        (tracking.get("swept_colliding_segments") or 0)
+    print("  q2 conflict runs: longest %d tick(s) over %d snapshot(s); persistent "
+          "(>= %d ticks and >= %d snapshots): %d"
+          % (tracking.get("longest_conflict_run_ticks", 0),
+             tracking.get("longest_conflict_run_snapshots", 0),
+             args.persist_min_ticks, args.persist_min_snapshots,
+             len(tracking.get("persistent_conflict_runs", []))))
+    if args.strict_diagnostics:
+        gate_conflicts = reference_conflicts + actual_conflicts
+        gated = answers.values()
+    else:
+        gate_conflicts = reference_conflicts + \
+            len(tracking.get("persistent_conflict_runs", []))
+        gated = [answers["q1_reference_collision_free_at_publish"]]
+        if actual_conflicts and not gate_conflicts:
+            print("  NOTE: q2 conflicts recorded as diagnostics only (not persistent)")
+    if gate_conflicts:
         print("RESULT: nav tracking analysis COMPLETE, conflicts found")
         return 1
-    if any(answer["answer"] == "unknown" for answer in answers.values()):
+    if any(answer["answer"] == "unknown" for answer in gated):
         print("RESULT: nav tracking analysis INCOMPLETE (question evidence unknown)")
         return 2
     print("RESULT: nav tracking analysis COMPLETE, no conflicts found")

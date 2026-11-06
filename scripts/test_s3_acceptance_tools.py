@@ -24,6 +24,26 @@ class EvidenceTools(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertAlmostEqual(result["path_length_m"], 1.0)
 
+    def test_final_tolerance_is_a_parameter(self):
+        path = [(0, 0), (1, 0)]
+        self.assertFalse(s3.route_metrics(path, [(1.1, 0)], 0.5)["passed"])
+        self.assertTrue(s3.route_metrics(path, [(1.1, 0)], 0.5, final_tolerance=0.15)["passed"])
+        self.assertEqual((s3.WAYPOINT_TOLERANCE_M, s3.FINAL_TOLERANCE_M), (0.15, 0.08))
+
+    def test_only_executed_references_count_as_gate_collisions(self):
+        from types import SimpleNamespace as NS
+
+        def status(goal, sequence, sec, count, state=1):
+            return NS(state=state, STATE_REFERENCE_READY=1, goal_id=goal,
+                      plan_request_sequence=sequence, gate_collision_count=count,
+                      reference_stamp=NS(sec=sec, nanosec=0))
+
+        statuses = [status(7, 1, 10, 2), status(7, 2, 11, 3), status(7, 3, 12, 0),
+                    status(7, 4, 13, 5, state=0)]
+        executed, transient = s3.split_gate_collisions(statuses, {(7, 11.0)})
+        self.assertEqual([e["plan_request_sequence"] for e in executed], [2])
+        self.assertEqual([t["plan_request_sequence"] for t in transient], [1])
+
     def test_post_route_exception_revokes_the_overall_pass(self):
         import json
         from types import SimpleNamespace

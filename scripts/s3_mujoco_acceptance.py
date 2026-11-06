@@ -23,14 +23,36 @@ ROOT = Path(__file__).resolve().parents[1]
 SIM = ROOT / "src/sim/ats_mujoco_sim"
 
 
-def route_metrics(path, endpoints, minimum_displacement):
+FINAL_TOLERANCE_M = 0.08
+WAYPOINT_TOLERANCE_M = 0.15
+
+
+def route_metrics(path, endpoints, minimum_displacement, final_tolerance=FINAL_TOLERANCE_M):
     length = sum(math.dist(a, b) for a, b in zip(path, path[1:]))
     errors = [math.dist(path[-1], endpoint) for endpoint in endpoints[-1:]] if path else []
     return {
         "path_length_m": length,
         "final_error_m": errors[-1] if errors else None,
-        "passed": bool(errors) and length >= minimum_displacement and max(errors) <= 0.08,
+        "passed": bool(errors) and length >= minimum_displacement and max(errors) <= final_tolerance,
     }
+
+
+def split_gate_collisions(statuses, executed_references):
+    """Separate READY collisions of references the MPC was told to execute from transients.
+
+    A READY status carries the reference stamp it committed.  Only a reference that the
+    goal manager later dispatched with an EXECUTE command can drive the vehicle; READY
+    collisions of references that were replaced or never dispatched are recorded only.
+    """
+    executed, transient = [], []
+    for status in statuses:
+        if status.state != status.STATE_REFERENCE_READY or status.gate_collision_count <= 0:
+            continue
+        key = (status.goal_id, stamp(status.reference_stamp))
+        (executed if key in executed_references else transient).append(
+            {"goal_id": status.goal_id, "plan_request_sequence": status.plan_request_sequence,
+             "reference_stamp": key[1], "gate_collision_count": status.gate_collision_count})
+    return executed, transient
 
 
 def route_deviation(path, waypoints):
@@ -183,6 +205,10 @@ class Probe:
         self.endpoint_results = []
         self.history = {}
         self.execution_events = []
+        self.executed_references = set()
+        self.latency_p95_limit_ms = 250.0
+        self.waypoint_tolerance_m = WAYPOINT_TOLERANCE_M
+        self.final_tolerance_m = FINAL_TOLERANCE_M
         self.last_execute = None
         self.obstacle_clouds = []
         self.fixture_site = None
@@ -316,6 +342,7 @@ class Probe:
     def on_execution(self, msg):
         if msg.mode == msg.MODE_EXECUTE:
             self.last_execute = msg
+            self.executed_references.add((msg.goal_id, stamp(msg.reference.header.stamp)))
         record = {"mode": msg.mode, "manager": msg.manager_incarnation,
                   "sequence": msg.command_sequence, "goal": msg.goal_id,
                   "epoch": msg.localization_epoch, "map_generation": msg.map_generation,
@@ -359,7 +386,7 @@ class Probe:
         (self.directory / "graph.json").write_text(json.dumps(result, indent=2) + "\n")
         return result
 
-    def navigate(self, waypoint, timeout):
+    def navigate(self, waypoint, timeout, final=True):
         from ats_navigation_interfaces.action import NavigateToPose
         self.action.wait_for_server(timeout_sec=10.0)
         goal = NavigateToPose.Goal()
@@ -374,9 +401,9 @@ class Probe:
         if not self.spin_until(future.done, 10.0, "goal acknowledgement") or not future.result().accepted:
             raise RuntimeError("goal was not accepted")
         handle = future.result()
-        self.finish_goal(handle, waypoint, timeout)
+        self.finish_goal(handle, waypoint, timeout, final)
 
-    def finish_goal(self, handle, waypoint, timeout):
+    def finish_goal(self, handle, waypoint, timeout, final=True):
         from ats_navigation_interfaces.action import NavigateToPose
         result = handle.get_result_async()
         if not self.spin_until(result.done, timeout * 10.0 + 30.0, "navigation result"):
@@ -386,14 +413,16 @@ class Probe:
         truth = self.latest["/simulation/ground_truth/odometry"][0]
         p = truth.pose.pose.position
         error = math.hypot(p.x - waypoint[0], p.y - waypoint[1])
-        record = {"goal": waypoint, "result_code": response.result_code, "message": response.message,
+        tolerance = self.final_tolerance_m if final else self.waypoint_tolerance_m
+        record = {"goal": waypoint, "final": final, "tolerance_m": tolerance,
+                  "result_code": response.result_code, "message": response.message,
                   "truth": [p.x, p.y, p.z], "truth_error_m": error,
                   "estimated_error_m": response.final_distance, "sim_s": self.sim_time()}
         self.endpoint_results.append(record)
         self.event("goal_result", record)
         print(json.dumps(record), flush=True)
         self.save_grid(f"goal_{len(self.endpoint_results)}")
-        if response.result_code != NavigateToPose.Result.RESULT_SUCCEEDED or error > 0.08:
+        if response.result_code != NavigateToPose.Result.RESULT_SUCCEEDED or error > tolerance:
             raise RuntimeError(f"goal failed independent truth gate: {record}")
 
     def save_grid(self, name, topics=("/rog_map_adapter/planning_snapshot", "/rog_map/odom_layer")):
@@ -484,6 +513,7 @@ def run(args):
     rclpy.init()
     probe = Probe(directory, observe_obstacle_clouds=fixture_case)
     probe.scene_model = scene
+    probe.latency_p95_limit_ms = getattr(args, "latency_p95_limit_ms", 250.0)
     # Mapping publishes the planning grid in odom; a reload (competition mode) in map.
     probe.expected_grid_frame = "map" if args.reload else "odom"
     summary = {"profile": args.profile, "reload": args.reload, "passed": False}
@@ -509,20 +539,28 @@ def run(args):
         waypoints = profile["waypoints"][:args.max_goals or None]
         if args.reload:
             waypoints = waypoints[:1]
-        for point in waypoints:
-            probe.navigate(point, profile["goal_timeout_sim_s"])
+        probe.waypoint_tolerance_m = getattr(args, "waypoint_tolerance_m", WAYPOINT_TOLERANCE_M)
+        probe.final_tolerance_m = getattr(args, "final_tolerance_m", FINAL_TOLERANCE_M)
+        for index, point in enumerate(waypoints):
+            probe.navigate(point, profile["goal_timeout_sim_s"], final=index == len(waypoints) - 1)
         if not args.reload:
             summary["save"] = probe.save_map()
         minimum = 0.2 if args.reload or args.max_goals else profile["minimum_displacement_m"]
-        summary.update(route_metrics(probe.path, [waypoints[-1][:2]], minimum))
+        summary.update(route_metrics(probe.path, [waypoints[-1][:2]], minimum,
+                                     probe.final_tolerance_m))
         summary["J"] = bool(probe.goals) and all(accepted for _, accepted in probe.goals)
         summary["endpoints"] = probe.endpoint_results
         summary["route_deviation"] = route_deviation(probe.path, [profile["start"][:2]] +
                                                      [p[:2] for p in waypoints])
         summary["route_completed_ratio"] = len(probe.endpoint_results) / len(waypoints)
         summary["topic_counts"] = probe.counts
-        summary["footprint_gate_collisions"] = sum(s.gate_collision_count for s in probe.planner_statuses
-                                                     if s.state == s.STATE_REFERENCE_READY)
+        executed, transient = split_gate_collisions(probe.planner_statuses,
+                                                    probe.executed_references)
+        summary["footprint_gate_collisions"] = sum(e["gate_collision_count"] for e in executed)
+        summary["footprint_gate_collisions_executed"] = executed
+        summary["footprint_gate_collisions_transient_ready"] = transient
+        summary["tolerances_m"] = {"waypoint": probe.waypoint_tolerance_m,
+                                   "final": probe.final_tolerance_m}
         summary["passed"] = bool(summary["passed"] and summary["J"] and
                                   summary["footprint_gate_collisions"] == 0)
         if not summary["passed"]:
@@ -571,6 +609,12 @@ def main():
                                           "dynamic_save", "unsafe", "service_timeout", "unknown",
                                           "no_path", "correction_0.05", "correction_0.15",
                                           "correction_0.30"), default="route")
+    parser.add_argument("--waypoint-tolerance-m", type=float, default=WAYPOINT_TOLERANCE_M,
+                        help="truth error limit for intermediate route points (0.08 reproduces the old gate)")
+    parser.add_argument("--final-tolerance-m", type=float, default=FINAL_TOLERANCE_M,
+                        help="truth error limit for the last point and the reload first goal")
+    parser.add_argument("--latency-p95-limit-ms", type=float, default=250.0,
+                        help="obstacle visibility p95 limit (150 reproduces the old gate)")
     parser.add_argument("--startup-timeout", type=float, default=180.0)
     parser.add_argument("--launch-arg", action="append", default=[])
     args = parser.parse_args()

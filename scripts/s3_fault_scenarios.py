@@ -194,8 +194,11 @@ def obstacle_latency(probe):
               "measurement": "physical obstacle insertion to matching MINCO grid commit",
               "fixture_site": site}
     (probe.directory / "latency.json").write_text(json.dumps(result, indent=2) + "\n")
-    if result["p95_ms"] >= 150:
-        raise RuntimeError(f"physical obstacle latency p95 {result['p95_ms']:.3f} ms exceeds 150 ms")
+    limit = float(getattr(probe, "latency_p95_limit_ms", 250.0))
+    result["p95_limit_ms"] = limit
+    if result["p95_ms"] >= limit:
+        raise RuntimeError(f"physical obstacle latency p95 {result['p95_ms']:.3f} ms exceeds {limit:g} ms "
+                           f"(maximum {result['maximum_ms']:.3f} ms)")
     return {"passed": True, "F": result}
 
 

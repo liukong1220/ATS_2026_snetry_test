@@ -286,12 +286,15 @@ class Fixture(object):
         return self.dir
 
 
-def run_analyzer(directory, extra_args=()):
+def run_analyzer(directory, extra_args=(), strict=True):
+    """Legacy cases pin the old gate (--strict-diagnostics); persistence cases pass strict=False."""
     output = os.path.join(directory, "verdict.json")
     argv = ["--input-dir", directory, "--output", output,
             "--length", str(FOOTPRINT["length"]),
             "--width", str(FOOTPRINT["width"]),
             "--safety-margin", str(FOOTPRINT["safety_margin"])]
+    if strict:
+        argv.append("--strict-diagnostics")
     argv.extend(extra_args)
     status = ana.main(argv)
     with open(output, "r", encoding="utf-8") as handle:
@@ -385,6 +388,56 @@ def case_actual_drifts_into_wall(root):
     check(source["unknown_is_obstacle"] == "snapshot" and
           source["obstacle_value_threshold"] == "snapshot",
           "threshold and unknown handling come from the snapshot, not a guess")
+
+
+def persistence_fixture(root, name, conflict_ticks_per_snapshot):
+    """Drive to 2.6 m, then sit inside the wall band for the given ticks per snapshot."""
+    fixture = Fixture(root, name)
+    data = wall_grid()
+    fixture.add_layer("/map", data, frame_id="map")
+    snapshots = [fixture.add_snapshot(data, publication_sequence=1 + index,
+                                      source_generation=5 + index)
+                 for index in range(len(conflict_ticks_per_snapshot))]
+    reference = fixture.add_reference(
+        [(x, ROBOT_Y, 0.0) for x in (0.8, 1.1, 1.4, 1.7, 2.0, 2.3, 2.6)])
+    for x in (0.8, 1.1, 1.4, 1.7, 2.0, 2.3, 2.6):
+        fixture.add_sample((x, ROBOT_Y, 0.0), snapshots[0], reference, speed=0.3)
+    for snapshot, ticks in zip(snapshots, conflict_ticks_per_snapshot):
+        for _ in range(ticks):
+            fixture.add_sample((2.9, ROBOT_Y, 0.0), snapshot, reference, speed=0.0,
+                               selected={"vx": 0.0, "vy": 0.0, "wz": 0.0})
+    return fixture.write()
+
+
+def case_conflict_persistence_gate(root):
+    """q2 fails only for >= 3 ticks spanning >= 2 snapshots; q3 never gates."""
+    directory = persistence_fixture(root, "transient_single_snapshot", [4])
+    status, report = run_analyzer(directory, strict=False)
+    tracking = report["actual_tracking"]
+    check(status == 0, "a conflict inside one snapshot is diagnostic only (got %s)" % status)
+    check(tracking["colliding_ticks"] >= 4 and not tracking["persistent_conflict"],
+          "the transient conflict is still recorded but not persistent")
+    check(tracking["longest_conflict_run_snapshots"] == 1,
+          "the transient run spans one snapshot")
+    check(report["answers"]["q2_actual_left_reference_envelope"]["answer"] == "yes",
+          "the raw q2 answer still reports the conflict")
+    check(run_analyzer(directory, strict=True)[0] == 1,
+          "--strict-diagnostics reproduces the old failing verdict")
+
+    directory = persistence_fixture(root, "persistent_two_snapshots", [2, 2])
+    status, report = run_analyzer(directory, strict=False)
+    tracking = report["actual_tracking"]
+    check(status == 1, "4 ticks across 2 snapshots fail the gate (got %s)" % status)
+    check(tracking["persistent_conflict"] and
+          tracking["persistent_conflict_runs"][0]["snapshots"] == [1, 2],
+          "the persistent run names both snapshot publications")
+
+    directory = persistence_fixture(root, "too_short_two_snapshots", [1, 1])
+    status, report = run_analyzer(directory, strict=False)
+    check(status == 0 and report["actual_tracking"]["longest_conflict_run_ticks"] >= 2,
+          "2 conflict ticks across 2 snapshots stay below the tick threshold")
+    status, _ = run_analyzer(directory, ("--persist-min-ticks", "2"), strict=False)
+    check(status == 1, "the tick threshold is a parameter")
 
 
 def case_reference_unsafe_at_publish(root):
@@ -777,6 +830,7 @@ def main():
     root = tempfile.mkdtemp(prefix="nav_tracking_analysis_")
     try:
         case_actual_drifts_into_wall(root)
+        case_conflict_persistence_gate(root)
         case_reference_unsafe_at_publish(root)
         case_map_update_occupies_rest_pose(root)
         case_first_conflict_flip_with_free_rest(root)

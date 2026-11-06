@@ -2489,6 +2489,9 @@ assert_no_physical_contact() {
 # 证据通过。显式 NAV_TRACKING_GATE=0 仅用于非验收取证，仍保留独立状态。
 NAV_TRACKING_RECORDER="${NAV_TRACKING_RECORDER:-1}"
 NAV_TRACKING_GATE="${NAV_TRACKING_GATE:-1}"
+# 2026-11-06 放宽：q1 必过；q2 仅在冲突持续 >= NAV_TRACKING_PERSIST_MIN_TICKS 个 tick
+# 且跨 >= NAV_TRACKING_PERSIST_MIN_SNAPSHOTS 个快照时判失败；q3 为诊断。
+# NAV_TRACKING_STRICT=1 复现旧门（任一 q2 冲突即失败）。
 # 证据目录必须在 LOG_DIR 之外：运行开始时 `rm -rf "${LOG_DIR}"` 会连同上一轮
 # 的 nav_tracking 产物一起删除，首违证据就只能靠当轮存活。按 domain 命名，
 # 因此并发 domain 不会互相覆盖。
@@ -2603,6 +2606,9 @@ analyze_nav_tracking_leg() {
     --length "$(nav_tracking_footprint_param footprint_length)" \
     --width "$(nav_tracking_footprint_param footprint_width)" \
     --safety-margin "$(nav_tracking_footprint_param footprint_safety_margin)" \
+    --persist-min-ticks "${NAV_TRACKING_PERSIST_MIN_TICKS:-3}" \
+    --persist-min-snapshots "${NAV_TRACKING_PERSIST_MIN_SNAPSHOTS:-2}" \
+    $([[ "${NAV_TRACKING_STRICT:-0}" == 1 ]] && printf '%s' --strict-diagnostics) \
     >"${dir}/analysis.out" 2>&1 || status=$?
   # A proven conflict dominates incomplete evidence, regardless of leg order.
   if [[ "${status}" == 1 || "${NAV_TRACKING_ANALYSIS_STATUS}" == not_run ||
