@@ -404,28 +404,72 @@ case "${TEST_PROFILE}" in
     [[ "${SCENE}" == "rmuc_2027" ]] || SCENE="rmuc_2027"
     require_static_map_current
     [[ -n "${TUNNEL}" ]] || { echo "TUNNEL is required for TEST_PROFILE=tunnel_2027" >&2; exit 2; }
-    TUNNEL_VALUES="$({ python3 - "${WORKSPACE_DIR}/src/sim/ats_mujoco_sim/config/tunnels_2027.yaml" "${TUNNEL}" <<'PY'
+    # 6 个隧道：tunnels_2027.yaml（tunnel_B、tunnel_B_mirror）+ passages_2027.yaml（ramp_bridge、south_plate
+    # 及镜像）。TUNNEL 可以是逗号分隔的多个名字，按顺序依次穿过（需要 TUNNEL_START）。
+    # 输出每行 "name entry_x entry_y entry_yaw exit_x exit_y exit_yaw"。
+    TUNNEL_VALUES="$({ python3 - "${WORKSPACE_DIR}/src/sim/ats_mujoco_sim/config" "${TUNNEL}" <<'PY'
 import sys, yaml
-config = yaml.safe_load(open(sys.argv[1], encoding='utf-8'))
-for tunnel in config.get('tunnels', []):
-    if tunnel.get('name') == sys.argv[2]:
-        e, x = tunnel['entry'], tunnel['exit']
-        print(*e, *x)
-        break
-else:
-    raise SystemExit('unknown tunnel: ' + sys.argv[2])
+from pathlib import Path
+known = {}
+for file in ('tunnels_2027.yaml', 'passages_2027.yaml'):
+    for tunnel in yaml.safe_load((Path(sys.argv[1]) / file).read_text(encoding='utf-8')).get('tunnels', []):
+        known[tunnel['name']] = tunnel
+for name in sys.argv[2].split(','):
+    if name not in known:
+        raise SystemExit('unknown tunnel: ' + name + ' (known: ' + ', '.join(sorted(known)) + ')')
+    print(name, *known[name]['entry'], *known[name]['exit'])
 PY
   } )" || { echo "invalid tunnel configuration" >&2; exit 2; }
-    read -r START_X START_Y START_YAW GOAL_X GOAL_Y GOAL_YAW <<<"${TUNNEL_VALUES}"
+    mapfile -t TUNNEL_ROWS <<<"${TUNNEL_VALUES}"
+    if (( ${#TUNNEL_ROWS[@]} > 1 )) && [[ -z "${TUNNEL_START:-}" ]]; then
+      echo "TUNNEL with several names needs TUNNEL_START" >&2
+      exit 2
+    fi
+    read -r _ START_X START_Y START_YAW GOAL_X GOAL_Y GOAL_YAW <<<"${TUNNEL_ROWS[0]}"
     # 入口在隧道西侧高台面（x=12.9 处网格高 0.343 m）上：轮底偏置 0.180 m，再留 2.7 cm 落差。
     # 旧值 0.330 是按旧估算的口袋底 0.15 m 取的，在真实地形上会让底盘出生在地里。
     if [[ "${START_Z_USER_SET}" != "1" ]]; then
       START_Z="0.550"
     fi
-    GOAL_TIMEOUT="${GOAL_TIMEOUT:-180}"
     GOAL_NAMES=("${TUNNEL}")
     GOAL_XS=("${GOAL_X}")
     GOAL_YS=("${GOAL_Y}")
+    if [[ -n "${TUNNEL_START:-}" ]]; then
+      # TUNNEL_START="x y"（map 系）：从基地出生，依次到每个隧道的入口（yaw 对齐轴线）再到出口。
+      # 从基地斜着直奔出口时路径会斜切进隧道口，domain 228 因此被足迹门禁拒绝。
+      # 起点地面高度按 red_box_2027 西侧平地（0.255 m）取 START_Z=0.465，其他位置请同时给 START_Z。
+      # TUNNEL_VIA="x y ..." 在第一个入口前插入中间目标；TUNNEL_FINAL="x y" 在最后出口后加一个开阔目标，
+      # 用来观察出隧道后恢复小陀螺。
+      read -r START_X START_Y <<<"${TUNNEL_START}"
+      START_YAW="${START_YAW:-0.0}"
+      if [[ "${START_Z_USER_SET}" != "1" ]]; then
+        START_Z="0.465"
+      fi
+      GOAL_TIMEOUT="${GOAL_TIMEOUT:-300}"
+      read -r -a VIA <<<"${TUNNEL_VIA-}"
+      GOAL_NAMES=()
+      GOAL_XS=()
+      GOAL_YS=()
+      for ((vi = 0; vi + 1 < ${#VIA[@]}; vi += 2)); do
+        GOAL_NAMES+=("via_$((vi / 2 + 1))")
+        GOAL_XS+=("${VIA[vi]}")
+        GOAL_YS+=("${VIA[vi + 1]}")
+      done
+      for row in "${TUNNEL_ROWS[@]}"; do
+        read -r t_name t_ex t_ey _ t_xx t_xy _ <<<"${row}"
+        GOAL_NAMES+=("${t_name}_entry" "${t_name}")
+        GOAL_XS+=("${t_ex}" "${t_xx}")
+        GOAL_YS+=("${t_ey}" "${t_xy}")
+      done
+      if [[ -n "${TUNNEL_FINAL:-}" ]]; then
+        read -r t_fx t_fy <<<"${TUNNEL_FINAL}"
+        GOAL_NAMES+=("open_after_tunnels")
+        GOAL_XS+=("${t_fx}")
+        GOAL_YS+=("${t_fy}")
+      fi
+    else
+      GOAL_TIMEOUT="${GOAL_TIMEOUT:-180}"
+    fi
     ;;
   red_box_2027)
     # 2027 地图上的红框：从西侧开阔平地出发，到中央高地北侧。2025 的红点 (10.36, 1.49) 是 2025 地图的
