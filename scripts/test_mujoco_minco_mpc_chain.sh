@@ -86,6 +86,7 @@ if [[ -n "${START_Z:-}" ]]; then
 fi
 START_Z="${START_Z:-0.381}"
 START_YAW="${START_YAW:-0.0}"
+TUNNEL_START_YAW="${START_YAW}"
 GOAL_X="${GOAL_X:-1.0}"
 GOAL_Y="${GOAL_Y:-0.06}"
 # Goal yaw is radians; planar quaternions always carry both z and w.
@@ -102,6 +103,12 @@ except ValueError as exc:
     sys.exit(f"Invalid GOAL_YAW: {exc}")
 print(f"{math.sin(yaw / 2.0):.17g} {math.cos(yaw / 2.0):.17g}")
 PY
+}
+set_goal_orientation() {
+  # 每个 action 同时更新 yaw 与四元数；不能复用 profile 选择前计算的全局四元数。
+  GOAL_YAW="${GOAL_YAWS[$1]}"
+  GOAL_QUATERNION="$(goal_quaternion "${GOAL_YAW}")" || return 2
+  read -r GOAL_YAW_Z GOAL_YAW_W <<<"${GOAL_QUATERNION}"
 }
 if [[ -v GOAL_YAW_W ]]; then
   echo "GOAL_YAW_W is no longer accepted; specify GOAL_YAW in radians." >&2
@@ -368,6 +375,7 @@ require_static_map_current() {
   STATIC_MAP_CHECKED=1
 }
 
+GOAL_YAWS=()
 case "${TEST_PROFILE}" in
   default|single)
     GOAL_NAMES=(single)
@@ -425,7 +433,7 @@ PY
       echo "TUNNEL with several names needs TUNNEL_START" >&2
       exit 2
     fi
-    read -r _ START_X START_Y START_YAW GOAL_X GOAL_Y GOAL_YAW <<<"${TUNNEL_ROWS[0]}"
+    read -r _ START_X START_Y START_YAW GOAL_X GOAL_Y tunnel_exit_yaw <<<"${TUNNEL_ROWS[0]}"
     # 入口在隧道西侧高台面（x=12.9 处网格高 0.343 m）上：轮底偏置 0.180 m，再留 2.7 cm 落差。
     # 旧值 0.330 是按旧估算的口袋底 0.15 m 取的，在真实地形上会让底盘出生在地里。
     if [[ "${START_Z_USER_SET}" != "1" ]]; then
@@ -434,6 +442,7 @@ PY
     GOAL_NAMES=("${TUNNEL}")
     GOAL_XS=("${GOAL_X}")
     GOAL_YS=("${GOAL_Y}")
+    GOAL_YAWS=("${tunnel_exit_yaw}")
     if [[ -n "${TUNNEL_START:-}" ]]; then
       # TUNNEL_START="x y"（map 系）：从基地出生，依次到每个隧道的入口（yaw 对齐轴线）再到出口。
       # 从基地斜着直奔出口时路径会斜切进隧道口，domain 228 因此被足迹门禁拒绝。
@@ -441,7 +450,7 @@ PY
       # TUNNEL_VIA="x y ..." 在第一个入口前插入中间目标；TUNNEL_FINAL="x y" 在最后出口后加一个开阔目标，
       # 用来观察出隧道后恢复小陀螺。
       read -r START_X START_Y <<<"${TUNNEL_START}"
-      START_YAW="${START_YAW:-0.0}"
+      START_YAW="${TUNNEL_START_YAW}"
       if [[ "${START_Z_USER_SET}" != "1" ]]; then
         START_Z="0.465"
       fi
@@ -450,22 +459,26 @@ PY
       GOAL_NAMES=()
       GOAL_XS=()
       GOAL_YS=()
+      GOAL_YAWS=()
       for ((vi = 0; vi + 1 < ${#VIA[@]}; vi += 2)); do
         GOAL_NAMES+=("via_$((vi / 2 + 1))")
         GOAL_XS+=("${VIA[vi]}")
         GOAL_YS+=("${VIA[vi + 1]}")
+        GOAL_YAWS+=("${GOAL_YAW}")
       done
       for row in "${TUNNEL_ROWS[@]}"; do
-        read -r t_name t_ex t_ey _ t_xx t_xy _ <<<"${row}"
+        read -r t_name t_ex t_ey t_entry_yaw t_xx t_xy t_exit_yaw <<<"${row}"
         GOAL_NAMES+=("${t_name}_entry" "${t_name}")
         GOAL_XS+=("${t_ex}" "${t_xx}")
         GOAL_YS+=("${t_ey}" "${t_xy}")
+        GOAL_YAWS+=("${t_entry_yaw}" "${t_exit_yaw}")
       done
       if [[ -n "${TUNNEL_FINAL:-}" ]]; then
         read -r t_fx t_fy <<<"${TUNNEL_FINAL}"
         GOAL_NAMES+=("open_after_tunnels")
         GOAL_XS+=("${t_fx}")
         GOAL_YS+=("${t_fy}")
+        GOAL_YAWS+=("${GOAL_YAW}")
       fi
     else
       GOAL_TIMEOUT="${GOAL_TIMEOUT:-180}"
@@ -532,6 +545,10 @@ PY
     exit 2
     ;;
 esac
+# 未指定逐目标朝向的 profile 保持调用者的 GOAL_YAW；在 action 开始前冻结整个列表。
+for index in "${!GOAL_NAMES[@]}"; do
+  GOAL_YAWS[index]="${GOAL_YAWS[index]:-${GOAL_YAW}}"
+done
 if [[ "${SCENE}" == "rmuc_2027" ]]; then
   require_static_map_current
 fi
@@ -2645,7 +2662,7 @@ analyze_nav_tracking_leg() {
     fi
     return 0
   }
-  python3 "${WORKSPACE_DIR}/scripts/analyze_nav_tracking.py" \
+  python3 -s "${WORKSPACE_DIR}/scripts/analyze_nav_tracking.py" \
     --input-dir "${dir}" --output "${dir}/verdict.json" \
     --length "$(nav_tracking_footprint_param footprint_length)" \
     --width "$(nav_tracking_footprint_param footprint_width)" \
@@ -2742,6 +2759,7 @@ run_navigation_goal() {
   local name="${GOAL_NAMES[index]}"
   local goal_x="${GOAL_XS[index]}"
   local goal_y="${GOAL_YS[index]}"
+  set_goal_orientation "${index}" || fail "invalid goal yaw for ${name}"
   local prefix="/tmp/ats_minco_mpc_${TEST_PROFILE}_${index}_${name}"
   local before_pose="${prefix}_before_pose.out"
   local after_pose="${prefix}_after_pose.out"
