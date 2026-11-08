@@ -4,13 +4,13 @@
   "generator_version": 1,
   "inputs": {
     "mesh": "src/sim/ats_mujoco_sim/models/meshes/rmuc_2027.obj",
-    "mesh_sha256": "601d69b7dd6fb5144051f8dedafca594b02f487c1611ac327273c3e0f0dcb33c",
+    "mesh_sha256": "b98e715c7bcd33166f153f07d56121d251d2274e5d274890bda16c954f23a4d4",
     "tunnels": "src/sim/ats_mujoco_sim/config/tunnels_2027.yaml",
     "tunnels_sha256": "19ba02b4cccf22c9ec270e4b31344e308aa86e0fb6e390951d5b0a106f7a0729"
   },
-  "occupied_cells": 33387,
+  "occupied_cells": 33246,
   "outputs": {
-    "rmuc_2027.pgm": "fa6696b06b56e4dd0a477f8803d35eb2003fb389cd27eea520ac3027fe8bdfd5",
+    "rmuc_2027.pgm": "8b578562011c59e4555e22e00db7a829186aebdceff7c83b01f9d4ec7af81ed5",
     "rmuc_2027.yaml": "a93feb59474dca194d190ff28707a55bd6e5ad5f12b740a60efa0b1049854a25"
   },
   "rules": {

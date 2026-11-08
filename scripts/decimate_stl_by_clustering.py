@@ -28,6 +28,7 @@ Example (official RMUC 2027 V1.0.0 model, millimetres -> metres):
 from __future__ import annotations
 
 import argparse
+import json
 import struct
 from pathlib import Path
 
@@ -106,11 +107,60 @@ def zones_from_tunnels(path: Path, margin: float) -> list[tuple[float, float, fl
     return zones
 
 
+def zones_from_audit(path: Path, margin: float) -> list[tuple[float, float, float, float]]:
+    """All bounded-air clusters, not just hand-labelled tunnels.
+
+    Keeping even low-clearance clusters fine preserves low lips such as D1.
+    These bounds affect simulation mesh reduction only, never navigation.
+    """
+    if margin < .3:
+        raise ValueError('audited fine zones need at least 0.3 m margin')
+    report = json.loads(path.read_text())
+    if report.get('purpose') != 'offline_evaluation_only':
+        raise ValueError('expected official-mesh offline audit')
+    return [(a - margin, b + margin, c - margin, d + margin)
+            for a, b, c, d in (cluster['bounds_xy'] for cluster in report['clusters'])]
+
+
 def write_obj(path: Path, points: np.ndarray, faces: np.ndarray) -> None:
     with path.open("w", encoding="utf-8") as obj:
         obj.write(f"# {len(points)} vertices, {len(faces)} faces, metres\n")
         np.savetxt(obj, points, fmt="v %.5f %.5f %.5f")
         np.savetxt(obj, faces + 1, fmt="f %d %d %d")
+
+
+def simplify_planar(points, faces, error):
+    """Optional topology-preserving reduction of coplanar dense triangles.
+
+    VTK's absolute error is a generator constraint, not independent proof of
+    mesh accuracy. Official-layer ray regression is still required afterwards.
+    """
+    if error <= 0:
+        raise ValueError('simplification error must be positive')
+    import vtk
+    from vtk.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray, vtk_to_numpy
+
+    vertices = vtk.vtkPoints()
+    vertices.SetData(numpy_to_vtk(np.asarray(points, dtype=np.float64), deep=True))
+    triangles = vtk.vtkCellArray()
+    packed = np.c_[np.full(len(faces), 3, dtype=np.int64), faces.astype(np.int64)]
+    triangles.SetCells(len(faces), numpy_to_vtkIdTypeArray(packed.ravel(), deep=True))
+    poly = vtk.vtkPolyData()
+    poly.SetPoints(vertices)
+    poly.SetPolys(triangles)
+    decimator = vtk.vtkDecimatePro()
+    decimator.SetInputData(poly)
+    decimator.SetTargetReduction(.95)
+    decimator.PreserveTopologyOn()
+    decimator.SplittingOff()
+    decimator.BoundaryVertexDeletionOff()
+    decimator.SetFeatureAngle(30.)
+    decimator.SetErrorIsAbsolute(1)
+    decimator.SetAbsoluteError(error)
+    decimator.Update()
+    result = decimator.GetOutput()
+    return (vtk_to_numpy(result.GetPoints().GetData()).copy(),
+            vtk_to_numpy(result.GetPolys().GetData()).reshape(-1, 4)[:, 1:].copy())
 
 
 def main() -> None:
@@ -125,12 +175,17 @@ def main() -> None:
         metavar=("X0", "X1", "Y0", "Y1"), help="box (output frame, metres) kept at --fine-cell",
     )
     parser.add_argument("--tunnels-yaml", type=Path, default=None, help="add a fine zone around each tunnel")
+    parser.add_argument('--overhang-audit', type=Path, help='add all audited bounded-air clusters')
+    parser.add_argument('--audit-zone-margin', type=float, default=.3)
+    parser.add_argument('--simplify-error', type=float, help='optional VTK topology-preserving absolute error (m)')
     parser.add_argument("--zone-margin", type=float, default=1.2, help="margin around --tunnels-yaml polygons")
     args = parser.parse_args()
     vertices = read_binary_stl_vertices(args.stl, args.scale)
     zones = [tuple(zone) for zone in args.fine_zone]
     if args.tunnels_yaml is not None:
         zones += zones_from_tunnels(args.tunnels_yaml, args.zone_margin)
+    if args.overhang_audit is not None:
+        zones += zones_from_audit(args.overhang_audit, args.audit_zone_margin)
     if zones and args.fine_cell is None:
         raise SystemExit("--fine-zone / --tunnels-yaml need --fine-cell")
     if zones:
@@ -143,6 +198,10 @@ def main() -> None:
               f"faces coarse/fine: {len(coarse_faces)}/{len(fine_faces)}")
     else:
         points, faces = cluster(vertices, args.cell)
+    if args.simplify_error is not None:
+        before = len(faces)
+        points, faces = simplify_planar(points, faces, args.simplify_error)
+        print(f'topology-preserving reduction: {before} -> {len(faces)} faces; absolute error {args.simplify_error} m')
     args.obj.parent.mkdir(parents=True, exist_ok=True)
     write_obj(args.obj, points, faces)
     print(
