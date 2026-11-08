@@ -33,11 +33,16 @@ def localization_seed(localizations, stamp, base_height, max_delta_s=0.1):
     return seed, delta
 
 
-def candidates(xyz, resolution=0.1, seed=(0.0, 0.0, 0.0), ground_fit_radius=0.0):
+def candidates(xyz, resolution=0.1, seed=(0.0, 0.0, 0.0), ground_fit_radius=0.0,
+               detrend_observed_floor=False):
     columns = defaultdict(list)
+    point_columns = defaultdict(list)
     for x, y, z in np.asarray(xyz):
         if np.isfinite([x, y, z]).all():
-            columns[(int(np.floor(x / resolution)), int(np.floor(y / resolution)))].append(z)
+            key = (int(np.floor(x / resolution)), int(np.floor(y / resolution)))
+            columns[key].append(z)
+            if detrend_observed_floor:
+                point_columns[key].append((x, y, z))
     surfaces = {}
     for key, values in columns.items():
         ordered = np.sort(values)
@@ -93,11 +98,41 @@ def candidates(xyz, resolution=0.1, seed=(0.0, 0.0, 0.0), ground_fit_radius=0.0)
                     if float(np.quantile(cluster, 0.1)) > z + 0.1]
         if overhead:
             cluster = overhead[0]
+            clearance = cluster - z
+            if detrend_observed_floor:
+                # This diagnostic must not create a floor across self-occlusion.
+                if key not in floor:
+                    continue
+                support = []
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        neighbor = (key[0] + dx, key[1] + dy)
+                        if neighbor not in floor:
+                            continue
+                        lower = surfaces[neighbor][0]
+                        support.extend(point for point in point_columns[neighbor]
+                                       if lower.min() <= point[2] <= lower.max())
+                if len(support) < 6:
+                    continue
+                support = np.array(support)
+                center = (np.array(key) + 0.5) * resolution
+                design = np.column_stack([support[:, :2] - center, np.ones(len(support))])
+                coefficients, _, rank, _ = np.linalg.lstsq(design, support[:, 2], rcond=None)
+                residual = float(np.max(np.abs(design @ coefficients - support[:, 2])))
+                if rank != 3 or residual > 0.005 or np.linalg.norm(coefficients[:2]) > 0.6:
+                    continue
+                ceiling_points = np.array([point for point in point_columns[key]
+                                           if cluster.min() <= point[2] <= cluster.max()])
+                ceiling_design = np.column_stack([
+                    ceiling_points[:, :2] - center, np.ones(len(ceiling_points))])
+                clearance = ceiling_points[:, 2] - ceiling_design @ coefficients
+                ground_source = "observed_local_plane_diagnostic"
+                z = float(coefficients[2])
             result.append({"column": list(key), "ground_z": z,
                            "ground_source": ground_source, "ground_fit_max_residual_m": residual,
                            "ceiling_min_z": float(cluster.min()),
-                           "clearance_min_m": float(cluster.min() - z),
-                           "clearance_q10_m": float(np.quantile(cluster, 0.1) - z),
+                           "clearance_min_m": float(clearance.min()),
+                           "clearance_q10_m": float(np.quantile(clearance, 0.1)),
                            "floor_points": len(surfaces[key][0]) if key in floor else 0,
                            "ceiling_points": len(cluster)})
     return result
@@ -120,6 +155,8 @@ def main():
     parser.add_argument("--seed", nargs=3, type=float, default=(0.0, 0.0, 0.0))
     parser.add_argument("--localization-base-height", type=float,
                         help="use nearest recorded odom body pose minus this z offset as seed")
+    parser.add_argument("--detrend-observed-floor", action="store_true",
+                        help="diagnostic plane correction only where connected ground is observed")
     parser.add_argument("--roi", nargs=4, type=float, metavar=("XMIN", "YMIN", "XMAX", "YMAX"))
     args = parser.parse_args()
     if args.resolution <= 0 or args.window_frames <= 0:
@@ -142,7 +179,8 @@ def main():
         if localizations is not None:
             seed, delta = localization_seed(localizations, frame["stamp"], args.localization_base_height)
             seed_deltas.append(abs(delta))
-        rows = candidates(np.concatenate(window), args.resolution, seed, args.ground_fit_radius)
+        rows = candidates(np.concatenate(window), args.resolution, seed, args.ground_fit_radius,
+                          args.detrend_observed_floor)
         for row in rows:
             x, y = ((v + 0.5) * args.resolution for v in row["column"])
             if args.roi and not (args.roi[0] <= x <= args.roi[2] and args.roi[1] <= y <= args.roi[3]):
@@ -159,6 +197,7 @@ def main():
                "resolution": args.resolution, "seed": args.seed, "roi": args.roi,
               "seed_source": "scan_time_localization" if localizations is not None else "fixed_argument",
               "localization_base_height": args.localization_base_height,
+              "detrend_observed_floor": args.detrend_observed_floor,
               "seed_absolute_time_delta_s": summarize(seed_deltas),
               "clearance_min_m": summarize([r["clearance_min_m"] for r in records]),
               "clearance_q10_m": summarize([r["clearance_q10_m"] for r in records]),
@@ -169,6 +208,8 @@ def main():
     suffix = f"_fit{args.ground_fit_radius:g}" if args.ground_fit_radius else ""
     if localizations is not None:
         suffix += "_locseed"
+    if args.detrend_observed_floor:
+        suffix += "_detrended"
     (args.directory / f"clearance_analysis_w{args.window_frames}{suffix}.json").write_text(
         json.dumps(result, indent=2) + "\n")
     print(json.dumps({k: v for k, v in result.items() if k not in ("records", "repeated_columns")}, indent=2))

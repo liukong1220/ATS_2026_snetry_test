@@ -63,3 +63,56 @@ def test_pose_seed_reaches_observed_floor_without_expanding_seed_radius():
     assert len(result) == 1
     assert result[0]["ground_source"] == "observed"
     assert result[0]["clearance_min_m"] == pytest.approx(0.249)
+
+
+@pytest.mark.parametrize('clearance', [0.25, 0.24])
+def test_observed_plane_diagnostic_compares_floor_at_actual_ceiling_xy(clearance):
+    xyz = []
+    for x in range(-2, 3):
+        for y in range(-2, 3):
+            for dx, dy in [(0.017, 0.017), (0.023, 0.017), (0.017, 0.023)]:
+                px, py = x * 0.1 + dx, y * 0.1 + dy
+                xyz.append([px, py, 0.3 * px + 0.4 * py])
+    for dx, dy in [(0.077, 0.077), (0.083, 0.077), (0.077, 0.083)]:
+        px, py = 0.1 + dx, 0.1 + dy
+        xyz.append([px, py, 0.3 * px + 0.4 * py + clearance])
+    baseline = candidates(xyz)
+    assert baseline[0]['clearance_min_m'] > clearance + 0.03
+    rows = candidates(xyz, detrend_observed_floor=True)
+    assert len(rows) == 1
+    assert rows[0]['clearance_min_m'] == pytest.approx(clearance)
+    assert rows[0]['ground_source'] == 'observed_local_plane_diagnostic'
+    assert rows[0]['floor_points'] == 3
+
+
+def test_observed_plane_diagnostic_does_not_bridge_unseen_ground():
+    xyz = [[0.05, 0.05, z] for z in [0.249, 0.25, 0.251]]
+    assert candidates(xyz, detrend_observed_floor=True) == []
+
+
+def test_observed_plane_diagnostic_refuses_rank_deficient_support():
+    xyz = [[0.15, 0.15, z] for z in [-0.001, 0.0, 0.001, 0.239, 0.24, 0.241]]
+    assert candidates(xyz, detrend_observed_floor=True) == []
+
+
+def test_observed_plane_diagnostic_refuses_step_instead_of_smoothing_it():
+    xyz = []
+    for x in range(-1, 2):
+        for y in range(-1, 2):
+            for dx, dy in [(0.02, 0.02), (0.03, 0.02), (0.02, 0.03)]:
+                xyz.append([x * 0.1 + dx, y * 0.1 + dy, 0.03 if x > 0 else 0.0])
+    xyz.extend([[0.05, 0.05, z] for z in [0.249, 0.25, 0.251]])
+    assert candidates(xyz)
+    assert candidates(xyz, detrend_observed_floor=True) == []
+
+
+def test_observed_plane_diagnostic_keeps_single_low_hanging_return():
+    xyz = []
+    for x in range(-1, 2):
+        for y in range(-1, 2):
+            for dx, dy in [(0.02, 0.02), (0.03, 0.02), (0.02, 0.03)]:
+                xyz.append([x * 0.1 + dx, y * 0.1 + dy, 0.0])
+    xyz.extend([[0.05, 0.05, z] for z in [0.239, 0.25, 0.251]])
+    rows = candidates(xyz, detrend_observed_floor=True)
+    assert len(rows) == 1
+    assert rows[0]['clearance_min_m'] == pytest.approx(0.239)
