@@ -23,6 +23,8 @@ def main():
     parser.add_argument('--base-height', type=float, required=True)
     parser.add_argument('--include-startup-ring', action='store_true')
     parser.add_argument('--roi', nargs=4, type=float, required=True)
+    parser.add_argument('--end-stamp', type=float,
+                        help='explicit diagnostic truncation; recorded in metadata, never implicit')
     args = parser.parse_args()
     if args.output.exists() or args.output.with_suffix('.json').exists():
         parser.error('choose a fresh output path')
@@ -39,6 +41,8 @@ def main():
                 raise ValueError('component replay requires odom scans')
             frames.append((frame['stamp'], args.directory / f'{prefix}_{i:04d}.npz'))
     frames.sort(key=lambda frame: frame[0])
+    if args.end_stamp is not None:
+        frames = [frame for frame in frames if frame[0] <= args.end_stamp]
     if not frames:
         raise ValueError('no recorded scans')
     if len({stamp for stamp, _ in frames}) != len(frames):
@@ -58,7 +62,8 @@ def main():
                 'config_sha256': hashlib.sha256(args.params.read_bytes()).hexdigest(),
                 'config': config, 'base_height': args.base_height, 'roi': args.roi,
                 'first_stamp': frames[0][0], 'last_stamp': frames[-1][0], 'frames': len(frames),
-                'max_abs_pose_delta_s': max_delta, 'input': str(args.output.resolve()),
+                'max_abs_pose_delta_s': max_delta, 'requested_end_stamp': args.end_stamp,
+                'input': str(args.output.resolve()),
                 'input_sha256': hashlib.sha256(args.output.read_bytes()).hexdigest()}
     args.output.with_suffix('.json').write_text(json.dumps(metadata, indent=2) + '\n')
     print(json.dumps(metadata, indent=2))

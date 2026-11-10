@@ -36,3 +36,16 @@ def test_export_keeps_component_scope_and_refuses_overwrite(tmp_path):
     assert rejected.returncode != 0
     assert b'fresh output' in rejected.stderr
     assert output.read_bytes() == before
+    # A requested shorter interval is explicit, preserves the full record, and
+    # is reflected in metadata. A missing-TF frame is never silently skipped.
+    (tmp_path / 'frames.json').write_text(json.dumps([
+        {'stamp': 1.0, 'frame': 'odom', 'points': 1},
+        {'stamp': 2.0, 'frame': 'odom', 'points': 1}]))
+    clipped = tmp_path / 'clipped.txt'
+    limited = command.copy()
+    limited[limited.index(str(output))] = str(clipped)
+    subprocess.run([*limited, '--end-stamp', '1.0'], check=True, capture_output=True)
+    metadata = json.loads(clipped.with_suffix('.json').read_text())
+    assert metadata['frames'] == 1
+    assert metadata['requested_end_stamp'] == 1.0
+    assert output.read_bytes() == before

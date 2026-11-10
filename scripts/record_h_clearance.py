@@ -77,6 +77,11 @@ def main():
     from rclpy.qos import qos_profile_sensor_data
     from ats_navigation_interfaces.msg import LocalizationStatus, SwerveTelemetry
     from rosidl_runtime_py.convert import message_to_ordereddict
+    from tf2_msgs.msg import TFMessage
+    from rclpy.qos import DurabilityPolicy, QoSProfile
+    from rclpy.duration import Duration
+    from rclpy.time import Time
+    from tf2_ros import Buffer, TransformException
 
     rclpy.init()
     node = rclpy.create_node("h_clearance_recorder")
@@ -90,6 +95,9 @@ def main():
     # Bounded rings are diagnostic only and never count as stable sample frames.
     startup_scans = deque(maxlen=60)
     startup_sensor_scans = deque(maxlen=60)
+    transforms = []
+    static_transforms = []
+    tf_buffer = Buffer(cache_time=Duration(seconds=120.0))
     first_stamp = None
 
     def cloud_xyz(message):
@@ -154,7 +162,32 @@ def main():
         if lost_after_input or message.odom_identity_latched:
             raise RuntimeError("localization lost or identity latched: abort parking sample")
 
+    def on_tf(message, static=False):
+        destination = static_transforms if static else transforms
+        for transform in message.transforms:
+            destination.append(message_to_ordereddict(transform))
+            if static:
+                tf_buffer.set_transform_static(transform, 'runtime_recorder')
+            else:
+                tf_buffer.set_transform(transform, 'runtime_recorder')
+
+    def final_scan_tf_available():
+        if len(frames) < args.frames:
+            return False
+        try:
+            tf_buffer.lookup_transform('odom', 'front_mid360',
+                                       Time(nanoseconds=round(frames[-1]['stamp'] * 1e9)))
+            return True
+        except TransformException:
+            return False
+
     subscriptions = [
+        # Preserve actual runtime extrinsics and odom transforms. Offline ray
+        # replay must query scan time, not assume the source-default mount.
+        node.create_subscription(TFMessage, "/tf", on_tf, 100),
+        node.create_subscription(TFMessage, "/tf_static",
+                                 lambda m: on_tf(m, static=True),
+                                 QoSProfile(depth=100, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
         node.create_subscription(PointCloud2, "/mujoco/livox_points", on_sensor_cloud,
                                  qos_profile_sensor_data),
         node.create_subscription(PointCloud2, "/registered_scan", on_cloud, qos_profile_sensor_data),
@@ -172,12 +205,14 @@ def main():
     try:
         with (output / "launch.log").open("w") as log:
             process = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
-            while len(frames) < args.frames and time.monotonic() - started < args.timeout:
+            while not final_scan_tf_available() and time.monotonic() - started < args.timeout:
                 if process.poll() is not None:
                     raise RuntimeError(f"launch exited {process.returncode}")
                 rclpy.spin_once(node, timeout_sec=0.2)
             if len(frames) < args.frames:
                 raise RuntimeError(f"sampling timeout: {len(frames)}/{args.frames} frames")
+            if not final_scan_tf_available():
+                raise RuntimeError('sampling timeout: final scan-time TF unavailable')
     finally:
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGINT)
@@ -199,6 +234,8 @@ def main():
         (output / "telemetry.json").write_text(json.dumps(telemetry) + "\n")
         (output / "localization.json").write_text(json.dumps(localization) + "\n")
         (output / "localization_status.json").write_text(json.dumps(statuses) + "\n")
+        (output / "tf.json").write_text(json.dumps(transforms) + "\n")
+        (output / "tf_static.json").write_text(json.dumps(static_transforms) + "\n")
         node.destroy_node()
         rclpy.try_shutdown()
 
