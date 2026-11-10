@@ -187,6 +187,7 @@ class Probe:
         from rclpy.action import ActionClient
         from ats_navigation_interfaces.action import NavigateToPose
         from ats_navigation_interfaces.msg import ExecutionCommand, LocalizationStatus, PlanningMapStatus, PlannerGoal, PlannerStatus, RelocalizationObservation, PlanningMapSnapshot
+        from ats_navigation_interfaces.msg import SwerveTelemetry
         from planning_snapshot_grid import PLANNING_SNAPSHOT_TOPIC, snapshot_to_grid
         from nav_msgs.msg import Odometry, OccupancyGrid, Path as PathMessage
         from geometry_msgs.msg import Twist
@@ -220,6 +221,7 @@ class Probe:
         self.subscriptions = []
         topics = [
             (Odometry, "/simulation/ground_truth/odometry", qos_profile_sensor_data, self.on_truth),
+            (SwerveTelemetry, "/swerve/telemetry", 10, self.on_telemetry),
             (Odometry, "/localization", qos_profile_sensor_data, None),
             (LocalizationStatus, "/localization/status", durable, None),
             (RelocalizationObservation, "/relocalization_observation", 10, None),
@@ -263,9 +265,15 @@ class Probe:
                     self.history[topic] = self.history[topic][-40:]
                 elif topic == "/localization":
                     self.history.setdefault(topic, []).append((received, msg))
+                    status = self.latest.get("/localization/status")
+                    if status:
+                        self.check_localization_health(status[0])
+                elif topic == "/localization/status":
+                    self.event(topic, self.message_dict(msg))
+                    self.check_localization_health(msg)
                 if callback:
                     callback(msg)
-                elif topic in ("/localization/status", "/rog_map_adapter/status", "/planner/emergency_stop",
+                elif topic in ("/rog_map_adapter/status", "/planner/emergency_stop",
                                "/relocalization_observation"):
                     self.event(topic, self.message_dict(msg))
             self.subscriptions.append(self.node.create_subscription(kind, topic, receive, qos))
@@ -323,6 +331,24 @@ class Probe:
         self.goals.append((msg, accepted))
         self.event("planner_goal", {"accepted_before_dispatch": accepted, **self.message_dict(msg)})
 
+    def on_telemetry(self, msg):
+        diagnostic = {"contact_violation_count": msg.contact_violation_count,
+                      "max_contact_force": msg.max_contact_force}
+        self.event("contact_diagnostic", diagnostic)
+        if msg.contact_violation_count > 0:
+            raise RuntimeError(f"contact diagnostic: {diagnostic}")
+
+    def check_localization_health(self, msg):
+        if msg.odom_identity_latched:
+            raise RuntimeError("localization identity latched")
+        if "/localization" in self.latest and msg.state == msg.STATE_LOST:
+            raise RuntimeError("localization lost after odometry input")
+
+    def check_executed_collisions(self):
+        executed, _ = split_gate_collisions(self.planner_statuses, self.executed_references)
+        if executed:
+            raise RuntimeError(f"executed reference footprint collision: {executed}")
+
     def on_planner_status(self, msg):
         self.planner_statuses.append(msg)
         self.event("planner_status", self.message_dict(msg))
@@ -338,6 +364,7 @@ class Probe:
                 "indices": msg.gate_collision_indices,
                 "reference": self.message_dict(reference[0]) if reference else None,
                 "localization": self.message_dict(pose[0]) if pose else None}) + "\n")
+        self.check_executed_collisions()
 
     def on_execution(self, msg):
         if msg.mode == msg.MODE_EXECUTE:
@@ -350,6 +377,7 @@ class Probe:
                   "reference_points": len(msg.reference.poses)}
         self.execution_events.append((time.monotonic(), record))
         self.event("execution_command", record)
+        self.check_executed_collisions()
 
     def spin_until(self, predicate, wall_timeout, label):
         end = time.monotonic() + wall_timeout

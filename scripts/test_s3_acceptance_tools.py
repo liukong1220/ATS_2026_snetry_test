@@ -44,6 +44,70 @@ class EvidenceTools(unittest.TestCase):
         self.assertEqual([e["plan_request_sequence"] for e in executed], [2])
         self.assertEqual([t["plan_request_sequence"] for t in transient], [1])
 
+    def test_runtime_contact_and_post_input_lost_abort_without_weakening_bootstrap(self):
+        from types import SimpleNamespace as NS
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.event = Mock()
+        probe.latest = {}
+        probe.on_telemetry(NS(contact_violation_count=0, max_contact_force=0.0))
+        with self.assertRaisesRegex(RuntimeError, 'contact diagnostic'):
+            probe.on_telemetry(NS(contact_violation_count=1, max_contact_force=12.0))
+        lost = NS(state=4, STATE_LOST=4, odom_identity_latched=False)
+        probe.check_localization_health(lost)
+        probe.latest['/localization'] = (object(), 1.0)
+        with self.assertRaisesRegex(RuntimeError, 'localization lost'):
+            probe.check_localization_health(lost)
+        probe.latest.clear()
+        lost.odom_identity_latched = True
+        with self.assertRaisesRegex(RuntimeError, 'identity latched'):
+            probe.check_localization_health(lost)
+
+    def test_runtime_executed_collision_aborts_but_ready_transient_does_not(self):
+        from types import SimpleNamespace as NS
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.planner_statuses = [NS(state=1, STATE_REFERENCE_READY=1, goal_id=7,
+                                    plan_request_sequence=2, gate_collision_count=1,
+                                    reference_stamp=NS(sec=10, nanosec=0))]
+        probe.executed_references = set()
+        probe.check_executed_collisions()
+        probe.executed_references.add((7, 10.0))
+        with self.assertRaisesRegex(RuntimeError, 'executed reference'):
+            probe.check_executed_collisions()
+
+    def test_runtime_collision_checks_both_callback_arrival_orders(self):
+        from types import SimpleNamespace as NS
+        for execution_first in (False, True):
+            with self.subTest(execution_first=execution_first), tempfile.TemporaryDirectory() as tmp:
+                probe = s3.Probe.__new__(s3.Probe)
+                probe.event = Mock()
+                probe.save_grid = Mock()
+                probe.directory = Path(tmp)
+                probe.latest = {}
+                probe.planner_statuses = []
+                probe.executed_references = set()
+                probe.execution_events = []
+                probe.message_dict = lambda _: {}
+                status = NS(state=1, STATE_REFERENCE_READY=1, goal_id=7,
+                            plan_request_sequence=2, gate_collision_count=1,
+                            gate_collision_indices=[0], reference_stamp=NS(sec=10, nanosec=0))
+                execution = NS(mode=1, MODE_EXECUTE=1, goal_id=7,
+                               reference=NS(header=NS(stamp=NS(sec=10, nanosec=0)), poses=[]),
+                               manager_incarnation=1, command_sequence=1,
+                               localization_epoch=1, map_generation=1)
+                first, second = ((lambda: probe.on_execution(execution),
+                                  lambda: probe.on_planner_status(status)) if execution_first else
+                                 (lambda: probe.on_planner_status(status),
+                                  lambda: probe.on_execution(execution)))
+                first()
+                with self.assertRaisesRegex(RuntimeError, 'executed reference'):
+                    second()
+
+    def test_runtime_telemetry_subscription_matches_simulator_default(self):
+        source = Path(s3.__file__).read_text()
+        self.assertIn('(SwerveTelemetry, "/swerve/telemetry", 10, self.on_telemetry)', source)
+        simulator = (s3.SIM / 'ats_mujoco_sim/sim_node.py').read_text()
+        self.assertIn('"swerve_telemetry_topic", "/swerve/telemetry"', simulator)
+
     def test_post_route_exception_revokes_the_overall_pass(self):
         import json
         from types import SimpleNamespace
