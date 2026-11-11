@@ -4,6 +4,8 @@
 
 本文记录当前 `develop` 代码中 Gazebo 导航入口与自研导航链的实际接口。Gazebo 负责物理世界、传感器/真值桥和底盘执行；定位、地图、规划与 MPC 由活动导航仓提供。MuJoCo 与 Gazebo 共享同一套导航 topic 和消息语义，因此可以用相同的接口检查脚本比较两种仿真域。
 
+> 2026-11-12 状态：Gazebo 暂不启用（用户 2026-10-31）。本文与 `ats_gazebo_nav.launch.py` 仍描述 M3/M4 之前的地图接口（`ats_rog_map_adapter`、`/rog_map/get_ground_projection`、`/rc_esdf/planning_grid`、`planning_grid_owner`），这些在导航仓已删除；导航仓现行接口见 [导航定位与轨迹链路](导航定位与轨迹链路.md)。重新启用 Gazebo 前要先同步入口。
+
 ## 启动入口
 
 ```bash
