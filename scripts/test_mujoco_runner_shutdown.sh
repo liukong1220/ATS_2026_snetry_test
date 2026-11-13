@@ -48,6 +48,8 @@ if mode == 'fanout':
 def shutdown(signum, frame):
     if mode == 'ignore':
         return
+    if mode == 'slow':
+        time.sleep(4.0)
     if child_pid is not None:
         time.sleep(0.1)
         os.kill(child_pid, signal.SIGINT)
@@ -79,6 +81,7 @@ run_case() {
     LAUNCH_LOG="${dir}/launch.log" RUNNER_STATUS_FILE="${dir}/runner_status.env"
     flush_leg_evidence() { echo flushed >>"${dir}/flush.count"; }
     stop_capture_process() { :; }
+    stop_capture_daemon() { :; }
     start_launch python3 "${WORK_DIR}/fake_launch.py" "${dir}/ready" "${record}" "${launch_exit}" "${mode}"
     trap 'kill -KILL "-${LAUNCH_PID}" 2>/dev/null || true' EXIT
     deadline=$((SECONDS + 5))
@@ -118,6 +121,7 @@ run_case() {
 run_case normal_sigint '[INFO] [launch]: user interrupted with ctrl-c (SIGINT)' 0 normal 0 0 passed
 run_case normal_child '[INFO] [node-1]: process has finished cleanly [pid 123]' 0 normal 0 0 passed
 run_case single_child_interrupt '[INFO] [node-1]: process has finished cleanly [pid 123]' 0 fanout 0 0 passed
+run_case slow_clean_shutdown '[INFO] [node-1]: process has finished cleanly [pid 123]' 0 slow 0 0 passed
 run_case child_abort '[ERROR] [node-1]: process has died [pid 123, exit code -6, cmd node]' 0 normal 0 1 failed
 run_case child_error '[ERROR] [node-1]: process has died [pid 123, exit code 1, cmd node]' 0 normal 0 1 failed
 run_case nonzero_record '[node-1]: exit code: 1' 0 normal 0 1 failed

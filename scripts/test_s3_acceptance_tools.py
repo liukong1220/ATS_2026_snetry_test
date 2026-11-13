@@ -165,6 +165,47 @@ class EvidenceTools(unittest.TestCase):
         self.assertAlmostEqual(result["mean_m"], 0.2 / 3)
         self.assertGreater(result["p95_m"], 0.15)
 
+    def test_tunnel_profile_is_explicit_and_keeps_other_profiles_unchanged(self):
+        import yaml
+        source = s3.SIM / "config/s3_mapping_routes.yaml"
+        profiles = yaml.safe_load(source.read_text())
+        self.assertNotIn("routes", profiles["rmuc_2027"])
+        base = profiles["rmuc_2027_tunnels"]
+        self.assertEqual(base["start"], profiles["rmuc_2027"]["start"])
+        self.assertEqual(base["odom_layer_origin"], profiles["rmuc_2027"]["odom_layer_origin"])
+        with self.assertRaises(ValueError):
+            s3.load_profile(source, "rmuc_2027_tunnels", "unknown_route")
+        with self.assertRaises(ValueError):
+            s3.load_profile(source, "rmuc_2027", "tunnel_b_roundtrip")
+        for route in base["routes"]:
+            profile = s3.load_profile(source, "rmuc_2027_tunnels", route)
+            x0, y0 = profile["odom_layer_origin"]
+            sx, sy = profile["start"][:2]
+            truth = s3.load_tunnel_truth(s3.SIM / "config", [t["name"] for t in profile["tunnels"]])
+            self.assertEqual(len(truth), len(profile["tunnels"]))
+            for x, y, _ in profile["waypoints"]:
+                self.assertTrue(x0 <= x - sx < x0 + 40.0 and y0 <= y - sy < y0 + 30.0)
+                # The official ridge field (STL peak-to-valley 6-7 cm, S2) is excluded.
+                self.assertFalse(5.15 <= x <= 7.8 and 0.35 <= y <= 3.2, (route, x, y))
+
+    def test_tunnel_report_counts_complete_traversals_and_axis_error(self):
+        tunnel = {"name": "t", "corridor_polygon": [[0, -0.4], [4, -0.4], [4, 0.4], [0, 0.4]],
+                  "entry": [0.1, 0.0, 0.0], "exit": [3.9, 0.0, 0.0], "axis_yaw": 0.0,
+                  "width": 0.8}
+        through = [(x / 10.0, 0.05, 0.02) for x in range(0, 41)]
+        report = s3.tunnel_report(through, [tunnel])["t"]
+        self.assertEqual((report["forward_passes"], report["reverse_passes"]), (1, 0))
+        self.assertAlmostEqual(report["axis_lateral_max_m"], 0.05)
+        self.assertTrue(report["within_walls"])
+        back = s3.tunnel_report(through + through[::-1], [tunnel])["t"]
+        self.assertEqual((back["forward_passes"], back["reverse_passes"]), (1, 1))
+        # Reaching the exit by going around (outside the corridor) is not a pass.
+        around = [(0.05, 0.0, 0.0), (0.0, 1.0, 0.0), (4.0, 1.0, 0.0), (3.95, 0.0, 0.0)]
+        self.assertEqual(s3.tunnel_report(around, [tunnel])["t"]["forward_passes"], 0)
+        # Hugging a wall beyond (width - robot) / 2 fails the wall criterion.
+        wall = [(x / 10.0, 0.3, 0.0) for x in range(0, 41)]
+        self.assertFalse(s3.tunnel_report(wall, [tunnel])["t"]["within_walls"])
+
     def test_field_profiles_keep_the_fixed_array_around_the_complete_field(self):
         import yaml
         source = Path(__file__).resolve().parents[1] / "src/sim/ats_mujoco_sim/config/s3_mapping_routes.yaml"
@@ -409,7 +450,11 @@ class EvidenceTools(unittest.TestCase):
                         bottom = roof.get("bottom_z", roof.get("roof_bottom_z"))
                         bottom += roof.get("slope_y", 0.0) * (y - (lo[1] + hi[1]) / 2)
                         self.assertGreaterEqual(
-                            bottom - ground, 0.255 + 0.05,
+                            # Offline route guard against the physical vehicle height
+                            # (0.242 m, user-confirmed). Every route to the east shelf
+                            # passes under ramp_bridge (0.302 m), so the 0.305 m runtime gate
+                            # cannot be the preflight; the runtime gate is selected separately.
+                            bottom - ground, 0.242,
                             f"2027 segment {index} has insufficient clearance under {roof['name']}")
             previous = target
 

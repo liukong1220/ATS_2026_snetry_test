@@ -76,6 +76,82 @@ def route_deviation(path, waypoints):
             "maximum_m": max(distances) if distances else None}
 
 
+def load_profile(config_path, name, route=None):
+    """Return one profile; profiles with a routes table need an explicit route name."""
+    profile = dict(yaml.safe_load(Path(config_path).read_text())[name])
+    routes = profile.pop("routes", None)
+    if routes is None:
+        if route:
+            raise ValueError(f"profile {name} has no named routes")
+        return profile
+    route = route or profile.get("default_route")
+    if route not in routes:
+        raise ValueError(f"profile {name} needs --route in {sorted(routes)}")
+    profile.update(routes[route])
+    profile["route"] = route
+    return profile
+
+
+def load_tunnel_truth(config_dir, names):
+    """Evaluator-only tunnel geometry; navigation never receives these files."""
+    known = {}
+    for file in ("tunnels_2027.yaml", "passages_2027.yaml"):
+        for tunnel in yaml.safe_load((Path(config_dir) / file).read_text()).get("tunnels", []):
+            known[tunnel["name"]] = tunnel
+    missing = [name for name in names if name not in known]
+    if missing:
+        raise ValueError(f"unknown tunnels: {missing}")
+    return [known[name] for name in names]
+
+
+def tunnel_report(samples, tunnels, robot_width=0.571):
+    """Per-tunnel passes and axis lateral error from independent truth samples.
+
+    samples are (x, y, yaw). A pass is a full traversal of the entry-exit axis in
+    either direction: the sample sequence reaches one end zone, stays within the
+    walled corridor, and reaches the other end zone. Passing around the tunnel
+    does not count because every counted sample must lie inside corridor_polygon.
+    """
+    report = {}
+    end_zone = 0.15
+    for tunnel in tunnels:
+        entry, exit_ = tunnel["entry"][:2], tunnel["exit"][:2]
+        dx, dy = exit_[0] - entry[0], exit_[1] - entry[1]
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        xs = [p[0] for p in tunnel["corridor_polygon"]]
+        ys = [p[1] for p in tunnel["corridor_polygon"]]
+        lateral, yaw_errors, passes = [], [], {"forward": 0, "reverse": 0}
+        end = None
+        for x, y, heading in samples:
+            inside = min(xs) <= x <= max(xs) and min(ys) <= y <= max(ys)
+            along = (x - entry[0]) * ux + (y - entry[1]) * uy
+            offset = -(x - entry[0]) * uy + (y - entry[1]) * ux
+            if inside and 0.0 <= along <= length:
+                lateral.append(abs(offset))
+                error = heading - float(tunnel["axis_yaw"])
+                yaw_errors.append(abs(0.5 * math.atan2(math.sin(2 * error), math.cos(2 * error))))
+            if not inside:
+                end = None
+                continue
+            zone = "entry" if along <= end_zone else "exit" if along >= length - end_zone else None
+            if zone and end and zone != end:
+                passes["forward" if zone == "exit" else "reverse"] += 1
+            if zone:
+                end = zone
+        limit = (float(tunnel["width"]) - robot_width) / 2.0
+        ordered = sorted(lateral)
+        report[tunnel["name"]] = {
+            "forward_passes": passes["forward"], "reverse_passes": passes["reverse"],
+            "corridor_samples": len(lateral),
+            "axis_lateral_max_m": max(lateral) if lateral else None,
+            "axis_lateral_p95_m": ordered[int(0.95 * (len(ordered) - 1))] if ordered else None,
+            "axis_lateral_limit_m": limit,
+            "yaw_error_max_rad": max(yaw_errors) if yaw_errors else None,
+            "within_walls": bool(lateral) and max(lateral) <= limit}
+    return report
+
+
 def verify_installed_files(pairs):
     for source, installed in pairs:
         if not installed.is_file() or source.read_bytes() != installed.read_bytes():
@@ -203,6 +279,8 @@ class Probe:
         self.truth_csv = csv.writer(self.truth_file)
         self.truth_csv.writerow(["wall_s", "sim_s", "x", "y", "z", "yaw", "vx", "vy", "wz"])
         self.path, self.latest, self.counts, self.goals, self.planner_statuses = [], {}, {}, [], []
+        self.truth_samples = []
+        self.contact_seen = {"max_violation_count": 0, "max_force": 0.0}
         self.endpoint_results = []
         self.history = {}
         self.execution_events = []
@@ -265,6 +343,18 @@ class Probe:
                     self.history[topic] = self.history[topic][-40:]
                 elif topic == "/localization":
                     self.history.setdefault(topic, []).append((received, msg))
+                    # 5 Hz planning-frame pose: what goal_manager and the MPC actually see
+                    # (yaw/speed), needed to tell a yaw-convergence stall from a position one.
+                    pose_stamp = stamp(msg.header.stamp)
+                    if pose_stamp - self.__dict__.get("last_pose_event_stamp", -1.0) >= 0.2:
+                        self.last_pose_event_stamp = pose_stamp
+                        q = msg.pose.pose.orientation
+                        self.event("localization_pose", {
+                            "x": msg.pose.pose.position.x, "y": msg.pose.pose.position.y,
+                            "yaw": math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                                              1.0 - 2.0 * (q.y * q.y + q.z * q.z)),
+                            "vx": msg.twist.twist.linear.x, "vy": msg.twist.twist.linear.y,
+                            "wz": msg.twist.twist.angular.z})
                     status = self.latest.get("/localization/status")
                     if status:
                         self.check_localization_health(status[0])
@@ -321,6 +411,7 @@ class Probe:
     def on_truth(self, msg):
         p, v = msg.pose.pose, msg.twist.twist
         self.path.append((p.position.x, p.position.y))
+        self.truth_samples.append((p.position.x, p.position.y, yaw(p.orientation)))
         self.truth_csv.writerow([time.monotonic(), stamp(msg.header.stamp), p.position.x,
                                 p.position.y, p.position.z, yaw(p.orientation), v.linear.x,
                                 v.linear.y, v.angular.z])
@@ -335,6 +426,9 @@ class Probe:
         diagnostic = {"contact_violation_count": msg.contact_violation_count,
                       "max_contact_force": msg.max_contact_force}
         self.event("contact_diagnostic", diagnostic)
+        seen = self.__dict__.setdefault("contact_seen", {"max_violation_count": 0, "max_force": 0.0})
+        seen["max_violation_count"] = max(seen["max_violation_count"], msg.contact_violation_count)
+        seen["max_force"] = max(seen["max_force"], msg.max_contact_force)
         if msg.contact_violation_count > 0:
             raise RuntimeError(f"contact diagnostic: {diagnostic}")
 
@@ -501,7 +595,8 @@ def run(args):
         (SIM / "launch/rmuc_2027_mujoco.launch.py", sim_share / "launch/rmuc_2027_mujoco.launch.py"),
         (SIM / "config/s3_mapping_routes.yaml", sim_share / "config/s3_mapping_routes.yaml"),
     ])
-    profile = yaml.safe_load((SIM / "config/s3_mapping_routes.yaml").read_text())[args.profile]
+    profile = load_profile(SIM / "config/s3_mapping_routes.yaml", args.profile,
+                           getattr(args, "route", None))
     directory = Path(args.output).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     parameters = yaml.safe_load((ROOT / "src/ats_sentry_bringup/params/node_params.yaml").read_text())
@@ -589,7 +684,21 @@ def run(args):
         summary["footprint_gate_collisions_transient_ready"] = transient
         summary["tolerances_m"] = {"waypoint": probe.waypoint_tolerance_m,
                                    "final": probe.final_tolerance_m}
-        summary["passed"] = bool(summary["passed"] and summary["J"] and
+        if profile.get("tunnels") and not args.max_goals:
+            summary["route"] = profile.get("route")
+            summary["tunnels"] = tunnel_report(
+                probe.truth_samples,
+                load_tunnel_truth(SIM / "config", [t["name"] for t in profile["tunnels"]]))
+            summary["contact_diagnostic"] = dict(probe.contact_seen,
+                                                 physical_contact_acceptance="unverified")
+            for want in profile["tunnels"]:
+                got = summary["tunnels"][want["name"]]
+                got["required_passes"] = {k: want.get(k, 0) for k in ("forward_passes", "reverse_passes")}
+                got["passed"] = bool(got["within_walls"] and
+                                     got["forward_passes"] >= want.get("forward_passes", 0) and
+                                     got["reverse_passes"] >= want.get("reverse_passes", 0))
+        tunnels_ok = all(t["passed"] for t in summary.get("tunnels", {}).values())
+        summary["passed"] = bool(summary["passed"] and summary["J"] and tunnels_ok and
                                   summary["footprint_gate_collisions"] == 0)
         if not summary["passed"]:
             raise RuntimeError("route evidence gates failed")
@@ -627,8 +736,9 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", required=True, choices=("small_10x10", "rmuc_2025", "rmuc_2027"))
+    parser.add_argument("--profile", required=True, choices=("small_10x10", "rmuc_2025", "rmuc_2027", "rmuc_2027_tunnels"))
     parser.add_argument("--output", required=True)
+    parser.add_argument("--route", help="named route of a profile with a routes table")
     parser.add_argument("--reload", help="saved map prefix, without suffix")
     parser.add_argument("--max-goals", type=int, default=0)
     parser.add_argument("--post-route-case", choices=("obstacle_latency", "dynamic_save", "obstacle_and_dynamic"),

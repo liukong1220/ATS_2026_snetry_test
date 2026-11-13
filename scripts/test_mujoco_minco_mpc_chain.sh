@@ -616,7 +616,9 @@ teardown_launch() {
     # Launch owns child SIGINT fanout. Signalling the whole group here would
     # interrupt each child's cleanup a second time when launch forwards it.
     kill -INT "${LAUNCH_PID}" 2>/dev/null || true
-    deadline=$((SECONDS + 3))
+    # Allow launch fanout and sensor-process joins to finish. Three seconds
+    # interrupted valid MuJoCo cleanup; escalation still means test failure.
+    deadline=$((SECONDS + 20))
     while kill -0 "-${LAUNCH_PID}" 2>/dev/null && (( SECONDS < deadline )); do
       sleep 0.1
     done

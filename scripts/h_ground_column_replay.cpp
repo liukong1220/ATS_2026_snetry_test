@@ -2,6 +2,7 @@
 #include "ats_rog_map/ground_column.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -49,8 +50,10 @@ int main(int argc, char ** argv)
       config.surface_max >> config.robot_height >> config.top_margin >>
       config.max_ground_slope >> xmin >> ymin >> xmax >> ymax))
     {throw std::runtime_error("invalid input header");}
+    if (const char * noise = std::getenv("H_SUPPORT_NOISE")) {config.support_noise = std::stod(noise);}
+    if (const char * plane = std::getenv("H_PLANE_RESIDUAL")) {config.plane_residual_max = std::stod(plane);}
     GroundColumnGrid grid(width, height, resolution, origin_x, origin_y, config);
-    std::cout << "stamp,column_x,column_y,ground_z,state\n" << std::setprecision(17);
+    std::cout << "stamp,column_x,column_y,ground_z,state,ceiling_low,support_lower,support_upper,headroom,support_estimate\n" << std::setprecision(17);
     std::size_t count;
     double stamp;
     std::array<double, 3> seed;
@@ -75,7 +78,13 @@ int main(int argc, char ** argv)
           std::cout << stamp << ',' << x << ',' << y << ',';
           if (ground) {std::cout << *ground;}
           std::cout << ',' << (state == ColumnState::kFree ? "free" :
-            state == ColumnState::kOccupied ? "occupied" : "unknown") << '\n';
+            state == ColumnState::kOccupied ? "occupied" : "unknown");
+          const auto headroom = grid.ceilingHeadroom(x, y);
+          if (headroom) {
+            std::cout << ',' << headroom->ceiling_low << ',' << headroom->support_lower << ',' <<
+              headroom->support_upper << ',' << headroom->headroom << ',' << headroom->support_estimate;
+          } else {std::cout << ",,,,,";}
+          std::cout << '\n';
         }
       }
     }
