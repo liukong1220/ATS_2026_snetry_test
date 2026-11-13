@@ -144,7 +144,7 @@ generation 的证据建议区分 `ROGMap source generation`、adapter publicatio
 - 失效安全状态定义为输入健康与规划安全的合取；单一 ready 消息不改变规划失败急停状态。
 - `/rog_map_adapter/ready=true` 是持续续租的 heartbeat，不是永久状态；lease 超时后的确定性结果是地图与规划失效并触发急停。
 - MPC 收到急停后清空 tracker；ready 恢复本身不会让急停前或无有效时间戳的旧 reference 重新驱动车辆。
-- 最终安全 reference 优先在 snapshot/heartbeat 复核成功的提交点统一重定时，保持各 pose 相对时间，并在同一互斥区内先发布 `emergency_stop=false`、再发布 reference；时序竞争优先在提交点解决，而非放宽 MPC 的旧 reference 拒绝规则。
+- 最终安全 reference 优先在 snapshot/heartbeat 复核成功的提交点统一重定时，保持各 pose 相对时间，并在同一互斥区内先发布 `emergency_stop=false`、再发布 reference；时序竞争优先在提交点解决，而非放宽 MPC 的旧 reference 拒绝规则。Goal Manager 在每次急停上升沿记录 `stop_to_reference_guard_sec`（默认 0.01 s、范围 0.002–0.1 s）的提交屏障；急停后的候选 reference 必须等本节点时钟越过屏障后再提交，MPC 的旧 reference 拒绝门不放宽。该屏障用于跨 DDS `/clock` 回调竞态，不是永久 ready 状态，也不改变失败零速。
 - dead code 只标记 `[Dead Code Suggestion]`，除非用户明确授权，否则不删除。
 
 ### 5.3 修改后
