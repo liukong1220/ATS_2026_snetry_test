@@ -1,0 +1,2535 @@
+{
+  "status": "iteration_closed_stage_not_fully_complete",
+  "date": "2026-11-14",
+  "current_heads": {
+    "root": "6840990ee05d0c982411b9706444351814d4ffcf",
+    "nav": "e7bf50023cbdeb1943f85525bc636b206dec2bb5",
+    "sim": "c42576a5687c0c347ff1b73d340ca5edbeed6034"
+  },
+  "baseline": {
+    "root": "6840990ee05d0c982411b9706444351814d4ffcf",
+    "nav": "488c8b53c9cc49c55807d81c17c39074c2f754da",
+    "sim": "1e32caf48311bdaf0d4c80ebafd6b3cbfd70b306"
+  },
+  "finalization": {
+    "reason": "用户明确结束本轮优化，提交推送现有修改、整理当前程度/欠项与新提示词",
+    "optimization_stopped": true,
+    "stage_fully_complete": false,
+    "active_task_runs": [],
+    "root_pending_file_count": 54,
+    "root_pending_commit_groups": 6,
+    "static_validation": {
+      "status": "passed",
+      "path": "log/nav_acceptance/20261114_stage/final_delivery/finalization_validation.json",
+      "scope": "Python/JSON/shell语法、提示词一致、54文件空白与三仓diff；没有新构建或仿真"
+    },
+    "source_install_validation": {
+      "status": "passed",
+      "path": "log/nav_acceptance/20261114_stage/final_delivery/final_source_install_audit.json",
+      "d14_matched_files": 1154,
+      "d17_matched_files": 1154
+    },
+    "all_task_runs_finished": [
+      "d13 exit1 pre-injection",
+      "d14 exit1 truth gate",
+      "d17 exit1 q2",
+      "d15 exit0 strict Nav2 variant",
+      "d14 observer exit0"
+    ],
+    "host_global_process_absence_claimed": false,
+    "rviz": false,
+    "physical_contact_acceptance": "unverified",
+    "real_robot": "unverified_not_operated",
+    "root_git": {
+      "status": "blocked_read_only_metadata",
+      "commit": "not_created",
+      "push_of_worktree_changes": "not_done",
+      "error_file": "log/nav_acceptance/20261114_stage/root_stage.log",
+      "mount_file": "log/nav_acceptance/20261114_stage/final_delivery/root_git_mount.txt"
+    },
+    "nav_git": {
+      "status": "committed_and_pushed",
+      "stage_commit_count": 14,
+      "head": "e7bf50023cbdeb1943f85525bc636b206dec2bb5",
+      "clean": true
+    },
+    "sim_git": {
+      "status": "committed_and_pushed",
+      "stage_commit_count": 2,
+      "head": "c42576a5687c0c347ff1b73d340ca5edbeed6034",
+      "clean": true
+    },
+    "live_remote_check": {
+      "root": {
+        "utc": "2026-11-14T03:51:19.451878+00:00",
+        "available": false,
+        "matches_local_head": null,
+        "command_error": "kex_exchange_identification: Connection closed by remote host\nConnection closed by 198.18.0.42 port 22\nfatal: 无法读取远程仓库。\n\n请确认您有正确的访问权限并且仓库存在。\n",
+        "last_successful_push_verification": null
+      },
+      "nav": {
+        "utc": "2026-11-14T03:51:19.452586+00:00",
+        "available": false,
+        "matches_local_head": null,
+        "command_error": "kex_exchange_identification: Connection closed by remote host\nConnection closed by 198.18.0.42 port 22\nfatal: 无法读取远程仓库。\n\n请确认您有正确的访问权限并且仓库存在。\n",
+        "last_successful_push_verification": {
+          "push_log": "log/nav_acceptance/20261114_stage/terminal_yaw_push.log",
+          "remote_log": "log/nav_acceptance/20261114_stage/terminal_yaw_remote.txt",
+          "remote_stdout": "e7bf50023cbdeb1943f85525bc636b206dec2bb5\trefs/heads/develop\n",
+          "record_file_mtime_utc": "2026-11-14T01:11:08.603924+00:00",
+          "matches_current_head": true
+        }
+      },
+      "sim": {
+        "utc": "2026-11-14T03:51:19.453008+00:00",
+        "available": false,
+        "matches_local_head": null,
+        "command_error": "kex_exchange_identification: Connection closed by remote host\nConnection closed by 198.18.0.42 port 22\nfatal: 无法读取远程仓库。\n\n请确认您有正确的访问权限并且仓库存在。\n",
+        "last_successful_push_verification": {
+          "push_log": "log/nav_acceptance/20261114_stage/near_clearance_push.log",
+          "remote_log": "log/nav_acceptance/20261114_stage/near_clearance_remote.txt",
+          "remote_stdout": "c42576a5687c0c347ff1b73d340ca5edbeed6034\trefs/heads/develop\n",
+          "record_file_mtime_utc": "2026-11-14T01:11:08.595924+00:00",
+          "matches_current_head": true
+        }
+      }
+    },
+    "root_delivery_bundle": "log/nav_acceptance/20261114_stage/final_delivery/root_delivery_20261114.tar.gz",
+    "root_delivery_checksums": "log/nav_acceptance/20261114_stage/final_delivery/delivery_manifest.json",
+    "root_commit_groups": "docs/nav_acceptance/20261114_root_commit_groups.json",
+    "resume_prompt": "docs/nav_acceptance/20261114_resume_prompt.txt",
+    "runtime_reproduction_inputs": "docs/nav_acceptance/20261114_runtime_inputs.json",
+    "no_large_logs_or_assets_staged": true,
+    "next_steps": [
+      "核对根交付并在可写宿主完成显式分组提交推送",
+      "复盘d17 q2与d14 south；d13先定位注入前置条件",
+      "继续H2/T/M及Y/两场S3 A–K，M通过才做H3",
+      "最后行为后补对应闭环、默认、2025红框及P2独立故障矩阵"
+    ],
+    "excluded_scope": [
+      "第5节后续滚动规划",
+      "Point-LIO数值优化",
+      "方向观测后端",
+      "机械升级"
+    ]
+  },
+  "acceptance_matrix": [
+    {
+      "item": "P_STOP_reference",
+      "status": "已验证",
+      "level": "组件/冻结时钟ROS节点",
+      "evidence": [
+        "p_results.log",
+        "p_test.log"
+      ],
+      "limit": "最后行为后的默认/红框/故障矩阵未补齐；MPC拒绝门不放宽"
+    },
+    {
+      "item": "H2",
+      "status": "未验证（取证未达标）",
+      "level": "生产组件实际TF回放/terrain节点",
+      "evidence": [
+        "local_support_trial/d171_summary.json",
+        "local_support_trial/d173_summary.json",
+        "d171_headroom_variation_sources.json"
+      ],
+      "limit": "最大净空变化62.444mm，7mm余量不足以据此获证；d173无可评价列；d166缺TF"
+    },
+    {
+      "item": "TUNNEL_FREE",
+      "status": "未实现",
+      "level": "源码检查",
+      "evidence": [],
+      "limit": "仅可在融合层或terrain一处实现；occupied立即生效，不依赖真值清单"
+    },
+    {
+      "item": "M",
+      "status": "未验证（路线未达标）",
+      "level": "部分闭环",
+      "evidence": [
+        "tunnel_b_d47/summary.json"
+      ],
+      "limit": "只到ramp_bridge；实际B在路线10–13点；B往返/ramp_south/six_tunnels未完成"
+    },
+    {
+      "item": "S3_2025",
+      "status": "未验证（闭环失败）",
+      "level": "最终行为闭环，domain17，退出1",
+      "evidence": [
+        "s3_2025_d17/summary.json",
+        "d17_result_summary.json"
+      ],
+      "reached": 37,
+      "total": 54,
+      "max_truth_error_m": 0.025437416537976515,
+      "q1": "pass_for_evaluated_segments",
+      "q2": {
+        "colliding_ticks": 8,
+        "longest_run_ticks": 5,
+        "snapshots_in_longest_run": 2
+      },
+      "limit": "第37段实际足迹q2失败；保存/延迟/动态/重载未触达"
+    },
+    {
+      "item": "S3_2027_south",
+      "status": "未验证（闭环失败）",
+      "level": "最终行为闭环，domain14，退出1",
+      "evidence": [
+        "s3_2027_d14/summary.json"
+      ],
+      "reached_truth": 7,
+      "total": 64,
+      "failed_point": 8,
+      "goal": [
+        4.45,
+        2.525
+      ],
+      "truth_error_m": 0.19416489929090927,
+      "estimated_error_m": 0.01765102821424498,
+      "q1_q2": "8 evaluated segments passed",
+      "limit": "不能用action成功或旧锚定解释代替真值门；清理时DEGRADED不证明到点时因果"
+    },
+    {
+      "item": "Y_spin",
+      "status": "未验证（持续性未达标）",
+      "level": "d14完整失败运行的诊断",
+      "evidence": [
+        "d14_spin_chain_final_summary.json"
+      ],
+      "moving_duration_s": 61.922499999999985,
+      "near_3_duration_s": 1.2600000000000016,
+      "longest_near_3_s": 1.0150000000000006,
+      "limit": "不是开阔区/入口停转/出洞恢复专门验收；轮速1.6689711和max_awz2.0保持"
+    },
+    {
+      "item": "Y_prior_six_tunnels",
+      "status": "未验证（未运行）",
+      "level": "无最终闭环",
+      "evidence": [],
+      "limit": "与无图结果分开；启动LOST异构样本仅诊断"
+    },
+    {
+      "item": "S3_G",
+      "status": "未验证（最终矩阵未完成）",
+      "level": "d13在注入前失败；d24历史单项通过",
+      "evidence": [
+        "s3_2027_restart_d13/summary.json",
+        "s3_2025_restart_d24/summary.json"
+      ],
+      "d13_injection_counts": {
+        "kill_point_lio": 0,
+        "restart_point_lio": 0,
+        "replay_old_execution": 0
+      },
+      "limit": "先定位25墙秒运动前置等待，不改生产租约；两场五类G独立domain仍欠缺"
+    },
+    {
+      "item": "H3",
+      "status": "未实现（依赖M通过）",
+      "level": "实车配置未改",
+      "evidence": [],
+      "limit": "实车0.255+0.05=0.305m保持；2027仿真0.249m，2025ROG0.305m/terrainoverhead0"
+    },
+    {
+      "item": "Nav2",
+      "status": "已验证（显式严格变体）",
+      "level": "隔离历史RMUC2026 truth闭环，domain15，退出0",
+      "evidence": [
+        "nav2_d15/summary.json",
+        "nav2_d57/summary.json"
+      ],
+      "truth_error_m": 0.04910518769002393,
+      "limit": "原默认checker0.25的d57真值0.167386m失败保留；不替代两场lio或ATS默认/P3"
+    },
+    {
+      "item": "ATS_final_regressions",
+      "status": "未验证（最终版本未运行）",
+      "level": "仅有更早源码闭环",
+      "evidence": [
+        "redbox_d52.exit",
+        "default_d53.exit"
+      ],
+      "limit": "最后行为后对应闭环/默认/2025红框/P2五类独立故障矩阵需完成"
+    }
+  ],
+  "S3_A_K_final_status": {
+    "A": "已验证（d14/d17名义启动graph局部：adapter唯一发布、odom；不代表全时段全部A–K）",
+    "B": "未验证：2025 37/54，2027前7/64真值通过",
+    "C": "未验证：最终两场保存/真值漏误检/动态排除未触达",
+    "D": "未验证：最终两场reload TRACKING与首目标未触达",
+    "E": "未验证（失败）：d17持续q2冲突，d14第8点真值超差",
+    "F": "未验证：N离线864帧比较已执行，20次实体延迟/p95/最大值未完成",
+    "G": "未验证：最终两场五类独立故障矩阵欠缺；d13未实际注入",
+    "H": "已实现未完整验证：d14/d17最后日志范围外计数0，仅最后记录下界，未汇总全时段位置",
+    "I": "已实现未运行：两场correction_0.05/0.15/0.30独立闭环欠缺",
+    "J": "组件有覆盖；最终两场首次确认前无目标完整时序尚待逐项核对",
+    "K": "已验证（部分闭环）：独立map真值捕获d14内部成功但超差，完整路线仍未通过"
+  },
+  "evidence_files": {
+    "p_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_build.log",
+      "sha256": "a4225e5d8cb88472d6d74dbfcfaea4397c2afaed5cd1823b0b591baf5df4c75f",
+      "bytes": 986
+    },
+    "p_test.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_test.log",
+      "sha256": "8cf3a136aeb5bbd2a7a24134ca831095ed21b733ea79edc0f4614a2ab974df06",
+      "bytes": 39119
+    },
+    "p_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_results.log",
+      "sha256": "c7e9364eeb2dde47248b73a2d2c418a79f78f5b3efc8fa09bc1049250950458f",
+      "bytes": 51
+    },
+    "terminal_yaw_green_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/terminal_yaw_green_build.log",
+      "sha256": "d043a3191ea0f192c93426958123c8b72e8b6d94036d69c6cf1521e7da721551",
+      "bytes": 976
+    },
+    "terminal_yaw_green_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/terminal_yaw_green_results.log",
+      "sha256": "133dd5c059af1abf827c5bd9f8b95ebd3c4bcdd336ae0f37d5d86014b0ea6170",
+      "bytes": 52
+    },
+    "terminal_yaw_green_test.log": {
+      "path": "log/nav_acceptance/20261114_stage/terminal_yaw_green_test.log",
+      "sha256": "631ce80b11c8886dd40f007b2438c418a60f32092aea3131ac349ef26067a336",
+      "bytes": 101
+    },
+    "terminal_yaw_install_hashes.json": {
+      "path": "log/nav_acceptance/20261114_stage/terminal_yaw_install_hashes.json",
+      "sha256": "24baa747c8512b88e79b7e7af3f8c7572353252351b36d15951e177bd75d76cc",
+      "bytes": 704
+    },
+    "terminal_yaw_push.log": {
+      "path": "log/nav_acceptance/20261114_stage/terminal_yaw_push.log",
+      "sha256": "edf0c162942612c872adf0a7d370182692c880bfe1e5f3a2d87b0e23dea7f52a",
+      "bytes": 85
+    },
+    "terminal_yaw_remote.txt": {
+      "path": "log/nav_acceptance/20261114_stage/terminal_yaw_remote.txt",
+      "sha256": "73926f105f1bc3a13b392e8b09726725bdb6b6aa078d395b62d295be103bbcd5",
+      "bytes": 60
+    },
+    "near_clearance_validation.json": {
+      "path": "log/nav_acceptance/20261114_stage/near_clearance_validation.json",
+      "sha256": "868687aa490c44ae6fb8f9215b64ea5e51009266186230bb789ffefde8e511a0",
+      "bytes": 541
+    },
+    "near_clearance_push.log": {
+      "path": "log/nav_acceptance/20261114_stage/near_clearance_push.log",
+      "sha256": "eaebcca534ebf4e4905823095544fb8267df20793b11d82ee44df581decee522",
+      "bytes": 85
+    },
+    "near_clearance_remote.txt": {
+      "path": "log/nav_acceptance/20261114_stage/near_clearance_remote.txt",
+      "sha256": "7c63c8fbc83cbea1cac5b55860c2eecb490b167de7c18e56bed3108853b38e41",
+      "bytes": 60
+    },
+    "column_evidence_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/column_evidence_tests.log",
+      "sha256": "33e091f00b9c78723e0f895bce0506f694bccf839987a3df89770293bdc6484a",
+      "bytes": 98
+    },
+    "s3_tool_contract_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/s3_tool_contract_tests.log",
+      "sha256": "f956005d0fffd32ac4a36ab5c68098cf29abcd859b0dd83722c4ea73d78658fd",
+      "bytes": 102
+    },
+    "restart_health_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/restart_health_green.log",
+      "sha256": "0716b579b5d74651f66c819c7cb16b74ffcf523df214a75cc74aca0eac870d8e",
+      "bytes": 115
+    },
+    "prior_runner_applied_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/prior_runner_applied_tests.log",
+      "sha256": "e8e46fc6b469e32642dfd23e7f9a908466042756add57e8f6ba55fe0533dc86f",
+      "bytes": 6813
+    },
+    "root_stage.log": {
+      "path": "log/nav_acceptance/20261114_stage/root_stage.log",
+      "sha256": "6147b812f303551d257a998b97ebf95400dbe339873798b79728431d3abdfc47",
+      "bytes": 90
+    },
+    "root_initial.patch": {
+      "path": "log/nav_acceptance/20261114_stage/root_initial.patch",
+      "sha256": "384d05e9bada68dfb1233dc4a4017f0fd74b06e5caf3a898840945db583355b6",
+      "bytes": 81096
+    },
+    "source_assets.json": {
+      "path": "log/nav_acceptance/20261114_stage/source_assets.json",
+      "sha256": "42afe671c6e6a5f8ba42b9a257437be1667a6a6fb0f14ee199d14b1afdff002c",
+      "bytes": 30000
+    },
+    "local_support_final_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/local_support_final_results.log",
+      "sha256": "71c497cf0de33b95600e1460c1606b12ce7ba1991aa1ef2fbd1de55140b1ac59",
+      "bytes": 52
+    },
+    "final_delivery/final_source_install_audit.json": {
+      "path": "log/nav_acceptance/20261114_stage/final_delivery/final_source_install_audit.json",
+      "sha256": "c6d63959ec1c13213379ea77a60336475877ba1d1b637ccb445d37b57d7e324f",
+      "bytes": 1072862
+    },
+    "d13_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d13_manifest.json",
+      "sha256": "605b38bed89b9192c72e3e519d9228fcd0d86843a1720e071257ce1f837528fa",
+      "bytes": 246982
+    },
+    "d14_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d14_manifest.json",
+      "sha256": "d6d2b844653c6744e85a9b06d9162d0dc3ea899ec25624d83b7bdf92068f0893",
+      "bytes": 247844
+    },
+    "d15_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d15_manifest.json",
+      "sha256": "cf34f0edb381dcf0571b5955fc8d101e183f7fd1f3935cd0642e58f588ebc0cc",
+      "bytes": 247150
+    },
+    "d17_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_manifest.json",
+      "sha256": "0c2820e2bda2c77bcd04953cf2d6d35fb12c7d9ee35a3773678e6cddddcf5cd0",
+      "bytes": 247843
+    },
+    "d14_runtime_parameters.json": {
+      "path": "log/nav_acceptance/20261114_stage/d14_runtime_parameters.json",
+      "sha256": "efb34a07547f993e9d28414f938b2c8353a1bbf3b314ac7fc71492dff676938b",
+      "bytes": 62532
+    },
+    "d17_runtime_parameters.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_runtime_parameters.json",
+      "sha256": "04c295d19cfec2728d286fc7f8212deff1e80727afd491428ff4dcf784873891",
+      "bytes": 62096
+    },
+    "d14_spin_chain_final_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/d14_spin_chain_final_summary.json",
+      "sha256": "43f90715ee512884021b50113879eef9b43953fad8529d0b004e586cc95810ad",
+      "bytes": 20904
+    },
+    "d14_out_of_range_final.json": {
+      "path": "log/nav_acceptance/20261114_stage/d14_out_of_range_final.json",
+      "sha256": "0faa78f4da77ce55672c30ebcbe175679611ec2198e1e80f25d8c4ec69b4fb49",
+      "bytes": 2735
+    },
+    "d17_out_of_range_final.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_out_of_range_final.json",
+      "sha256": "c11ef74c097fe85a47821f095799929f8c761da38844262e4d5025fa3fcb7456",
+      "bytes": 9348
+    },
+    "d17_result_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_result_summary.json",
+      "sha256": "ac4653a389349f87b6a31774ddd2737033727c9d1ccb36a919d0ee0f73396591",
+      "bytes": 7531
+    },
+    "d17_cell_timeline.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_cell_timeline.json",
+      "sha256": "ce5e0bc92b9bee38b3ba37b85721b91339a31c949b0eda149de617cc27a5714a",
+      "bytes": 5571
+    },
+    "d17_committed_window_audit.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_committed_window_audit.json",
+      "sha256": "1f181c5141e5dc29cac6421f99250595062afcc28204a07338c3afffa63726ff",
+      "bytes": 2085
+    },
+    "d17_replay_input_audit.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_replay_input_audit.json",
+      "sha256": "c13d9fcea35b136dcbebf9bf1a0dfbd78262a548ee782015a4d2cec32762dec4",
+      "bytes": 485
+    },
+    "d171_headroom_variation_sources.json": {
+      "path": "log/nav_acceptance/20261114_stage/d171_headroom_variation_sources.json",
+      "sha256": "f88e5cf9059ed5e5d194a29155ed38ef1301283fdc7bb04ea7e711ddfa26fc91",
+      "bytes": 5212
+    },
+    "local_support_trial/d171_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/local_support_trial/d171_summary.json",
+      "sha256": "18f468488324a88967cbe9ffc836b4e4d64d682557696d73a9abc18d19d0e102",
+      "bytes": 9325
+    },
+    "local_support_trial/d173_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/local_support_trial/d173_summary.json",
+      "sha256": "5720892e67776e08ebd17ebc570d25f071ebd92a66ab2b5d001869f0f4600276",
+      "bytes": 7608
+    },
+    "d35_actual_model_ray_comparison.json": {
+      "path": "log/nav_acceptance/20261114_stage/d35_actual_model_ray_comparison.json",
+      "sha256": "e271a9fa81f34b66498a7a0d8a6325fedfd2f71a6be01d19d70341f63f7a77d8",
+      "bytes": 6827
+    },
+    "s3_2027_d14/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_d14/summary.json",
+      "sha256": "41d49916ce41f80274f1662898f3992da65e3c2ac28e7655273dc19c179e2edf",
+      "bytes": 7670
+    },
+    "s3_2025_d17/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2025_d17/summary.json",
+      "sha256": "e2109caca6b2465f2b2c4e8471d191b91fe526f0631ed60a17ac81a7d792d246",
+      "bytes": 25778
+    },
+    "s3_2027_restart_d13/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_restart_d13/summary.json",
+      "sha256": "a5eccc6e3618b14a3aa79a1359214b3d96164c8a072f0cd9ae931fa958f8efad",
+      "bytes": 2225
+    },
+    "s3_2025_restart_d24/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2025_restart_d24/summary.json",
+      "sha256": "be40b49cc478cbc90204c4988f25729b89757b919bbd9ba348d8c7fe3bb928fb",
+      "bytes": 1578
+    },
+    "nav2_d15/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d15/summary.json",
+      "sha256": "865205d0be5cd8e0cea84232bb754f2cc03b913e7a3555ca9af2e92741f58315",
+      "bytes": 2141
+    },
+    "nav2_d57/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d57/summary.json",
+      "sha256": "03a0130cda19c16d844f302db7f0b7b5670f518b397ce35c07e8c88c1a46c121",
+      "bytes": 2100
+    },
+    "s3_2025_d17.exit": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2025_d17.exit",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    "s3_2027_d14.exit": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_d14.exit",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    "s3_2027_restart_d13.exit": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_restart_d13.exit",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    "nav2_d15.exit": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d15.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "run_s3_2025_d17.sh": {
+      "path": "log/nav_acceptance/20261114_stage/run_s3_2025_d17.sh",
+      "sha256": "6a0ba8aa06c9400d0d9ee60e255052b7d28176a536d4f8f8ba925035c62824e0",
+      "bytes": 1352
+    },
+    "run_s3_2027_d14.sh": {
+      "path": "log/nav_acceptance/20261114_stage/run_s3_2027_d14.sh",
+      "sha256": "cd1f1eb2cf4cb14f4f3fd3f7c1f572a4ccd3f1da22e6bb5dd99785dd47f1b4a1",
+      "bytes": 1352
+    },
+    "run_s3_2027_restart_d13.sh": {
+      "path": "log/nav_acceptance/20261114_stage/run_s3_2027_restart_d13.sh",
+      "sha256": "f064ac69fc99b5cb8b4a341b1b8a18e3803870d33ede6ce54eb3359a5e927cd0",
+      "bytes": 656
+    },
+    "run_nav2_d15.sh": {
+      "path": "log/nav_acceptance/20261114_stage/run_nav2_d15.sh",
+      "sha256": "9c73307d94544aa717bb65ed49d0de0f10a4eec36a8c59ee85e37e9a705c8190",
+      "bytes": 690
+    },
+    "d14_global_layer_observer_process.txt": {
+      "path": "log/nav_acceptance/20261114_stage/d14_global_layer_observer_process.txt",
+      "sha256": "02a9402f89343ddbffc89cf78edcab64024a8daacb2b322cfbfe765a66b1bd04",
+      "bytes": 19
+    },
+    "d14_observer_processes.txt": {
+      "path": "log/nav_acceptance/20261114_stage/d14_observer_processes.txt",
+      "sha256": "f230a92960b78f880206de95a230e7bf08b688f92992441d8ad2253aa5d7fe30",
+      "bytes": 30
+    },
+    "d17_observer_processes.txt": {
+      "path": "log/nav_acceptance/20261114_stage/d17_observer_processes.txt",
+      "sha256": "f230a92960b78f880206de95a230e7bf08b688f92992441d8ad2253aa5d7fe30",
+      "bytes": 30
+    },
+    "s3_2025_d17_process.txt": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2025_d17_process.txt",
+      "sha256": "1a90c51d3bf35b810fe1cf00dcc44ee8d0f8d99a426d81ad8282d9befbbe510f",
+      "bytes": 98
+    },
+    "s3_2027_d14_process.txt": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_d14_process.txt",
+      "sha256": "32ea42ea395da60017b8fc9dafdae45e16bb806d605b01cedd66afb03efdd74f",
+      "bytes": 19
+    },
+    "s3_2027_restart_d13_process.txt": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_restart_d13_process.txt",
+      "sha256": "32ea42ea395da60017b8fc9dafdae45e16bb806d605b01cedd66afb03efdd74f",
+      "bytes": 19
+    },
+    "final_delivery/root_git_mount.txt": {
+      "path": "log/nav_acceptance/20261114_stage/final_delivery/root_git_mount.txt",
+      "sha256": "15573fa9addee8080c8e58410e51db538b42e683bf576db610fc3209ae47fbc6",
+      "bytes": 79
+    },
+    "final_delivery/remote_verification.json": {
+      "path": "log/nav_acceptance/20261114_stage/final_delivery/remote_verification.json",
+      "sha256": "ed50b9166f44ae9748b78169b9ee4a380d272947859653dc7283a92d2c622e9b",
+      "bytes": 9612
+    }
+  },
+  "historical_file_index_notice": "以下hash保留原检查点语义，可能不是当前文件；当前结论只读finalization/acceptance_matrix/evidence_files。",
+  "historical_file_index": {
+    "p_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_build.log",
+      "sha256": "a4225e5d8cb88472d6d74dbfcfaea4397c2afaed5cd1823b0b591baf5df4c75f",
+      "bytes": 986
+    },
+    "p_test.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_test.log",
+      "sha256": "8cf3a136aeb5bbd2a7a24134ca831095ed21b733ea79edc0f4614a2ab974df06",
+      "bytes": 39119
+    },
+    "p_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_results.log",
+      "sha256": "c7e9364eeb2dde47248b73a2d2c418a79f78f5b3efc8fa09bc1049250950458f",
+      "bytes": 51
+    },
+    "mpc_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/mpc_build.log",
+      "sha256": "51035fc33e765926ff5c37efc73382315f5b9df9427acd46a23e1964e047e53e",
+      "bytes": 976
+    },
+    "mpc_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/mpc_results.log",
+      "sha256": "833045efaf3660b39defc064de1498c593135ecf78dd98844242bbb8706db3cc",
+      "bytes": 52
+    },
+    "redbox_d87_console.log": {
+      "path": "log/nav_acceptance/20261114_stage/redbox_d87_console.log",
+      "sha256": "ed0417fddadd4a2f3e0c1556349d239994e6efee67dfcb87333e825b02f8af84",
+      "bytes": 287666
+    },
+    "redbox_d87_launch.log": {
+      "path": "log/nav_acceptance/20261114_stage/redbox_d87_launch.log",
+      "sha256": "982b506dbdc913df45e722922b2925eeeaa8770a2428da7eba915fbf18f103d4",
+      "bytes": 651304
+    },
+    "h_column.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_column.log",
+      "sha256": "7e0d17da4fc9144ad8a689e2a1920322cc814e8a4351e05f78bb8c1ab1b02466",
+      "bytes": 392
+    },
+    "h_tools.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_tools.log",
+      "sha256": "e8826ddf071536d75e282d791d15a7e1d8c8d6b92c8b22ddeaf8b6d4ea1e8182",
+      "bytes": 98
+    },
+    "s3_tools.log": {
+      "path": "log/nav_acceptance/20261114_stage/s3_tools.log",
+      "sha256": "c7ae15111330607b5cf9148e4e443b5c4169676f1da05da6ede32afb2b9fec8d",
+      "bytes": 110
+    },
+    "source_assets.json": {
+      "path": "log/nav_acceptance/20261114_stage/source_assets.json",
+      "sha256": "42afe671c6e6a5f8ba42b9a257437be1667a6a6fb0f14ee199d14b1afdff002c",
+      "bytes": 30000
+    },
+    "h_replay/inputs.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/inputs.json",
+      "sha256": "709a6f3ed011193bce1332d6013d0e5a507a22cc0fb3ab66fb1e580699c8eb41",
+      "bytes": 1365
+    },
+    "h_replay/d166.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d166.json",
+      "sha256": "0811335a186f7bb760954c181519166a96cdbb69571f9657f4cc8f29b89f5187",
+      "bytes": 10171
+    },
+    "h_replay/d171.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d171.json",
+      "sha256": "04768184618baf57208a8177a21e6a21e7f7c4b427c3bd4b80e517efd0035b23",
+      "bytes": 10227
+    },
+    "h_replay/d173.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d173.json",
+      "sha256": "4bc14ed0ae8783fcba662e0f484549f7a5cb76e36fc9c490cc9962f1ed2a0de0",
+      "bytes": 9979
+    },
+    "tunnel_b_d86/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d86/summary.json",
+      "sha256": "2bd83f9d76e0366dbfeca3a159d8a1ffbb176a669e4facdb093c5c97a16c2777",
+      "bytes": 2721
+    },
+    "progress_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/progress_results.log",
+      "sha256": "29ac0dc2567897f2f5ae5680f5ebdd2600e484cd08c141aaf0e36f00ad4798a1",
+      "bytes": 51
+    },
+    "tracker_dense_mpc_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/tracker_dense_mpc_results.log",
+      "sha256": "da1c75184277dfcab0bd652ab37ed5b0b3aabb3eac6fc5648c637e165838837c",
+      "bytes": 52
+    },
+    "tracker_dense_red.log": {
+      "path": "log/nav_acceptance/20261114_stage/tracker_dense_red.log",
+      "sha256": "39dc5d43357bbf939eeb96914aed0d069a684c7dfcafdf0d1e74ac325d187119",
+      "bytes": 1417
+    },
+    "tracker_dense_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/tracker_dense_green.log",
+      "sha256": "538732f608494d2aa8b26a4606a2a34b0b7c7ce428251593241559023b163830",
+      "bytes": 2704
+    },
+    "d81_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d81_manifest.json",
+      "sha256": "64e0496ceb1c4c645d2b928871b4c31aae6e7a29daf98e430a215fd67912d700",
+      "bytes": 386489
+    },
+    "d81_failure_grid.json": {
+      "path": "log/nav_acceptance/20261114_stage/d81_failure_grid.json",
+      "sha256": "b702440112cde0f44254d3c98fe676fb26c5e4f0075f61bebfb8d70cd6787b39",
+      "bytes": 3295
+    },
+    "tunnel_b_d81/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d81/summary.json",
+      "sha256": "71581a2a3fd9aa7e065f31954f58efb6498a7e12d70b251b49783d385396da09",
+      "bytes": 5407
+    },
+    "ramp_park_d80_console.log": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_park_d80_console.log",
+      "sha256": "ec79ed25075168e7a52da422ae615f787a2e4b95380be96e6b20e33b9871ac17",
+      "bytes": 1780
+    },
+    "ramp_park_d80/parking_mode.json": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_park_d80/parking_mode.json",
+      "sha256": "7f9fdaf77871df42266122c9990a0c1f0c050134ef3e66766daf6ddef3044772",
+      "bytes": 93
+    },
+    "h_fixture_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_fixture_tests.log",
+      "sha256": "1cc82d0160a4695de718dba6129509f4d254e580392fb1e440d157bf2e9ae030",
+      "bytes": 2791
+    },
+    "root_stage.log": {
+      "path": "log/nav_acceptance/20261114_stage/root_stage.log",
+      "sha256": "6147b812f303551d257a998b97ebf95400dbe339873798b79728431d3abdfc47",
+      "bytes": 90
+    },
+    "s3_fault_geometry_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/s3_fault_geometry_green.log",
+      "sha256": "bdca544007cfee9a360bf40c2f001d1d5305b11d16d5acf4ece2eb2e7d49c9b8",
+      "bytes": 112
+    },
+    "s3_tool_contract_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/s3_tool_contract_tests.log",
+      "sha256": "f956005d0fffd32ac4a36ab5c68098cf29abcd859b0dd83722c4ea73d78658fd",
+      "bytes": 102
+    },
+    "y_evaluator_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/y_evaluator_tests.log",
+      "sha256": "7ba600c131d14938fa296eb6eb208c575bf239a15b65439f37d0578df0fff9bf",
+      "bytes": 101
+    },
+    "h_ray_replay_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_ray_replay_manifest.json",
+      "sha256": "985e8c917cfec68e034915ac13b9e31ba72e140d5a7dfb5339810ed6e9dffc65",
+      "bytes": 2496
+    },
+    "h_replay/d171_ray.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d171_ray.json",
+      "sha256": "86c563e26baa504d5271de462cc6c1b50eda516287f9a9cbaf87894aa5cb92f8",
+      "bytes": 9337
+    },
+    "h_replay/d173_ray.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d173_ray.json",
+      "sha256": "80458cf005cd694b978b1fe04fdb8040472800d578345ed301e344177d133279",
+      "bytes": 8873
+    },
+    "h_settle_window_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_settle_window_tests.log",
+      "sha256": "0b7ede8c8682c95da8ee490cf24dab3160596fde2b4a9c8da2658980b3dec7fc",
+      "bytes": 98
+    },
+    "h_connectivity_red.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_connectivity_red.log",
+      "sha256": "91a9c0469a5b9ab1a651d1a49c44eec25a17a8182d34b3f69c341fa98c6cc39b",
+      "bytes": 7077
+    },
+    "h_overhead_red.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_overhead_red.log",
+      "sha256": "a81b7382174612d84fe9fa047976b3b6759afa39cf6c07e4612ac609e8eeff00",
+      "bytes": 2331
+    },
+    "h_overhead_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_overhead_green.log",
+      "sha256": "39d0c4f402553fe1cc92c0df12a0fa0ce186ca4dfc0badf23e2ef991017bf9b1",
+      "bytes": 1622
+    },
+    "h_connectivity_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_connectivity_green.log",
+      "sha256": "2cb064f495e85fd95c2ebdb497cfd661bf0f2b19688c07716803757f4125c25d",
+      "bytes": 6337
+    },
+    "d78_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d78_manifest.json",
+      "sha256": "a4c519c22986e2b466e5b0a59300fbb94375e4faab4d2a802609f2d8db632793",
+      "bytes": 387518
+    },
+    "d78_status_window_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/d78_status_window_summary.json",
+      "sha256": "8a2db7e2c65461ee0d3778bd9b919981901d8dabb60c70e92d17582cee4fdc0c",
+      "bytes": 1228
+    },
+    "d78_status_window.json": {
+      "path": "log/nav_acceptance/20261114_stage/d78_status_window.json",
+      "sha256": "d7c57d33f23cdbba3e982692548b078b549373e3968a312bb0a12662dfe6ade1",
+      "bytes": 507595
+    },
+    "ramp_fixed_d78/parking_mode.json": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_fixed_d78/parking_mode.json",
+      "sha256": "21aa6fb0409fca246adf6507a779a567dc8021d58ba554b473ac4111620124f7",
+      "bytes": 178
+    },
+    "ramp_fixed_d79/parking_mode.json": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_fixed_d79/parking_mode.json",
+      "sha256": "13575dedc20e678821f047d334b0e5fe34873feb26c85f0f0e02d6b64168f0e3",
+      "bytes": 93
+    },
+    "ramp_fixed_d79_console.log": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_fixed_d79_console.log",
+      "sha256": "634bd5fc139fcf8c5dc797a646a20a5192d36fb5b546a6cfc4bcb3dda1438d8c",
+      "bytes": 1580
+    },
+    "ramp_fixed_d78_console.log": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_fixed_d78_console.log",
+      "sha256": "cfa6b4c26d8c186b88e9eb7475bf8709eef352c46d38a00d9969594feaaf290b",
+      "bytes": 399
+    },
+    "s3_updated_full_tools.log": {
+      "path": "log/nav_acceptance/20261114_stage/s3_updated_full_tools.log",
+      "sha256": "0950d1cbfa882fde944fcdc917e0d2d112098e11eeba3360e645e65aaea80831",
+      "bytes": 754
+    },
+    "h_ray_tools_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_ray_tools_tests.log",
+      "sha256": "ee7d23180f47aaa68a83b2c4e293561402e15e468a8c91bea935b431ba66a3d1",
+      "bytes": 98
+    },
+    "h2_packages_test.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_packages_test.log",
+      "sha256": "62194a23026c5e5f9032f696d17efad7a57b54492b0a19160ef1908ea2a7cae1",
+      "bytes": 563
+    },
+    "h2_packages_shell_preflight_error.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_packages_shell_preflight_error.log",
+      "sha256": "96f860d9c1e6c9d0206b6c3a428b479f3aec6be497e46586613c32f7c5f8c955",
+      "bytes": 79
+    },
+    "h2_packages_console.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_packages_console.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "h2_packages_terrain_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_packages_terrain_results.log",
+      "sha256": "f7e2019e5bba56123775b5e79a71504d9165d61055b5a8421048a21474e687c2",
+      "bytes": 43872
+    },
+    "h2_packages_rog_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_packages_rog_results.log",
+      "sha256": "af6e55da79c32989146fb95e81b1db1ed9b7255c4f538a9131d3489f284d5f27",
+      "bytes": 52
+    },
+    "h2_packages_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_packages_build.log",
+      "sha256": "48aea60b8aee031158deb3bb7f48e92ff55856b4ab9779a08e88dc45abbdceca",
+      "bytes": 1150
+    },
+    "h2_terrain_changed_style.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_terrain_changed_style.log",
+      "sha256": "6273e33b92dc8bc0b74e63ae433c048abb87ff004328f56886d658e115674005",
+      "bytes": 249
+    },
+    "h2_terrain_functional.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_terrain_functional.log",
+      "sha256": "15da5581ea452699a8ec0c35449bfc6e10eee5c1d820295548fddfffa320a94b",
+      "bytes": 612
+    },
+    "h_replay/d173_ray_after.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d173_ray_after.json",
+      "sha256": "d75af7fe067e2ec2838f7a3fbff9696362a13641c464d85938ba5b0e16098537",
+      "bytes": 10616
+    },
+    "h_replay/d171_observe_after.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d171_observe_after.json",
+      "sha256": "65b1c375343631218ceb11e7a4a4923b2a279fe3c2f3e52fdbd80452349ae1ac",
+      "bytes": 10225
+    },
+    "h_replay/d173_observe_after.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d173_observe_after.json",
+      "sha256": "74eb4b97865795a5f177c472e47449a13f0ae7ba41def62e2d6593bb27c10590",
+      "bytes": 9944
+    },
+    "h_replay/d171_ray_after.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d171_ray_after.json",
+      "sha256": "7577c6e6e9cf722b09ed37083606983c47564838b0518a676e6f5993aaced82e",
+      "bytes": 10204
+    },
+    "h_replay/d166_observe_after.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d166_observe_after.json",
+      "sha256": "8a9d8ab74071f50a4788b0f574199f38714e87e70b87825cdffeadf47eceb161",
+      "bytes": 10134
+    },
+    "h_replay/d75_sensor_origins.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d75_sensor_origins.json",
+      "sha256": "f34f5e119d92c4be8db7abb462b78576b7726fb7acc996882752c5baff97970c",
+      "bytes": 966
+    },
+    "h_replay/d75_production.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d75_production.json",
+      "sha256": "b2e1bf5e7b152ab6a834916937ead0c639eb8677ce5beae647519c6c2be4a783",
+      "bytes": 1102
+    },
+    "h_replay/d75_ray.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d75_ray.json",
+      "sha256": "229c05d1883d0cd61579f9be71d16ecbf0631e90364a512763190286b45ef269",
+      "bytes": 58357
+    },
+    "d75_support_visibility.json": {
+      "path": "log/nav_acceptance/20261114_stage/d75_support_visibility.json",
+      "sha256": "55e5939a9c002e64ddf78b02021aa849a2242112e79d06c33ec8347e8fbc4792",
+      "bytes": 13741
+    },
+    "d75_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d75_manifest.json",
+      "sha256": "cf755b66fafafe4afebbc15a5854f2f4e29b019eb6cb631de6f66205df53c3a1",
+      "bytes": 388055
+    },
+    "d74_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d74_manifest.json",
+      "sha256": "868ccb5eedeb08f6b4ff02b368d2a91e0b1f99a38ac1cfef6fd58dddeef66412",
+      "bytes": 388571
+    },
+    "y_duplicate_time_red.log": {
+      "path": "log/nav_acceptance/20261114_stage/y_duplicate_time_red.log",
+      "sha256": "c4f34f8624885e5feb238e84279cf1263acd73076e6a52d69df2ced47c480a33",
+      "bytes": 1219
+    },
+    "y_duplicate_time_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/y_duplicate_time_green.log",
+      "sha256": "62cfbeb2911bb226088bfb0918eb4b05008ea70b20bce854ee2ca8a564bd37a5",
+      "bytes": 104
+    },
+    "ramp_fixed_d75/parking_mode.json": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_fixed_d75/parking_mode.json",
+      "sha256": "27055629a7103ca15f2d7c86e845adad7333f37021e9e5ddc4968ae532e72f24",
+      "bytes": 179
+    },
+    "ramp_fixed_d75/frames.json": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_fixed_d75/frames.json",
+      "sha256": "b238ea3719024b2a85c9bea1361d7f462d2904b6f6533eb3cc6ca7d876a7495f",
+      "bytes": 8716
+    },
+    "ramp_fixed_d75_console.log": {
+      "path": "log/nav_acceptance/20261114_stage/ramp_fixed_d75_console.log",
+      "sha256": "5de49dfd0f8a5f7aee98e22628a82422ec0627d3c7e62738211f0c1476a6eb4d",
+      "bytes": 1718
+    },
+    "tunnel_b_d74/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d74/summary.json",
+      "sha256": "57fe0964ed5ad934557b42f7b0774002af96a46b28bfacb397c6c0608eccd204",
+      "bytes": 3746
+    },
+    "tunnel_b_d74/nav_tracking/goal_1/verdict.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d74/nav_tracking/goal_1/verdict.json",
+      "sha256": "821c979358e29263dc0fc55bafe48bcb78d051ebada270207f388f0876e09d74",
+      "bytes": 48637
+    },
+    "tunnel_b_d74/nav_tracking/goal_2/verdict.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d74/nav_tracking/goal_2/verdict.json",
+      "sha256": "da0d84d3d7f5aee52d1c01d93d50548ea41a008910bf10cf7dfc76839f91e9f1",
+      "bytes": 16922
+    },
+    "d74_goal2_layers.json": {
+      "path": "log/nav_acceptance/20261114_stage/d74_goal2_layers.json",
+      "sha256": "b988debd9fed8a6479e25c6579315a8a18b9bb95bf269b04183f7325bb267959",
+      "bytes": 19343
+    },
+    "d74_spin_truth_diagnostic.json": {
+      "path": "log/nav_acceptance/20261114_stage/d74_spin_truth_diagnostic.json",
+      "sha256": "e718c941476c899b4585e704c5b3b44809419bfcb6d06adf12b7d9f7daf10abe",
+      "bytes": 1554
+    },
+    "h2_nav_push.log": {
+      "path": "log/nav_acceptance/20261114_stage/h2_nav_push.log",
+      "sha256": "a6cb0fe5bd3a32dbcb59dcea5db56e7bc8c063b83fca7d831682c5513cf0b6e2",
+      "bytes": 85
+    },
+    "h2_nav_push.exit": {
+      "path": "log/nav_acceptance/20261114_stage/h2_nav_push.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "h2_nav_live_remote.txt": {
+      "path": "log/nav_acceptance/20261114_stage/h2_nav_live_remote.txt",
+      "sha256": "478eabc35b5f3a5956f070dc8a47be4f3c992b0e3a45e2a3593294cba40fdd63",
+      "bytes": 60
+    },
+    "s3_column_recorder_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/s3_column_recorder_tests.log",
+      "sha256": "3605abb09038ce24e90d81df8f7c0d87bb6f647a5e016bf461d8a8fcb408f6e9",
+      "bytes": 98
+    },
+    "y_map_pairing_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/y_map_pairing_tests.log",
+      "sha256": "30ac62445c22a4baa21883f1b601d8396e88e18d101daa6775430746f2bfb8e1",
+      "bytes": 437
+    },
+    "h_runtime_export_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_runtime_export_tests.log",
+      "sha256": "9263a4797bedb7951d944bd1fd9e113c7c3fca6f4e29226580debde6cbbe54bc",
+      "bytes": 98
+    },
+    "d73_params_ats_rog_map.yaml": {
+      "path": "log/nav_acceptance/20261114_stage/d73_params_ats_rog_map.yaml",
+      "sha256": "16fa6914f9f5988163899cafea43629295fe633ba561c0ef812850069c72b106",
+      "bytes": 3470
+    },
+    "d73_params_terrain.yaml": {
+      "path": "log/nav_acceptance/20261114_stage/d73_params_terrain.yaml",
+      "sha256": "c72658a67032aeccdae2dcde509f1b54a1be5d76f48665b1518ad0e2e1e3c57e",
+      "bytes": 1595
+    },
+    "d73_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d73_manifest.json",
+      "sha256": "1b1eba5194c8248d8f2d5b078950e7edddb841d4b594922eaddd84f3b8692d77",
+      "bytes": 388961
+    },
+    "tunnel_b_d73/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d73/summary.json",
+      "sha256": "13364e0eb55f85e2a216072d9ed03e755eb6537e98c53398d7e2bb7d80ad0b1e",
+      "bytes": 6094
+    },
+    "d73_goal6_complete_prefix_audit.json": {
+      "path": "log/nav_acceptance/20261114_stage/d73_goal6_complete_prefix_audit.json",
+      "sha256": "bfeaeaaca5bafcf58b1ae886ff71c6345268ab437bd2edb69c020a27a5eb7f91",
+      "bytes": 634
+    },
+    "d73_goal6_diagnostic_verdict.json": {
+      "path": "log/nav_acceptance/20261114_stage/d73_goal6_diagnostic_verdict.json",
+      "sha256": "ee57f3f234b0d7a1214fd2483b9bd2717671e1fff38c0bb520b866f06e8bad70",
+      "bytes": 20435
+    },
+    "d73_committed_capture_audit.json": {
+      "path": "log/nav_acceptance/20261114_stage/d73_committed_capture_audit.json",
+      "sha256": "fd35e4eeed54b282f8454cf916d02eece2e09786aa8696465cd621341daf38d2",
+      "bytes": 228
+    },
+    "d73_ray_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d73_ray_manifest.json",
+      "sha256": "ce54f853e54f2ffdb607fc90424c99c1acc3f43b3442250375a18542689c7812",
+      "bytes": 1861
+    },
+    "d73_projection_boundary_comparison.json": {
+      "path": "log/nav_acceptance/20261114_stage/d73_projection_boundary_comparison.json",
+      "sha256": "afb6ca9af2be1b2bf79e5f75d4431537e08ea2475bf82815c2c35d127019fd6b",
+      "bytes": 1596
+    },
+    "h_layer_boundary_red.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_layer_boundary_red.log",
+      "sha256": "a8f38dd6962d33af061f82592d6dddf50c9bf0e89fbc87abdf7c1c228d3e23c3",
+      "bytes": 2360
+    },
+    "h_layer_boundary_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_layer_boundary_green.log",
+      "sha256": "c757f3cc920c27c8bbed94eb8a23614bfa8499ef1ba1a997ab06e2be83a6d0ac",
+      "bytes": 4191
+    },
+    "layer_boundary_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/layer_boundary_build.log",
+      "sha256": "b02dd0e4d242812c88857cb07ac4cc09278b6bca7a544f416cf56227b9625738",
+      "bytes": 961
+    },
+    "layer_boundary_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/layer_boundary_results.log",
+      "sha256": "e6feb706a534c299a13747514202553fa763086d33e13b7aa1d62207beb34dad",
+      "bytes": 52
+    },
+    "layer_boundary_replay.log": {
+      "path": "log/nav_acceptance/20261114_stage/layer_boundary_replay.log",
+      "sha256": "bf8297773e20ccfac88f56b8f03b8a2e50dc4c8c58cd5984e499800c66dbe3b5",
+      "bytes": 98
+    },
+    "terrain_height_d70/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/terrain_height_d70/summary.json",
+      "sha256": "f34712c8e0ec331de4f7795450046a0acafb6c484124238fedccc7d241ef7b4b",
+      "bytes": 1760
+    },
+    "terrain_height_d70/hashes.json": {
+      "path": "log/nav_acceptance/20261114_stage/terrain_height_d70/hashes.json",
+      "sha256": "b7ff5b131e05c215b9444a2c03e2f683c72142a70ac37a0cc0ad40a60d3ffda2",
+      "bytes": 765
+    },
+    "recorder_json_red_actual.log": {
+      "path": "log/nav_acceptance/20261114_stage/recorder_json_red_actual.log",
+      "sha256": "82cbcbdc99170ea696659b738489db216caffbf55343e42ae0aea357b2232349",
+      "bytes": 1222
+    },
+    "recorder_json_d68.log": {
+      "path": "log/nav_acceptance/20261114_stage/recorder_json_d68.log",
+      "sha256": "89dc2024df5e1728af7e51946016bb193c0db9cd5a261db5cdebf38762edcd9f",
+      "bytes": 104
+    },
+    "recorder_offline_d68.log": {
+      "path": "log/nav_acceptance/20261114_stage/recorder_offline_d68.log",
+      "sha256": "786c575979ae7f8cc91c1051dad354602e1b42d9cf29b6ee72ef273ea2b519fa",
+      "bytes": 3441
+    },
+    "d65_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d65_manifest.json",
+      "sha256": "81c320c731188539ab86ce3f7db7d5270cb2d6f00a54e538ecc952114d49380a",
+      "bytes": 389358
+    },
+    "d67_safety_abort.json": {
+      "path": "log/nav_acceptance/20261114_stage/d67_safety_abort.json",
+      "sha256": "2141608e52e404a8f11adcde7427440c386a71b9f910c61f753c119b8baafc97",
+      "bytes": 206
+    },
+    "nav2_compat_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_compat_build.log",
+      "sha256": "7481dd32a035a8c28870a47d8a41866fd44cc8dd1c09dc15c162ee2a9b20260c",
+      "bytes": 182
+    },
+    "nav2_compat_build.exit": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_compat_build.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "nav2_compat_functional_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_compat_functional_results.log",
+      "sha256": "30486a8587e236385d36bec31bf4130ae9ac039f0a8ea70e17730d3ddd8e46a7",
+      "bytes": 50
+    },
+    "nav2_prepare_scene_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_prepare_scene_tests.log",
+      "sha256": "5d8a174d448d59185fd227bcbab9c964e39b10a9c2e28965972cfb0c833dd854",
+      "bytes": 102
+    },
+    "nav2_d60/intervention.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d60/intervention.json",
+      "sha256": "2ca48f11b7186a0504993ddad7b75b5c8585954c620668c55f400b0ad264f96a",
+      "bytes": 344
+    },
+    "nav2_d59/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d59/summary.json",
+      "sha256": "58c5380e8468bdb10e272250f59a36f2c2401164f2f3a4fcb096ccee6a906640",
+      "bytes": 1407
+    },
+    "nav2_d58/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d58/summary.json",
+      "sha256": "e1ed68769f00bb2b1c0f393745824947828698df862697ca11c9eb75ca77da19",
+      "bytes": 2000
+    },
+    "nav2_d57/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d57/summary.json",
+      "sha256": "03a0130cda19c16d844f302db7f0b7b5670f518b397ce35c07e8c88c1a46c121",
+      "bytes": 2100
+    },
+    "d57_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d57_manifest.json",
+      "sha256": "3396aef05e7dc57320ace0cbed6c0e8ace34e52b974201bc5f3d1a3b07414e8e",
+      "bytes": 30526
+    },
+    "d62_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d62_manifest.json",
+      "sha256": "2a1ef165f4dd7b9f8e0661d0935c21ada59cb06f123b7148405bf148e5b19f65",
+      "bytes": 390024
+    },
+    "tunnel_b_d62/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d62/summary.json",
+      "sha256": "603f060943f6bd088e5739a71f7838f8db1be54ddb404d4ffeeb3a04ab1c9310",
+      "bytes": 6953
+    },
+    "d62_ground_high_identity.json": {
+      "path": "log/nav_acceptance/20261114_stage/d62_ground_high_identity.json",
+      "sha256": "d8a11293d54d1dab1b32af7fbfca998eef692884c61923c6546c134d7fea6067",
+      "bytes": 26782
+    },
+    "d62_local_support_fit_diagnostics.json": {
+      "path": "log/nav_acceptance/20261114_stage/d62_local_support_fit_diagnostics.json",
+      "sha256": "771c13e48d74f65b599e88896e423ca1b292cd235e0fc88a0ee615d27d0e664f",
+      "bytes": 6644
+    },
+    "h_replay/d62_committed.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d62_committed.json",
+      "sha256": "b85a9dd433d19b0ead7cf6dbd2f3b533722f78157e1fcee34ae8b5ee5097c0c3",
+      "bytes": 382904
+    },
+    "h_support_patch_red.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_support_patch_red.log",
+      "sha256": "782c7f15a03961c3234d8e3e92836794a439449c0e4a3383f4f0b07cf9ce2ffa",
+      "bytes": 1037
+    },
+    "h_support_patch_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/h_support_patch_green.log",
+      "sha256": "3890236d9c648c20a1cc366acdb494bd58022bb39374dba8bd58c1ae8c7fe6b1",
+      "bytes": 7001
+    },
+    "nav_support_remote.txt": {
+      "path": "log/nav_acceptance/20261114_stage/nav_support_remote.txt",
+      "sha256": "d9cce1ff669f1a27dcb1b0303cf8cce1fa89091c59e6b84c7185071491a4cbde",
+      "bytes": 60
+    },
+    "rejected_support_patch.patch": {
+      "path": "log/nav_acceptance/20261114_stage/rejected_support_patch.patch",
+      "sha256": "7e88a0637be8da9c4fa086b15d4405e4dde48e43408cf2c4247c6d8a7ae3c121",
+      "bytes": 3137
+    },
+    "d55_constraint_comparison.json": {
+      "path": "log/nav_acceptance/20261114_stage/d55_constraint_comparison.json",
+      "sha256": "16cb6a600320ba27aa47c58eb9e2bcaecb8b2cc403d2ce4843534cb86aca4c95",
+      "bytes": 779
+    },
+    "d55_comparison_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d55_comparison_manifest.json",
+      "sha256": "e239eda4d224779a1fab61ecd7f7fbbc581bba5abd7ae6f67ed22dcea96453eb",
+      "bytes": 1310
+    },
+    "d55_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d55_manifest.json",
+      "sha256": "2c04f25b97a5ef0da651fbddba9f79151feb4e60f43e68a5d831958bb342a1e3",
+      "bytes": 389946
+    },
+    "tunnel_b_d55/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d55/summary.json",
+      "sha256": "896585fbf92a4eecefbe69264312c59bcb99cd5059f7137b63f54e3d0e6d6f7f",
+      "bytes": 3090
+    },
+    "d56_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d56_manifest.json",
+      "sha256": "21fe6c99df4481c534b061994b5f75b3eb7c463cb1388128eaab8e24affd24ef",
+      "bytes": 2549
+    },
+    "support_patch_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/support_patch_results.log",
+      "sha256": "1758e3affde43e37e2ed98274c5cb2aaa62635bf2a133d71fe026305511edf73",
+      "bytes": 52
+    },
+    "d62_support_patch_comparison.json": {
+      "path": "log/nav_acceptance/20261114_stage/d62_support_patch_comparison.json",
+      "sha256": "2b40b6360850da70be7af13f27bc5ce765d4a5d8945eef003ac62a6da6eb0640",
+      "bytes": 10222
+    },
+    "h_replay/d171_support_patch_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d171_support_patch_summary.json",
+      "sha256": "43825bb574987267aeb5a839fff742072e8396110ad8ca7198514779a330547d",
+      "bytes": 9331
+    },
+    "h_replay/d173_support_patch_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/h_replay/d173_support_patch_summary.json",
+      "sha256": "5720892e67776e08ebd17ebc570d25f071ebd92a66ab2b5d001869f0f4600276",
+      "bytes": 7608
+    },
+    "column_diagnostic_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/column_diagnostic_tests.log",
+      "sha256": "f62856bf55710418544da7bb61bc3570a1a293c4053b2e85426b8068f0b37ac6",
+      "bytes": 98
+    },
+    "out_of_range_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/out_of_range_tests.log",
+      "sha256": "33060fd73862c5e1af97335504d5b45211fce6d229657f556d8deceeadc52ce4",
+      "bytes": 101
+    },
+    "d62_range_evidence.json": {
+      "path": "log/nav_acceptance/20261114_stage/d62_range_evidence.json",
+      "sha256": "24439bce4246d0973e46f14cbeebf2119c7bc40f2b64ef2a4183dea56c85de92",
+      "bytes": 2417
+    },
+    "restore_4311_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/restore_4311_results.log",
+      "sha256": "31922e090b3e7cb673b99e12447b3aae494efaead546fa056d8e83a40ed4e751",
+      "bytes": 52
+    },
+    "restore_4311_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/restore_4311_build.log",
+      "sha256": "e173a1f01d016a7fb45d99059d0940c23d3652bdd6278c00ef3b47395c803cfd",
+      "bytes": 961
+    },
+    "d54_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d54_manifest.json",
+      "sha256": "ac0ecc73e5576ef07e12a15128e4939d74263f2fa54bcfa42da23415576e55d1",
+      "bytes": 357
+    },
+    "runner_log_guard_checks.json": {
+      "path": "log/nav_acceptance/20261114_stage/runner_log_guard_checks.json",
+      "sha256": "b218fae629f747389c26b37c615ce2e45ff102a41c7762634c3d2740962c3795",
+      "bytes": 216
+    },
+    "d53_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d53_manifest.json",
+      "sha256": "406926a8061e1d446097eb0f8d8b1d177f362a4b71fa6c1cea5bf81edba60b50",
+      "bytes": 390151
+    },
+    "default_d53_strict_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/default_d53_strict_summary.json",
+      "sha256": "470df060ab7726291b374ec1a7154b091889bafbeb7d6812cc95d6753fea3638",
+      "bytes": 681
+    },
+    "default_d53_console.log": {
+      "path": "log/nav_acceptance/20261114_stage/default_d53_console.log",
+      "sha256": "4188dd43ffd450d517dc9fbec36faa38c1b39ea5393f63c905ba7a711abd3fa8",
+      "bytes": 57039
+    },
+    "default_d53_launch.log": {
+      "path": "log/nav_acceptance/20261114_stage/default_d53_launch.log",
+      "sha256": "1770fca9ae3e605f2564e50b832119d7d80af14c1141f7731982685fce5e987a",
+      "bytes": 497054
+    },
+    "d53_runtime_parameters.json": {
+      "path": "log/nav_acceptance/20261114_stage/d53_runtime_parameters.json",
+      "sha256": "fa396fe64a6480fca7e1db98d2e4d1a7c9395f692c26f3d359e38a424c5398a4",
+      "bytes": 41630
+    },
+    "d53_runtime_parameters_with_adapter.json": {
+      "path": "log/nav_acceptance/20261114_stage/d53_runtime_parameters_with_adapter.json",
+      "sha256": "97d4ec087b5cc120ac8981f86cd1262e71b851b6ad6022e21f6dd0b71a2d8248",
+      "bytes": 300
+    },
+    "runtime_parameter_tool_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/runtime_parameter_tool_tests.log",
+      "sha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5",
+      "bytes": 98
+    },
+    "log/nav_acceptance/20261114_stage/d52_runtime_parameters.json": {
+      "sha256": "cfbf67c57f939a9a819880c112e6d2da898c35299d79e8fb68c3d2d68c681bb5",
+      "bytes": 47549
+    },
+    "log/nav_acceptance/20261114_stage/redbox_d52_console.log": {
+      "sha256": "71e30e464864b36570bb36b95c04315fdf6a882de5eecfd1cf57268db61783ba",
+      "bytes": 261467
+    },
+    "log/nav_acceptance/20261114_stage/redbox_d52_launch.log": {
+      "sha256": "f68944db50b5e8d2451a47844099788167cc25cce834087aebb51186e723bb48",
+      "bytes": 625011
+    },
+    "log/nav_acceptance/20261114_stage/redbox_d52.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "log/nav_acceptance/20261114_stage/default_d53_strict_summary.json": {
+      "sha256": "470df060ab7726291b374ec1a7154b091889bafbeb7d6812cc95d6753fea3638",
+      "bytes": 681
+    },
+    "log/nav_acceptance/20261114_stage/restore_4311_results.log": {
+      "sha256": "31922e090b3e7cb673b99e12447b3aae494efaead546fa056d8e83a40ed4e751",
+      "bytes": 52
+    },
+    "log/nav_acceptance/20261114_stage/h_voxel_density_red.log": {
+      "sha256": "98bd0982cc8df202a554ab62840888649719c1c9987473705dab72a4c9d9f497",
+      "bytes": 932
+    },
+    "log/nav_acceptance/20261114_stage/h_voxel_density_green.log": {
+      "sha256": "493561637cdaff66754b2a4b4316967c9cf27110504dd05e34f867ae2c144362",
+      "bytes": 6975
+    },
+    "log/nav_acceptance/20261114_stage/voxel_density_results.log": {
+      "sha256": "1758e3affde43e37e2ed98274c5cb2aaa62635bf2a133d71fe026305511edf73",
+      "bytes": 52
+    },
+    "log/nav_acceptance/20261114_stage/d62_voxel_density_comparison.json": {
+      "sha256": "2547ee211c5f5a3e0df528050a3dadbaa56dc67bccbfd3321a788b210d21f256",
+      "bytes": 1225
+    },
+    "log/nav_acceptance/20261114_stage/d52_stop_reference_trace.json": {
+      "sha256": "a2337353a2e76f06a87ad23974fb9db73f55c21b6dff3d38c9862e60f2b470ef",
+      "bytes": 2011
+    },
+    "log/nav_acceptance/20261114_stage/d49_runtime_parameters.json": {
+      "sha256": "038ffaaf64ae0a8dc621b9d399238e4ac5164f10bd1025584bcd95b15bb3cd0d",
+      "bytes": 47955
+    },
+    "log/nav_acceptance/20261114_stage/terrain_replay_inputs.json": {
+      "sha256": "438ed6d50a885a7a351ac681df8f3223b16e8a889dc3545e67db84e238c9fbca",
+      "bytes": 646
+    },
+    "log/nav_acceptance/20261114_stage/d52_terrain_confirmation_summary.json": {
+      "sha256": "79243074b7c12f042cfdb83189a30073699dba090de23455e10fb8eadb4e1a48",
+      "bytes": 1672
+    },
+    "log/nav_acceptance/20261114_stage/s3_logging_tool_tests_with_mujoco.log": {
+      "sha256": "27698d515243c6798e9a5e3564084a7c2c305b5208de14bf568f5fb0f9622417",
+      "bytes": 110
+    },
+    "log/nav_acceptance/20261114_stage/tunnel_b_d49/summary.json": {
+      "sha256": "a3a611e33e9107a3861ecb68bce05a84870f5b3f42ea0fb54471633f0b65b12a",
+      "bytes": 4010
+    },
+    "log/nav_acceptance/20261114_stage/service_timeout_d48_ros/p2_transition/summary.json": {
+      "sha256": "04ff1285eea7e7008a7db2980365550862a69a727ffae538facd114ad08f6335",
+      "bytes": 1564
+    },
+    "log/nav_acceptance/20261114_stage/nav_voxel_density_remote.txt": {
+      "sha256": "4ed00cfa1117bce67dfe54b5b1d8da78e93ea8909954dfbae5c7154464fd9301",
+      "bytes": 60
+    },
+    "log/nav_acceptance/20261114_stage/d47_runtime_parameters.json": {
+      "sha256": "c68f07438f6e11a1bf9d331d1c09cf60a8ec0199b218965156050d0d0e302f09",
+      "bytes": 62535
+    },
+    "log/nav_acceptance/20261114_stage/adapter_lease_d51_ros/p2_transition/summary_full_recovery_window.json": {
+      "sha256": "a74aa7e81421277553d0384d2ed273497c00618c0148e3501b8d885c4ce24b5b",
+      "bytes": 2234
+    },
+    "log/nav_acceptance/20261114_stage/service_timeout_d48_ros/p2_transition/summary_full_recovery_window.json": {
+      "sha256": "41d5015c0d7fbaaffd803b39c21238e9dd582d363ea473cd03ebabd3bb307372",
+      "bytes": 2234
+    },
+    "log/nav_acceptance/20261114_stage/p2_transition_window_tests.log": {
+      "sha256": "d5be81bbe49b412357ba177be7fae47b32ba70b563d2a01ec6ee15df362cc215",
+      "bytes": 98
+    },
+    "tunnel_b_d47/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d47/summary.json",
+      "sha256": "748b8277c913b958b9d39a835ac34e32d7bc6031962ea7a9950f62255f9eba5f",
+      "bytes": 6817
+    },
+    "d47_runtime_parameters.json": {
+      "path": "log/nav_acceptance/20261114_stage/d47_runtime_parameters.json",
+      "sha256": "c68f07438f6e11a1bf9d331d1c09cf60a8ec0199b218965156050d0d0e302f09",
+      "bytes": 62535
+    },
+    "d47_goal7_layers.png": {
+      "path": "log/nav_acceptance/20261114_stage/d47_goal7_layers.png",
+      "sha256": "efbc241be4b0830184fbaf5bc174fbe84fbe5b45d81be35c84887ef1836b5e28",
+      "bytes": 34037
+    },
+    "patch_ranges_trial/comparison.json": {
+      "path": "log/nav_acceptance/20261114_stage/patch_ranges_trial/comparison.json",
+      "sha256": "b55e6c75db5a5fd22a3f3dc3926b5ab20ee1d9b9db6c4c782727f4f65ebb22f2",
+      "bytes": 1762
+    },
+    "facet_floor_trial/comparison.json": {
+      "path": "log/nav_acceptance/20261114_stage/facet_floor_trial/comparison.json",
+      "sha256": "17fe060a8a1df17e2795d762ca28f3ebb5640927ca490c105acf4d6e0bf16d65",
+      "bytes": 771
+    },
+    "d49_spin_diagnostic.log": {
+      "path": "log/nav_acceptance/20261114_stage/d49_spin_diagnostic.log",
+      "sha256": "5263bd149bfbfd7158a3269dcc7e60e5c0e8c79ea0c6f41f8b94ad029fff6ab9",
+      "bytes": 1371
+    },
+    "input_stale_d46_ros/p2_transition/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/input_stale_d46_ros/p2_transition/summary.json",
+      "sha256": "abf5e3ee0e10f7c7b2499a9b734519756c97dffafeafcafa54834ac7824b556f",
+      "bytes": 2059
+    },
+    "input_stale_d46.exit": {
+      "path": "log/nav_acceptance/20261114_stage/input_stale_d46.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "unknown_d45.exit": {
+      "path": "log/nav_acceptance/20261114_stage/unknown_d45.exit",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    "unknown_fixture_red.log": {
+      "path": "log/nav_acceptance/20261114_stage/unknown_fixture_red.log",
+      "sha256": "cb8c7a3e69d3128cead76034f4316a438c4f13cb0d5d78017ee99de3c3b2f66e",
+      "bytes": 4305
+    },
+    "unknown_fixture_first_suite.log": {
+      "path": "log/nav_acceptance/20261114_stage/unknown_fixture_first_suite.log",
+      "sha256": "749f539d39ae350b01284237978a735e2f26a2b9272ac5240a7cb93fa81a0ad1",
+      "bytes": 3355
+    },
+    "unknown_fixture_green.log": {
+      "path": "log/nav_acceptance/20261114_stage/unknown_fixture_green.log",
+      "sha256": "0085d2fe770f9c904745927c3e33bba2ea49faad98932efd37127c7ae5f11fd8",
+      "bytes": 99
+    },
+    "d46_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d46_manifest.json",
+      "sha256": "19997f10568fb14b1c05c6cc86378199368a8cfbdddbfeba252ecd88e51cfea2",
+      "bytes": 246267
+    },
+    "d45_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d45_manifest.json",
+      "sha256": "7c80c175c912591d10125a31960602625dec2f5182e1ff8168403a7e3c7b1e52",
+      "bytes": 246217
+    },
+    "d44_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d44_manifest.json",
+      "sha256": "a5c9e0b19f4afc636aee09a9fcea93df120027deb92feeca53f6f4f4b9e5d778",
+      "bytes": 246341
+    },
+    "facet_support_comparison.json": {
+      "path": "log/nav_acceptance/20261114_stage/facet_support_comparison.json",
+      "sha256": "8d1c1bf034a1006014b32700998f2b837d32c6ca3efe0f4b2f2338ca3c5036c6",
+      "bytes": 633
+    },
+    "facet_support_build.log": {
+      "path": "log/nav_acceptance/20261114_stage/facet_support_build.log",
+      "sha256": "4fa4d6df66d82cd4a1ffaad63ee2bea11ee6764dc4c7813da58dd373aa22b68f",
+      "bytes": 5774
+    },
+    "facet_support_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/facet_support_results.log",
+      "sha256": "8ab400f04e1cd1b226c21006b065fa02c43b8ae305ad055e22d86607f23d290a",
+      "bytes": 52
+    },
+    "facet_support_replay.exit": {
+      "path": "log/nav_acceptance/20261114_stage/facet_support_replay.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "d42_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d42_manifest.json",
+      "sha256": "24dfb7d96fd612eb740269547eca63380ff056c8bde8ba792ff993a20aac0dad",
+      "bytes": 248123
+    },
+    "d41_manifest.json": {
+      "path": "log/nav_acceptance/20261114_stage/d41_manifest.json",
+      "sha256": "f90e7ba71c4fcc586fff3f3daf8f39f210ad253d591fc7d866d6de3fc40da4b2",
+      "bytes": 246256
+    },
+    "unknown_d44.exit": {
+      "path": "log/nav_acceptance/20261114_stage/unknown_d44.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "unreachable_d43.exit": {
+      "path": "log/nav_acceptance/20261114_stage/unreachable_d43.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "unknown_timeline_tools.log": {
+      "path": "log/nav_acceptance/20261114_stage/unknown_timeline_tools.log",
+      "sha256": "2b2d767105fcadd6caca0788dc8b5865e63271d079fdf44070bda78649e483f5",
+      "bytes": 99
+    },
+    "s3_partial_tunnel_tests.log": {
+      "path": "log/nav_acceptance/20261114_stage/s3_partial_tunnel_tests.log",
+      "sha256": "a63ef195e87fc1a05abd2af82911cc4a1b203dd0a3f16bd1f85645f31594307b",
+      "bytes": 113
+    },
+    "unknown_d44_fault_artifacts/ats_p2_unknown_observation_44.json": {
+      "path": "log/nav_acceptance/20261114_stage/unknown_d44_fault_artifacts/ats_p2_unknown_observation_44.json",
+      "sha256": "4a123f0ea7502bfd04dae17ea8024db8dc7c852560a49dfc0650379ba24c452c",
+      "bytes": 6570
+    },
+    "log/nav_acceptance/20261114_stage/upper_support_results.log": {
+      "sha256": "83c61fd5ff4190055872a8e2f49883e638e43703e12c290eb82a1f957e74d5fb",
+      "bytes": 52
+    },
+    "log/nav_acceptance/20261114_stage/upper_support_build.log": {
+      "sha256": "dda56f159d96de24ee60bb34afe6c31bbdc5b0cc3eecd7c9c943ba26f57e012c",
+      "bytes": 5774
+    },
+    "log/nav_acceptance/20261114_stage/upper_support_trial/green_final.log": {
+      "sha256": "bc91ae93baa7cc405151e6869480d91ee71280479c78082f7ed4633614211c4c",
+      "bytes": 7945
+    },
+    "log/nav_acceptance/20261114_stage/upper_support_trial/red.log": {
+      "sha256": "84826bcf18fcd4955549e7faa54fcc8789d19f19ffabaef7e7494b2eb806dfe2",
+      "bytes": 1591
+    },
+    "log/nav_acceptance/20261114_stage/upper_support_trial/comparison.json": {
+      "sha256": "8049c2e9ee767dcd4d6889725da0c64812c4a4aa77f400103bb79474ef19986c",
+      "bytes": 3015
+    },
+    "log/nav_acceptance/20261114_stage/tunnel_b_d35/summary.json": {
+      "sha256": "3c8b2159a95ec3b30ce4ef86d81863fe869195a0b4d025075561c87fa22031ea",
+      "bytes": 4616
+    },
+    "log/nav_acceptance/20261114_stage/d35_column_comparison.json": {
+      "sha256": "88cea0f0876e9265ab76a1430d6a0f69cd0e70a07f75b804027c02b111c971e1",
+      "bytes": 153
+    },
+    "log/nav_acceptance/20261114_stage/d37_spin_windows.json": {
+      "sha256": "80005816f6b26448a8f0c7551d2fa3e22f9aca646386ad6e7730129800b6d1ab",
+      "bytes": 380355
+    },
+    "log/nav_acceptance/20261114_stage/d35_subsurface_returns.json": {
+      "sha256": "f1116f35da8de2af65184118f957426b8353aff23cc0ab75ff051fc8fd2cb869",
+      "bytes": 3302
+    },
+    "log/nav_acceptance/20261114_stage/d35_official_subsurface.json": {
+      "sha256": "4d3c44172a1a92b82ed59f638843fe91ab950b6f37509adbde0358bddd902744",
+      "bytes": 5682
+    },
+    "log/nav_acceptance/20261114_stage/d35_official_ray_comparison.json": {
+      "sha256": "01073b5038038cb3f03ff05c6d7e55a34a4f9fb554bf0c312c12f2afd3954c1a",
+      "bytes": 8803
+    },
+    "log/nav_acceptance/20261114_stage/d35_actual_model_ray_comparison.json": {
+      "sha256": "e271a9fa81f34b66498a7a0d8a6325fedfd2f71a6be01d19d70341f63f7a77d8",
+      "bytes": 6827
+    },
+    "log/nav_acceptance/20261114_stage/upper_support_remote.txt": {
+      "sha256": "55132ef164a57697adf130df4abd0dd9ec5537774c4780faa190bf0d9b31ffc7",
+      "bytes": 60
+    },
+    "log/nav_acceptance/20261114_stage/run_upper_support_d36.sh": {
+      "sha256": "a8d9aa294dea4aa442905f9a0a60414fcf5cbc3c372ead2d66e73af9c8672b14",
+      "bytes": 1633
+    },
+    "log/nav_acceptance/20261114_stage/run_tunnel_d35.sh": {
+      "sha256": "4b9bfcc15c9dfd2460380e1199cff1abbb25d0bd05f375d886140ca3f98941f9",
+      "bytes": 1351
+    },
+    "log/nav_acceptance/20261114_stage/run_s3_2025_d34.sh": {
+      "sha256": "bc999fba3ddf8df3004d61464dec03a3327f93769c840f08e0a3399b59a3f44d",
+      "bytes": 1352
+    },
+    "log/nav_acceptance/20261114_stage/d35_compiled_mesh_ray_comparison.json": {
+      "sha256": "04ddb60746b3bed969830385febf0457c4046b11641ab24a046656d66d27127a",
+      "bytes": 11631
+    },
+    "log/nav_acceptance/20261114_stage/d35_compiled_mesh_rays.log": {
+      "sha256": "04dc39bf00e9f0402e8f6fc05d509fd864d3e828546ab64216d51e7d4895346a",
+      "bytes": 1065
+    },
+    "log/nav_acceptance/20261114_stage/recorder_payload_write_benchmark.json": {
+      "sha256": "5d88ffd58640396a80a9b3ec7ee4a2b9c62df551a5a8e17f0ea1243eccb78a49",
+      "bytes": 306
+    },
+    "log/nav_acceptance/20261114_stage/s3_2025_d34/summary.json": {
+      "sha256": "a01b83c0f1094329dd07aec581e5de22312d3858ff3cebfd4818034b461979f5",
+      "bytes": 2988
+    },
+    "log/nav_acceptance/20261114_stage/s3_2025_d34/nav_tracking/goal_1/verdict.json": {
+      "sha256": "c650d2e3be9a46063e9823adf3fbcb013e74a295e2ba7c7810f8f8819506ec71",
+      "bytes": 103142
+    },
+    "log/nav_acceptance/20261114_stage/recorder_backlog_red.log": {
+      "sha256": "8a6406c435754d67190a838be61d52467a6625a222bebf2b000fbafd7ee0c71a",
+      "bytes": 1375
+    },
+    "log/nav_acceptance/20261114_stage/recorder_backlog_green.log": {
+      "sha256": "d0a18512431fd66e9ae113e90f7f9529b7c836168c1e808a2ac827898edbf769",
+      "bytes": 105
+    },
+    "log/nav_acceptance/20261114_stage/recorder_backlog_offline_green.log": {
+      "sha256": "e678104197b7f3b75eb025f246ffc80d733b383a557c44503244f0da0fe24e36",
+      "bytes": 3515
+    },
+    "log/nav_acceptance/20261114_stage/prior_runner_candidate_tests.log": {
+      "sha256": "72266fb3f3bbd2d4ebc76896601a42fafb6862fe30fa566d742e1682587e971e",
+      "bytes": 633
+    },
+    "log/nav_acceptance/20261114_stage/prior_runner_red.log": {
+      "sha256": "49761e9ff6bca30de98622334d74bfddfa4413a514f4706078ff1ff213d0c6e7",
+      "bytes": 5340
+    },
+    "log/nav_acceptance/20261114_stage/s3_prior_candidate.py": {
+      "sha256": "273321103a0f42d5e43cce5240e5c0c904a1042a15beb0feca2e1abb18b1b5ff",
+      "bytes": 47767
+    },
+    "log/nav_acceptance/20261114_stage/test_s3_prior_runner.py": {
+      "sha256": "74c4e432cfa9362e705252a80c0745406d9a7f0f5e171a0845dba915a35de81d",
+      "bytes": 3764
+    },
+    "log/nav_acceptance/20261114_stage/prepare_prior_runner_candidate.py": {
+      "sha256": "aba0c3aa0a58ff509386ba0b5ddbcf595ba7fffa3506013590ee7cbdce920a33",
+      "bytes": 2579
+    },
+    "log/nav_acceptance/20261114_stage/run_s3_2025_d30.sh": {
+      "sha256": "164440c4ec2065ada7a539488355229f1f9c52901749abb5cc34aa5a89088d7f",
+      "bytes": 1352
+    },
+    "log/nav_acceptance/20261114_stage/d26_result_summary.json": {
+      "sha256": "4c7adb671e03843d4b0087b6b3d7a7642b4b543dceae6ff4173e2f986ca5631c",
+      "bytes": 478
+    },
+    "log/nav_acceptance/20261114_stage/d26_cell_timeline.json": {
+      "sha256": "35ccae4b9838a6165ee811c13e13524bb0c6e68eee1a7170ace64cfcd1715ea8",
+      "bytes": 1019
+    },
+    "log/nav_acceptance/20261114_stage/d26_goal47_terminal_trace.json": {
+      "sha256": "759e61b5f7344af9975c3e5307da3877aeb4a4574a448c4f9f869d31140eb988",
+      "bytes": 35677
+    },
+    "log/nav_acceptance/20261114_stage/s3_2025_restart_d24/summary.json": {
+      "sha256": "be40b49cc478cbc90204c4988f25729b89757b919bbd9ba348d8c7fe3bb928fb",
+      "bytes": 1578
+    },
+    "log/nav_acceptance/20261114_stage/restart_health_red.log": {
+      "sha256": "d8182f3ecfe5b977eba5433f4d8509d5a83e34b978ba1d5b05b868e473e73657",
+      "bytes": 1257
+    },
+    "log/nav_acceptance/20261114_stage/restart_health_green.log": {
+      "sha256": "0716b579b5d74651f66c819c7cb16b74ffcf523df214a75cc74aca0eac870d8e",
+      "bytes": 115
+    },
+    "log/nav_acceptance/20261114_stage/local_support_push.log": {
+      "sha256": "5dcc5831af38498db38272c0e91a856954938cf1bf9e7243c220da392ec31e2b",
+      "bytes": 85
+    },
+    "log/nav_acceptance/20261114_stage/local_support_remote.txt": {
+      "sha256": "4c52dc8ff1425f7169aa8bd2e84c25f2d6244b69ee77fa12c14cce1e6234da6e",
+      "bytes": 60
+    },
+    "log/nav_acceptance/20261114_stage/summarize_startup_audit.py": {
+      "sha256": "fc6e4f56d76d6a3e14dbf8d2c6e081b0fe0514f68b04cccd67a6adc67dac3755",
+      "bytes": 2345
+    },
+    "log/nav_acceptance/20261114_stage/gicp_startup_status_matrix_updated.json": {
+      "sha256": "7d387b7410edcaa77286ca053b535e7d06de9dd2c068bc9f80769d3ffdb85325",
+      "bytes": 52022
+    },
+    "log/nav_acceptance/20261114_stage/d17_result_summary.json": {
+      "sha256": "ac4653a389349f87b6a31774ddd2737033727c9d1ccb36a919d0ee0f73396591",
+      "bytes": 7531
+    },
+    "log/nav_acceptance/20261114_stage/d17_cell_timeline.json": {
+      "sha256": "ce5e0bc92b9bee38b3ba37b85721b91339a31c949b0eda149de617cc27a5714a",
+      "bytes": 5571
+    },
+    "log/nav_acceptance/20261114_stage/diagnose_d17_cell_timeline.py": {
+      "sha256": "ff2f7b802f4e80a749312ad570ac87619e9fb9b3b3a9bad6c5756e6aaf50c0d7",
+      "bytes": 1555
+    },
+    "log/nav_acceptance/20261114_stage/nav2_d15/summary.json": {
+      "sha256": "865205d0be5cd8e0cea84232bb754f2cc03b913e7a3555ca9af2e92741f58315",
+      "bytes": 2141
+    },
+    "log/nav_acceptance/20261114_stage/nav2_d15/goal_checker_variant.json": {
+      "sha256": "32a8661be7cbf69471149f9d4df0e7f97db2511b06594249162ec45cb0b60aea",
+      "bytes": 184
+    },
+    "log/nav_acceptance/20261114_stage/d17_committed_window_audit.json": {
+      "sha256": "1f181c5141e5dc29cac6421f99250595062afcc28204a07338c3afffa63726ff",
+      "bytes": 2085
+    },
+    "log/nav_acceptance/20261114_stage/layer_commit_selection_red.log": {
+      "sha256": "e0015f8c7e21f3e5da9109d31de24f07cfa77dcf25b6cf65533b3d664f1f289d",
+      "bytes": 846
+    },
+    "log/nav_acceptance/20261114_stage/layer_commit_selection_green.log": {
+      "sha256": "22c6730bb7a71c8db53f6f1a481fc3a8e6eca8927605a693e96f299d76f5cd0a",
+      "bytes": 98
+    },
+    "log/nav_acceptance/20261114_stage/run_d14_global_layer_observer.sh": {
+      "sha256": "274c86928c3e66c421265df546917640e7bcaffd238d0dc15933fd7ab8518e2f",
+      "bytes": 792
+    }
+  },
+  "iteration_history_notice": "以下逐轮字段包括旧active_run/current_heads；均为已结束历史，禁止作为当前运行或最终通过依据。",
+  "iteration_history": {
+    "status": "in_progress_not_accepted",
+    "baseline": {
+      "root": "6840990ee05d0c982411b9706444351814d4ffcf",
+      "nav": "488c8b53c9cc49c55807d81c17c39074c2f754da",
+      "sim": "1e32caf48311bdaf0d4c80ebafd6b3cbfd70b306"
+    },
+    "nav_fixture_commit": "5b75bc87f7f552d9f6363441160bba9b1cd0ba38",
+    "physical_contact_acceptance": "unverified",
+    "rviz": false,
+    "current_heads": {
+      "root": "6840990ee05d0c982411b9706444351814d4ffcf",
+      "nav": "de356d3b60c30d8635fded95d8d5cd542aef10af",
+      "sim": "55b9d8e70fe720e678b6e7995d014b345c6be2fd"
+    },
+    "push": {
+      "nav": "SSH push succeeded; live ls-remote equals current head",
+      "sim": "SSH push succeeded; live ls-remote equals current head",
+      "root": "git add failed EROFS, index.lock; no root commit or push of current changes",
+      "nav_voxel_density": {
+        "local_HEAD": "d87f83b69aac7f8a6b2342117cca3550fcc8c3db",
+        "live_remote_HEAD": "d87f83b69aac7f8a6b2342117cca3550fcc8c3db",
+        "exit": 0
+      }
+    },
+    "d81": {
+      "domain": 81,
+      "exit_code": 1,
+      "goals_succeeded": 6,
+      "failed_goal_index": 7,
+      "goal": [
+        9.3,
+        1.95,
+        -1.5708
+      ],
+      "failure": "bounded suspended-replan wait; goal center free, unknown nearby; JPS clearance rejection under investigation",
+      "truth_error_m": 1.7261211872987718,
+      "scope": "partial approach evidence, not tunnel acceptance"
+    },
+    "d80": {
+      "domain": 80,
+      "exit_code": 1,
+      "scope": "X-lock parking fixture failed",
+      "maximum_displacement_m": 0.050017,
+      "stable_frames": 0
+    },
+    "replay_input_scope_correction": "Earlier component exports omit production XY self-filter and use nearest localization; strict runtime-base-TF/filter and committed-source selection added, 6 tests pass.",
+    "current_run": null,
+    "uncommitted_navigation_change": {
+      "base": "d87f83b69aac7f8a6b2342117cca3550fcc8c3db",
+      "files": [
+        "ats_rog_map/include/ats_rog_map/ground_column.hpp",
+        "ats_rog_map/src/ground_column.cpp",
+        "ats_rog_map/test/test_ground_column.cpp"
+      ],
+      "installed": true,
+      "tests": "175/0/0/0",
+      "loop": "d41 running; not accepted"
+    },
+    "latest_boundary_commit": "44220a6f4260e0d090105f3f023a9daa62b4bebc",
+    "d65": {
+      "exit_code": 1,
+      "tunnel_B_passed": false,
+      "first_six_truth_errors_m": [
+        0.0242982769911,
+        0.02230719336045,
+        0.03073009868035,
+        0.05914009840641,
+        0.04324302596286,
+        0.04272837371489
+      ],
+      "goal7_truth_error_m": 1.7064389442648027,
+      "goal7_reason": "no path/goal occupied; bounded suspended-replan timeout; no executable reference",
+      "physical_contact_acceptance": "unverified",
+      "rviz": false,
+      "artifacts": {
+        "log/nav_acceptance/20261114_stage/tunnel_b_d65/summary.json": {
+          "sha256": "ec32442f34e702ae0092a4060aa10228bb8f8908fe5377a01431d46d5f222812",
+          "bytes": 6969
+        },
+        "log/nav_acceptance/20261114_stage/d65_manifest.json": {
+          "sha256": "81c320c731188539ab86ce3f7db7d5270cb2d6f00a54e538ecc952114d49380a",
+          "bytes": 389358
+        },
+        "log/nav_acceptance/20261114_stage/d65_truth_pose.jsonl": {
+          "sha256": "7db983e8bbd54497d775e8baba785ca46dff73134520cbafea67f567591c376c",
+          "bytes": 1369860
+        },
+        "log/nav_acceptance/20261114_stage/nav_boundary_remote.txt": {
+          "sha256": "2a30cfc7f5826e155dad3d565168c5b655d27d4e5317e9c1104a749b03bb79b2",
+          "bytes": 60
+        },
+        "log/nav_acceptance/20261114_stage/d65_scan_truth_native_hfield.json": {
+          "sha256": "8c407b346e4af9a757aff6cba48f422f1d588476f26c39851f1f28bfdc1aa782",
+          "bytes": 12216209
+        }
+      }
+    },
+    "active_run": {
+      "domain": 14,
+      "session_id": 65906,
+      "script": "log/nav_acceptance/20261114_stage/run_s3_2027_d14.sh",
+      "console": "log/nav_acceptance/20261114_stage/s3_2027_d14_console.log",
+      "output": "log/nav_acceptance/20261114_stage/s3_2027_d14",
+      "status": "running",
+      "global_layer_observer": {
+        "session_id": 17916,
+        "script": "log/nav_acceptance/20261114_stage/run_d14_global_layer_observer.sh",
+        "output": "log/nav_acceptance/20261114_stage/d14_global_layer_observer"
+      }
+    },
+    "h2_support_update": {
+      "nav_HEAD": "44220a6f4260e0d090105f3f023a9daa62b4bebc",
+      "files": [
+        "ats_rog_map/include/ats_rog_map/ground_column.hpp",
+        "ats_rog_map/src/ground_column.cpp",
+        "ats_rog_map/test/test_ground_column.cpp"
+      ],
+      "committed": true,
+      "build": "Release d63 pass",
+      "package_tests": {
+        "tests": 173,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      "candidate_gate_accepted": false,
+      "summary": "Accepted 1c388fd/4311d73; d62 first six legs passed, seventh failed. Gate remains unaccepted.",
+      "artifacts": {
+        "log/nav_acceptance/20261114_stage/h_dense_support_red.log": {
+          "sha256": "27b1a78bd30ae5f72d0e44c5f7924c978a4b66c9a17893338f6e3e710d254f4d",
+          "bytes": 1017
+        },
+        "log/nav_acceptance/20261114_stage/h_local_support_baseline_actual.log": {
+          "sha256": "747d76e9e4bdd30183330eeb14f09064d731eb9f82581ea5566a28b84a17e648",
+          "bytes": 998
+        },
+        "log/nav_acceptance/20261114_stage/h_local_support_green.log": {
+          "sha256": "9ad25cb6a0a9feefce597fb8e9ada9c25d2a7bf6474d89af221bf60570140e6f",
+          "bytes": 6832
+        },
+        "log/nav_acceptance/20261114_stage/local_support_results.log": {
+          "sha256": "31922e090b3e7cb673b99e12447b3aae494efaead546fa056d8e83a40ed4e751",
+          "bytes": 52
+        },
+        "log/nav_acceptance/20261114_stage/d65_cache_equivalence_and_timing.json": {
+          "sha256": "68aedaecaf97bbdab424742c7e4eba63b85ff08288fe967d737b0b19c0981e96",
+          "bytes": 1032
+        },
+        "log/nav_acceptance/20261114_stage/d65_support_fit_residuals.json": {
+          "sha256": "48be038b13dd6efa2f9ef31bbed034a3faca0d50fc089f404640d54a9e7478f5",
+          "bytes": 5293
+        },
+        "log/nav_acceptance/20261114_stage/d65_high_support_endpoint_identity.json": {
+          "sha256": "f86821c2e15647e80ddadb7eb067ad4430bf62719ac613bac977ff95b85f8ae0",
+          "bytes": 217
+        },
+        "log/nav_acceptance/20261114_stage/h_replay/d171_runtime_summary.json": {
+          "sha256": "23eae1b335a6e3c0a74dd7b9b863b31fcc9d499ad34340289e3a244bb2068aa4",
+          "bytes": 9338
+        },
+        "log/nav_acceptance/20261114_stage/h_replay/d173_runtime_summary.json": {
+          "sha256": "1da33c722aa8bc26e2f869c11655a207d5152c5bd29f537f1979f50cf68347dd",
+          "bytes": 7611
+        },
+        "log/nav_acceptance/20261114_stage/d63_manifest.json": {
+          "sha256": "9f4b5e63140c6202d28fc6b8ba50f120aea738dad852f209e483e64168e84c71",
+          "bytes": 2733
+        },
+        "log/nav_acceptance/20261114_stage/d62_manifest.json": {
+          "sha256": "2a1ef165f4dd7b9f8e0661d0935c21ada59cb06f123b7148405bf148e5b19f65",
+          "bytes": 390024
+        }
+      }
+    },
+    "nav2_compat": {
+      "status": "Built and isolated runtime d57; historical protocol passed, strict stage truth limit failed",
+      "source_revision": "305b985213c655d72101d3d8281efda7fcec2d68",
+      "source_files": 45,
+      "prepare_tests_passed": 3,
+      "runtime_packages_missing": [],
+      "manifest": "log/nav_acceptance/20261114_stage/nav2_compat_ws/manifest.json",
+      "manifest_sha256": "2ee52b898d31020d85f526e5701fee045af82c1e6b927275a1c11c02ab3dcc6e",
+      "reproduce": "python3 -s scripts/prepare_nav2_compat.py --output <new-isolated-directory>",
+      "production_navigation_changed": false
+    },
+    "latest_heads": {
+      "root": "6840990ee05d0c982411b9706444351814d4ffcf",
+      "nav": "af0312b72458ecd18d4fd3499159f72dcc31b7b0",
+      "sim": "55b9d8e70fe720e678b6e7995d014b345c6be2fd"
+    },
+    "historical_nav2": {
+      "protocol_baseline": "passed_d57_truth_only",
+      "stage_truth_gate": "failed_0.16738629092808663_m",
+      "current_2025_2027_lio_acceptance": "not_replaced"
+    },
+    "rejected_candidate": {
+      "patch": "rejected_support_patch.patch",
+      "reason": "d55 first-goal availability regression, 22 new unknown cells at the goal, reproduced on identical source frames",
+      "production_source_restored_to": "4311d73e29495129a4cacb5dc9f557638d7ff1c7",
+      "installed_artifacts": "restored to4311d73, d54 Release173tests pass",
+      "candidate_tests": "174 passed, belongs to rejected implementation, not final acceptance"
+    },
+    "current_nominal": {
+      "default": {
+        "domain": 53,
+        "exit": 0,
+        "truth_error_m": 0.052991,
+        "strict_truth_limit_m": 0.08,
+        "runner_historical_limit_m": 0.3,
+        "q1": "pass",
+        "q2": "pass"
+      },
+      "red_box": {
+        "domain": 52,
+        "exit": 0,
+        "truth_error_m": 0.027305,
+        "truth_limit_m": 0.08,
+        "q1": "pass",
+        "q2": "pass",
+        "discrete_footprint_collisions": 0,
+        "contact_diagnostic_increment": 0
+      },
+      "nav_HEAD": "4311d73e29495129a4cacb5dc9f557638d7ff1c7",
+      "physical_contact_acceptance": "unverified",
+      "rviz": false
+    },
+    "fault_matrix": {
+      "adapter_lease": {
+        "domain": 51,
+        "status": "passed before voxel-density candidate",
+        "summary": "log/nav_acceptance/20261114_stage/adapter_lease_d51_ros/p2_transition/summary.json",
+        "stop_latency_sec_monotonic": 3.887232087,
+        "recovery_zero_duration_sec": 6.023333689,
+        "new_references": 0,
+        "new_execute": 0
+      },
+      "service_timeout": {
+        "domain": 48,
+        "status": "passed_current_density",
+        "recovery_zero_duration_sec": 6.026218845,
+        "stop_latency_including_cli_sec": 6.203921802,
+        "recovered_reference_count": 0,
+        "recovered_execute_count": 0
+      },
+      "input_stale_d46": {
+        "passed": true,
+        "scope": "lio live fault/recovery, complete zero and no old reference revival",
+        "stop_latency_s": 0.46336019699811004,
+        "recovered_window_s": 6.028064334001101
+      },
+      "unknown_d45": {
+        "passed": false,
+        "reason": "old truth-mode occlusion helper requires wrong registered_scan owner in lio",
+        "injection_completed": false
+      },
+      "unknown_d44": {
+        "passed": true,
+        "scope": "strict numeric unknown, selected/motion zero, Path non-revival, new goal recovery",
+        "generation": [
+          1650,
+          1839,
+          2488
+        ],
+        "raw_and_execution_trace": "not recorded; final rerun required",
+        "before_latest_column_change": true
+      },
+      "unreachable_d43": {
+        "passed": true,
+        "classification": "footprint-blocked free goal / occupied",
+        "pure_no_path": false,
+        "all_three_velocity_streams_zero": true,
+        "before_latest_column_change": true
+      }
+    },
+    "pending_offline": null,
+    "voxel_density_commit": "d87f83b69aac7f8a6b2342117cca3550fcc8c3db",
+    "d49": {
+      "status": "failed_localization_LOST_goal4",
+      "first3_truth_errors_m": [
+        0.021781181674219423,
+        0.024082037476218614,
+        0.027448722244120875
+      ],
+      "source": "tunnel_b_d49/summary.json"
+    },
+    "d47": {
+      "passed": false,
+      "successful_goals": 6,
+      "failing_goal": 7,
+      "truth_error_m": 1.7144573867829067,
+      "q1_goal7": "unknown/no executable reference",
+      "localization": "TRACKING",
+      "candidate_h_gate_accepted": false
+    },
+    "d41_failure": {
+      "exit": 1,
+      "truth_error_m": 0.7040115493081796,
+      "reason": "bounded suspended-replan watchdog",
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d41",
+      "scope_trial": "overhead-only; d41 entire replay identical to d87; next d40 build"
+    },
+    "overhead_support_update": {
+      "nav_head": "d87f83b69aac7f8a6b2342117cca3550fcc8c3db",
+      "committed": true,
+      "build": "Release20.2s",
+      "package_tests": 176,
+      "test_failures": 0,
+      "native_tests": 44,
+      "scope": "d41 entire projection sequence identical to d87; d62 final ROI357free/94unknown/29occupied; component only",
+      "loop": "d39 failed first goal; same input projection identical to d87",
+      "commit": "b4ad57cccd607dceef5f12708e8195656129f62f"
+    },
+    "d39_failure": {
+      "exit": 1,
+      "truth_error_m": 1.036999486257113,
+      "reason": "bounded suspended-replan watchdog; source unknown near terminal footprint",
+      "source_comparison": "entire ROI projection identical to d87",
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d39"
+    },
+    "support_identity_update": {
+      "committed": true,
+      "files": [
+        "ats_rog_map/src/ground_column.cpp",
+        "ats_rog_map/test/test_ground_column.cpp"
+      ],
+      "build": "d38 Release6.01s",
+      "tests": 177,
+      "failures": 0,
+      "loop": "d37 first6 truth/q1/q2 pass; goal7 ramp_bridge failed1.700102m",
+      "scope": "identity of existing support preserved; disconnected lower return blocks its own column; not a whole-stage acceptance",
+      "commit": "4dcf3206b907268843a3c6b6a37924411821dae5",
+      "push": "success; subsequent live ls-remote failed connection closed"
+    },
+    "current_h2_replay": {
+      "171": {
+        "summary": {
+          "measured_columns": 18,
+          "complete_columns": 3,
+          "gate_passes_production": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 1,
+            "0.247": 2,
+            "0.245": 2,
+            "0.240": 2
+          },
+          "gate_passes_centre": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 0,
+            "0.247": 2,
+            "0.245": 3,
+            "0.240": 3
+          },
+          "headroom_production_median": 0.25057496590979356,
+          "headroom_frame_ptp_max": 0.06244416495053154,
+          "support_width_median": 0.008855064057905577,
+          "centre_min": 0.24499818851790556,
+          "centre_median": 0.24944198490870145,
+          "centre_max": 0.26391709169952277,
+          "centre_frame_ptp_max": 0.028600883233343533
+        },
+        "path": "log/nav_acceptance/20261114_stage/local_support_trial/d171_summary.json",
+        "sha256": "18f468488324a88967cbe9ffc836b4e4d64d682557696d73a9abc18d19d0e102",
+        "production_nav_commit": "af0312b72458ecd18d4fd3499159f72dcc31b7b0",
+        "scope": "Production columns/rays/store cold-start component replay; d171118 available frames/d173120; actual0.45m self-filter; no end-to-end or physical clearance acceptance"
+      },
+      "173": {
+        "summary": {
+          "measured_columns": 0,
+          "complete_columns": 0,
+          "gate_passes_production": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 0,
+            "0.247": 0,
+            "0.245": 0,
+            "0.240": 0
+          },
+          "gate_passes_centre": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 0,
+            "0.247": 0,
+            "0.245": 0,
+            "0.240": 0
+          }
+        },
+        "path": "log/nav_acceptance/20261114_stage/local_support_trial/d173_summary.json",
+        "sha256": "5720892e67776e08ebd17ebc570d25f071ebd92a66ab2b5d001869f0f4600276",
+        "production_nav_commit": "af0312b72458ecd18d4fd3499159f72dcc31b7b0",
+        "scope": "Production columns/rays/store cold-start component replay; d171118 available frames/d173120; actual0.45m self-filter; no end-to-end or physical clearance acceptance"
+      }
+    },
+    "gicp_startup_status_matrix": {
+      "path": "log/nav_acceptance/20261114_stage/gicp_startup_status_matrix.json",
+      "startup_lost_runs": 0,
+      "sample_runs": 6,
+      "runtime_lost_domains": [
+        49
+      ],
+      "scope": "six heterogeneous runs; no startup-root-cause claim",
+      "updated_evidence": "log/nav_acceptance/20261114_stage/gicp_startup_status_matrix_updated.json",
+      "updated_summary": {
+        "nominal_runs": 10,
+        "runs_with_startup_LOST": 0,
+        "runs_with_runtime_LOST": 1,
+        "runtime_LOST_domain": 49,
+        "scope": "异构源码/配置的名义运行接收样本，非受控发生率估计，不含故障和进行中d17"
+      }
+    },
+    "tunnel_route_interpretation": "goals1..6 approach; goal7 ramp_bridge; tunnel_B at goals10..13; no actual tunnel_B width or traversal yet",
+    "d37_failure": {
+      "path": "log/nav_acceptance/20261114_stage/tunnel_b_d37",
+      "truth_error_m": 1.7001020297352532,
+      "passed_goals": 6,
+      "actual_tunnel_b_reached": false,
+      "source_replay": "explicit1550-frameprefix; missingterminal sourcegeneration1553"
+    },
+    "upper_support_update": {
+      "commit": "de356d3b60c30d8635fded95d8d5cd542aef10af",
+      "push_exit": 0,
+      "live_remote": "de356d3b60c30d8635fded95d8d5cd542aef10af\trefs/heads/develop",
+      "native_tests": 48,
+      "package_tests": {
+        "total": 180,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      "d35_closed_loop_passed": false,
+      "d35_first_goal_truth_error_m": 1.220808963759611,
+      "d35_q1_q2": "passed for the failed first leg, not route pass",
+      "same_input_comparison": "log/nav_acceptance/20261114_stage/d35_column_comparison.json",
+      "h2_gate": "unverified",
+      "next_domain": 33
+    },
+    "mesh_ray_discrepancy": {
+      "scope": "已定位当前编译网格缺口：mj_rayMesh与直接三角形求交一致到1.2e-14，均与官方STL两条射线约0.648m差异；几何未改",
+      "official": "log/nav_acceptance/20261114_stage/d35_official_ray_comparison.json",
+      "actual_model": "log/nav_acceptance/20261114_stage/d35_actual_model_ray_comparison.json",
+      "invalid_mount_diagnostic": "log/nav_acceptance/20261114_stage/d35_native_ray_comparison.json",
+      "invalid_reason": "uses unpatched legacy-gimbal model; not evidence for actual beam origins"
+    },
+    "d34_failure": {
+      "profile": "rmuc_2025",
+      "first_goal_truth_error_m": 0.0026342280811734635,
+      "q1": "pass",
+      "q2": "fail: 4 ticks / 4 snapshots",
+      "clock_pairing_diagnostic": "pose 62.450s with source snapshot62.650s; recorder pose queue50 under synchronous payload IO",
+      "full_route": "not completed",
+      "save_latency_dynamic": "not reached"
+    },
+    "recorder_backlog_fix": {
+      "files": [
+        "scripts/nav_tracking_recorder.py",
+        "scripts/test_nav_tracking_recorder_shutdown.py",
+        "scripts/test_nav_tracking_recorder.py"
+      ],
+      "red_domain": 33,
+      "red": "42 pose callbacks required after blocked callback",
+      "green_domain": 32,
+      "green_ros_tests": 7,
+      "green_offline_domain": 31,
+      "analyzer_changed": false,
+      "q2_gates_changed": false,
+      "root_commit": "blocked by read-only .git"
+    },
+    "prior_runner_candidate": {
+      "status": "isolated tests pass; NOT applied to running scripts",
+      "candidate": "log/nav_acceptance/20261114_stage/s3_prior_candidate.py",
+      "test": "log/nav_acceptance/20261114_stage/test_s3_prior_runner.py",
+      "prepare": "log/nav_acceptance/20261114_stage/prepare_prior_runner_candidate.py",
+      "tests": 3,
+      "red_exit": 1,
+      "apply_after_current_run": true
+    },
+    "next_domain": "rescan;17 running,18excluded,19invalid-used,20..used",
+    "s3_2025_d30": {
+      "status": "failed_closed_loop",
+      "domain": 30,
+      "exit_code": 1,
+      "successful_goals": 47,
+      "attempted_goals": 48,
+      "required_goals": 54,
+      "max_successful_truth_error_m": 0.022882087742466677,
+      "failed_goal_truth_error_m": 0.06747506987824015,
+      "failure": "goal48 bounded suspended-replan wait; terminal yaw footprint rejection",
+      "all_48_tracking_legs_passed": true,
+      "physical_contact_acceptance": "unverified",
+      "save_latency_dynamic_reload": "not reached",
+      "output": "log/nav_acceptance/20261114_stage/s3_2025_d30",
+      "diagnostics": {
+        "d30_terminal_conflicts.json": "log/nav_acceptance/20261114_stage/d30_terminal_conflicts.json",
+        "d30_cell_returns.json": "log/nav_acceptance/20261114_stage/d30_cell_returns.json",
+        "d30_neighbor_height_distribution.json": "log/nav_acceptance/20261114_stage/d30_neighbor_height_distribution.json",
+        "d30_column_gap.json": "log/nav_acceptance/20261114_stage/d30_column_gap.json",
+        "d30_cloud_rank_audit.json": "log/nav_acceptance/20261114_stage/d30_cloud_rank_audit.json",
+        "d30_local_column_transitions.json": "log/nav_acceptance/20261114_stage/d30_local_column_transitions.json",
+        "d30_out_of_range.json": "log/nav_acceptance/20261114_stage/d30_out_of_range.json"
+      }
+    },
+    "prior_runner_entry": {
+      "status": "implemented_and_unit_verified",
+      "tests_passed": 46,
+      "log": "log/nav_acceptance/20261114_stage/prior_runner_applied_green.log",
+      "runtime_prior_route": "pending",
+      "root_commit": "blocked_readonly_git"
+    },
+    "spin_d29_prefix5": {
+      "status": "diagnostic_prefix_unmet",
+      "moving_duration_s": 28.39,
+      "measured_max_abs_wz": 2.5653256517014236,
+      "near_3_duration_s": 0,
+      "bridge_max_angular_z": 3.0,
+      "path": "log/nav_acceptance/20261114_stage/d29_spin_chain_prefix5_summary.json"
+    },
+    "s3_2027_d29": {
+      "status": "failed_closed_loop",
+      "exit_code": 1,
+      "goals_reached": 7,
+      "maximum_truth_error_m": 0.06324994512273394,
+      "failure": "goal7 q2 persistent 4 ticks across4 snapshots; terrain occupied",
+      "q1": "passed_all7",
+      "physical_contact": "unverified",
+      "contact_diagnostic_delta": 0,
+      "south_goal8_save_latency_reload": "not reached",
+      "output": "log/nav_acceptance/20261114_stage/s3_2027_d29",
+      "terrain_geometry_diagnostic": "log/nav_acceptance/20261114_stage/d29_conflict_points.json",
+      "measured_motion_spin": {
+        "moving_duration_s": 32.9525,
+        "max_abs_wz": 2.5653256517014236,
+        "near_3_duration_s": 0
+      },
+      "localization_status_samples": 5916,
+      "lost_status_samples": 0
+    },
+    "local_support_repair": {
+      "status": "implemented_release181_tests_passed_closed_loop_running",
+      "production_head_before_change": "de356d3b60c30d8635fded95d8d5cd542aef10af",
+      "files": [
+        "ats_rog_map/src/ground_column.cpp",
+        "ats_rog_map/include/ats_rog_map/ground_column.hpp",
+        "ats_rog_map/test/test_ground_column.cpp"
+      ],
+      "first_candidate_rejected": "unsafe own column free and changed original model;47/49",
+      "bounded_candidate_native_tests": 49,
+      "first_package_tests": 181,
+      "final_change": "clearVoxel reports support usability changes to integration and invalidates neighbour fits",
+      "component_replay_comparison": "log/nav_acceptance/20261114_stage/local_support_trial/comparison.json",
+      "component_scope": "d30 local cold-start; d35 complete recorded committed selection; d37 explicit recorded prefix; final return-contract change needs revalidation",
+      "commit": "af0312b72458ecd18d4fd3499159f72dcc31b7b0",
+      "final_package_tests": 181,
+      "final_replay_contract": "three replay outputs identical after integration notification change; local_support_trial/final_contract_comparison.json",
+      "h2_replay": {
+        "d171": {
+          "measured_columns": 18,
+          "complete_columns": 3,
+          "gate_passes_production": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 1,
+            "0.247": 2,
+            "0.245": 2,
+            "0.240": 2
+          },
+          "gate_passes_centre": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 0,
+            "0.247": 2,
+            "0.245": 3,
+            "0.240": 3
+          },
+          "headroom_production_median": 0.25057496590979356,
+          "headroom_frame_ptp_max": 0.06244416495053154,
+          "support_width_median": 0.008855064057905577,
+          "centre_min": 0.24499818851790556,
+          "centre_median": 0.24944198490870145,
+          "centre_max": 0.26391709169952277,
+          "centre_frame_ptp_max": 0.028600883233343533
+        },
+        "d173": {
+          "measured_columns": 0,
+          "complete_columns": 0,
+          "gate_passes_production": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 0,
+            "0.247": 0,
+            "0.245": 0,
+            "0.240": 0
+          },
+          "gate_passes_centre": {
+            "0.305": 0,
+            "0.255": 0,
+            "0.249": 0,
+            "0.247": 0,
+            "0.245": 0,
+            "0.240": 0
+          }
+        }
+      },
+      "h2_status": "7mm margin still unverified; no H3",
+      "push": "verified by live ls-remote"
+    },
+    "s3_2025_d26": {
+      "status": "failed_q2",
+      "domain": 26,
+      "exit": 1,
+      "reached": 47,
+      "total": 54,
+      "max_truth_m": 0.02173045263809741,
+      "q1_all_passed": true,
+      "goal47_q2": {
+        "colliding_ticks": 5,
+        "longest_conflict_run_ticks": 5,
+        "longest_conflict_run_snapshots": 2,
+        "persistent_conflict": true
+      },
+      "goal37_q2": "4 ticks / 1 snapshot; diagnostic only",
+      "save_latency_dynamic_reload": "not reached",
+      "physical_contact_acceptance": "unverified",
+      "rviz": false
+    },
+    "s3_restart_2025": {
+      "status": "verified_live",
+      "domain": 24,
+      "result": {
+        "passed": true,
+        "old_instance": 40450965350148,
+        "new_instance": 40514058383648,
+        "old_epoch": 1,
+        "new_epoch": 2,
+        "death_to_sustained_stop_wall_s": 1.9969537689976278,
+        "recovery_wall_s": 3.5843400320009096,
+        "old_execution_rejected": true,
+        "zero_topics": [
+          "/cmd_vel/autonomy_raw",
+          "/cmd_vel/selected",
+          "/motion_control"
+        ]
+      },
+      "preceding_failure": {
+        "domain": 25,
+        "reason": "evaluator rejected expected LOST during injected restart; production safety was not relaxed"
+      },
+      "tests": "restart_health_green.log: 16 passed"
+    },
+    "terminal_yaw_repair": {
+      "status": "implemented_component_verified",
+      "files": [
+        "src/ats_sentry_nav/ats_swerve_mpc/src/ats_swerve_mpc_node.cpp",
+        "src/ats_sentry_nav/ats_swerve_mpc/test/test_mpc_localization_gate.cpp"
+      ],
+      "red_domain": 23,
+      "red_output": "log/nav_acceptance/20261114_stage/terminal_yaw_red_test.log",
+      "measured_failure": {
+        "scope": "subscriber receive trace, asynchronous; angular endpoint is exact executed reference",
+        "target_yaw": -1.4805171086467719,
+        "actual_min_yaw": -1.5274240438129119,
+        "max_overshoot_rad": 0.046906935166139974,
+        "raw_peak_abs_wz": 0.5730929412799441,
+        "last_nonzero_raw": {
+          "ros_t": 607.352500002,
+          "wall": 40053.528225812,
+          "kind": "autonomy_raw",
+          "wz": -0.08890960316808333
+        },
+        "first_conflict_actual_stamp": 607.299991664,
+        "actual_MPC_goal_position_tolerance": 0.01,
+        "actual_MPC_goal_yaw_tolerance": 0.05,
+        "tau": 1.2,
+        "arbiter": "passes selected source unchanged; differences between last-received raw/selected are not additive control evidence"
+      },
+      "mujoCo": "d21 fails unrelated moving leg37 q2, terminal47 not reached",
+      "build_wall_s": 18.8,
+      "tests": {
+        "total": 127,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "nav2_strict_variant": {
+      "status": "implemented_not_run",
+      "original_baseline": "d57 protocol passes; truth0.167386m fails stage0.08m",
+      "old_checker_xy_m": 0.25,
+      "candidate_checker_xy_m": 0.05,
+      "stage_truth_gate_m": 0.08,
+      "tests": "5 tests pass; launch show-args pass",
+      "scope": "isolated historical RMUC2026 truth/Nav2 variant, not current ATS or LIO",
+      "closed_loop": {
+        "domain": 15,
+        "status": "passed_isolated_historical_truth_scene_variant",
+        "truth_error_m": 0.04910518769002393,
+        "goal_checker_m": 0.05,
+        "stage_truth_gate_m": 0.08,
+        "original_baseline_unchanged": true,
+        "summary": "log/nav_acceptance/20261114_stage/nav2_d15/summary.json"
+      }
+    },
+    "future_2027_near_clearance_candidate": {
+      "status": "prepared_not_applied",
+      "profile": "log/nav_acceptance/20261114_stage/rmuc_2027_near_clearance_candidate.yaml",
+      "patch": "log/nav_acceptance/20261114_stage/rmuc_2027_near_clearance_candidate.patch",
+      "diagnostic": "log/nav_acceptance/20261114_stage/d29_near_clearance_candidate.json"
+    },
+    "s3_2025_d21": {
+      "domain": 21,
+      "exit": 1,
+      "reached": 37,
+      "total": 54,
+      "max_truth_error_m": 0.02282590526639684,
+      "failed_leg": 37,
+      "q1_all_passed": true,
+      "q2": {
+        "colliding_ticks": 11,
+        "longest_conflict_run_ticks": 9,
+        "longest_conflict_run_snapshots": 2,
+        "persistent_conflict_runs": [
+          {
+            "first_tick": 91,
+            "snapshots": [
+              5252,
+              5253
+            ],
+            "ticks": 4
+          },
+          {
+            "first_tick": 132,
+            "snapshots": [
+              5256,
+              5257
+            ],
+            "ticks": 9
+          }
+        ]
+      },
+      "first": {
+        "actual_speed_mps": 0.4385718062153293,
+        "actual_stamp_identity": "496.999995830",
+        "actual_wz_body": 1.6890836390230577,
+        "tracking_error": {
+          "distance_m": 0.018047391547884744,
+          "lateral_m": 0.0178904451076444,
+          "longitudinal_m": 0.002374934848164096,
+          "nearest_index": 34,
+          "nearest_of": 65,
+          "reference_x": 19.96319391943108,
+          "reference_y": 3.268589206791537,
+          "reference_yaw": -1.350972181893206,
+          "yaw_error_rad": -0.5109922429648794
+        }
+      },
+      "terminal47_retest": "not reached",
+      "save_latency_dynamic_reload": "not reached",
+      "physical_contact_acceptance": "unverified",
+      "rviz": false
+    },
+    "near_clearance_change": {
+      "status": "installed10relatedtests_pass1existingtest_failure",
+      "path": "src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml",
+      "old": 0.6,
+      "new": 0.15,
+      "shared_by": [
+        "2025",
+        "2027"
+      ],
+      "scope": "reference time scaling at center clearance below0.9m; no hardware/geometry/tolerance changes",
+      "validation": "log/nav_acceptance/20261114_stage/near_clearance_validation.json"
+    },
+    "invalid_d19": {
+      "path": "log/nav_acceptance/20261114_stage/d19_invalid_abort.json",
+      "status": "invalid_aborted130",
+      "reason": "preflight failure was incorrectly ignored before launch; no result admissible"
+    },
+    "excluded_d18": "host LISTEN127.0.0.1:12001; preflight rejected, no launch",
+    "s3_2025_d17": {
+      "status": "failed_closed_loop",
+      "domain": 17,
+      "reached_goals": 37,
+      "required_goals": 54,
+      "max_truth_error_m": 0.025437416537976515,
+      "q1_all_passed": true,
+      "q2_failed_goal": 37,
+      "colliding_ticks": 8,
+      "persistent_runs": [
+        {
+          "first_tick": 586,
+          "snapshots": [
+            5801,
+            5802
+          ],
+          "ticks": 5
+        },
+        {
+          "first_tick": 642,
+          "snapshots": [
+            5807,
+            5808
+          ],
+          "ticks": 3
+        }
+      ],
+      "missing": [
+        "goals38..54",
+        "explicit_save",
+        "20_obstacle_trials",
+        "dynamic_not_saved",
+        "reload"
+      ],
+      "evidence": "log/nav_acceptance/20261114_stage/d17_result_summary.json"
+    },
+    "layer_commit_replay_selection": {
+      "status": "offline_verified_5_tests",
+      "files": [
+        "scripts/export_h_column_replay.py",
+        "scripts/test_export_h_column_replay.py"
+      ],
+      "red": "log/nav_acceptance/20261114_stage/layer_commit_selection_red.log",
+      "green": "log/nav_acceptance/20261114_stage/layer_commit_selection_green.log",
+      "runtime_audit": "log/nav_acceptance/20261114_stage/d17_committed_window_audit.json",
+      "full_replay": "not_available_missing_raw_scans"
+    }
+  }
+}

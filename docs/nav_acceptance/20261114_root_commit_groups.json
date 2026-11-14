@@ -1,0 +1,112 @@
+{
+  "status": "root_groups_committed_and_pushed",
+  "branch": "develop",
+  "origin": "git@github.com:liukong1220/ATS_2026_snetry_test.git",
+  "baseline_head": "6840990ee05d0c982411b9706444351814d4ffcf",
+  "identity": {
+    "name": "liukong1220",
+    "email": "1625038134@qq.com"
+  },
+  "file_count": 54,
+  "groups": [
+    {
+      "id": "H",
+      "title": "[仿真] 补齐车高门支撑身份与原始扫描回放取证",
+      "body": "为候选0.249m车高门提供生产列组件、实际TF与传感器原点回放，不以真值或邻列拟合虚构free。增加静态计量夹具、逐帧净空统计和terrain实际节点测量。\n\n验证：相关回放/导出/净空工具回归及terrain节点低悬障碍测试已执行，证据索引见20261114_stage.json。d171净空帧间变化最大62.444mm，d173实际自滤后无可评价列；7mm余量尚未通过，夹具不代表导航或驻车验收。未修改场景几何、Point-LIO数值或实车参数。",
+      "files": [
+        "scripts/record_h_clearance.py",
+        "scripts/export_h_column_replay.py",
+        "scripts/export_h_sensor_origins.py",
+        "scripts/h_odom_layer_replay.cpp",
+        "scripts/summarize_h_headroom.py",
+        "scripts/h_stationary_fixture.py",
+        "scripts/check_terrain_height_node.py",
+        "scripts/test_export_h_column_replay.py",
+        "scripts/test_export_h_sensor_origins.py",
+        "scripts/test_h_odom_layer_replay.py",
+        "scripts/test_record_h_clearance.py",
+        "scripts/test_summarize_h_headroom.py",
+        "scripts/test_h_stationary_fixture.py"
+      ]
+    },
+    {
+      "id": "safety_evidence",
+      "title": "[安全] 保留参考提交及实际足迹故障恢复取证",
+      "body": "完善q1/q2记录器收尾与积压诊断、P2 STOP/reference接收顺序观察及独立故障运行入口。保留q1必过、q2至少3tick且跨2快照、旧reference失效与失败零速契约，不放宽生产安全门。\n\n验证：记录器离线/ROS收尾、P2故障工具相关测试已执行；历史独立故障产物保留。2025最终d17仍有持续q2冲突，最终行为后的默认/红框/完整故障矩阵未完成，不能把工具通过当闭环通过。未带RViz，物理接触未验证。",
+      "files": [
+        "scripts/nav_tracking_recorder.py",
+        "scripts/test_nav_tracking_recorder.py",
+        "scripts/test_nav_tracking_recorder_shutdown.py",
+        "scripts/p2_transition_observer.py",
+        "scripts/test_p2_transition_observer.py",
+        "scripts/test_mujoco_minco_mpc_chain.sh",
+        "scripts/set_mujoco_lidar_occlusion.py",
+        "scripts/test_mujoco_fault_contracts.py"
+      ]
+    },
+    {
+      "id": "S3_Y",
+      "title": "[仿真] 扩展两场S3及小陀螺分层评估证据",
+      "body": "修正两场故障评估的出生锚定/profile限定，逐段记录独立真值、执行reference和q1/q2，采集实际参数、扫描/提交配对、范围外计数、保存悬空物与速度链。原始扫描使用有界证据队列，不改变导航决策；缺帧回放明确拒绝升级为完整复现。\n\n验证：S3/故障/先验入口/参数与自旋分析工具相关回归已执行，最新列证据测试7通过。2025 d17在37/54点后q2失败；2027 d14第8点south真值0.194165m超差；d13重启尝试在注入前超时。持续3rad/s、两场完整A–K、保存/延迟/动态/重载、有先验六隧道仍未通过或未执行，不宣称无图可用。",
+      "files": [
+        "scripts/evaluate_spin_tunnel_route.py",
+        "scripts/s3_fault_scenarios.py",
+        "scripts/s3_mujoco_acceptance.py",
+        "scripts/capture_navigation_runtime_parameters.py",
+        "scripts/record_navigation_spin_chain.py",
+        "scripts/s3_column_input_recorder.py",
+        "scripts/s3_tracking_evidence.py",
+        "scripts/summarize_s3_out_of_range.py",
+        "scripts/summarize_saved_overhangs.py",
+        "scripts/summarize_navigation_spin_chain.py",
+        "scripts/test_evaluate_spin_tunnel_route.py",
+        "scripts/test_capture_navigation_runtime_parameters.py",
+        "scripts/test_s3_column_input_recorder.py",
+        "scripts/test_s3_tracking_evidence.py",
+        "scripts/test_s3_prior_runner.py",
+        "scripts/test_summarize_s3_out_of_range.py",
+        "scripts/test_summarize_saved_overhangs.py",
+        "scripts/test_summarize_navigation_spin_chain.py",
+        "scripts/test_s3_acceptance_tools.py",
+        "scripts/test_s3_fault_scenarios.py"
+      ]
+    },
+    {
+      "id": "terrain",
+      "title": "[仿真] 增加terrain确认帧数离线生产组件比较",
+      "body": "导出terrain确认输入并调用活动生产组件比较N=1/2/4/8/12/16，保留原始帧顺序和实体障碍延迟判据，避免仅按参数推断通过。\n\n验证：导出回归及864帧离线比较已执行。N=8仍是当前方案A，尚未完成两场负载下20次实体障碍延迟p95<250ms及最大值验收；本提交不修改生产确认参数或延迟门。",
+      "files": [
+        "scripts/export_terrain_confirmation_frames.py",
+        "scripts/terrain_confirmation_replay.cpp",
+        "scripts/test_export_terrain_confirmation_frames.py"
+      ]
+    },
+    {
+      "id": "Nav2",
+      "title": "[仿真] 提供隔离的历史Nav2兼容回归入口",
+      "body": "在旧Nav2脚本已删除后提供独立兼容launch、配置生成与NavigateToPose验收，不改变正式ATS action链；显式标明历史RMUC2026 truth场景与控制器变体。\n\n验证：配置工具回归、launch检查与独立d15闭环通过；0.05m goal checker变体真值0.049105m、TF错误0、完成后4墙秒新增plan0。原默认0.25m checker的d57协议成功但真值0.167386m失败仍保留。该结果不替代两场lio、ATS默认或P3验收，物理接触未验证。",
+      "files": [
+        "scripts/nav2_compat.launch.py",
+        "scripts/prepare_nav2_compat.py",
+        "scripts/test_mujoco_nav2_compat.py",
+        "scripts/test_prepare_nav2_compat.py"
+      ]
+    },
+    {
+      "id": "docs",
+      "title": "[文档] 记录本轮收尾状态与未完成验收及续接提示词",
+      "body": "按用户要求结束本轮优化，收敛报告当前状态、domain账本、证据hash、三仓提交结果和下一轮提示词，保留历史迭代及原始用户文档差异。不再把运行中检查点、局部单测或旧源码结果写成阶段全部完成。\n\n验证：三仓diff检查、文档/JSON/提示词一致性及交付文件hash检查见final_delivery。导航e7bf500和仿真c42576a已推送并实时核对；收尾时根.git曾只读；恢复可写后本文档和工具已通过显式分组提交并推送。H2/T/M/Y/S/H3及最终回归仍有缺项，实车与物理接触未验证。",
+      "files": [
+        "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+        "docs/nav_acceptance/20261114_stage.json",
+        "docs/nav_acceptance/20261114_iterations.txt",
+        "docs/nav_acceptance/20261114_resume_prompt.txt",
+        "docs/nav_acceptance/20261114_runtime_inputs.json",
+        "docs/nav_acceptance/20261114_root_commit_groups.json"
+      ]
+    }
+  ],
+  "host_entry": "log/nav_acceptance/20261114_stage/final_delivery/commit_root_on_host.py",
+  "file_hashes": "log/nav_acceptance/20261114_stage/final_delivery/root_expected_files.json",
+  "note": "根工作树和初始用户文档差异均保留；此清单记录已完成的显式分组提交。宿主脚本遇HEAD变化/未知文件/已有暂存或hash变化即停止，不reset、不force。"
+}

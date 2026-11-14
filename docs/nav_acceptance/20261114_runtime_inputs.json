@@ -1,0 +1,30 @@
+{
+  "scope": "Workspace-local WLAN DDS configuration captured at closeout; restore only inside this workspace. Global ~/.ros settings are not modified.",
+  "files": {
+    "log/nav_acceptance/dds/wlan_env.sh": {
+      "sha256": "1e958b2499bb6383f68ca3e2ea5ac5812aa1b0883849f89e806c361811573b78",
+      "text": "# Source this file in each terminal before starting ROS nodes.\n# Keep ROS_DOMAIN_ID explicit for each test; do not use domains 5 or 77.\nexport RMW_IMPLEMENTATION=rmw_cyclonedds_cpp\nexport ROS_LOCALHOST_ONLY=0\nexport CYCLONEDDS_URI=file:///home/ats/ATS_2026_snetry_test/log/nav_acceptance/dds/wlan.xml\n"
+    },
+    "log/nav_acceptance/dds/wlan.xml": {
+      "sha256": "38a7643e9f9e8f05419e8f42c13d6b36d15e221f69d6c55873489973c9557685",
+      "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<CycloneDDS xmlns=\"https://cdds.io/config\">\n  <Domain id=\"any\">\n    <General>\n      <Interfaces>\n        <NetworkInterface name=\"wlo1\" multicast=\"true\" presence_required=\"true\"/>\n      </Interfaces>\n      <AllowMulticast>true</AllowMulticast>\n    </General>\n    <Discovery>\n      <ParticipantIndex>auto</ParticipantIndex>\n      <MaxAutoParticipantIndex>80</MaxAutoParticipantIndex>\n    </Discovery>\n  </Domain>\n</CycloneDDS>\n"
+    }
+  },
+  "external_assets": [
+    {
+      "path": "/home/ats/ats_evidence/rmuc_2025_prior.pcd",
+      "sha256": "c6360f957f75cea77384fe952d43819e80bf54ba07aca5c72effc97650f54d07",
+      "required_for": "2025 competition/default/red_box; supplied external prior, not added to Git"
+    },
+    {
+      "path": "src/ats_sentry_bringup/pcd/rmuc_2027.pcd",
+      "sha256": "3d738c081b66c2a9aca02b551125bd6d2d84efc8053164662c3ead8e725eaa17",
+      "required_for": "2027 prior localization"
+    },
+    {
+      "path": "2027_map/RMUC2027_V1.0.0.STL",
+      "sha256": "213a19bcadbcc0bff30981ae280eda6b637f82a013bde9afef027ada2c9a27f6",
+      "required_for": "official mesh evaluator only; not navigation input"
+    }
+  ]
+}
