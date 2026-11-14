@@ -1,41 +1,12 @@
-在 /home/ats/ATS_2026_snetry_test 继续 ATS 哨兵导航未完成阶段。先核对当前现场，再按失败证据推进到验收与分内容分仓提交推送；不要重复实施已有修复，也不要把局部通过写成全部完成。
+继续 ATS 哨兵导航未完成验收。工作区：`/home/ats/ATS_2026_snetry_test`。
 
-【读取与授权】
-全文读 AGENTS.md，加载 develop-robot-vision-navigation skill；读 docs/调研/无先验地图钻洞高速导航优化调研报告.md 的 0.0、0.9.3、4.1、4.2、9.0/9.0.1、9.5、9.6、9.8.5、附录 A.1，以及 docs/nav_acceptance/20261114_stage.json 的 finalization。迭代原文归档只供溯源，不能当作运行中检查点。
-用户已授权本阶段修改、构建、测试、中文分内容分仓提交和通过 SSH 推送三个 develop；无需再次申请。上一轮按用户要求结束优化，不代表阶段验收通过。每阶段先给 DoD、精确文件范围、验证命令和安全退出条件，失败先留证再定位行为所有者，做最小修改并重跑相关闭环。
+先读 `AGENTS.md`、报告 0.0、4.1、4.2、9.5、9.6、9.8.5 和附录 A.1，并加载 `develop-robot-vision-navigation` skill。先核对三仓 `develop` 的工作树、HEAD、实时 `git ls-remote`、源码/配置/安装 hash；不要检出旧版本、回退或覆盖用户修改。根仓已完成分组提交推送，不再执行旧宿主提交脚本或只读修复流程。
 
-【真实起点，禁止检出旧版本】
-三仓分别检查 git status --short --branch、git rev-parse HEAD、git remote -v 和实时 git ls-remote origin refs/heads/develop。
-收尾时根 HEAD=6840990ee05d0c982411b9706444351814d4ffcf；导航 HEAD=e7bf50023cbdeb1943f85525bc636b206dec2bb5；仿真 HEAD=c42576a5687c0c347ff1b73d340ca5edbeed6034。导航/仿真已推送且干净，提交时实时远端一致，但收尾再次查询SSH连接被关闭，下一轮需按现场复核；根源码、测试、报告尚未提交，因为 .git 挂载 ro，原始 git add 错误为 EROFS/index.lock。以开工实际 HEAD 为准，保留新用户修改，不 stash、不回退、不扩大沙箱权限。
-先核对根仓待交付清单 docs/nav_acceptance/20261114_root_commit_groups.json。可写宿主终端中的完整提交入口是 log/nav_acceptance/20261114_stage/final_delivery/commit_root_on_host.py；先审查文件 hash、分组和正文，再执行已授权提交。若仍只读，保留补丁并继续不依赖 Git 写入的工作，不能声称根修改已推送。
-当前没有本轮需要续跑的仿真/旁路进程，d13/d14/d17 均已退出；仅凭沙箱 /proc 不证明宿主无用户进程。不要重新启动这些旧脚本或复用这些 domain。
+按当前失败证据推进：
+- H2：验证支撑身份、未观测列和 0.249 m 候选车高门；低 1 cm、斜面、悬空板、低悬挂物、瞬时翻转均需回归证据。
+- T/M：依次运行 `tunnel_b_roundtrip`、`ramp_south`、`six_tunnels`，每项使用新 domain、新 launch、独立输出；`TUNNEL_FREE` 未实现前不得宣称无图隧道通过。
+- Y：验证持续 3 rad/s 平移、自旋入口/出口恢复与 south 定位；不改硬件上限或定位确认门。
+- S：完成 2025/2027 S3 A–K、保存/重载、动态障碍、延迟和 G/I 故障矩阵；缺产物/缺帧标为未验证。
+- M 通过后才评估 H3；最后一次行为修改后重跑 Release、默认、2025 红框和 P2 故障矩阵。
 
-【已完成的组件工作，输入与相关源码未变时复用证据】
-STOP/reference ROS 时钟屏障 c0f3f28 已通过 frozen-clock 节点与 Goal Manager 13/13 CTest；MPC 的旧 reference 拒绝门保持。
-已提交运动进度与安全墙钟分离 bdb65e9、终端 yaw 投影 69a74d0、列支撑 XY/平面/缓存与矛盾邻列隔离（最终 af0312b）、terrain 等门及实际车高内悬挂物过滤 f7a9392、终端 yaw 提前制动 e7bf500。ROG 包 181 项、MPC 包 127 项通过；它们不等于完整闭环通过。
-仿真 c42576a 将共用近障参考下限 0.6→0.15，2027继承，硬件上限和足迹/成功容差未变。配置测试 10 过、1 个 HEAD 既有 overlay 断言失败，不能写全包通过。
-独立历史 Nav2 d15 显式收紧控制器至 0.05m 的变体通过，真值 0.049105m；原历史 d57 额外 0.08m 真值门失败（0.167386m）。固定旧 RMUC2026/truth 场景不能代替 ATS 默认、2025/2027 lio 或 P3。
-
-【优先复盘当前失败，不能移动目标或改门凑通过】
-2025 d17：37/54 点到达，最大真值误差 0.025437m；q1 全过，第37段 q2 8冲突tick，最长5tick跨2快照，首次速度0.2442m/s、横向偏差0.03127m。冲突格 free/unknown 翻转，尚未证明根因；原始路径 s3_2025_d17/、d17_result_summary.json、d17_cell_timeline.json。
-2027 d14：前7/64点真值通过，第8点 south=(4.45,2.525) action成功但真值误差0.194165m（估计0.017651m），失败退出；8段 q1/q2均无冲突。先沿 scan stamp -> 三维 candidate/odom/map->odom -> 配准质量 -> fusion接受 -> 增长地图入图排查，不能再只用已修复的起点锚定解释。日志、完整扫描/TF、d14_runtime_parameters.json、d14_global_layer_observer/ 均保留。
-d13 的 2027 point_lio_restart 在故障注入前等待 motion/EXECUTE 25墙秒超时；kill/restart/旧reference重放次数均0。先核对前置工具等待与真实规划状态，不放宽生产安全租约。d24 2025重启通过，但早于最终行为修改，不替代最终矩阵。
-完整日志、命令、三仓 HEAD/源码/配置/安装hash和退出码位于 log/nav_acceptance/20261114_stage，按证据索引取用；缺产物就写缺失。d17逐帧提交日志3916对可与投影锚点核对，但原始扫描缺6帧，不能伪造完整回放；540–595s的269提交帧窗口仅冷启动诊断，未复现生产unknown。
-
-【剩余范围与依赖】
-1. H2：0.242+0.007=0.249m 仅是2027候选。当前 d171 实际TF/0.45m自滤生产组件回放，18列有净空、3列完整、1列全程过门，最大净空变化62.444mm；d173自滤后无可评价净空列；d166缺TF。d164已用 world-weld 夹具稳定补采60帧，但近车支撑种子不足，不能算净空通过。继续支撑身份、未观测列、斜面z=0.3x净空0.239仍占据、等门可过/低1cm不可过/低悬挂物/悬空板/瞬时翻转回归；先修估计，不靠压余量。两条实际网格射线与官方STL有差异只属有限重建证据，不擅改几何。
-2. T/M：tunnel_B真实穿越及有效规划宽度尚未证明，TUNNEL_FREE未实现。若terrain仍压窄，只在融合层或terrain_analysis_ext一处实现在线标记；地面连通、顶板>=门、两侧墙、连续N帧，occupied立即生效；ESDF双侧探测与标记合取，入口降速停转对齐，已提交段known-free。依次 rmuc_2027_tunnels 的 tunnel_b_roundtrip -> ramp_south -> six_tunnels，各自新domain/新launch/独立输出，失败先修当前步骤。第7个前置ramp_bridge不能冒充tunnel_B，第10–13点才是该路线的tunnel_B。逐隧道状态、轴线横向误差、接触诊断、保存图顶板/悬空板误写均须报告。
-3. Y：基地(3.37,9.03)、yaw0开阔区持续平移稳定3rad/s，入口停转对齐、整车离开后恢复。d14完整失败运行中有效平移61.9225s、近3±0.15累计1.26s/最长1.015s，只是诊断，尚非持续自旋验收；轮速1.6689711m/s和max_awz2保持。继续定位首个限幅点并量化分布/恢复；south失败及启动/运行期GICP LOST继续计数。新物理有先验六隧道单独用 --prior 跑，不能用 --reload 首目标代替。
-4. S：两场 rmuc_2025/rmuc_2027 全路线、显式保存、真值漏检/误检、动态不保存、重载TRACKING与首目标，按9.5.1逐项A–K补齐。N=8完整864帧组件对比已做，最优N和全覆盖负载20次实体障碍延迟仍未验证；记录实际projection_rate、snapshot_timeout、10Hz heartbeat和租约。G的 point_lio_restart/unsafe/service_timeout/unknown/no_path 与I的 correction_0.05/0.15/0.30 两场分别新domain运行；small_10x10和旧源码结果不能替代。
-5. M通过后才执行H3：只把已验证的同组车高门写入 src/ats_sentry_bringup/params/node_params.yaml，独立[规范]提交，不操作实车、不改其他硬件/实车参数。当前实车门0.305m，H3未做；2025实际门仍0.305m/terrain头顶过滤0，不能混称两场均0.249m。
-6. 最后一次行为修改后：Release重建与相应闭环 -> 当前ATS default -> 2025 red_box -> adapter_lease/service_timeout/input_stale/unknown/unreachable独立P2矩阵。名义case=none。旧reference恢复后不复活、无新目标保持停车；旧d52/d53与P2矩阵只作历史。Nav2隔离能力已补，不重新加入正式ATS链；相关实现/输入变更后再跑对应隔离回归。
-第5节滚动规划、Point-LIO数值优化、方向观测后端、机械升级不在此范围。
-
-【命令与不变门】
-source /opt/ros/humble/setup.bash、install/setup.bash、log/nav_acceptance/dds/wlan_env.sh（set +u）。WLAN只用wlo1，ROS_LOCALHOST_ONLY=0；忽略配置缺失可按 docs/nav_acceptance/20261114_runtime_inputs.json 恢复到工作区。查宿主socket及9.0.1选0..232新domain，排除5、77、91/92和全部已用/无效编号，不改全局DDS、不碰Gazebo或用户进程。Release、--base-paths src、内存约束JOBS、flock /tmp/ats27_build.lock，构建与闭环串行。
-隧道入口：ROS_DOMAIN_ID=<new> USE_RVIZ=false USE_MUJOCO_VIEWER=false flock /tmp/ats27_build.lock python3 scripts/s3_mujoco_acceptance.py --profile rmuc_2027_tunnels --route tunnel_b_roundtrip --record-column-inputs --registration-details --output <new-output> --launch-arg nav_start_delay_sec:=60.0 --launch-arg lidar_threads:=24
-S3按实际 --help 选择profile/case；correction用例须在首次接受前接管matcher，不沿用名义路线的60s nav启动延迟。
-默认/红框：ROS_DOMAIN_ID=<new> USE_RVIZ=false USE_MUJOCO_VIEWER=false PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none TEST_PROFILE=<default|red_box> GOAL_TIMEOUT=300 EXTRA_LAUNCH_ARGS="localization_source:=lio prior_pcd_file:=/home/ats/ats_evidence/rmuc_2025_prior.pcd lidar_threads:=24" flock /tmp/ats27_build.lock scripts/test_mujoco_minco_mpc_chain.sh（红框保留NAV_TRACKING_MAX_LAYER_PAYLOADS=3000，实际真值按0.08m复核）。
-路线点真值<=0.15m、终点/重载首目标<=0.08m；障碍延迟p95<250ms并报最大值；q1必过、q2持续>=3tick且跨>=2快照才失败、q3诊断，足迹来自对应profile；已执行参考离散冲突0且escape_prefix不豁免，快照publisher1。unknown/lease/epoch/急停/失败零速均不放宽。物理接触仅诊断，实车未验证。
-保持IdentifiedOdometry、内部odom存图/保存时转map、规划控制odom、目标权威map；不新增回环/位姿图/关键帧，不用场地真值清单作导航输入，不改官方几何/目标/成功容差。
-每轮保存命令/三仓HEAD/源码与安装hash/domain/PID/日志/退出码，30–60s汇报进展，运行中不改输入。提交仅显式文件，中文正文写原因/契约/验证/未覆盖，检查cached stat/check，SSH push develop后实时ls-remote核对。若再次收尾，先安全结束自有进程，更新9.8.5和证据索引；未达标时明确“本阶段未全部完成”。
+每轮先给 DoD、文件范围、验证命令和安全退出条件。保持目标、位置/yaw/停稳/footprint/急停/租约门不变；保存命令、domain、源码/配置/安装 hash、日志和退出码。区分“已验证/已实现未运行/推断/未验证”，不以单测或 topic 存在替代闭环，不把物理接触或实车写成已验证。完成后按内容分仓提交并实时核对远端。
