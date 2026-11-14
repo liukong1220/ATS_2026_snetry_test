@@ -137,8 +137,10 @@ def main():
     # choice that cannot silently drop a whole topic.
     check(stream.reliability == ReliabilityPolicy.BEST_EFFORT,
           "stream_qos is best_effort, so a BEST_EFFORT publisher still matches")
-    check(stream.depth >= 50,
-          "stream_qos keeps a deep queue so a slow tick does not drop command samples")
+    check(stream.depth == 1,
+          "stream_qos keeps the latest state instead of replaying old poses after payload IO")
+    check(recorder.stream_qos(depth=10).depth == 10,
+          "reference subscriptions can retain explicitly requested history")
 
     # --- layer retention keeps the conflict-time content ---------------------
     # A plain chronological cap keeps the earliest layers and discards the ones in

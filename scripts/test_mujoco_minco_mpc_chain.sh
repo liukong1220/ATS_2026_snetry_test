@@ -4,9 +4,9 @@ set -u
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/runtime_binary_freshness.sh
 source "${WORKSPACE_DIR}/scripts/runtime_binary_freshness.sh"
-LOG_DIR="/tmp/ats_minco_mpc_test_logs"
 # ROS 领域号；默认 88，避免回归测试与其他 ROS 进程串话。
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-88}"
+LOG_DIR="${LOG_DIR:-/tmp/ats_minco_mpc_test_logs_${ROS_DOMAIN_ID}}"
 # CycloneDDS 的发现端口为 7400 + 250 * domain，超过 65535 时每个节点都在
 # rmw_create_node 失败，表象是 "timeout waiting for node graph" 而不是
 # 非法 domain。这里先做上界检查，避免把配置错误当成闭环失败记入验收。
@@ -568,8 +568,12 @@ export ROS_LOG_DIR="${LOG_DIR}"
 # 沙箱禁止 ros2cli 的 XML-RPC daemon socket；直接通过当前 DDS domain 查询图。
 export ROS2CLI_DISABLE_DAEMON="${ROS2CLI_DISABLE_DAEMON:-1}"
 
-rm -rf "${LOG_DIR}"
-mkdir -p "${LOG_DIR}"
+if [[ -e "${LOG_DIR}" || -L "${LOG_DIR}" ]]; then
+  echo "FAIL: 日志目录已存在，保留原始证据，请选择新的 LOG_DIR: ${LOG_DIR}" >&2
+  exit 2
+fi
+mkdir -p "$(dirname "${LOG_DIR}")"
+mkdir "${LOG_DIR}" || exit 2
 : > "${LAUNCH_LOG}"
 
 CAPTURE_PIDS=()
@@ -1514,9 +1518,13 @@ stream_has_boolean_value() {
 
 capture_zero_outputs() {
   local label="$1"
+  local raw_file="/tmp/ats_p2_fault_${label}_autonomy_raw.out"
   local cmd_file="/tmp/ats_p2_fault_${label}_cmd.out"
   local motion_file="/tmp/ats_p2_fault_${label}_motion.out"
   sleep 0.5
+  capture_numeric_stream /cmd_vel/autonomy_raw "${raw_file}" || \
+    fail "${label} did not publish /cmd_vel/autonomy_raw during stop"
+  assert_zero_stream "${label} /cmd_vel/autonomy_raw" "${raw_file}"
   capture_numeric_stream "${SELECTED_CMD_VEL_TOPIC}" "${cmd_file}" || \
     fail "${label} did not publish ${SELECTED_CMD_VEL_TOPIC} during stop"
   assert_zero_stream "${label} ${SELECTED_CMD_VEL_TOPIC}" "${cmd_file}"
@@ -1727,6 +1735,70 @@ find_unreachable_goal() {
     "at (${UNREACHABLE_GOAL_X}, ${UNREACHABLE_GOAL_Y}) stamp=${UNREACHABLE_GOAL_STAMP}"
 }
 
+start_transition_observer() {
+  TRANSITION_DIR="${LOG_DIR}/p2_transition"
+  TRANSITION_PHASES="${LOG_DIR}/p2_transition_phases.jsonl"
+  python3 "${WORKSPACE_DIR}/scripts/p2_transition_observer.py" \
+    --output "${TRANSITION_DIR}" --phases "${TRANSITION_PHASES}" \
+    >"${LOG_DIR}/p2_transition_observer.log" 2>&1 &
+  TRANSITION_PID=$!
+  CAPTURE_PIDS+=("${TRANSITION_PID}")
+  wait_for_command "fault transition observer ready" 10 \
+    grep -q OBSERVER_READY "${LOG_DIR}/p2_transition_observer.log"
+  sleep 1
+}
+
+transition_phase() {
+  python3 - "${TRANSITION_PHASES}" "$1" <<'PY'
+import json
+import sys
+import time
+with open(sys.argv[1], 'a') as stream:
+    stream.write(json.dumps({'phase': sys.argv[2], 'mono': time.monotonic()}) + '\n')
+PY
+}
+
+cancel_fault_goal_before_recovery() {
+  if grep -q 'Goal finished with status:' "${FAULT_ACTION_OUTPUT}"; then
+    return 0
+  fi
+  local goal_id uuid byte index
+  goal_id="$(sed -n 's/^Goal accepted with ID: //p' "${FAULT_ACTION_OUTPUT}" | head -n 1)"
+  [[ "${goal_id}" =~ ^[[:xdigit:]]{32}$ ]] || fail "cannot parse in-flight fault goal UUID"
+  uuid=""
+  for ((index = 0; index < 32; index += 2)); do
+    byte="$((16#${goal_id:index:2}))"
+    uuid+="${uuid:+, }${byte}"
+  done
+  timeout 8 ros2 service call /ats_navigate_to_pose/_action/cancel_goal \
+    action_msgs/srv/CancelGoal \
+    "{goal_info: {goal_id: {uuid: [${uuid}]}, stamp: {sec: 0, nanosec: 0}}}" \
+    >"${LOG_DIR}/fault_cancel.out" 2>&1 || fail "cannot cancel fault goal before recovery"
+  wait_for_command "fault action terminal before recovery" 10 \
+    grep -q 'Goal finished with status:' "${FAULT_ACTION_OUTPUT}"
+}
+
+finish_transition_observer() {
+  transition_phase recovered
+  # Longer than the current five-second map lease, without a new goal.
+  sleep 6
+  transition_phase complete
+  wait "${TRANSITION_PID}" || fail "fault timeline/no-revival gate failed: ${TRANSITION_DIR}/summary.json"
+  echo "OK: full fault timeline and no-reference-revival gate passed"
+}
+
+set_unknown_fixture_lidar_occlusion() {
+  if [[ " ${EXTRA_LAUNCH_ARGS:-} " == *" localization_source:=lio "* ]]; then
+    # In lio mode /registered_scan belongs to Point-LIO. A physically empty
+    # raw scan stops its updates and tests input_stale instead of map unknown.
+    # The authorized ROG owner fixture below clears numeric evidence on every
+    # healthy scan; strict numeric all-unknown and generation gates still apply.
+    echo "RESULT: unknown_source_fixture=rog_map_numeric_owner localization_source=lio physical_occlusion=false"
+    return 0
+  fi
+  timeout 8 python3 "${WORKSPACE_DIR}/scripts/set_mujoco_lidar_occlusion.py" "$1"
+}
+
 run_p2_fault_injection() {
   local fault_case="$1"
   local process_pid baseline log_start_line replan_count
@@ -1737,28 +1809,37 @@ run_p2_fault_injection() {
       # its ready heartbeat, and MINCO's map lease must fail closed.
       process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_rog_map/ats_rog_map_node' | head -n 1 || true)"
       [[ -n "${process_pid}" ]] || fail "cannot locate ROGMap/adapter process for fault injection"
+      start_transition_observer
       publish_relative_fault_goal adapter_lease
       baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
         fail "cannot read generation before adapter lease fault"
+      transition_phase fault
       kill -STOP "${process_pid}" || fail "cannot pause adapter process"
       STOPPED_PIDS+=("${process_pid}")
       wait_for_command "adapter heartbeat lease triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
+      sleep 0.5
+      transition_phase stopped
       capture_zero_outputs adapter_lease
+      cancel_fault_goal_before_recovery
+      transition_phase recovery_requested
       resume_process "${process_pid}" adapter
       wait_for_command "adapter recovers ready heartbeat" 12 \
         topic_field_equals /rog_map_adapter/ready data true
       wait_for_generation_advance "${baseline}" 15
       capture_zero_outputs adapter_lease_recovery
+      finish_transition_observer
       ;;
     service_timeout)
       # In-process equivalent of an unanswered projection service: the guarded
       # test_stall_projection parameter holds the projection worker, so the
       # adapter's request deadline fires while the map node keeps running.
+      start_transition_observer
       publish_relative_fault_goal service_timeout
       baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
         fail "cannot read generation before service timeout"
       log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
+      transition_phase fault
       timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_stall_projection true \
         >/tmp/ats_p2_fault_service_timeout_stall.out 2>&1 || \
         fail "cannot stall the in-process ROGMap projection"
@@ -1768,7 +1849,11 @@ run_p2_fault_injection() {
         bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -q 'projection request timed out'"
       wait_for_command "ROGMap service timeout triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
+      sleep 0.5
+      transition_phase stopped
       capture_zero_outputs service_timeout
+      cancel_fault_goal_before_recovery
+      transition_phase recovery_requested
       timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_stall_projection false \
         >/tmp/ats_p2_fault_service_timeout_resume.out 2>&1 || \
         fail "cannot release the in-process ROGMap projection stall"
@@ -1776,13 +1861,16 @@ run_p2_fault_injection() {
         topic_field_equals /rog_map_adapter/ready data true
       wait_for_generation_advance "${baseline}" 15
       capture_zero_outputs service_timeout_recovery
+      finish_transition_observer
       ;;
     input_stale)
       process_pid="$(pgrep -P "${LAUNCH_PID}" -f 'ats_mujoco_sim/lib/ats_mujoco_sim/ats_mujoco_sim' | head -n 1 || true)"
       [[ -n "${process_pid}" ]] || fail "cannot locate MuJoCo process for fault injection"
+      start_transition_observer
       publish_relative_fault_goal input_stale
       baseline="$(read_positive_topic_field /rog_map_adapter/generation data 10)" || \
         fail "cannot read generation before input stale"
+      transition_phase fault
       kill -STOP "${process_pid}" || fail "cannot pause MuJoCo input process"
       STOPPED_PIDS+=("${process_pid}")
       wait_for_command "ROGMap detects stale Point-LIO-compatible inputs" 8 \
@@ -1791,6 +1879,8 @@ run_p2_fault_injection() {
         topic_field_equals /rog_map_adapter/ready data false
       wait_for_command "input stale triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
+      sleep 0.5
+      transition_phase stopped
       capture_zero_outputs input_stale
       # 输入恢复后 goal_manager 会继续派发仍在飞的故障目标，机器人随即合法地重新起步，
       # 与"恢复后旧轨迹不复活"的零速断言冲突。先取消在飞目标，让恢复阶段只测旧
@@ -1812,6 +1902,9 @@ run_p2_fault_injection() {
           fail "cannot cancel the in-flight input_stale goal"
         echo "OK: cancelled in-flight input_stale goal before resuming inputs"
       fi
+      wait_for_command "input_stale action terminal before recovery" 10 \
+        grep -q 'Goal finished with status:' "${FAULT_ACTION_OUTPUT}"
+      transition_phase recovery_requested
       resume_process "${process_pid}" MuJoCo
       wait_for_command "ROGMap inputs recover fresh" 15 \
         topic_field_equals /rog_map/stale data false
@@ -1819,10 +1912,11 @@ run_p2_fault_injection() {
         topic_field_equals /rog_map_adapter/ready data true
       wait_for_generation_advance "${baseline}" 15
       capture_zero_outputs input_stale_recovery
+      finish_transition_observer
       ;;
     unknown)
-      # 真实 unknown 必须来自 ROGMap 的数值状态：先用持续发布的零回波
-      # 模拟 LiDAR 全遮挡，再由 ROGMap owner 清空既有观测。adapter 只在
+      # 真实 unknown 必须来自 ROGMap 的数值状态。truth 模式使用零回波，
+      # lio 模式保持定位输入，使用已有 ROG owner 数值夹具。adapter 只在
       # 融合前遮蔽辅助证据，绝不从 debug PointCloud2 或融合后栅格伪造结果。
       local source_before source_after source_recovered request_identity
       local numeric_unknown="/tmp/ats_p2_unknown_numeric_${ROS_DOMAIN_ID}.out"
@@ -1840,6 +1934,7 @@ run_p2_fault_injection() {
       # pre-fault action.  A recovery cannot pass the no-revival gate without that baseline.
       start_fault_observer "${observer_report}" "${fault_trigger}" \
         "${recovery_trigger}" "${observer_log}"
+      start_transition_observer
       # 与目标无关的健康期基线先读，注入时刻因此只落在目标发布之后的最短路径上。
       source_before="$(read_rog_numeric_projection_generation \
         "/tmp/ats_p2_unknown_numeric_before_${ROS_DOMAIN_ID}.out")" || \
@@ -1863,8 +1958,7 @@ run_p2_fault_injection() {
       # 测得的延迟只会偏保守，绝不会漏掉注入后的第一条消息。
       : >"${fault_trigger}"
       FAULT_OBSERVER_FAULT_EPOCH="${SECONDS}"
-      # Direct service ownership plus two fresh empty source scans; no daemon graph cache.
-      timeout 8 python3 "${WORKSPACE_DIR}/scripts/set_mujoco_lidar_occlusion.py" true \
+      set_unknown_fixture_lidar_occlusion true \
         >/tmp/ats_p2_fault_unknown_occlusion_enable.out 2>&1 || \
         fail "cannot enable MuJoCo LiDAR occlusion"
       timeout 8 ros2 param set --no-daemon /ats_rog_map test_reset_to_unknown true \
@@ -1885,6 +1979,11 @@ run_p2_fault_injection() {
         test -s "${audit_report}"
       wait "${audit_capture_pid}" || \
         fail "unknown audit capture did not validate: $(<"${audit_log}")"
+      assert_fault_goal_still_in_flight unknown
+      # The compound unknown fault becomes effective only when secondary
+      # evidence is masked. Keep source-reset preparation in the old detailed
+      # timeline, and measure the STOP deadline from this actual final mutation.
+      transition_phase fault
       timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_mask_secondary_evidence true \
         >/tmp/ats_p2_fault_unknown_mask_enable.out 2>&1 || \
         fail "cannot enable adapter secondary-evidence mask"
@@ -1909,6 +2008,7 @@ run_p2_fault_injection() {
       # （当前 30 s）耗尽后才以 code 4 结束目标，旧的 12 s 等待早于该预算。
       wait_for_command "unknown fault triggers emergency stop" 8 \
         topic_field_equals /planner/emergency_stop data true
+      transition_phase stopped
       # LiDAR 全遮挡同时让定位失效：先到期的是 localization_wait_timeout（code 6），
       # 否则才是 map_wait_timeout（code 4）。两者都是安全终止，断言放宽到这两个码。
       wait_for_fault_action_result unknown '[46]' 40
@@ -1917,6 +2017,7 @@ run_p2_fault_injection() {
       # 恢复动作必须等到故障阶段的零速窗口关闭之后再执行，否则窗口内会混入
       # 恢复后的数据。
       wait_fault_observer_window "${FAULT_OBSERVER_FAULT_EPOCH}" 32
+      transition_phase recovery_requested
       : >"${recovery_trigger}"
       record_unknown_timeline recovery_started_ns
       timeout 8 ros2 param set --no-daemon /ats_rog_map_adapter test_mask_secondary_evidence false \
@@ -1925,7 +2026,7 @@ run_p2_fault_injection() {
       timeout 8 ros2 param set --no-daemon /ats_rog_map test_reset_to_unknown false \
         >/tmp/ats_p2_fault_unknown_source_rearm.out 2>&1 || \
         fail "cannot rearm ROGMap source reset fixture"
-      timeout 8 python3 "${WORKSPACE_DIR}/scripts/set_mujoco_lidar_occlusion.py" false \
+      set_unknown_fixture_lidar_occlusion false \
         >/tmp/ats_p2_fault_unknown_occlusion_disable.out 2>&1 || \
         fail "cannot restore MuJoCo LiDAR raycast"
       wait_for_command "unknown recovery restores adapter ready" 15 \
@@ -1943,6 +2044,7 @@ run_p2_fault_injection() {
       assert_no_old_reference_revival \
         "/tmp/ats_p2_unknown_old_reference_${ROS_DOMAIN_ID}.out"
       await_fault_observer_gate "${observer_report}" "${observer_log}"
+      finish_transition_observer
       # Recovery must not replay the failed request.  A new independent goal
       # is the only permitted way to re-establish planning and motion.
       # Reuse the map-frame nominal target proven by this same fresh launch.  The earlier relative
@@ -2555,9 +2657,8 @@ NAV_TRACKING_GATE="${NAV_TRACKING_GATE:-1}"
 # 2026-11-06 放宽：q1 必过；q2 仅在冲突持续 >= NAV_TRACKING_PERSIST_MIN_TICKS 个 tick
 # 且跨 >= NAV_TRACKING_PERSIST_MIN_SNAPSHOTS 个快照时判失败；q3 为诊断。
 # NAV_TRACKING_STRICT=1 复现旧门（任一 q2 冲突即失败）。
-# 证据目录必须在 LOG_DIR 之外：运行开始时 `rm -rf "${LOG_DIR}"` 会连同上一轮
-# 的 nav_tracking 产物一起删除，首违证据就只能靠当轮存活。按 domain 命名，
-# 因此并发 domain 不会互相覆盖。
+# 证据目录保持在 LOG_DIR 之外；LOG_DIR 每次必须全新，既有运行证据不会被删除。
+# 按 domain 命名，独立运行不会互相覆盖首违和 nav_tracking 产物。
 NAV_TRACKING_DIR="${NAV_TRACKING_DIR:-/tmp/ats_nav_evidence/nav_tracking_${TEST_PROFILE}_${ROS_DOMAIN_ID}}"
 NAV_TRACKING_RATE_HZ="${NAV_TRACKING_RATE_HZ:-50.0}"
 NAV_TRACKING_START_TIMEOUT="${NAV_TRACKING_START_TIMEOUT:-20}"

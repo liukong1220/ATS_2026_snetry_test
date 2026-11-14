@@ -77,7 +77,9 @@ class LidarOcclusionControl(Node):
         if not baseline['valid'] or (baseline['points'] == 0) != before:
             raise RuntimeError('source scan does not match pre-injection parameter state')
         first_sample = len(self.samples)
-        stamp_floor = max(baseline['stamp'], self.get_clock().now().nanoseconds)
+        # Source stamps use simulation time; this standalone CLI's clock may
+        # use wall time. Reject replayed scans in the source's own time domain.
+        stamp_floor = max(sample['stamp'] for sample in self.samples)
         request = SetParameters.Request()
         request.parameters = [Parameter(self.PARAMETER, value=enabled).to_parameter_msg()]
         future = self.setter.call_async(request)

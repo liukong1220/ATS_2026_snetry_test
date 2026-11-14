@@ -62,10 +62,12 @@ import hashlib
 import json
 import math
 import os
+import signal
 import time
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import OccupancyGrid
 from nav_msgs.msg import Odometry
@@ -105,8 +107,11 @@ def latched_qos(depth=10):
     )
 
 
-def stream_qos(depth=50):
-    """Best-effort + volatile: the only reliability that matches every writer.
+def stream_qos(depth=1):
+    """Latest state, best-effort + volatile, compatible with every writer.
+
+    Tick samples need the latest pose/velocity, not a backlog drained after a
+    slow payload callback. Reference history requests its own depth explicitly.
 
     A RELIABLE *reader* silently matches nothing when the writer is BEST_EFFORT,
     and DDS surfaces that as "no publisher", not as an error.  That is exactly how
@@ -251,6 +256,13 @@ def tracking_error(actual, reference_poses):
         "reference_y": ry,
         "reference_yaw": ryaw,
     }
+
+
+def write_gzip_json(path, payload):
+    """Preserve the complete payload without thousands of tiny compressor writes."""
+    encoded = json.dumps(payload)
+    with gzip.open(path, "wt", compresslevel=1) as handle:
+        handle.write(encoded)
 
 
 class JsonLinesWriter(object):
@@ -635,8 +647,7 @@ class NavTrackingRecorder(Node):
                 # occupancy rather than being reconstructed later.
                 "signed_distance_m": [float(v) for v in msg.signed_distance_m],
             }
-            with gzip.open(path, "wt") as handle:
-                json.dump(payload, handle)
+            write_gzip_json(path, payload)
             self._snapshot_payloads_written += 1
             record["payload"] = os.path.join("snapshot_payload", name)
         else:
@@ -691,8 +702,7 @@ class NavTrackingRecorder(Node):
             "info": grid_metadata(msg.info),
             "data": data,
         }
-        with gzip.open(path, "wt") as handle:
-            json.dump(payload, handle)
+        write_gzip_json(path, payload)
         self._layer_payloads_written += 1
         self._layer_retained.setdefault(topic, []).append(name)
         self._event("layer_payload", {
@@ -996,25 +1006,37 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     os.makedirs(args.output_dir, exist_ok=True)
-    rclpy.init()
+    # Python's default SIGINT can interrupt json.dump inside a gzip callback,
+    # leaving a valid gzip stream with truncated JSON (d73). rclpy's handler
+    # also invalidates graph queries before summary collection. Request a stop
+    # only: finish the current callback, write evidence with a live context,
+    # then shut ROS down. SIGTERM follows the same bounded graceful path.
+    stop_requested = False
+    def request_stop(signum, frame):
+        nonlocal stop_requested
+        stop_requested = True
+    previous_handlers = {sig: signal.signal(sig, request_stop)
+                         for sig in (signal.SIGINT, signal.SIGTERM)}
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     node = NavTrackingRecorder(args)
     reason = "signal"
     try:
         deadline = node._start_mono + args.startup_timeout_sec
-        while (rclpy.ok() and node._recording_start_mono is None and
+        while (rclpy.ok() and not stop_requested and node._recording_start_mono is None and
                time.monotonic() < deadline):
             rclpy.spin_once(node, timeout_sec=min(0.1, max(0.0, deadline - time.monotonic())))
         if node._recording_start_mono is None:
-            reason = "startup_timeout" if rclpy.ok() else "shutdown"
+            reason = "interrupt" if stop_requested else ("startup_timeout" if rclpy.ok() else "shutdown")
             node._event("warmup_failed", {"reason": reason, "missing": node._warmup_missing})
         elif args.duration_sec > 0.0:
             deadline = node._recording_start_mono + args.duration_sec
-            while rclpy.ok() and time.monotonic() < deadline:
+            while rclpy.ok() and not stop_requested and time.monotonic() < deadline:
                 rclpy.spin_once(node, timeout_sec=0.1)
-            reason = "duration_elapsed" if rclpy.ok() else "shutdown"
+            reason = "interrupt" if stop_requested else ("duration_elapsed" if rclpy.ok() else "shutdown")
         else:
-            rclpy.spin(node)
-            reason = "shutdown"
+            while rclpy.ok() and not stop_requested:
+                rclpy.spin_once(node, timeout_sec=0.1)
+            reason = "interrupt" if stop_requested else "shutdown"
     except KeyboardInterrupt:
         reason = "interrupt"
     except ExternalShutdownException:
@@ -1032,6 +1054,8 @@ def main(argv=None):
         node.close()
         node.destroy_node()
         node.context.try_shutdown()
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
         print("RECORDER: reason=%s ticks=%d samples=%d references=%d snapshots=%d "
               "events=%d" % (
                   summary["reason"], summary["ticks"],

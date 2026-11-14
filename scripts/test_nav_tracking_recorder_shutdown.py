@@ -14,7 +14,7 @@ import unittest
 
 import rclpy
 from geometry_msgs.msg import TransformStamped, Twist
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, OccupancyGrid
 from tf2_msgs.msg import TFMessage
 from ats_navigation_interfaces.msg import PlanningMapSnapshot
 
@@ -110,6 +110,7 @@ NAV_TRACKING_LEG_DIR=""
 NAV_TRACKING_RECORDER=1
 NAV_TRACKING_RATE_HZ=50
 NAV_TRACKING_STOP_TIMEOUT=5
+PLANNING_SNAPSHOT_FRAME=map
 RECORDER_STATUS=not_started
 stop_capture_process() { kill -KILL "$1" 2>/dev/null || true; }
 finish() {
@@ -153,6 +154,146 @@ while [[ ! -f "$OUTPUT/stop" ]]; do sleep 0.03; done
                 self.assertTrue(summary["recording_started"])
                 self.assertGreater(summary["records"]["samples"], 0)
                 self.assertNotIn("Traceback", log_path.read_text())
+
+    def test_sigint_during_layer_json_finishes_payload_and_preserves_graph(self):
+        """Reproduce d73: signal after the first gzip JSON fragment, not between ticks."""
+        import gzip
+        self.enabled = {"actual", "snapshot", "tf"}
+        publisher = self.node.create_publisher(OccupancyGrid, '/traversability_grid', stream_qos())
+        recorder = Path(__file__).with_name('nav_tracking_recorder.py')
+        script = '''
+import gzip, json, os, signal, sys, time
+sys.path.insert(0, sys.argv[1])
+import nav_tracking_recorder as recorder
+original_dump = recorder.write_gzip_json
+fired = False
+def interrupted_dump(path, value):
+    global fired
+    if not fired and '/layers/' in str(path):
+        fired = True
+        fragments = json.JSONEncoder().iterencode(value)
+        with gzip.open(path, 'wt') as stream:
+            stream.write(next(fragments))
+            stream.flush()
+            print('INJECT_SIGINT_DURING_LAYER_JSON', flush=True)
+            os.kill(os.getpid(), signal.SIGINT)
+            time.sleep(.05)
+            for fragment in fragments:
+                stream.write(fragment)
+        return
+    return original_dump(path, value)
+recorder.write_gzip_json = interrupted_dump
+raise SystemExit(recorder.main(sys.argv[2:]))
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            log_path = output / 'process.log'
+            with log_path.open('w') as log:
+                process = subprocess.Popen([sys.executable, '-c', script, str(recorder.parent),
+                    '--output-dir', directory], stdout=log, stderr=subprocess.STDOUT,
+                    env=self.environment)
+                try:
+                    self.until(lambda: 'RECORDER_READY ' in log_path.read_text())
+                    grid = OccupancyGrid()
+                    grid.header.stamp = self.node.get_clock().now().to_msg()
+                    grid.header.frame_id = 'map'
+                    grid.info.width = grid.info.height = 100
+                    grid.info.resolution = .1
+                    grid.info.origin.orientation.w = 1.
+                    grid.data = [0]*10000
+                    publisher.publish(grid)
+                    self.until(lambda: process.poll() is not None)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=5)
+            self.assertIn('INJECT_SIGINT_DURING_LAYER_JSON', log_path.read_text())
+            self.assertEqual(process.returncode, 0, log_path.read_text())
+            payloads = list((output / 'layers').glob('*.gz'))
+            self.assertTrue(payloads)
+            for path in payloads:
+                with gzip.open(path, 'rt') as stream:
+                    json.load(stream)
+            summary = json.loads((output / 'summary.json').read_text())
+            self.assertEqual(summary['publishers']['/localization']['count'], 1)
+            self.assertNotIn('error', summary['publishers']['/localization'])
+
+    def test_blocked_payload_callback_does_not_replay_old_localizations(self):
+        """A slow payload write must not pair a queue of old poses with new maps."""
+        self.enabled = {"actual", "snapshot", "tf"}
+        publisher = self.node.create_publisher(
+            OccupancyGrid, '/traversability_grid', stream_qos())
+        recorder = Path(__file__).with_name('nav_tracking_recorder.py')
+        script = '''
+import os, signal, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import nav_tracking_recorder as recorder
+release = Path(sys.argv[2])
+original_layer = recorder.NavTrackingRecorder._on_layer
+original_pose = recorder.NavTrackingRecorder._on_localization
+blocked = False
+released = False
+after = 0
+def layer(self, topic, msg):
+    global blocked, released
+    if not blocked:
+        blocked = True
+        print('PAYLOAD_BLOCKED', flush=True)
+        while not release.exists():
+            time.sleep(.005)
+        released = True
+    return original_layer(self, topic, msg)
+def pose(self, msg):
+    global after
+    if released:
+        after += 1
+        if msg.pose.pose.position.x == 999.0:
+            print('LATEST_POSE_CALLBACK=' + str(after), flush=True)
+            os.kill(os.getpid(), signal.SIGINT)
+    return original_pose(self, msg)
+recorder.NavTrackingRecorder._on_layer = layer
+recorder.NavTrackingRecorder._on_localization = pose
+raise SystemExit(recorder.main(sys.argv[3:]))
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            release = output / 'release'
+            log_path = output / 'process.log'
+            with log_path.open('w') as log:
+                process = subprocess.Popen(
+                    [sys.executable, '-c', script, str(recorder.parent), str(release),
+                     '--output-dir', directory], stdout=log, stderr=subprocess.STDOUT,
+                    env=self.environment)
+                try:
+                    self.until(lambda: 'RECORDER_READY ' in log_path.read_text())
+                    grid = OccupancyGrid()
+                    grid.header.frame_id = 'map'
+                    grid.info.width = grid.info.height = 1
+                    grid.info.resolution = 1.
+                    grid.info.origin.orientation.w = 1.
+                    grid.data = [0]
+                    publisher.publish(grid)
+                    self.until(lambda: 'PAYLOAD_BLOCKED' in log_path.read_text())
+                    for value in [*range(40), 999]:
+                        pose = Odometry()
+                        pose.header.stamp = self.node.get_clock().now().to_msg()
+                        pose.header.frame_id = 'odom'
+                        pose.pose.pose.position.x = float(value)
+                        pose.pose.pose.orientation.w = 1.
+                        self.actual_pub.publish(pose)
+                        time.sleep(.005)
+                    time.sleep(.05)
+                    release.touch()
+                    self.assertEqual(process.wait(timeout=10), 0, log_path.read_text())
+                finally:
+                    release.touch()
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=5)
+            line = next(line for line in log_path.read_text().splitlines()
+                        if line.startswith('LATEST_POSE_CALLBACK='))
+            self.assertLessEqual(int(line.split('=')[1]), 2, log_path.read_text())
 
     def test_runner_dispatch_waits_for_each_real_prerequisite(self):
         with tempfile.TemporaryDirectory() as directory:

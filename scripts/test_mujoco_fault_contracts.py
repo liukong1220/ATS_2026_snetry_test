@@ -166,7 +166,8 @@ class LidarSourceContractTest(unittest.TestCase):
                               samples=[dict(stamp=10, points=4 if enabled else 0, valid=True)],
                               setter=NS(service_is_ready=lambda: True, call_async=Mock(return_value=future)),
                               getter=NS(service_is_ready=lambda: True), unique_source=lambda: True,
-                              get_clock=lambda: NS(now=lambda: NS(nanoseconds=11)))
+                              # The CLI node may use wall time while source scans use /clock.
+                              get_clock=lambda: NS(now=lambda: NS(nanoseconds=1_790_000_000_000_000_000)))
                     node.readback = Mock(side_effect=[enabled if failure == 'already_set' else not enabled,
                                                       not enabled if failure == 'readback' else enabled])
                     node.fresh_effect = lambda state, first, floor: L.fresh_effect(node, state, first, floor)
@@ -183,12 +184,36 @@ class LidarSourceContractTest(unittest.TestCase):
                     else:
                         report = L.run(node, enabled, 6.)
                         self.assertEqual(report['enabled'], enabled)
+                        self.assertEqual(report['effect_stamp_floor'], 10)
                         request = node.setter.call_async.call_args.args[0]
                         self.assertEqual(request.parameters[0].name, 'lidar_occlusion_enabled')
                         self.assertEqual(request.parameters[0].value.bool_value, enabled)
                         self.assertEqual(len(report['effect_samples']), 2)
                     if failure == 'already_set':
                         node.setter.call_async.assert_not_called()
+
+
+class UnknownFixtureModeTest(unittest.TestCase):
+    def test_lio_uses_numeric_owner_and_truth_uses_physical_lidar(self):
+        text = (ROOT / 'scripts/test_mujoco_minco_mpc_chain.sh').read_text()
+        start = text.index('set_unknown_fixture_lidar_occlusion() {')
+        function = text[start:text.index('\n}', start) + 2]
+        for mode in ('lio', 'truth'):
+            for enabled in ('true', 'false'):
+                with self.subTest(mode=mode, enabled=enabled):
+                    script = function + '''
+EXTRA_LAUNCH_ARGS="localization_source:=$1"
+WORKSPACE_DIR=/test
+timeout() { printf 'PHYSICAL:%s\\n' "$*"; }
+set_unknown_fixture_lidar_occlusion "$2"
+'''
+                    result = subprocess.run(['bash', '-c', script, 'test', mode, enabled],
+                                            text=True, capture_output=True, check=True)
+                    if mode == 'lio':
+                        self.assertIn('rog_map_numeric_owner', result.stdout)
+                        self.assertNotIn('PHYSICAL:', result.stdout)
+                    else:
+                        self.assertIn('set_mujoco_lidar_occlusion.py ' + enabled, result.stdout)
 
 
 class UnreachableRunnerContractTest(unittest.TestCase):
@@ -209,6 +234,7 @@ CAUSE="$2" CODE="$3"
 fail() { echo "FAIL: $*" >&2; exit 97; }
 find_unreachable_goal() {
   UNREACHABLE_GOAL_FRAME=map UNREACHABLE_GOAL_X=8.97 UNREACHABLE_GOAL_Y=3.91
+  UNREACHABLE_GOAL_KIND=no_path UNREACHABLE_CLEARANCE_FLOOR=0.341
 }
 publish_relative_fault_goal() { :; }
 send_fault_goal() {
