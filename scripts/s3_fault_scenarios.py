@@ -16,6 +16,52 @@ import time
 VELOCITY_TOPICS = ("/cmd_vel/autonomy_raw", "/cmd_vel/selected", "/motion_control")
 
 
+def fault_goal(profile):
+    """Use an existing authoritative map waypoint, including its required yaw."""
+    points = profile.get("waypoints", [])
+    if not points or len(points[0]) != 3 or not all(math.isfinite(x) for x in points[0]):
+        raise ValueError("fault experiment requires a finite existing profile waypoint")
+    return list(points[0])
+
+
+def recorded_fault_goal(probe):
+    return fault_goal(json.loads((probe.directory / "command.json").read_text())["profile"])
+
+
+def map_observation_pose(position, quaternion, transform, map_bias_x=0.0):
+    """Synthetic observation: fixed map<-odom anchor times the measured odom pose.
+
+    Bias is an explicit map-x translation experiment; it does not remove the
+    real spawn translation, height or orientation. Quaternion order is xyzw.
+    """
+    import numpy as np
+    p, q = np.array(position, dtype=float), np.array(quaternion, dtype=float)
+    t = np.array([transform["translation"][key] for key in ("x", "y", "z")])
+    r = np.array([transform["rotation"][key] for key in ("x", "y", "z", "w")])
+    if (p.shape != (3,) or q.shape != (4,) or
+            not all(np.isfinite(v).all() for v in (p, q, t, r)) or
+            not math.isfinite(map_bias_x) or
+            abs(float(q @ q) - 1.0) > 1e-3 or abs(float(r @ r) - 1.0) > 1e-3):
+        raise ValueError("invalid synthetic observation pose or anchor")
+    q /= np.linalg.norm(q)
+    r /= np.linalg.norm(r)
+    rotated = p + 2 * np.cross(r[:3], np.cross(r[:3], p) + r[3] * p)
+    mapped = rotated + t + [map_bias_x, 0., 0.]
+    orientation = np.r_[r[3] * q[:3] + q[3] * r[:3] + np.cross(r[:3], q[:3]),
+                        r[3] * q[3] - r[:3] @ q[:3]]
+    return mapped.tolist(), orientation.tolist()
+
+
+def point_in_odom(position, map_from_odom):
+    inverse_rotation = {key: value if key == "w" else -value
+                        for key, value in map_from_odom["rotation"].items()}
+    shifted = [position[i] - map_from_odom["translation"][key]
+               for i, key in enumerate(("x", "y", "z"))]
+    mapped, _ = map_observation_pose(shifted, [0., 0., 0., 1.],
+        {"translation": {"x": 0., "y": 0., "z": 0.}, "rotation": inverse_rotation})
+    return mapped
+
+
 def planner_latency_ms(marker_ns, stamp_ns, commits, digest=None):
     matching = [c for c in commits if c["stamp_ns"] == stamp_ns and
                 (digest is None or c["digest"] == digest) and
@@ -382,7 +428,13 @@ def correction_case(probe, launch, delta):
             "/localization" in probe.latest, 30, "known frontend before first accepted observation")
     if stamp(probe.latest["/localization/status"][0].last_observation_stamp) > 0:
         raise RuntimeError("matcher accepted before the controlled first-acceptance gate")
-    handle = start_goal(probe, x=1.5)
+    goal = recorded_fault_goal(probe)
+    require(probe, lambda: probe.buffer.can_transform("map", "odom", Time()),
+            5, "seeded map-to-odom anchor")
+    anchor = probe.message_dict(probe.buffer.lookup_transform("map", "odom", Time()).transform)
+    initial_odom = deepcopy(probe.latest["/localization"][0].pose.pose.position)
+    probe.event("correction_anchor", {"map_from_odom": anchor, "goal": goal})
+    handle = start_goal(probe, *goal)
     early_at = time.monotonic()
     spin_for(probe, 1.0)
     # Map readiness is independent of first global acceptance. Establish real
@@ -412,8 +464,13 @@ def correction_case(probe, launch, delta):
         state["stamp"] = when
         observation.sequence = state["sequence"]
         observation.odom_instance_id, observation.odom_epoch = status.odom_instance_id, status.odom_epoch
-        observation.pose.pose = deepcopy(odom.pose.pose)
-        observation.pose.pose.position.x += state["bias"]
+        p, q = odom.pose.pose.position, odom.pose.pose.orientation
+        position, orientation = map_observation_pose(
+            [p.x, p.y, p.z], [q.x, q.y, q.z, q.w], anchor, state["bias"])
+        for key, value in zip(("x", "y", "z"), position):
+            setattr(observation.pose.pose.position, key, value)
+        for key, value in zip(("x", "y", "z", "w"), orientation):
+            setattr(observation.pose.pose.orientation, key, value)
         for i in (0, 7, 14, 21, 28, 35):
             observation.pose.covariance[i] = 0.001
         observation.status, observation.accepted = observation.STATUS_ACCEPTED, True
@@ -428,12 +485,14 @@ def correction_case(probe, launch, delta):
         if graph["/rog_map_adapter/planning_snapshot"]["publishers"] != ["ats_rog_map_adapter"]:
             raise RuntimeError("planning grid ownership changed")
         require(probe, lambda: probe.last_execute is not None and
-                probe.latest["/simulation/ground_truth/odometry"][0].pose.pose.position.x > 0.15 and
-                abs(probe.latest["/cmd_vel/selected"][0].linear.x) > 0.05,
+                math.hypot(probe.latest["/localization"][0].pose.pose.position.x - initial_odom.x,
+                           probe.latest["/localization"][0].pose.pose.position.y - initial_odom.y) > 0.15 and
+                math.hypot(probe.latest["/cmd_vel/selected"][0].linear.x,
+                           probe.latest["/cmd_vel/selected"][0].linear.y) > 0.05,
                 30, "motion under initially biased accepted transform")
         before_status = deepcopy(probe.latest["/localization/status"][0])
         before_tf = probe.buffer.lookup_transform("map", "odom", Time())
-        if abs(before_tf.transform.translation.x + delta) > 0.002:
+        if abs(before_tf.transform.translation.x - anchor["translation"]["x"] + delta) > 0.002:
             raise RuntimeError("initial correction bias was not actually accepted")
         before_grid = deepcopy(probe.latest["/rog_map/odom_layer"][0])
         probe.save_grid("correction_before")
@@ -445,14 +504,20 @@ def correction_case(probe, launch, delta):
                     "before_status": probe.message_dict(before_status)})
         def correction_applied():
             try:
-                return abs(probe.buffer.lookup_transform("map", "odom", Time()).transform.translation.x) < 0.002
+                current = probe.buffer.lookup_transform("map", "odom", Time()).transform.translation
+                return math.sqrt(sum((getattr(current, key) - anchor["translation"][key])**2
+                                     for key in ("x", "y", "z"))) < 0.002
             except Exception:
                 return False
         require(probe, correction_applied, 10, "fusion applied the injected correction")
+        expected_odom_goal = point_in_odom([goal[0], goal[1], 0.], anchor)
         require(probe, lambda: any(g.plan_request_sequence > previous_request and
-                abs(g.goal_pose.pose.position.x - 1.5) < 0.015 for g, _ in probe.goals),
+                g.goal_pose.header.frame_id == "odom" and
+                math.hypot(g.goal_pose.pose.position.x - expected_odom_goal[0],
+                           g.goal_pose.pose.position.y - expected_odom_goal[1]) < 0.015
+                for g, _ in probe.goals),
                 20, "authoritative map goal retargeted with the latest transform")
-        probe.finish_goal(handle, [1.5, 0.0, 0.0], 90)
+        probe.finish_goal(handle, goal, 90, final=True)
         after_status = probe.latest["/localization/status"][0]
         after_tf = probe.buffer.lookup_transform("map", "odom", Time())
         after_grid = probe.latest["/rog_map/odom_layer"][0]
@@ -497,6 +562,7 @@ def correction_case(probe, launch, delta):
                     raise RuntimeError("large correction missed zero velocity: " + topic)
         result = {"passed": True, "A": True, "I": True, "J": True, "K": True,
                   "synthetic_observation": True, "delta_m": delta, "continuity": continuity,
+                  "anchor": anchor, "goal": goal,
                   "stationary_occupied_cells_retained": retained,
                   "before_tf": probe.message_dict(before_tf), "after_tf": probe.message_dict(after_tf),
                   "before_epoch": before_status.epoch, "after_epoch": after_status.epoch,
@@ -510,8 +576,9 @@ def correction_case(probe, launch, delta):
 
 def safety_case(case, probe, launch):
     if case == "no_path":
-        # A real low barrier spans the test arena. The far floor is visible
-        # over it, but every traversable connection is blocked.
+        # A low barrier is present only in the explicit small test scene.
+        # Full fields use naturally disconnected known-free cells from the live
+        # grid; lack of such a cell fails the experiment without changing geometry.
         from query_occupancy_grid import find_unreachable, grid_to_world
         semantics = get_parameters(probe, "/minco_planner", ["footprint_length",
             "footprint_width", "footprint_safety_margin", "jps_safe_distance",
@@ -533,8 +600,16 @@ def safety_case(case, probe, launch):
         x, y = grid_to_world(grid, index % grid.info.width, index // grid.info.width)
         if not 0 <= grid.data[index] < 100:
             raise RuntimeError("no-path target must be a genuinely known-free grid cell")
+        source_xy = [x, y]
+        if grid.header.frame_id != "map":
+            from rclpy.time import Time
+            transform = probe.buffer.lookup_transform("map", grid.header.frame_id, Time())
+            mapped, _ = map_observation_pose([x, y, 0.], [0., 0., 0., 1.],
+                                             probe.message_dict(transform.transform))
+            x, y = mapped[:2]
         probe.event("free_unreachable_goal", {"index": index, "value": grid.data[index],
-                    "xy": [x, y], "effective_clearance_m": selected["clearance"],
+                    "grid_frame": grid.header.frame_id, "grid_xy": source_xy, "map_xy": [x, y],
+                    "effective_clearance_m": selected["clearance"],
                     "planner_parameters": semantics})
         fault_at = time.monotonic()
         handle = start_goal(probe, x=x, y=y)
@@ -542,7 +617,8 @@ def safety_case(case, probe, launch):
         handle = start_goal(probe)
         require(probe, lambda: probe.last_execute is not None and
                 "/cmd_vel/selected" in probe.latest and
-                abs(probe.latest["/cmd_vel/selected"][0].linear.x) > 0.05,
+                math.hypot(probe.latest["/cmd_vel/selected"][0].linear.x,
+                           probe.latest["/cmd_vel/selected"][0].linear.y) > 0.05,
                 25, "active execution before safety injection")
         fault_at = time.monotonic()
     stalled = False
@@ -559,8 +635,13 @@ def safety_case(case, probe, launch):
             set_parameters(probe, "/ats_rog_map_adapter", {"test_mask_secondary_evidence": True})
             set_parameters(probe, "/ats_rog_map", {"test_reset_to_unknown": True})
         elif case == "unsafe":
-            p = probe.latest["/simulation/ground_truth/odometry"][0].pose.pose.position
-            fixture_position(probe, [p.x + 0.80, p.y, 0.30])
+            from s3_fixture_scene import fixture_position_for_pose
+            from s3_mujoco_acceptance import yaw
+            pose = probe.latest["/simulation/ground_truth/odometry"][0].pose.pose
+            velocity = probe.latest["/cmd_vel/selected"][0].linear
+            direction = yaw(pose.orientation) + math.atan2(velocity.y, velocity.x)
+            fixture_position(probe, fixture_position_for_pose(probe.scene_model,
+                [pose.position.x, pose.position.y, direction], distance=0.80))
         elif case != "no_path":
             raise ValueError(case)
         require(probe, lambda: "/planner/emergency_stop" in probe.latest and
@@ -646,8 +727,11 @@ def spin_for(probe, duration):
     require(probe, lambda: time.monotonic() >= end, duration + 1.0, "observation window")
 
 
-def start_goal(probe, x=3.0, y=0.0, heading=0.0):
+def start_goal(probe, x=None, y=None, heading=None):
     from ats_navigation_interfaces.action import NavigateToPose
+    default = recorded_fault_goal(probe)
+    x, y, heading = [default[i] if value is None else value
+                     for i, value in enumerate((x, y, heading))]
     goal = NavigateToPose.Goal()
     goal.goal_pose.header.frame_id = "map"
     goal.goal_pose.header.stamp = probe.node.get_clock().now().to_msg()
@@ -675,7 +759,8 @@ def restart_frontend(probe, launch):
     from rclpy.qos import QoSProfile, DurabilityPolicy
     handle = start_goal(probe)
     require(probe, lambda: probe.last_execute is not None and "/cmd_vel/selected" in probe.latest and
-            abs(probe.latest["/cmd_vel/selected"][0].linear.x) > 0.05,
+            math.hypot(probe.latest["/cmd_vel/selected"][0].linear.x,
+                       probe.latest["/cmd_vel/selected"][0].linear.y) > 0.05,
             25, "motion and committed execution before restart")
     old_execution = deepcopy(probe.last_execute)
     old_status = deepcopy(probe.latest["/localization/status"][0])
@@ -683,61 +768,64 @@ def restart_frontend(probe, launch):
     fault_at = time.monotonic()
     probe.event("kill_point_lio", {"pid": pid, "instance": old_status.odom_instance_id,
                                  "epoch": old_status.odom_epoch})
-    os.kill(pid, signal.SIGKILL)
-    require(probe, lambda: any(t >= fault_at and not ready for t, ready in
-            probe.history.get("/rog_map_adapter/ready", [])), 6, "adapter not ready after frontend death")
-    require(probe, lambda: probe.latest["/planner/emergency_stop"][1] >= fault_at and
-            probe.latest["/planner/emergency_stop"][0].data and all_zero(probe, fault_at),
-            6, "fresh emergency stop and sustained zero through both velocity stages")
-    stopped_at = time.monotonic()
-    cancel = handle.cancel_goal_async()
-    require(probe, cancel.done, 5, "cancel interrupted goal before recovery replay")
-    require(probe, lambda: not Path(f"/proc/{pid}").exists(), 5, "old frontend process reaped")
-    log = (probe.directory / "point-lio-restart.log").open("w")
-    process = subprocess.Popen(command, env=environment, cwd=cwd, stdout=log, stderr=log,
-                               start_new_session=True)
-    try:
-        probe.event("restart_point_lio", {"pid": process.pid})
-        require(probe, lambda: probe.latest["/localization/status"][0].odom_instance_id >
-                old_status.odom_instance_id and probe.latest["/localization/status"][0].odom_epoch ==
-                old_status.odom_epoch + 1, 30, "new frontend identity and epoch increment")
-        new_epoch = deepcopy(probe.latest["/localization/status"][0])
-        require(probe, lambda: probe.ready() and
-                probe.latest["/localization/status"][0].state == old_status.STATE_TRACKING,
-                90, "fresh map and accepted registration after process restart")
-        recovery_at = time.monotonic()
-        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        publisher = probe.node.create_publisher(ExecutionCommand, "/planner/execution_command", qos)
-        spin_for(probe, 0.3)
-        replay_at = time.monotonic()
-        probe.event("replay_old_execution", {"epoch": old_execution.localization_epoch,
-            "sequence": old_execution.command_sequence, "reference_stamp":
-            old_execution.reference.header.stamp.sec + old_execution.reference.header.stamp.nanosec * 1e-9})
-        for _ in range(12):
-            publisher.publish(old_execution)
-            spin_for(probe, 0.05)
-        spin_for(probe, 0.5)
-        probe.node.destroy_publisher(publisher)
-        for topic in VELOCITY_TOPICS:
-            samples = [(t, v) for t, v in probe.history[topic] if t >= recovery_at]
-            if not samples or any(any(abs(a) > 1e-6 for a in values) for _, values in samples):
-                raise RuntimeError(f"old execution revived after recovery on {topic}")
-        result = {"passed": True, "old_instance": old_status.odom_instance_id,
-                  "new_instance": new_epoch.odom_instance_id, "old_epoch": old_status.odom_epoch,
-                  "new_epoch": new_epoch.odom_epoch, "death_to_sustained_stop_wall_s": stopped_at - fault_at,
-                  "recovery_wall_s": recovery_at - fault_at, "old_execution_replay_at": replay_at,
-                  "old_execution_rejected": True, "zero_topics": list(VELOCITY_TOPICS)}
-        probe.event("restart_result", result)
-        return result
-    finally:
-        if process.poll() is None:
-            process.send_signal(signal.SIGINT)
-            try:
-                process.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                process.terminate()
-                process.wait(timeout=5)
-        log.close()
+    # Sum of the existing bounded stop/identity/recovery waits, with cleanup margin.
+    with probe.expect_localization_loss(150.0) as finish_expected_loss:
+        os.kill(pid, signal.SIGKILL)
+        require(probe, lambda: any(t >= fault_at and not ready for t, ready in
+                probe.history.get("/rog_map_adapter/ready", [])), 6, "adapter not ready after frontend death")
+        require(probe, lambda: probe.latest["/planner/emergency_stop"][1] >= fault_at and
+                probe.latest["/planner/emergency_stop"][0].data and all_zero(probe, fault_at),
+                6, "fresh emergency stop and sustained zero through both velocity stages")
+        stopped_at = time.monotonic()
+        cancel = handle.cancel_goal_async()
+        require(probe, cancel.done, 5, "cancel interrupted goal before recovery replay")
+        require(probe, lambda: not Path(f"/proc/{pid}").exists(), 5, "old frontend process reaped")
+        log = (probe.directory / "point-lio-restart.log").open("w")
+        process = subprocess.Popen(command, env=environment, cwd=cwd, stdout=log, stderr=log,
+                                   start_new_session=True)
+        try:
+            probe.event("restart_point_lio", {"pid": process.pid})
+            require(probe, lambda: probe.latest["/localization/status"][0].odom_instance_id >
+                    old_status.odom_instance_id and probe.latest["/localization/status"][0].odom_epoch ==
+                    old_status.odom_epoch + 1, 30, "new frontend identity and epoch increment")
+            new_epoch = deepcopy(probe.latest["/localization/status"][0])
+            require(probe, lambda: probe.ready() and
+                    probe.latest["/localization/status"][0].state == old_status.STATE_TRACKING,
+                    90, "fresh map and accepted registration after process restart")
+            finish_expected_loss()
+            recovery_at = time.monotonic()
+            qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+            publisher = probe.node.create_publisher(ExecutionCommand, "/planner/execution_command", qos)
+            spin_for(probe, 0.3)
+            replay_at = time.monotonic()
+            probe.event("replay_old_execution", {"epoch": old_execution.localization_epoch,
+                "sequence": old_execution.command_sequence, "reference_stamp":
+                old_execution.reference.header.stamp.sec + old_execution.reference.header.stamp.nanosec * 1e-9})
+            for _ in range(12):
+                publisher.publish(old_execution)
+                spin_for(probe, 0.05)
+            spin_for(probe, 0.5)
+            probe.node.destroy_publisher(publisher)
+            for topic in VELOCITY_TOPICS:
+                samples = [(t, v) for t, v in probe.history[topic] if t >= recovery_at]
+                if not samples or any(any(abs(a) > 1e-6 for a in values) for _, values in samples):
+                    raise RuntimeError(f"old execution revived after recovery on {topic}")
+            result = {"passed": True, "old_instance": old_status.odom_instance_id,
+                      "new_instance": new_epoch.odom_instance_id, "old_epoch": old_status.odom_epoch,
+                      "new_epoch": new_epoch.odom_epoch, "death_to_sustained_stop_wall_s": stopped_at - fault_at,
+                      "recovery_wall_s": recovery_at - fault_at, "old_execution_replay_at": replay_at,
+                      "old_execution_rejected": True, "zero_topics": list(VELOCITY_TOPICS)}
+            probe.event("restart_result", result)
+            return result
+        finally:
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+                try:
+                    process.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    process.wait(timeout=5)
+            log.close()
 
 
 def run_case(case, probe, launch):

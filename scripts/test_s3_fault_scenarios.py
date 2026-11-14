@@ -5,6 +5,46 @@ from s3_fault_scenarios import process_matches, sustained_zero, planner_latency_
 
 
 class FaultEvidence(unittest.TestCase):
+    def test_fault_goal_is_the_existing_profile_waypoint(self):
+        from s3_fault_scenarios import fault_goal
+        profile = {"start": [3.37, 9.03, .465, 0.],
+                   "waypoints": [[4.475, 7.925, -.7854], [5.575, 6.825, -.7854]]}
+        self.assertEqual(fault_goal(profile), [4.475, 7.925, -.7854])
+        self.assertEqual(profile["waypoints"][0], [4.475, 7.925, -.7854])
+        with self.assertRaises(ValueError):
+            fault_goal({"waypoints": [[float('nan'), 0., 0.]]})
+
+    def test_synthetic_observation_preserves_full_spawn_transform(self):
+        from s3_fault_scenarios import map_observation_pose
+        transform = {"translation": {"x": 3.37, "y": 9.03, "z": .285},
+                     "rotation": {"x": 0., "y": 0., "z": 2**-.5, "w": 2**-.5}}
+        p, q = map_observation_pose([2., 0., .18], [0., 0., 0., 1.], transform, -.15)
+        for actual, expected in zip(p, [3.22, 11.03, .465]):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(q, [0., 0., 2**-.5, 2**-.5]):
+            self.assertAlmostEqual(actual, expected)
+        # Full 3-D rotation, not a planar shortcut or position-only translation.
+        transform["rotation"] = {"x": 2**-.5, "y": 0., "z": 0., "w": 2**-.5}
+        p, q = map_observation_pose([0., 0., 1.], [0., 0., 2**-.5, 2**-.5], transform)
+        for actual, expected in zip(p, [3.37, 8.03, .285]):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(q, [.5, -.5, .5, .5]):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_synthetic_observation_rejects_invalid_frame_geometry(self):
+        from s3_fault_scenarios import map_observation_pose
+        transform = {"translation": {"x": 0., "y": 0., "z": 0.},
+                     "rotation": {"x": 0., "y": 0., "z": 0., "w": 0.}}
+        with self.assertRaises(ValueError):
+            map_observation_pose([0., 0., 0.], [0., 0., 0., 1.], transform)
+
+    def test_retarget_expectation_transforms_map_authority_to_odom(self):
+        from s3_fault_scenarios import point_in_odom
+        transform = {"translation": {"x": 3.37, "y": 9.03, "z": .285},
+                     "rotation": {"x": 0., "y": 0., "z": 2**-.5, "w": 2**-.5}}
+        for actual, expected in zip(point_in_odom([3.37, 11.03, .465], transform), [2., 0., .18]):
+            self.assertAlmostEqual(actual, expected)
+
     def test_continuity_uses_observation_time_and_rejects_pose_jumps(self):
         from s3_fault_scenarios import odom_continuity
         normal = [{"stamp": 1.0, "x": 0., "y": 0.},

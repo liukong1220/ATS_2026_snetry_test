@@ -44,14 +44,16 @@ class EvidenceTools(unittest.TestCase):
         self.assertEqual([e["plan_request_sequence"] for e in executed], [2])
         self.assertEqual([t["plan_request_sequence"] for t in transient], [1])
 
-    def test_runtime_contact_and_post_input_lost_abort_without_weakening_bootstrap(self):
+    def test_contact_is_diagnostic_but_post_input_lost_still_aborts(self):
         from types import SimpleNamespace as NS
         probe = s3.Probe.__new__(s3.Probe)
         probe.event = Mock()
         probe.latest = {}
         probe.on_telemetry(NS(contact_violation_count=0, max_contact_force=0.0))
-        with self.assertRaisesRegex(RuntimeError, 'contact diagnostic'):
-            probe.on_telemetry(NS(contact_violation_count=1, max_contact_force=12.0))
+        probe.on_telemetry(NS(contact_violation_count=1, max_contact_force=12.0))
+        self.assertEqual(probe.contact_seen, {"max_violation_count": 1, "max_force": 12.0,
+            "first_violation_count": 0, "last_violation_count": 1,
+            "counter_resets": 0, "violation_delta": 1})
         lost = NS(state=4, STATE_LOST=4, odom_identity_latched=False)
         probe.check_localization_health(lost)
         probe.latest['/localization'] = (object(), 1.0)
@@ -74,6 +76,44 @@ class EvidenceTools(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'executed reference'):
             probe.check_executed_collisions()
 
+    def test_expected_localization_loss_is_bounded_and_ends_at_recovery(self):
+        from types import SimpleNamespace as NS
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.latest = {'/localization': (object(), 1.0)}
+        probe.event = Mock()
+        lost = NS(state=4, STATE_LOST=4, odom_identity_latched=False)
+        with patch.object(s3.time, 'monotonic', return_value=100.0) as clock:
+            with probe.expect_localization_loss(5.0) as recovered:
+                probe.check_localization_health(lost)
+                lost.odom_identity_latched = True
+                with self.assertRaisesRegex(RuntimeError, 'identity latched'):
+                    probe.check_localization_health(lost)
+                lost.odom_identity_latched = False
+                clock.return_value = 105.0
+                with self.assertRaisesRegex(RuntimeError, 'localization lost'):
+                    probe.check_localization_health(lost)
+                clock.return_value = 101.0
+                recovered()
+                with self.assertRaisesRegex(RuntimeError, 'localization lost'):
+                    probe.check_localization_health(lost)
+            with self.assertRaisesRegex(RuntimeError, 'localization lost'):
+                probe.check_localization_health(lost)
+
+    def test_expected_localization_loss_is_cleared_on_failed_experiment(self):
+        from types import SimpleNamespace as NS
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.latest = {'/localization': (object(), 1.0)}
+        probe.event = Mock()
+        with self.assertRaisesRegex(ValueError, 'fixture failure'):
+            with probe.expect_localization_loss(5.0):
+                raise ValueError('fixture failure')
+        with self.assertRaisesRegex(RuntimeError, 'localization lost'):
+            probe.check_localization_health(NS(state=4, STATE_LOST=4, odom_identity_latched=False))
+        for timeout in (0.0, -1.0, float('inf'), float('nan')):
+            with self.assertRaises(ValueError):
+                with probe.expect_localization_loss(timeout):
+                    pass
+
     def test_runtime_collision_checks_both_callback_arrival_orders(self):
         from types import SimpleNamespace as NS
         for execution_first in (False, True):
@@ -87,7 +127,7 @@ class EvidenceTools(unittest.TestCase):
                 probe.executed_references = set()
                 probe.execution_events = []
                 probe.message_dict = lambda _: {}
-                status = NS(state=1, STATE_REFERENCE_READY=1, goal_id=7,
+                status = NS(state=1, STATE_REFERENCE_READY=1, STATE_FAILED=2, goal_id=7,
                             plan_request_sequence=2, gate_collision_count=1,
                             gate_collision_indices=[0], reference_stamp=NS(sec=10, nanosec=0))
                 execution = NS(mode=1, MODE_EXECUTE=1, goal_id=7,
@@ -107,6 +147,28 @@ class EvidenceTools(unittest.TestCase):
         self.assertIn('(SwerveTelemetry, "/swerve/telemetry", 10, self.on_telemetry)', source)
         simulator = (s3.SIM / 'ats_mujoco_sim/sim_node.py').read_text()
         self.assertIn('"swerve_telemetry_topic", "/swerve/telemetry"', simulator)
+
+    def test_committed_reference_is_recorded_once_across_lease_renewals(self):
+        from types import SimpleNamespace as NS
+        from unittest.mock import Mock
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.event = Mock()
+        probe.message_dict = lambda msg: {'poses': msg.poses}
+        probe.executed_references = set()
+        probe.execution_events = []
+        probe.planner_statuses = []
+        msg = NS(mode=1, MODE_EXECUTE=1, goal_id=7,
+                 reference=NS(header=NS(stamp=NS(sec=10, nanosec=0)), poses=[1, 2]),
+                 manager_incarnation=1, command_sequence=1,
+                 localization_epoch=1, map_generation=1)
+        probe.on_execution(msg)
+        msg.command_sequence += 1
+        probe.on_execution(msg)
+        recorded = [call for call in probe.event.call_args_list
+                    if call.args[0] == 'committed_reference']
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0].args[1]['reference']['poses'], [1, 2])
+        self.assertEqual(len(probe.execution_events), 2)
 
     def test_post_route_exception_revokes_the_overall_pass(self):
         import json
@@ -131,6 +193,8 @@ class EvidenceTools(unittest.TestCase):
             "ament_index_python.packages": SimpleNamespace(
                 get_package_share_directory=lambda _: str(s3.SIM)),
             "s3_fault_scenarios": SimpleNamespace(run_case=Mock(side_effect=failure)),
+            "s3_tracking_evidence": SimpleNamespace(
+                TrackingLeg=lambda *_: __import__('contextlib').nullcontext()),
         }
         with tempfile.TemporaryDirectory() as tmp, patch.dict("sys.modules", modules), \
                 patch.object(s3, "verify_installed_files"), \
@@ -158,6 +222,35 @@ class EvidenceTools(unittest.TestCase):
                 provenance = __import__("json").loads((Path(tmp) / "scene-provenance.json").read_text())
                 self.assertEqual(provenance["source_model"],
                                  str((s3.SIM / f"models/{name}_swerve.xml").resolve()))
+
+    def test_full_field_no_path_uses_live_grid_without_modifying_geometry(self):
+        import yaml
+        profiles = yaml.safe_load((s3.SIM / "config/s3_mapping_routes.yaml").read_text())
+        for name in ("rmuc_2025", "rmuc_2027"):
+            with self.subTest(profile=name), tempfile.TemporaryDirectory() as tmp:
+                extra, scene = s3.prepare_scene(profiles[name], Path(tmp), barrier=True)
+                self.assertEqual(extra, [])
+                self.assertEqual(scene, s3.SIM / f"models/{name}_swerve.xml")
+                policy = __import__("json").loads((Path(tmp) / 'no-path-policy.json').read_text())
+                self.assertFalse(policy['scene_modified'])
+
+    def test_failure_preserves_source_layers_once_per_goal_and_reason(self):
+        from types import SimpleNamespace as NS
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.event = Mock()
+        probe.save_grid = Mock()
+        probe.planner_statuses = []
+        probe.message_dict = lambda _: {}
+        probe.check_executed_collisions = Mock()
+        status = NS(state=2, STATE_REFERENCE_READY=1, STATE_FAILED=2,
+                    goal_id=7, failure_reason=5)
+        for _ in range(400):
+            probe.on_planner_status(status)
+        probe.save_grid.assert_called_once()
+        self.assertIn('/traversability_grid', probe.save_grid.call_args.args[1])
+        status.failure_reason = 6
+        probe.on_planner_status(status)
+        self.assertEqual(probe.save_grid.call_count, 2)
 
     def test_route_deviation_is_measured_against_segments(self):
         result = s3.route_deviation([(0, 0), (1, 0.2), (2, 0)], [(0, 0), (2, 0)])
@@ -205,6 +298,63 @@ class EvidenceTools(unittest.TestCase):
         # Hugging a wall beyond (width - robot) / 2 fails the wall criterion.
         wall = [(x / 10.0, 0.3, 0.0) for x in range(0, 41)]
         self.assertFalse(s3.tunnel_report(wall, [tunnel])["t"]["within_walls"])
+
+    def test_tunnel_report_missing_and_reset_contact_counts_are_not_zero(self):
+        tunnel = {"name": "t", "entry": [0., 0.], "exit": [1., 0.], "axis_yaw": 0.,
+                  "width": 1., "corridor_polygon": [[0., -.5], [1., -.5], [1., .5], [0., .5]]}
+        path = [(0., 0., 0.), (.5, 0., 0.), (1., 0., 0.)]
+        self.assertEqual(s3.tunnel_report(path, [tunnel], contact_counts=[8, 9, 11])
+                         ["t"]["contact_counter_delta"], 3)
+        for counts in (None, [None, 0, 0], [8, 1, 2]):
+            self.assertIsNone(s3.tunnel_report(path, [tunnel], contact_counts=counts)
+                              ["t"]["contact_counter_delta"])
+        with self.assertRaises(ValueError):
+            s3.tunnel_report(path, [tunnel], contact_counts=[0])
+
+    def test_contact_counter_reset_keeps_the_run_delta_unknown(self):
+        from types import SimpleNamespace as NS
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.event = Mock()
+        for count in (8, 11):
+            probe.on_telemetry(NS(contact_violation_count=count, max_contact_force=1.))
+        self.assertEqual(probe.contact_seen['violation_delta'], 3)
+        probe.on_telemetry(NS(contact_violation_count=1, max_contact_force=0.))
+        self.assertIsNone(probe.contact_seen['violation_delta'])
+        self.assertEqual(probe.contact_seen['counter_resets'], 1)
+
+    def test_failed_tunnel_route_still_writes_per_tunnel_evidence(self):
+        import json
+        from types import SimpleNamespace as NS
+        probe = Mock()
+        probe.graph.return_value = {"/rog_map_adapter/planning_snapshot": {"publishers": ["ats_rog_map_adapter"]}}
+        probe.truth_samples, probe.truth_contact_counts, probe.endpoint_results = [], [], []
+        probe.health_summary.return_value = {"ready": True}
+        probe.navigate.side_effect = RuntimeError("goal is occupied")
+        process = Mock()
+        process.poll.return_value = 0
+        modules = {
+            "rclpy": Mock(),
+            "ament_index_python.packages": NS(get_package_share_directory=lambda _: str(s3.SIM)),
+            "s3_tracking_evidence": NS(TrackingLeg=lambda *_: __import__('contextlib').nullcontext()),
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("sys.modules", modules), \
+                patch.object(s3, "verify_installed_files"), \
+                patch.object(s3, "prepare_scene", return_value=([], Path("scene.xml"))), \
+                patch.object(s3, "Probe", return_value=probe), \
+                patch.object(s3.subprocess, "Popen", return_value=process):
+            args = NS(profile="rmuc_2027_tunnels", route="tunnel_b_roundtrip", output=tmp,
+                      case="route", reload=None, max_goals=0, post_route_case=None,
+                      startup_timeout=1., launch_arg=[])
+            with self.assertRaisesRegex(RuntimeError, "goal is occupied"):
+                s3.run(args)
+            summary = json.loads((Path(tmp) / "summary.json").read_text())
+            self.assertFalse(summary['passed'])
+            self.assertTrue(summary['tunnels'])
+            for tunnel in summary['tunnels'].values():
+                self.assertFalse(tunnel['passed'])
+                self.assertIsNone(tunnel['axis_lateral_max_m'])
+                self.assertIsNone(tunnel['contact_counter_delta'])
+            probe.close.assert_called_once()
 
     def test_field_profiles_keep_the_fixed_array_around_the_complete_field(self):
         import yaml

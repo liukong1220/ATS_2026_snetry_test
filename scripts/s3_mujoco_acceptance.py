@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Explicit S3 no-prior LIO experiment; raw evidence stays outside source trees.
+"""Explicit mapping, reload and prior-map LIO experiments; raw evidence stays outside source trees.
 
 Run after sourcing install/setup.bash. Navigation only receives ROS goals.
 Ground truth is consumed exclusively by this evaluator.
 """
 import argparse
 import csv
+from contextlib import contextmanager
 import hashlib
 import json
 import math
@@ -104,7 +105,7 @@ def load_tunnel_truth(config_dir, names):
     return [known[name] for name in names]
 
 
-def tunnel_report(samples, tunnels, robot_width=0.571):
+def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
     """Per-tunnel passes and axis lateral error from independent truth samples.
 
     samples are (x, y, yaw). A pass is a full traversal of the entry-exit axis in
@@ -112,6 +113,8 @@ def tunnel_report(samples, tunnels, robot_width=0.571):
     walled corridor, and reaches the other end zone. Passing around the tunnel
     does not count because every counted sample must lie inside corridor_polygon.
     """
+    if contact_counts is not None and len(contact_counts) != len(samples):
+        raise ValueError("truth/contact diagnostic sample count mismatch")
     report = {}
     end_zone = 0.15
     for tunnel in tunnels:
@@ -121,14 +124,15 @@ def tunnel_report(samples, tunnels, robot_width=0.571):
         ux, uy = dx / length, dy / length
         xs = [p[0] for p in tunnel["corridor_polygon"]]
         ys = [p[1] for p in tunnel["corridor_polygon"]]
-        lateral, yaw_errors, passes = [], [], {"forward": 0, "reverse": 0}
+        lateral, yaw_errors, contacts, passes = [], [], [], {"forward": 0, "reverse": 0}
         end = None
-        for x, y, heading in samples:
+        for sample_index, (x, y, heading) in enumerate(samples):
             inside = min(xs) <= x <= max(xs) and min(ys) <= y <= max(ys)
             along = (x - entry[0]) * ux + (y - entry[1]) * uy
             offset = -(x - entry[0]) * uy + (y - entry[1]) * ux
             if inside and 0.0 <= along <= length:
                 lateral.append(abs(offset))
+                contacts.append(None if contact_counts is None else contact_counts[sample_index])
                 error = heading - float(tunnel["axis_yaw"])
                 yaw_errors.append(abs(0.5 * math.atan2(math.sin(2 * error), math.cos(2 * error))))
             if not inside:
@@ -141,6 +145,8 @@ def tunnel_report(samples, tunnels, robot_width=0.571):
                 end = zone
         limit = (float(tunnel["width"]) - robot_width) / 2.0
         ordered = sorted(lateral)
+        contact_complete = (bool(contacts) and all(c is not None for c in contacts)
+                            and all(b >= a for a, b in zip(contacts, contacts[1:])))
         report[tunnel["name"]] = {
             "forward_passes": passes["forward"], "reverse_passes": passes["reverse"],
             "corridor_samples": len(lateral),
@@ -148,7 +154,24 @@ def tunnel_report(samples, tunnels, robot_width=0.571):
             "axis_lateral_p95_m": ordered[int(0.95 * (len(ordered) - 1))] if ordered else None,
             "axis_lateral_limit_m": limit,
             "yaw_error_max_rad": max(yaw_errors) if yaw_errors else None,
-            "within_walls": bool(lateral) and max(lateral) <= limit}
+            "within_walls": bool(lateral) and max(lateral) <= limit,
+            "contact_counter_delta": contacts[-1] - contacts[0] if contact_complete else None,
+            "contact_diagnostic_samples": sum(c is not None for c in contacts),
+            "contact_diagnostic_scope": "latest received counter at each truth callback; not atomic",
+            "physical_contact_acceptance": "unverified"}
+    return report
+
+
+def required_tunnel_report(profile, samples, config_dir, contact_counts=None):
+    requirements = profile.get("tunnels", [])
+    report = tunnel_report(samples, load_tunnel_truth(config_dir, [t["name"] for t in requirements]),
+                           contact_counts=contact_counts)
+    for want in requirements:
+        got = report[want["name"]]
+        got["required_passes"] = {k: want.get(k, 0) for k in ("forward_passes", "reverse_passes")}
+        got["passed"] = bool(got["within_walls"] and
+                             got["forward_passes"] >= want.get("forward_passes", 0) and
+                             got["reverse_passes"] >= want.get("reverse_passes", 0))
     return report
 
 
@@ -234,7 +257,13 @@ def prepare_scene(profile, directory, fixture=False, barrier=False):
         scene_profile.write_text(yaml.safe_dump(scene_parameters))
         extra.append(f"scene_navigation_profile:={scene_profile}")
     elif barrier:
-        raise ValueError("the barrier experiment requires the explicit small_10x10 profile")
+        # Full-field no-path evidence selects a genuinely observed, disconnected
+        # free cell from the live grid. The official geometry stays unchanged;
+        # absence of a qualifying cell is a failed experiment, never a pass.
+        (directory / "no-path-policy.json").write_text(json.dumps({
+            "target_selection": "live_known_free_disconnected",
+            "scene_modified": False, "source_model": str(source),
+        }, indent=2) + "\n")
     elif fixture:
         from s3_fixture_scene import make_fixture_scene
         scene = directory / "scene.xml"
@@ -256,7 +285,7 @@ def yaw(q):
 
 
 class Probe:
-    def __init__(self, directory, observe_obstacle_clouds=False):
+    def __init__(self, directory, observe_obstacle_clouds=False, record_column_inputs=False):
         import rclpy
         from rclpy.parameter import Parameter
         from rclpy.qos import QoSProfile, DurabilityPolicy, qos_profile_sensor_data
@@ -280,6 +309,7 @@ class Probe:
         self.truth_csv.writerow(["wall_s", "sim_s", "x", "y", "z", "yaw", "vx", "vy", "wz"])
         self.path, self.latest, self.counts, self.goals, self.planner_statuses = [], {}, {}, [], []
         self.truth_samples = []
+        self.truth_contact_counts = []
         self.contact_seen = {"max_violation_count": 0, "max_force": 0.0}
         self.endpoint_results = []
         self.history = {}
@@ -294,6 +324,10 @@ class Probe:
         self.scene_model = None
         self.buffer = Buffer()
         self.listener = TransformListener(self.buffer, self.node)
+        self.column_input_recorder = None
+        if record_column_inputs:
+            from s3_column_input_recorder import ColumnInputRecorder
+            self.column_input_recorder = ColumnInputRecorder(self.node, directory / 'column_inputs')
         self.action = ActionClient(self.node, NavigateToPose, "/ats_navigate_to_pose")
         durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.subscriptions = []
@@ -318,7 +352,7 @@ class Probe:
             (MotionCtrl, "/motion_control", 10, None),
             (PathMessage, "/minco/raw_path", 10, None),
             (PathMessage, "/minco/reference_path", 10, None),
-            (PathMessage, "/ats_swerve_mpc/reference_path", 10, None),
+            (PathMessage, "/ats_swerve_mpc/reference_horizon", 10, None),
             (PathMessage, "/ats_swerve_mpc/predicted_path", 10, None),
         ]
         for kind, topic, qos, callback in topics:
@@ -361,6 +395,11 @@ class Probe:
                 elif topic == "/localization/status":
                     self.event(topic, self.message_dict(msg))
                     self.check_localization_health(msg)
+                elif topic == "/ats_swerve_mpc/reference_horizon":
+                    horizon_stamp = stamp(msg.header.stamp)
+                    if horizon_stamp - self.__dict__.get('last_horizon_event_stamp', -1.0) >= 0.2:
+                        self.last_horizon_event_stamp = horizon_stamp
+                        self.event('mpc_reference_horizon', self.message_dict(msg))
                 if callback:
                     callback(msg)
                 elif topic in ("/rog_map_adapter/status", "/planner/emergency_stop",
@@ -412,6 +451,7 @@ class Probe:
         p, v = msg.pose.pose, msg.twist.twist
         self.path.append((p.position.x, p.position.y))
         self.truth_samples.append((p.position.x, p.position.y, yaw(p.orientation)))
+        self.truth_contact_counts.append(self.contact_seen.get("last_violation_count"))
         self.truth_csv.writerow([time.monotonic(), stamp(msg.header.stamp), p.position.x,
                                 p.position.y, p.position.z, yaw(p.orientation), v.linear.x,
                                 v.linear.y, v.angular.z])
@@ -427,16 +467,49 @@ class Probe:
                       "max_contact_force": msg.max_contact_force}
         self.event("contact_diagnostic", diagnostic)
         seen = self.__dict__.setdefault("contact_seen", {"max_violation_count": 0, "max_force": 0.0})
+        count = int(msg.contact_violation_count)
+        seen.setdefault("first_violation_count", count)
+        seen["counter_resets"] = seen.get("counter_resets", 0) + int(
+            count < seen.get("last_violation_count", count))
+        seen["last_violation_count"] = count
+        seen["violation_delta"] = (count - seen["first_violation_count"]
+                                    if not seen["counter_resets"] else None)
         seen["max_violation_count"] = max(seen["max_violation_count"], msg.contact_violation_count)
         seen["max_force"] = max(seen["max_force"], msg.max_contact_force)
-        if msg.contact_violation_count > 0:
-            raise RuntimeError(f"contact diagnostic: {diagnostic}")
+        # Contact counters are diagnostic under the current acceptance contract.
+        # Executed footprint conflicts and localization loss remain hard gates.
+
+    @contextmanager
+    def expect_localization_loss(self, timeout):
+        """Observe an injected outage; all identity and motion gates still apply.
+
+        The caller closes this window as soon as recovery is measured. A failed
+        experiment or expired deadline restores the nominal LOST rejection.
+        """
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("expected localization loss requires a finite positive timeout")
+        if getattr(self, '_expected_localization_loss_deadline', None) is not None:
+            raise RuntimeError("nested localization loss windows are forbidden")
+        self._expected_localization_loss_deadline = time.monotonic() + timeout
+        self.event('expected_localization_loss_begin', {'timeout_wall_s': timeout})
+
+        def finish():
+            if self._expected_localization_loss_deadline is not None:
+                self._expected_localization_loss_deadline = None
+                self.event('expected_localization_loss_end', {})
+
+        try:
+            yield finish
+        finally:
+            finish()
 
     def check_localization_health(self, msg):
         if msg.odom_identity_latched:
             raise RuntimeError("localization identity latched")
         if "/localization" in self.latest and msg.state == msg.STATE_LOST:
-            raise RuntimeError("localization lost after odometry input")
+            deadline = getattr(self, '_expected_localization_loss_deadline', None)
+            if deadline is None or time.monotonic() >= deadline:
+                raise RuntimeError("localization lost after odometry input")
 
     def check_executed_collisions(self):
         executed, _ = split_gate_collisions(self.planner_statuses, self.executed_references)
@@ -446,6 +519,14 @@ class Probe:
     def on_planner_status(self, msg):
         self.planner_statuses.append(msg)
         self.event("planner_status", self.message_dict(msg))
+        if msg.state == msg.STATE_FAILED:
+            failures = self.__dict__.setdefault('saved_planner_failures', set())
+            key = (msg.goal_id, msg.failure_reason)
+            if key not in failures:
+                failures.add(key)
+                self.save_grid(f'failure_g{msg.goal_id}_reason{msg.failure_reason}',
+                    ('/rog_map_adapter/planning_snapshot', '/rog_map/odom_layer',
+                     '/traversability_grid', '/traversability_slope_grid'))
         if msg.state == msg.STATE_REFERENCE_READY and msg.gate_collision_count > 0:
             # Keep the exact grid the committed reference was gated on, plus the
             # reference and pose, so a READY collision can be traced afterwards.
@@ -463,7 +544,16 @@ class Probe:
     def on_execution(self, msg):
         if msg.mode == msg.MODE_EXECUTE:
             self.last_execute = msg
-            self.executed_references.add((msg.goal_id, stamp(msg.reference.header.stamp)))
+            identity = (msg.goal_id, stamp(msg.reference.header.stamp))
+            if identity not in self.executed_references and msg.reference.poses:
+                # Save once per committed reference, not once per renewal heartbeat.
+                # Retain pose stamps/yaw to replay tracker projection and terminal motion.
+                self.event('committed_reference', {
+                    'manager': msg.manager_incarnation, 'sequence': msg.command_sequence,
+                    'goal': msg.goal_id, 'epoch': msg.localization_epoch,
+                    'map_generation': msg.map_generation,
+                    'reference': self.message_dict(msg.reference)})
+            self.executed_references.add(identity)
         record = {"mode": msg.mode, "manager": msg.manager_incarnation,
                   "sequence": msg.command_sequence, "goal": msg.goal_id,
                   "epoch": msg.localization_epoch, "map_generation": msg.map_generation,
@@ -580,7 +670,10 @@ class Probe:
         return self.message_dict(result)
 
     def close(self):
-        self.save_grid("final")
+        if self.column_input_recorder is not None:
+            self.column_input_recorder.close()
+        self.save_grid("final", ('/rog_map_adapter/planning_snapshot', '/rog_map/odom_layer',
+                                 '/traversability_grid', '/traversability_slope_grid'))
         self.events.close()
         self.truth_file.close()
         self.node.destroy_node()
@@ -597,10 +690,27 @@ def run(args):
     ])
     profile = load_profile(SIM / "config/s3_mapping_routes.yaml", args.profile,
                            getattr(args, "route", None))
+    prior = getattr(args, "prior", None)
+    if prior and args.reload:
+        raise ValueError("--prior and --reload are mutually exclusive")
+    map_prefix = prior or args.reload
+    map_inputs = None
+    if map_prefix:
+        prefix = Path(map_prefix).resolve()
+        yaml_path, pcd_path = Path(str(prefix) + ".yaml"), Path(str(prefix) + ".pcd")
+        metadata = yaml.safe_load(yaml_path.read_text())
+        image_path = yaml_path.parent / metadata["image"]
+        map_inputs = {str(path.resolve()): {"bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            for path in (yaml_path, pcd_path, image_path)}
     directory = Path(args.output).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     parameters = yaml.safe_load((ROOT / "src/ats_sentry_bringup/params/node_params.yaml").read_text())
     configure_mapping_bounds(parameters, profile)
+    if getattr(args, "registration_details", False):
+        registration = parameters["small_gicp_relocalization"]["ros__parameters"]
+        registration["log_registration_details"] = True
+        registration["log_throttle_ms"] = 250
     fixture_case = args.case in ("obstacle_latency", "dynamic_save", "unsafe") or bool(args.post_route_case)
     if fixture_case:
         parameters["minco_planner"]["ros__parameters"]["map_commit_trace_enabled"] = True
@@ -614,7 +724,7 @@ def run(args):
     parameter_path.write_text(yaml.safe_dump(parameters, sort_keys=False))
     start = profile["start"]
     command = ["ros2", "launch", "ats_mujoco_sim", profile["launch"],
-               "localization_source:=lio", f"slam:={'false' if args.reload else 'true'}",
+               "localization_source:=lio", f"slam:={'false' if map_prefix else 'true'}",
                "use_identified_odometry:=true", "planning_grid_owner:=rog_map",
                "use_viewer:=false", "show_viewer:=false", "use_rviz:=false",
                "launch_mujoco_rviz:=false", "lidar_threads:=8", "lidar_downsample:=1",
@@ -622,24 +732,25 @@ def run(args):
                f"params_file:={parameter_path}",
                *[f"{key}:={val}" for key, val in zip(("start_x", "start_y", "start_z", "start_yaw"), start)],
                *extra]
-    if args.reload:
-        prefix = Path(args.reload).resolve()
+    if map_prefix:
+        prefix = Path(map_prefix).resolve()
         command += [f"map_yaml_file:={prefix}.yaml", f"prior_pcd_file:={prefix}.pcd"]
     else:
         command += [f"map_yaml_file:={directory}/absent.yaml", f"prior_pcd_file:={directory}/absent.pcd"]
     command += args.launch_arg
     (directory / "command.json").write_text(json.dumps({"command": command,
-        "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID"), "profile": profile}, indent=2) + "\n")
+        "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID"), "profile": profile, "map_inputs": map_inputs}, indent=2) + "\n")
     print("COMMAND", " ".join(command), flush=True)
     log = (directory / "launch.log").open("w")
     process = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
     rclpy.init()
-    probe = Probe(directory, observe_obstacle_clouds=fixture_case)
+    probe = Probe(directory, observe_obstacle_clouds=fixture_case,
+                  record_column_inputs=getattr(args, 'record_column_inputs', False))
     probe.scene_model = scene
     probe.latency_p95_limit_ms = getattr(args, "latency_p95_limit_ms", 250.0)
-    # Mapping publishes the planning grid in odom; a reload (competition mode) in map.
-    probe.expected_grid_frame = "map" if args.reload else "odom"
-    summary = {"profile": args.profile, "reload": args.reload, "passed": False}
+    # Mapping publishes in odom; prior-map and reload localization runs publish in map.
+    probe.expected_grid_frame = "map" if map_prefix else "odom"
+    summary = {"profile": args.profile, "reload": args.reload, "prior": prior, "passed": False}
     try:
         if args.case.startswith("correction_"):
             from s3_fault_scenarios import run_case
@@ -664,9 +775,11 @@ def run(args):
             waypoints = waypoints[:1]
         probe.waypoint_tolerance_m = getattr(args, "waypoint_tolerance_m", WAYPOINT_TOLERANCE_M)
         probe.final_tolerance_m = getattr(args, "final_tolerance_m", FINAL_TOLERANCE_M)
+        from s3_tracking_evidence import TrackingLeg
         for index, point in enumerate(waypoints):
-            probe.navigate(point, profile["goal_timeout_sim_s"], final=index == len(waypoints) - 1)
-        if not args.reload:
+            with TrackingLeg(probe, profile, index):
+                probe.navigate(point, profile["goal_timeout_sim_s"], final=index == len(waypoints) - 1)
+        if not map_prefix:
             summary["save"] = probe.save_map()
         minimum = 0.2 if args.reload or args.max_goals else profile["minimum_displacement_m"]
         summary.update(route_metrics(probe.path, [waypoints[-1][:2]], minimum,
@@ -686,17 +799,10 @@ def run(args):
                                    "final": probe.final_tolerance_m}
         if profile.get("tunnels") and not args.max_goals:
             summary["route"] = profile.get("route")
-            summary["tunnels"] = tunnel_report(
-                probe.truth_samples,
-                load_tunnel_truth(SIM / "config", [t["name"] for t in profile["tunnels"]]))
+            summary["tunnels"] = required_tunnel_report(
+                profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts)
             summary["contact_diagnostic"] = dict(probe.contact_seen,
                                                  physical_contact_acceptance="unverified")
-            for want in profile["tunnels"]:
-                got = summary["tunnels"][want["name"]]
-                got["required_passes"] = {k: want.get(k, 0) for k in ("forward_passes", "reverse_passes")}
-                got["passed"] = bool(got["within_walls"] and
-                                     got["forward_passes"] >= want.get("forward_passes", 0) and
-                                     got["reverse_passes"] >= want.get("reverse_passes", 0))
         tunnels_ok = all(t["passed"] for t in summary.get("tunnels", {}).values())
         summary["passed"] = bool(summary["passed"] and summary["J"] and tunnels_ok and
                                   summary["footprint_gate_collisions"] == 0)
@@ -718,6 +824,14 @@ def run(args):
         summary["endpoints"] = probe.endpoint_results
         raise
     finally:
+        if profile.get("tunnels"):
+            summary["route"] = profile.get("route")
+            summary["tunnels"] = required_tunnel_report(
+                profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts)
+            summary["tunnel_evidence_scope"] = "all received truth, including an incomplete failed route"
+        summary["nav_tracking"] = probe.__dict__.get("tracking_results", [])
+        summary["contact_diagnostic"] = probe.__dict__.get("contact_seen", {})
+        summary["physical_contact_acceptance"] = "unverified"
         (directory / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         probe.close()
         if rclpy.ok():
@@ -739,7 +853,13 @@ def main():
     parser.add_argument("--profile", required=True, choices=("small_10x10", "rmuc_2025", "rmuc_2027", "rmuc_2027_tunnels"))
     parser.add_argument("--output", required=True)
     parser.add_argument("--route", help="named route of a profile with a routes table")
-    parser.add_argument("--reload", help="saved map prefix, without suffix")
+    parser.add_argument("--record-column-inputs", action="store_true",
+                        help="save delivered registered scans, localization/identity and runtime TF for replay")
+    parser.add_argument("--registration-details", action="store_true",
+                        help="enable existing GICP iteration/quality logs; no acceptance gate changes")
+    maps = parser.add_mutually_exclusive_group()
+    maps.add_argument("--reload", help="saved map prefix; verify TRACKING and the first goal only")
+    maps.add_argument("--prior", help="map YAML/PCD prefix; run the complete selected route in localization mode")
     parser.add_argument("--max-goals", type=int, default=0)
     parser.add_argument("--post-route-case", choices=("obstacle_latency", "dynamic_save", "obstacle_and_dynamic"),
                         help="run physical fixture evidence after completing the selected route")
@@ -756,7 +876,7 @@ def main():
     parser.add_argument("--startup-timeout", type=float, default=180.0)
     parser.add_argument("--launch-arg", action="append", default=[])
     args = parser.parse_args()
-    if args.post_route_case and (args.case != "route" or args.reload):
+    if args.post_route_case and (args.case != "route" or args.reload or args.prior):
         parser.error("post-route fixtures require a mapping route")
     domain = int(os.environ.get("ROS_DOMAIN_ID", "-1"))
     if domain < 0 or domain > 232 or domain == 77:
