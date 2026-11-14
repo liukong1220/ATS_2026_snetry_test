@@ -35,3 +35,5 @@ def test_runtime_tf_origin_is_interpolated_at_scan_not_latest(tmp_path):
     from tf2_ros import TransformException
     with pytest.raises(TransformException):
         sensor_origins(tmp_path, [4.0])
+    with pytest.raises(ValueError, match='positive finite'):
+        sensor_origins(tmp_path, [0.0])

@@ -18,14 +18,15 @@ def replay(tmp_path_factory):
     return output
 
 
-def run_replay(replay, directory, points, sensor_stamp=1):
+def run_replay(replay, directory, points, sensor_stamp=1, headroom=False):
     source = directory / 'columns.txt'
     source.write_text('10 10 0.1 0 0 0.1 0.242 0.005 0.6 0 0 0.3 0.3\n'
                       + f'1 {len(points)} 0 0 0\n'
                       + ''.join(' '.join(map(str, p)) + '\n' for p in points))
     sensor = directory / 'origins.txt'
     sensor.write_text(f'{sensor_stamp} 0.01 0.01 0.4\n')
-    return subprocess.run([str(replay), str(source), str(sensor), str(directory / 'timing.csv')],
+    return subprocess.run([str(replay), str(source), str(sensor), str(directory / 'timing.csv'),
+                           *(['--headroom'] if headroom else [])],
                           text=True, capture_output=True)
 
 
@@ -45,3 +46,18 @@ def test_missing_floor_and_mismatched_sensor_fail_closed(replay, tmp_path):
     result = run_replay(replay, tmp_path, [(0.15, 0.15, 0.25)], sensor_stamp=2)
     assert result.returncode != 0
     assert 'mismatched' in result.stderr
+
+
+def test_measured_headroom_is_from_the_same_low_slope_column_and_global_layer(replay, tmp_path):
+    import csv
+    import io
+    points = [(x, y, 0.3*x) for x in [.01, .11, .21] for y in [.01, .11, .21]]
+    points.append((.19, .15, .3*.19+.239))
+    result = run_replay(replay, tmp_path, points, headroom=True)
+    assert result.returncode == 0, result.stderr
+    rows = list(csv.DictReader(io.StringIO(result.stdout)))
+    column = next(r for r in rows if r['column_x'] == '1' and r['column_y'] == '1')
+    assert column['state'] == column['layer_state'] == 'occupied'
+    assert int(column['projection_value']) == 100
+    assert float(column['headroom']) == pytest.approx(.239)
+    assert float(column['ceiling_low'])-float(column['support_estimate']) == pytest.approx(.239)

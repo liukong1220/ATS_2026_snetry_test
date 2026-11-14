@@ -11,7 +11,10 @@
 int main(int argc, char ** argv)
 {
   try {
-    if (argc != 4) {throw std::runtime_error("usage: h_odom_layer_replay columns.txt origins.txt timing.csv");}
+    if (argc < 4 || argc > 5 || (argc == 5 && std::string(argv[4]) != "--headroom")) {
+      throw std::runtime_error("usage: h_odom_layer_replay columns.txt origins.txt timing.csv [--headroom]");
+    }
+    const bool report_headroom = argc == 5;
     std::ifstream input(argv[1]), origins(argv[2]);
     std::ofstream timing(argv[3]);
     if (!input || !origins || !timing) {throw std::runtime_error("cannot open replay files");}
@@ -28,7 +31,12 @@ int main(int argc, char ** argv)
     lc.width = width; lc.height = height; lc.resolution = resolution;
     lc.origin_x = ox; lc.origin_y = oy;
     ats_rog_map::OdomLayerStore layer(lc);
-    std::cout << "stamp,column_x,column_y,column_state,layer_state\n" << std::setprecision(17);
+    std::cout << (report_headroom ? "stamp,column_x,column_y,state,layer_state" :
+      "stamp,column_x,column_y,column_state,layer_state");
+    if (report_headroom) {
+      std::cout << ",ground_z,ceiling_low,support_lower,support_upper,headroom,support_estimate,projection_value";
+    }
+    std::cout << '\n' << std::setprecision(17);
     timing << "stamp,prepare_ms,ray_ms,ground_ms,evidence_ms,ray_voxels\n" << std::setprecision(17);
     const auto name = [](auto state) {
         const int value = static_cast<int>(state);
@@ -58,7 +66,19 @@ int main(int argc, char ** argv)
           const double cx = ox + (x + 0.5) * resolution, cy = oy + (y + 0.5) * resolution;
           if (cx < xmin || cx > xmax || cy < ymin || cy > ymax) {continue;}
           std::cout << stamp << ',' << x << ',' << y << ',' << name(columns.state(x, y)) <<
-            ',' << name(layer.cell(x, y)->state) << '\n';
+            ',' << name(layer.cell(x, y)->state);
+          if (report_headroom) {
+            std::cout << ',';
+            if (const auto ground = columns.ground(x, y)) {std::cout << *ground;}
+            if (const auto headroom = columns.ceilingHeadroom(x, y)) {
+              std::cout << ',' << headroom->ceiling_low << ',' << headroom->support_lower <<
+                ',' << headroom->support_upper << ',' << headroom->headroom << ',' << headroom->support_estimate;
+            } else {std::cout << ",,,,,";}
+            std::cout << ',' << static_cast<int>(layer.sampleFootprint(
+              ox + x * resolution, oy + y * resolution,
+              ox + (x + 1) * resolution, oy + (y + 1) * resolution));
+          }
+          std::cout << '\n';
         }
       }
       previous = stamp; ++frames;

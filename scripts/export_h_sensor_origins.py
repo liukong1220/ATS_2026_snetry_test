@@ -7,6 +7,7 @@ This does not replay epochs, fusion commits or history before the saved ring.
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 
 
@@ -34,7 +35,11 @@ def input_stamps(path):
     return stamps
 
 
-def sensor_origins(directory, stamps):
+def sensor_origins(directory, stamps, source_frame='front_mid360'):
+    # tf2 interprets time zero as latest, which is never a recorded scan-time
+    # contract. Reject it even if a later transform happens to be available.
+    if not stamps or any(not math.isfinite(t) or t <= 0 for t in stamps):
+        raise ValueError('scan-time TF requires positive finite stamps')
     from geometry_msgs.msg import TransformStamped
     from rclpy.duration import Duration
     from rclpy.time import Time
@@ -53,7 +58,7 @@ def sensor_origins(directory, stamps):
                 buffer.set_transform(transform, 'recorded_runtime')
     result = []
     for stamp in stamps:
-        transform = buffer.lookup_transform('odom', 'front_mid360',
+        transform = buffer.lookup_transform('odom', source_frame,
                                             Time(nanoseconds=round(stamp * 1e9)))
         point = transform.transform.translation
         result.append((stamp, point.x, point.y, point.z))

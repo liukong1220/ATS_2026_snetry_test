@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""H parking evidence: record live registered scans without publishing motion/goals.
+"""H parking evidence: record live registered scans without publishing velocity/goals.
+
+Optional --park requests the existing X-lock mode through /motion_mode before
+settling; it does not pin the simulated pose or change the scene/dynamics.
 
 Coordinates only select the initial simulator pose. No audit/truth geometry is
 fed to navigation. Raw clouds remain in their published odom frame.
@@ -17,12 +20,40 @@ import time
 import numpy as np
 
 
+def parking_acknowledged(future):
+    if future is None or not future.done():
+        return False
+    response = future.result()
+    if response is None or response.cmd_ack != 0:
+        raise RuntimeError('parking mode request was rejected')
+    return True
+
+
 def check_parking_displacement(start, position, limit):
     """Evaluator-only XY drift gate; never published to navigation/control."""
     distance = math.hypot(position[0] - start[0], position[1] - start[1])
     if not math.isfinite(distance) or distance > limit:
         raise RuntimeError(f"parking displacement {distance:.6f} m exceeds {limit:.6f} m")
     return distance
+
+
+def localization_abort_required(status, has_frontend, tracking_seen, fixed_body):
+    return status.odom_identity_latched or (
+        status.state == status.STATE_LOST and has_frontend and
+        (not fixed_body or tracking_seen))
+
+
+def settle_origin(previous, stamp, park_ready, tracking_seen, require_tracking):
+    """Physical settling begins after parking and the first accepted tracking.
+
+    Later non-TRACKING clouds are skipped separately; a postcommit hold must
+    not restart physical settling. LOST/identity/motion still abort the run.
+    """
+    if not park_ready or (require_tracking and not tracking_seen):
+        return None
+    if previous is None or stamp < previous:
+        return stamp
+    return previous
 
 
 def launch_command(start, output, roll=0.0, pitch=0.0, nav_start_delay_sec=60.0):
@@ -45,6 +76,10 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--roll", type=float, default=0.0)
     parser.add_argument("--pitch", type=float, default=0.0)
+    parser.add_argument("--park", action="store_true",
+                        help="request existing MODE_PARK X-lock before settling; keep drift gate")
+    parser.add_argument("--fixed-body", action="store_true",
+                        help="static metrology only: generated world-weld fixture, not navigation evidence")
     parser.add_argument("--frames", type=int, default=60)
     parser.add_argument("--settle-sim-s", type=float, default=15.0)
     parser.add_argument("--timeout", type=float, default=600.0)
@@ -65,10 +100,20 @@ def main():
     if (output / "command.json").exists():
         parser.error("output already contains a run; choose a fresh directory")
     command = launch_command(args.start, output, args.roll, args.pitch, args.nav_start_delay_sec)
+    if args.fixed_body:
+        from h_stationary_fixture import make_stationary_fixture
+        source = Path(__file__).resolve().parents[1] / 'src/sim/ats_mujoco_sim/models/rmuc_2027_swerve.xml'
+        fixture = output / 'stationary_scene.xml'
+        provenance = make_stationary_fixture(source, fixture, args.start, args.roll, args.pitch)
+        (output / 'fixture-provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
+        command.append(f'model_file:={fixture}')
     (output / "command.json").write_text(json.dumps({
         "command": command, "domain": domain, "scope": "stationary H sampling, not navigation acceptance",
         "range_noise_enabled": False, "physical_contact_acceptance": "unverified",
         "max_parking_displacement_m": args.max_parking_displacement_m,
+        "park_requested": args.park,
+        "fixed_body_metrology": args.fixed_body,
+        "wait_for_first_tracking": args.fixed_body,
     }, indent=2) + "\n")
     import rclpy
     from nav_msgs.msg import Odometry
@@ -85,6 +130,13 @@ def main():
 
     rclpy.init()
     node = rclpy.create_node("h_clearance_recorder")
+    park_client = None
+    if args.park:
+        from manda_can_control.srv import MotionMode
+        park_client = node.create_client(MotionMode, '/motion_mode')
+    park_future = None
+    park_ready = not args.park
+    park_result = {'requested': args.park, 'acknowledged': False}
     frames = []
     truth = []
     telemetry = []
@@ -99,6 +151,8 @@ def main():
     static_transforms = []
     tf_buffer = Buffer(cache_time=Duration(seconds=120.0))
     first_stamp = None
+    tracking_seen = False
+    startup_lost_samples = 0
 
     def cloud_xyz(message):
         points = np.array(list(point_cloud2.read_points(
@@ -121,12 +175,17 @@ def main():
     def on_cloud(message):
         nonlocal first_stamp
         stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+        first_stamp = settle_origin(first_stamp, stamp, park_ready, tracking_seen, args.fixed_body)
+        if not park_ready or (args.fixed_body and
+                (not statuses or statuses[-1]['state'] != LocalizationStatus.STATE_TRACKING)):
+            startup_scans.append((stamp, message.header.frame_id, cloud_xyz(message)))
+            return
         if first_stamp is None:
             first_stamp = stamp
         if stamp - first_stamp < args.settle_sim_s:
             startup_scans.append((stamp, message.header.frame_id, cloud_xyz(message)))
             return
-        if stamp - first_stamp < args.settle_sim_s or len(frames) >= args.frames:
+        if len(frames) >= args.frames:
             return
         if not localization or not statuses:
             return
@@ -154,13 +213,17 @@ def main():
             raise RuntimeError("unexpected nonzero motion command during parking sample")
 
     def on_status(message):
+        nonlocal tracking_seen, startup_lost_samples
         statuses.append(message_to_ordereddict(message))
         # Before the first frontend sample the production fusion reports LOST
         # while sensors/model load. This is initialization, not a transition
         # from healthy parking. Keep navigation's own inhibit untouched.
-        lost_after_input = message.state == LocalizationStatus.STATE_LOST and bool(localization)
-        if lost_after_input or message.odom_identity_latched:
+        if message.state == LocalizationStatus.STATE_LOST and not tracking_seen:
+            startup_lost_samples += 1
+        if localization_abort_required(message, bool(localization), tracking_seen, args.fixed_body):
             raise RuntimeError("localization lost or identity latched: abort parking sample")
+        if message.state == LocalizationStatus.STATE_TRACKING:
+            tracking_seen = True
 
     def on_tf(message, static=False):
         destination = static_transforms if static else transforms
@@ -208,12 +271,25 @@ def main():
             while not final_scan_tf_available() and time.monotonic() - started < args.timeout:
                 if process.poll() is not None:
                     raise RuntimeError(f"launch exited {process.returncode}")
+                if args.park and not park_ready:
+                    if park_future is None and park_client.service_is_ready():
+                        request = MotionMode.Request()
+                        request.cmd_ctl = 16
+                        park_future = park_client.call_async(request)
+                    if parking_acknowledged(park_future):
+                        park_ready = True
+                        park_result.update(acknowledged=True,
+                                           acknowledged_wall_s=time.monotonic() - started)
+                        print('MODE_PARK acknowledged; starting settle window', flush=True)
                 rclpy.spin_once(node, timeout_sec=0.2)
             if len(frames) < args.frames:
                 raise RuntimeError(f"sampling timeout: {len(frames)}/{args.frames} frames")
             if not final_scan_tf_available():
                 raise RuntimeError('sampling timeout: final scan-time TF unavailable')
     finally:
+        park_result.update(tracking_seen=tracking_seen, startup_lost_samples=startup_lost_samples,
+                           fixed_body_metrology=args.fixed_body)
+        (output / 'parking_mode.json').write_text(json.dumps(park_result, indent=2) + '\n')
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGINT)
             try:
