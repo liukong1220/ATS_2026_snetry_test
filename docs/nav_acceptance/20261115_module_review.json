@@ -1,0 +1,743 @@
+{
+  "date": "2026-11-15",
+  "review_utc": "2026-11-15T07:31:55.831833+00:00",
+  "scope": "代码与Git历史审查、10月22日基线远端拉取/备份、主报告与AGENTS更新；不改导航行为、系统或全局配置",
+  "current_stage": "S3验收未通过，O3专项部分提前开发",
+  "stage_fully_complete": false,
+  "new_builds": false,
+  "new_ros_nodes": false,
+  "new_simulations": false,
+  "new_domain_allocations": [],
+  "review_input_heads": {
+    "root": "88b7c428cf424a0aeb1353a1a5b3f75ffe841f92",
+    "nav": "e7bf50023cbdeb1943f85525bc636b206dec2bb5",
+    "sim": "c42576a5687c0c347ff1b73d340ca5edbeed6034"
+  },
+  "initial_worktrees": "all three clean on develop",
+  "baseline_backup": {
+    "utc": "2026-11-15T07:10:28.519001+00:00",
+    "requested_cutoff": "2026-10-22T23:59:59+08:00",
+    "note": "根报告是10月22日首次提交；导航和仿真是该时点各自最近可追溯提交（10月17日）。根仓没有锁定嵌套仓SHA，因此这是一份按时间重建的三仓基线，不声称原作者当时原子锁定了三个版本。只含这三仓Git跟踪资产，不等于全部ROS依赖/忽略资产的可运行安装包。",
+    "repositories": {
+      "root": {
+        "status": "fetched_from_ssh_origin",
+        "commit": "24612e2859a5f00739d7f4677740e23c881ffe1c",
+        "origin": "git@github.com:liukong1220/ATS_2026_snetry_test.git",
+        "author_time": "2026-10-22T17:29:42+08:00",
+        "committer_time": "2026-10-22T17:29:42+08:00",
+        "subject": "[文档] 新增无先验地图钻洞高速导航优化调研报告",
+        "archive": "/home/ats/Documents/ATS_20261022_git_baseline/root_24612e2859a5.tar.gz",
+        "archive_sha256": "aa4debfdcd91072c2f89d32a684a56edec4a91b2e4487f024d9799e49354ddd2",
+        "archive_bytes": 15691062,
+        "git_snapshot": "/home/ats/Documents/ATS_20261022_git_baseline/git_snapshots/root.git",
+        "verified_blob_count": 121
+      },
+      "nav": {
+        "status": "fetched_from_ssh_origin",
+        "commit": "9e20f8f92b5231bcbee62ede0d75c1a2a8590462",
+        "origin": "git@github.com:liukong1220/ats_sentry_nav.git",
+        "author_time": "2026-10-17T19:53:11+08:00",
+        "committer_time": "2026-10-17T19:53:11+08:00",
+        "subject": "[安全] MPC 拒绝非法执行授权时间戳并进入失效停车",
+        "archive": "/home/ats/Documents/ATS_20261022_git_baseline/nav_9e20f8f92b52.tar.gz",
+        "archive_sha256": "de0d2efb00973b19cb20a91e91acb764d942b537afa2472730712baed1a9d041",
+        "archive_bytes": 4284987,
+        "git_snapshot": "/home/ats/Documents/ATS_20261022_git_baseline/git_snapshots/nav.git",
+        "verified_blob_count": 976
+      },
+      "sim": {
+        "status": "fetched_from_ssh_origin",
+        "commit": "c89ac95c959f07c51f04471abd726d70fa042ccc",
+        "origin": "git@github.com:liukong1220/ats_mujoco_sim.git",
+        "author_time": "2026-10-17T16:45:11+08:00",
+        "committer_time": "2026-10-17T16:45:11+08:00",
+        "subject": "[文档] 更新MuJoCo隧道回归说明",
+        "archive": "/home/ats/Documents/ATS_20261022_git_baseline/sim_c89ac95c959f.tar.gz",
+        "archive_sha256": "02e65da4e5d10b482dddd49457fa6cbd73ea922b3d092fd0fd17b76ceeb052c9",
+        "archive_bytes": 44738166,
+        "git_snapshot": "/home/ats/Documents/ATS_20261022_git_baseline/git_snapshots/sim.git",
+        "verified_blob_count": 83
+      }
+    },
+    "all_verified": true
+  },
+  "baseline_manifest_sha256": "72135b0720b8b402b1f6809c00f9f37465a2eb88ee79dd3d3ea4cd6b7fa2736f",
+  "baseline_verified_blob_count": 1180,
+  "original_report": {
+    "root_commit": "24612e2859a5f00739d7f4677740e23c881ffe1c",
+    "sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+    "bytes": 52503
+  },
+  "report_before": {
+    "commit": "88b7c428cf424a0aeb1353a1a5b3f75ffe841f92",
+    "path": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+    "sha256": "dd95fc91a9aaf9e29c6715a45711981637bcbfcbabf5020603992cb2e854d99c"
+  },
+  "original_to_current_scope_corrections": [
+    "原O0的IMU频率odom转O5a，仍未完成；原始O0指标不能整行计为通过",
+    "O1原始延迟目标150ms保留；当前授权S3门250ms，二者分列",
+    "原增量2D ESDF未实现；后续采用单所有者全窗口精确EDT，不伪称增量完成",
+    "O1b M1-M5已有实现，旧路线表未写过期",
+    "QP shadow和PlanningMapSnapshot消息在10月22日基线已有；后者后续迁移为唯一生产契约",
+    "无图建图的增长图GICP与fusion已参与，旧不参与表述过期",
+    "正式ATS action与独立历史Nav2分别记录，旧AGENTS 6.2入口描述已修订"
+  ],
+  "modules": [
+    {
+      "id": "O0",
+      "status": "主要修正已实现，既定S2b有历史验证；原始指标未全部完成",
+      "source_keys": [
+        "goal_manager",
+        "stop_node_test",
+        "mpc_node",
+        "real_config"
+      ],
+      "remaining": "IMU频率odom转O5a，原换轨跌速<0.2m/s缺最终同口径证据，实车未验",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O1",
+      "status": "主干已实现，最终两场全场验收失败",
+      "source_keys": [
+        "rog_node",
+        "odom_layer",
+        "column",
+        "gicp",
+        "planning_publisher"
+      ],
+      "remaining": "保存/动态排除/重载/延迟/G-I欠缺，增量EDT未实现，比赛模式静态墙规则仍保留",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O1b",
+      "status": "M1-M4已实现且有组件/历史闭环验证；M5显示部分未验",
+      "source_keys": [
+        "esdf",
+        "esdf_test",
+        "snapshot_msg",
+        "snapshot_test",
+        "planning_publisher",
+        "rog_node"
+      ],
+      "remaining": "当前全链性能、完整RViz和最终行为回归欠缺，不再标为未写",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O2",
+      "status": "部分实现，完整滚动阶段未完成",
+      "source_keys": [
+        "replan_start",
+        "replan_test",
+        "planner",
+        "joint_tail",
+        "baseline_tail"
+      ],
+      "remaining": "10-15Hz完整滚动、非零尾状态、带导数跨进程轨迹、预算和p95目标未完成",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O3",
+      "status": "部分提前实施，专项闭环未通过",
+      "source_keys": [
+        "column",
+        "column_test",
+        "planner",
+        "sim27",
+        "real_config"
+      ],
+      "remaining": "H2余量证据不足，TUNNEL_FREE/真实B/南坡/六隧道/洞口恢复和H3未完成",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O4",
+      "status": "基础与基线QP shadow存在，核心计划升级未完成",
+      "source_keys": [
+        "mpc_node",
+        "mpc_model",
+        "mpc_config",
+        "qp_shadow"
+      ],
+      "remaining": "正式QP输出被拒绝；延迟增广/ESDF rollout/沿横迹权重和RMS/p99目标欠缺",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O5a",
+      "status": "低风险底座已实现，数值优化未完成",
+      "source_keys": [
+        "point_lio",
+        "point_lio_qr",
+        "real_config"
+      ],
+      "remaining": "QR替换、自适应采样、批量更新、饱和暂停、IMU前向传播、状态裁剪和可比CPU欠缺",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O5b",
+      "status": "已有整帧门控，方向后端未实现",
+      "source_keys": [
+        "observation",
+        "gicp",
+        "fusion"
+      ],
+      "remaining": "information/weak接口、Schur/NIS/加权fusion、局部子图跟踪欠缺",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O5c",
+      "status": "计划中的描述子全局恢复未实现",
+      "source_keys": [
+        "gicp",
+        "fusion"
+      ],
+      "remaining": "已有LOST多猜测不是Scan Context；召回率/误召回率/恢复时延欠缺",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    },
+    {
+      "id": "O5d",
+      "status": "未实施前端A/B",
+      "source_keys": [
+        "point_lio",
+        "point_lio_qr"
+      ],
+      "remaining": "保留Point-LIO，未引入ZLIO或完成Batch-LIO同bag比较",
+      "this_review_level": "源码/历史证据复核，没有新运行"
+    }
+  ],
+  "source_files": {
+    "point_lio": {
+      "path": "src/ats_sentry_nav/point_lio/src/laserMapping.cpp",
+      "sha256": "4898faa1bbc77929269228840823d86991239e2a82f05e1028e6728e962a97d3",
+      "bytes": 21332,
+      "anchors": {
+        "SingleThreadedExecutor": [
+          176
+        ],
+        "publish_odometry": [
+          146,
+          153,
+          439,
+          442,
+          524
+        ],
+        "update_iterated_dyn_share_modified": [
+          434
+        ]
+      }
+    },
+    "point_lio_qr": {
+      "path": "src/ats_sentry_nav/point_lio/include/common_lib.h",
+      "sha256": "fe2f18f3d9170d25a9a372874f690842fe00eca93e14bdefe95a453208532210",
+      "bytes": 5911,
+      "anchors": {
+        "colPivHouseholderQr": [
+          154,
+          183
+        ]
+      }
+    },
+    "gicp": {
+      "path": "src/ats_sentry_nav/small_gicp_relocalization/src/small_gicp_relocalization.cpp",
+      "sha256": "8d1686baaaab3d2b9ef6a2d329cb13e3a1f5d3d5b735eccb41a5e356ec0bed2d",
+      "bytes": 109242,
+      "anchors": {
+        "mapping_mode_": [
+          161,
+          432,
+          441,
+          558,
+          567
+        ],
+        "growing_map_->appendAccepted": [
+          2107
+        ],
+        "attempt.information": [
+          802,
+          807,
+          833,
+          877,
+          1144
+        ]
+      }
+    },
+    "fusion": {
+      "path": "src/ats_sentry_nav/small_gicp_relocalization/src/localization_fusion_node.cpp",
+      "sha256": "bd70af40f00ae6c9520489705f8c5af591caec14ff5a1be5be2b699a859a9303",
+      "bytes": 36940,
+      "anchors": {
+        "finiteCovariance": [
+          60,
+          446
+        ],
+        "map_to_odom_ = correction.map_to_odom": [
+          520
+        ]
+      }
+    },
+    "observation": {
+      "path": "src/ats_sentry_nav/ats_navigation_interfaces/msg/RelocalizationObservation.msg",
+      "sha256": "db5413cfdccf7ed44f73992a7ef4a32cb85c5c7a63117a32300b66ba361f1df9",
+      "bytes": 995,
+      "anchors": {
+        "geometry_msgs/PoseWithCovariance pose": [
+          13
+        ],
+        "odom_instance_id": [
+          8
+        ]
+      }
+    },
+    "rog_node": {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/ats_rog_map_node.cpp",
+      "sha256": "f79d033f02dc15e60981e757a98fec731425cd2929ad10c7096f7d11bc8d20b2",
+      "bytes": 80613,
+      "anchors": {
+        "makePlanningMapPublisher": [
+          1621
+        ],
+        "getGroundProjection": [
+          1230,
+          1624
+        ],
+        "odom_layer.window_x": [
+          291
+        ]
+      }
+    },
+    "planning_publisher": {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/planning/planning_map_publisher.cpp",
+      "sha256": "a7d9badfa3eb087e75e27307432b7148e72c293f5fc9d569e726040941a5abf1",
+      "bytes": 61539,
+      "anchors": {
+        "RcTraversabilityEsdfProvider esdf": [
+          910
+        ],
+        "makePlanningMapSnapshot": [
+          930
+        ],
+        "copySignedDistanceField": [
+          915
+        ]
+      }
+    },
+    "column": {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/ground_column.cpp",
+      "sha256": "71f2228716ef21654cb73478f74b866d2f2af19bc5030d897d18ef77b4da3bbe",
+      "bytes": 37836,
+      "anchors": {}
+    },
+    "column_test": {
+      "path": "src/ats_sentry_nav/ats_rog_map/test/test_ground_column.cpp",
+      "sha256": "40ac19dd6c2f71a388138993319a219f129c92a389dfe723de04d79c19d1fd17",
+      "bytes": 43480,
+      "anchors": {}
+    },
+    "odom_layer": {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/odom_layer.cpp",
+      "sha256": "b91b1fb1ac4c215d49a6f1acbb6f88f3c632790de147a55338f6bb984b1d19c5",
+      "bytes": 26081,
+      "anchors": {}
+    },
+    "snapshot_msg": {
+      "path": "src/ats_sentry_nav/ats_navigation_interfaces/msg/PlanningMapSnapshot.msg",
+      "sha256": "e51f5b88096c952579a92487c67068aa3cec1f435e99669ceb65b67b93144b57",
+      "bytes": 1218,
+      "anchors": {
+        "signed_distance_m": [
+          22
+        ],
+        "source_generation": [
+          11
+        ],
+        "publication_sequence": [
+          12
+        ]
+      }
+    },
+    "esdf": {
+      "path": "src/ats_sentry_nav/ats_rc_esdf/src/rc_traversability_esdf_provider.cpp",
+      "sha256": "0cba5994440006825ed833baf84de06c881418f90918b7891730b4f933529199",
+      "bytes": 30302,
+      "anchors": {
+        "squaredDistanceTransform1d": [
+          52,
+          129,
+          141
+        ],
+        "exactEuclideanDistanceTransform": [
+          110,
+          167,
+          681
+        ]
+      }
+    },
+    "esdf_test": {
+      "path": "src/ats_sentry_nav/ats_rc_esdf/test/test_rc_esdf_map.cpp",
+      "sha256": "a3f14489fc291c6352887b5e2b45712874159d157d0673d1a8fecfdefc73a3a1",
+      "bytes": 13224,
+      "anchors": {
+        "RandomGridsMatchBruteForce": [
+          176
+        ],
+        "SingleObstacleBesideWallsMatchesBruteForce": [
+          85
+        ]
+      }
+    },
+    "snapshot_test": {
+      "path": "src/ats_sentry_nav/minco_planner/test/test_planning_map_snapshot.cpp",
+      "sha256": "9ee44abcf80198e2b9b9accf92c042f7a39238b3ad485db2921d36b075978d3a",
+      "bytes": 17901,
+      "anchors": {
+        "GraphSearchOnTheSnapshotFieldMatchesTheLocalTransform": [
+          148
+        ],
+        "ReproducesTheLocallyComputedFields": [
+          99
+        ]
+      }
+    },
+    "planner": {
+      "path": "src/ats_sentry_nav/minco_planner/src/nodes/minco_planner_node.cpp",
+      "sha256": "fb5aeb041a73c274aced5182545bc23abafd3d183ee85706db4d6cda1e13de4e",
+      "bytes": 147161,
+      "anchors": {
+        "selectReplanStart": [
+          1684
+        ],
+        "publishReferenceIfCurrent": [
+          1566,
+          2299,
+          2700
+        ],
+        "nav_msgs::msg::Path control_reference": [
+          2278
+        ]
+      }
+    },
+    "replan_start": {
+      "path": "src/ats_sentry_nav/minco_planner/include/minco_planner/trajectory/replan_start.hpp",
+      "sha256": "5b99b55894481b5b21046cc008238a216111dfb22d5c85c94774ed5b064a813f",
+      "bytes": 8125,
+      "anchors": {
+        "selectReplanStart": [
+          147
+        ],
+        "plan_lead_sec": [
+          21,
+          187
+        ]
+      }
+    },
+    "replan_test": {
+      "path": "src/ats_sentry_nav/minco_planner/test/test_replan_start.cpp",
+      "sha256": "3b7f5a7e9f5acc9ffddc15072c27c8c4a38811a301494184351749d14ffffe2c",
+      "bytes": 8734,
+      "anchors": {}
+    },
+    "joint_tail": {
+      "path": "src/ats_sentry_nav/minco_planner/src/trajectory/minco_joint_optimizer.cpp",
+      "sha256": "e86c6576d143247b7efe2768a88f7fae732dd325edd16d0230610e9f114114ac",
+      "bytes": 23390,
+      "anchors": {
+        "tail = Eigen::Matrix<double, 2, 3>::Zero()": [
+          218
+        ],
+        "tail.col(0) = problem.tail_position": [
+          219
+        ]
+      }
+    },
+    "baseline_tail": {
+      "path": "src/ats_sentry_nav/minco_planner/src/trajectory/minco_trajectory_optimizer.cpp",
+      "sha256": "b389d3597bcf71aa62fc9b709d2ee1df6d9a60121f10f357a650cffec4e0be15",
+      "bytes": 43753,
+      "anchors": {
+        "tail = Eigen::Matrix<double, 2, 3>::Zero()": [
+          76
+        ]
+      }
+    },
+    "goal_manager": {
+      "path": "src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp",
+      "sha256": "4c94218e91c8daafe1fe2908c8bade6de444e27732c231683134ed5036898a45",
+      "bytes": 119000,
+      "anchors": {
+        "stop_to_reference_guard_sec": [
+          303,
+          304,
+          2247,
+          2345
+        ],
+        "create_server<NavigateToPose>": [
+          208
+        ]
+      }
+    },
+    "stop_node_test": {
+      "path": "src/ats_sentry_nav/ats_goal_manager/test/test_goal_manager_stop_barrier.py",
+      "sha256": "d6fd1e7c56233aec1fab3fbfd1fbe50ab3d35950cdafa5efcf6003c52c5a272b",
+      "bytes": 3398,
+      "anchors": {}
+    },
+    "action": {
+      "path": "src/ats_sentry_nav/ats_navigation_interfaces/action/NavigateToPose.action",
+      "sha256": "55ce2382a593ab3efcdf142a9deee4664752aba40e7d137248d32c71e48e980e",
+      "bytes": 774,
+      "anchors": {}
+    },
+    "mpc_node": {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/src/ats_swerve_mpc_node.cpp",
+      "sha256": "a24fd1d323512393171ed8755980c8a54d5f9d0004c08d499916dbbd7e73d52a",
+      "bytes": 95236,
+      "anchors": {
+        "solver_mode_ = declare_parameter": [
+          206
+        ],
+        "solver_mode=qp is reserved": [
+          214
+        ]
+      }
+    },
+    "mpc_model": {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/src/se2_model.cpp",
+      "sha256": "5c82635d038ea91c0391ce55e4eeb3de152b095f2c8765be6a6be88af5734b76",
+      "bytes": 2776,
+      "anchors": {
+        "State Se2Model::dynamics": [
+          14
+        ]
+      }
+    },
+    "mpc_config": {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/include/ats_swerve_mpc/se2_mpc_controller.hpp",
+      "sha256": "4074dff6bd0a816010e5e42b477d031be0b9826cd71629f7f1924ed441fabe46",
+      "bytes": 13547,
+      "anchors": {
+        "max_wheel_speed": [
+          55,
+          57
+        ],
+        "rotationPhaseCompensatedState": [
+          91
+        ]
+      }
+    },
+    "qp_shadow": {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/src/ltv_qp_problem.cpp",
+      "sha256": "e21b69ba54c1176b3819c23c5e12dab7659abee04d4a02d8081bee417192e196",
+      "bytes": 19732,
+      "anchors": {}
+    },
+    "real_config": {
+      "path": "src/ats_sentry_bringup/params/node_params.yaml",
+      "sha256": "ad883889e19944473936d0da147954fce633186cb83d664c1e8a0d7ce301ab08",
+      "bytes": 63459,
+      "anchors": {
+        "odom_layer.robot_height:": [
+          863
+        ],
+        "footprint_safety_margin:": [
+          920,
+          1086,
+          1162
+        ],
+        "spin_enabled:": [
+          1091
+        ],
+        "yaw_tunnel_enabled:": [
+          1075
+        ]
+      }
+    },
+    "sim25": {
+      "path": "src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml",
+      "sha256": "db66050b90eadea1431449cd875440eba8ff2d68be70c41b6c4857a36b87c5ca",
+      "bytes": 28531,
+      "anchors": {
+        "terrain_confirm_frames:": [
+          34
+        ],
+        "clearance_speed_min:": [
+          136
+        ],
+        "spin_enabled:": [
+          87
+        ]
+      }
+    },
+    "sim27": {
+      "path": "src/sim/ats_mujoco_sim/config/rmuc_2027_navigation.yaml",
+      "sha256": "134413f36511aacbc37c8019ff95aa0ef7049d06c35ad76df30bb56133b5547b",
+      "bytes": 4467,
+      "anchors": {
+        "traversabilityOverheadHeight:": [
+          18
+        ],
+        "odom_layer.robot_height:": [
+          24
+        ],
+        "odom_layer.top_margin:": [
+          25
+        ]
+      }
+    },
+    "ats_runner": {
+      "path": "scripts/test_mujoco_minco_mpc_chain.sh",
+      "sha256": "71d91dda0ddca132a6d865ef23a9b8c81cad5f1e9d80f25c16dc5eaf718a6687",
+      "bytes": 147244,
+      "anchors": {
+        "assert_p3_process_graph()": [
+          1013
+        ],
+        "ats_navigation_interfaces/action/NavigateToPose": [
+          1565,
+          2931
+        ]
+      }
+    }
+  },
+  "evidence_files": {
+    "s3_2025_d17/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2025_d17/summary.json",
+      "sha256": "e2109caca6b2465f2b2c4e8471d191b91fe526f0631ed60a17ac81a7d792d246",
+      "bytes": 25778
+    },
+    "s3_2027_d14/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_d14/summary.json",
+      "sha256": "41d49916ce41f80274f1662898f3992da65e3c2ac28e7655273dc19c179e2edf",
+      "bytes": 7670
+    },
+    "s3_2027_restart_d13/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/s3_2027_restart_d13/summary.json",
+      "sha256": "a5eccc6e3618b14a3aa79a1359214b3d96164c8a072f0cd9ae931fa958f8efad",
+      "bytes": 2225
+    },
+    "d17_result_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/d17_result_summary.json",
+      "sha256": "ac4653a389349f87b6a31774ddd2737033727c9d1ccb36a919d0ee0f73396591",
+      "bytes": 7531
+    },
+    "d14_spin_chain_final_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/d14_spin_chain_final_summary.json",
+      "sha256": "43f90715ee512884021b50113879eef9b43953fad8529d0b004e586cc95810ad",
+      "bytes": 20904
+    },
+    "nav2_d15/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d15/summary.json",
+      "sha256": "865205d0be5cd8e0cea84232bb754f2cc03b913e7a3555ca9af2e92741f58315",
+      "bytes": 2141
+    },
+    "nav2_d57/summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/nav2_d57/summary.json",
+      "sha256": "03a0130cda19c16d844f302db7f0b7b5670f518b397ce35c07e8c88c1a46c121",
+      "bytes": 2100
+    },
+    "local_support_trial/d171_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/local_support_trial/d171_summary.json",
+      "sha256": "18f468488324a88967cbe9ffc836b4e4d64d682557696d73a9abc18d19d0e102",
+      "bytes": 9325
+    },
+    "local_support_trial/d173_summary.json": {
+      "path": "log/nav_acceptance/20261114_stage/local_support_trial/d173_summary.json",
+      "sha256": "5720892e67776e08ebd17ebc570d25f071ebd92a66ab2b5d001869f0f4600276",
+      "bytes": 7608
+    },
+    "local_support_final_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/local_support_final_results.log",
+      "sha256": "71c497cf0de33b95600e1460c1606b12ce7ba1991aa1ef2fbd1de55140b1ac59",
+      "bytes": 52
+    },
+    "terminal_yaw_green_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/terminal_yaw_green_results.log",
+      "sha256": "133dd5c059af1abf827c5bd9f8b95ebd3c4bcdd336ae0f37d5d86014b0ea6170",
+      "bytes": 52
+    },
+    "p_results.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_results.log",
+      "sha256": "c7e9364eeb2dde47248b73a2d2c418a79f78f5b3efc8fa09bc1049250950458f",
+      "bytes": 51
+    },
+    "p_test.log": {
+      "path": "log/nav_acceptance/20261114_stage/p_test.log",
+      "sha256": "8cf3a136aeb5bbd2a7a24134ca831095ed21b733ea79edc0f4614a2ab974df06",
+      "bytes": 39119
+    },
+    "near_clearance_validation.json": {
+      "path": "log/nav_acceptance/20261114_stage/near_clearance_validation.json",
+      "sha256": "868687aa490c44ae6fb8f9215b64ea5e51009266186230bb789ffefde8e511a0",
+      "bytes": 541
+    },
+    "final_delivery/final_source_install_audit.json": {
+      "path": "log/nav_acceptance/20261114_stage/final_delivery/final_source_install_audit.json",
+      "sha256": "c6d63959ec1c13213379ea77a60336475877ba1d1b637ccb445d37b57d7e324f",
+      "bytes": 1072862
+    }
+  },
+  "bounded_negative_searches": {
+    "tunnel_free": {
+      "argv": [
+        "rg",
+        "-n",
+        "TUNNEL_FREE",
+        "/home/ats/ATS_2026_snetry_test/src/ats_sentry_nav/ats_rog_map",
+        "/home/ats/ATS_2026_snetry_test/src/ats_sentry_nav/minco_planner"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "",
+      "limit": "限定生产目录/接口的符号搜索，结合已读消息和调用点；不是任意同义实现不存在的数学证明"
+    },
+    "scan_context": {
+      "argv": [
+        "rg",
+        "-n",
+        "ScanContext|scan_context",
+        "/home/ats/ATS_2026_snetry_test/src/ats_sentry_nav/small_gicp_relocalization",
+        "/home/ats/ATS_2026_snetry_test/src/ats_sentry_nav/ats_navigation_interfaces"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "",
+      "limit": "限定生产目录/接口的符号搜索，结合已读消息和调用点；不是任意同义实现不存在的数学证明"
+    },
+    "direction_interface": {
+      "argv": [
+        "rg",
+        "-n",
+        "weak_mask|weak_direction|information_matrix",
+        "/home/ats/ATS_2026_snetry_test/src/ats_sentry_nav/ats_navigation_interfaces/msg/RelocalizationObservation.msg"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "",
+      "limit": "限定生产目录/接口的符号搜索，结合已读消息和调用点；不是任意同义实现不存在的数学证明"
+    }
+  },
+  "historical_domains": "docs/nav_acceptance/20261115_domain_ledger.md",
+  "raw_review_artifacts": "log/nav_acceptance/20261115_module_review/",
+  "physical_contact_acceptance": "unverified",
+  "real_robot": "unverified",
+  "latest_behavior_runs_rviz": false,
+  "documentation_validation": {
+    "status": "passed",
+    "command": "python3 log/nav_acceptance/20261115_module_review/validate_module_report.py",
+    "artifact": "log/nav_acceptance/20261115_module_review/documentation_validation.json",
+    "checks": {
+      "source_files_hashes": 30,
+      "evidence_files_hashes": 15,
+      "local_links": 25,
+      "algorithm_appendix_body_preserved": true,
+      "domain_table_rows_preserved": 95,
+      "required_handoff_headings": 15,
+      "modules": 10,
+      "backup_verified_blobs": 1180,
+      "root_diff_check": 0,
+      "nav_diff_check": 0,
+      "sim_diff_check": 0,
+      "root_explicit_file_count": 4,
+      "report_lines_before": 2016,
+      "report_lines_after": 816
+    },
+    "limit": "文档与备份完整性验证，不是新的构建、节点、闭环或实车验收"
+  }
+}
