@@ -15,6 +15,14 @@
 
 实现、修复或优化类请求的默认交付链为“定位 -> 修改 -> 构建 -> 单测 -> 仿真 -> 文档 -> 分仓提交”。
 
+### 1.1 当前状态与文档维护
+
+当前模块进度以 `docs/调研/无先验地图钻洞高速导航优化调研报告.md` 第 5 节为准，执行阶段见 5.1，最新行为验收见 9.5 / 9.8.5。2026-11-15 源码审查确认：S0/S1/S2a/S2b 已有阶段交付；S3 主干已实现、全场验收未通过；O1b 地图简化已落地；O3 钻洞部分提前实施；完整 O2/O4 及 O5 数值优化、方向后端、描述子恢复与前端 A/B 未完成。实车未验证，不按提交数或已写函数数估算总体完成百分比。
+
+纯文档整理与代码审查只运行引用、JSON、证据 hash 和 Git 差异等必要检查，不自动启动新的算法修改、构建或仿真；行为修改仍执行本规范的完整验证链。主报告保留结论、契约、完成状态和剩余门，逐次 domain/PID/命令/日志放专门账本与证据索引，不追加重复流水账。
+
+本阶段不修改系统文件或全局 ROS/DDS/SSH 配置，不处理与项目优化无关的内容。备份只写用户指定位置，保留当前工作树。10 月 22 日基线备份在 `/home/ats/Documents/ATS_20261022_git_baseline`，来源和逐文件校验见其 `manifest.json`；它不包含全部独立仓和忽略资产，不能直接视为完整可运行环境。
+
 ## 2. 项目事实与架构边界
 
 ### 2.1 目标主线
@@ -123,7 +131,7 @@ colcon test --base-paths src ...
 
 重要结论优先用两类独立证据交叉验证，例如“实现 + 单测”“launch + ROS graph”“日志 + 终点测量”。只有单一来源时明确标记 `[Confidence: Medium/Low]` 与限制。
 
-generation 的证据建议区分 `ROGMap source generation`、adapter publication 和 `MINCO local snapshot generation`。当前 `OccupancyGrid` 不携带 ROG source generation；现有证据仅覆盖单次规划内 JPS、二维 RC-ESDF、MINCO clearance、footprint gate 与 repair 共用同一 MINCO immutable snapshot。将 source generation 与 grid/数值 ESDF 放入同一不可变消息并由 consumer 校验后，结论可升级为编号端到端一致。
+generation 的证据建议区分 `ROGMap source generation`、adapter `publication_sequence`、`localization_epoch`、`MINCO local snapshot generation` 和执行参考的 stamp。当前活动契约是 `PlanningMapSnapshot`，已在单消息中携带 occupancy、signed distance、梯度和来源/发布/epoch 字段，消费者装载该数值场；不要继续按旧 `OccupancyGrid` 缺字段描述当前链。单次规划中的 JPS、MINCO clearance、footprint gate 与 repair 绑定同一不可变本地快照。跨进程结论仍须核对 producer、consumer 与 EXECUTE 的字段传递和拒绝证据；这些编号含义不同，不能要求它们数值相等，也不能只凭消息定义就声称端到端闭环验收通过。
 
 ## 5. 修改工作流
 
@@ -171,8 +179,8 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 - `/rog_map_adapter/planning_snapshot` publisher 数为 1 且 owner 为 adapter，`/rc_esdf/*` 话题不存在；
 - 任一有效来源 occupied 保持 occupied；任一新鲜来源的明确 free 可消解其他来源 unknown；所有来源均无 free/occupied 证据时输出最终 unknown，并默认按障碍处理（建图模式例外见 6.4）；静态细栅格到 planning grid 优先按输出 footprint 保守聚合；真值表、非整除分辨率、平移 origin 与 yaw 建议由单测锁定；
 - ROGMap 投影几何范围只定义其数据范围；范围外和 terrain/slope 的 `-1` 都表示缺少该来源证据，建议避免凭空覆盖另一来源的明确 free；
-- static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。完成带 yaw 的 `0.70 x 0.55 m + margin` 定向矩形栅格化及边界测试后，可评估启用；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
-- `ROGMap source generation` 持续递增、adapter 发布保持新鲜、单次规划固定 `MINCO local snapshot generation`；当前证据不支持三者编号端到端一致的结论；
+- static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。只有完成对应 profile 的定向矩形栅格化和边界测试后，才评估启用；栅格化和验收读取对应 profile 的长/宽/margin（当前车体配置为 `0.581 x 0.571 m`，仿真 margin `0.02`、实车 `0.05`），不混用旧固定尺寸或余量；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
+- `ROGMap source generation`、adapter publication 与 epoch 可追溯、发布保持新鲜、单次规划固定 `MINCO local snapshot generation`；按 4.2 核对其与执行参考的绑定，不将字段存在当作端到端验证完成；
 - `/minco/raw_path`、`/minco/reference_path`、MPC reference/predicted、`/cmd_vel_mpc`、`/motion_control` 非空；
 - `/cmd_vel_mpc` 只有一个 publisher，bridge 只有一个 subscriber；
 - `/motion_control` 只有一个 publisher，MuJoCo/底盘只有一个 subscriber；
@@ -182,22 +190,26 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 - `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子顺序；P2 建议验证提交点重定时与恢复后旧轨迹不复活，并把结构化原子安全契约保留为后续加固项；
 - 成功到达时记录终点坐标、位置误差、MINCO 离散 footprint 冲突采样数、MuJoCo 物理接触评估结果、规划点数、reference 点数和失败/恢复次数；无独立 contact evaluator 时建议把物理接触写为“未验证”，建议避免由 `footprint_collisions=0` 推导物理碰撞为零。
 
-### 6.2 Nav2 回归与红框
+### 6.2 ATS 默认、历史 Nav2 与红框
 
-`scripts/test_mujoco_nav_chain.sh` 是 Nav2 `NavigateToPose` 基线，不等价于红框或 P2 通过。建议完整执行。
+旧 `scripts/test_mujoco_nav_chain.sh` 已在根仓 `9b1b79a` 删除，不执行不存在的入口。当前 `scripts/test_mujoco_minco_mpc_chain.sh` 的默认与红框使用 `/ats_navigate_to_pose`，类型为 `ats_navigation_interfaces/action/NavigateToPose`；runner 断言没有 Nav2 进程及 `/plan`。不要再描述为默认 `launch_nav2:=true` 或调用 Nav2 action。
 
-红框回归使用：
+ATS 默认使用 `TEST_PROFILE=default`；红框使用：
 
 ```bash
 PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
   TEST_PROFILE=red_box GOAL_TIMEOUT=300 scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
-P2 修改建议让脚本显式支持并传入 ROGMap owner；若脚本尚无该入口，先补脚本，建议避免依赖手工 launch 后宣称通过。
+`PLANNING_GRID_OWNER=rog_map` 是现行 runner 保留的兼容取值；正式链已没有 owner 二选一入口。验收核对实际进程内 adapter 和唯一快照发布者，避免仅凭环境变量或手工 launch 宣称通过。
 
-`test_mujoco_minco_mpc_chain.sh` 当前仍以 `launch_nav2:=true` 调用 `NavigateToPose` 并依赖 `/plan`；即使 ROGMap owner 红框成功，也仅证明 P2 自研规划控制链，不能证明 P3/Nav2-free。
+实际验收使用独立新 domain、公共 `lio` / WLAN 环境及对应先验 PCD；2025 红框保留 `NAV_TRACKING_MAX_LAYER_PAYLOADS=3000`。最终行为修改后运行默认、2025 红框和 P2 独立故障矩阵；旧源码结果不替代。
+
+历史 Nav2 要求保留，隔离入口已补为 `scripts/nav2_compat.launch.py`、`scripts/prepare_nav2_compat.py`、`scripts/test_mujoco_nav2_compat.py`，按实际 CLI 和兼容工作区运行，不将 Nav2 加回正式 ATS 链。历史原默认 checker 的 d57 虽协议成功，额外真值门失败（0.167386 m）；d15 显式 `--strict-xy-goal-tolerance 0.05` 变体通过（0.049105 m）。两种配置分列，变体不替代原基线，也不替代两场 `lio`、ATS 默认或 P3 验收。
 
 ### 6.3 P3 Nav2-free
+
+自研 action、MINCO 直接目标入口和无 Nav2 graph 断言已有源码实现；实现与验收分别报告，不由入口存在推导阶段全部完成。
 
 P3 标记条件为同时满足以下各项：
 
@@ -210,7 +222,7 @@ P3 标记条件为同时满足以下各项：
 
 ### 6.4 建图模式与无先验导航（S3，部分实现，验收未通过）
 
-当前状态（2026-11-05，详见报告 0.8、0.10 与 9.5 节；运维目录的续接提示词 2026-11-07 已并入报告第 9 节）：`slam:=true` 已接入身份链、建图健康判据、射线清除、odom 全局规划层、增长地图匹配及显式 odom 到 map 保存。前序运行记录中，2025 的 54 点均满足真值到达门，但出现 1 个 READY 离散 footprint 冲突；2027 在第 8 点出现 0.15477 m 真值误差；全场障碍可见延迟 p95 为 153.530 ms，未满足 150 ms 门。这些运行的旧 `/tmp` 原始产物在本次提交归档时已不可读，须按报告 9.5 节重新取证。下列要求在验收通过前，不得在报告或提交中声称无图可用或全场建图完成。
+当前状态（2026-11-15 代码审查，最近行为验收为 11-14）：`slam:=true` 已接入身份链、建图健康判据、射线清除、odom 全局层、增长地图匹配及显式 odom 到 map 保存。导航 `e7bf500` / 仿真 `c42576a` 对应的最新两场运行均失败：2025 d17 到达 37/54 点后，第 37 段 q2 最长冲突 5 tick 跨 2 快照；2027 d14 前 7/64 点真值通过，第 8 点 south 真值 0.194165 m 超差，尽管 action 成功且该次 8 段 q1/q2 通过。两场均未完成最终保存/动态排除/重载和完整 A–K；d13 重启测试在注入前超时，不能计故障通过。完整范围与证据见报告 9.5 / 9.8.5 和 `docs/nav_acceptance/20261114_stage.json`，旧 54 点、首目标或 small_10x10 结果不替代最终两场验收。
 
 - 定位：建图期间 Point-LIO 持续提供位姿，并累积扫描形成地图。“无先验”只表示不加载先验 PCD，不表示没有定位。
 - 漂移校正：采用地图匹配（方式 3）。当前扫描与增长中的全局点云地图配准，修正写入 `map->odom`，经 `localization_fusion` 门控接受或拒绝。本阶段不做回环检测、位姿图和关键帧存储。
@@ -219,7 +231,7 @@ P3 标记条件为同时满足以下各项：
 - 场地尺寸：比赛场地 28×15 m。10×10 m 只用于建图和测试场地。所有尺寸参数化，比赛配置与测试配置分开。
 - unknown：参数 `allow_unknown_goal`，只在建图模式生效，默认 `false`。开启时，目标和引导段可以穿过 unknown；已提交段必须 known-free。比赛模式保持 6.1 的 unknown 规则。
 - 保存：只写静态层中未被射线清除、且观测占比达到阈值的格，输出 PGM+YAML（符合 map_server 契约）和 PCD。动态层不保存。
-- 比赛（定位）模式：加载建图保存的 PCD 与静态层，`small_gicp_relocalization` 做先验重定位，输出 `map->odom`。比赛起点固定，重定位初值为建图起点。先验静态层只用于全局引导和场地边界，障碍仍由实时点云决定。
+- 比赛（定位）模式：加载建图保存的 PCD 与静态层，`small_gicp_relocalization` 做先验重定位，输出 `map->odom`。比赛起点固定，重定位初值为建图起点。当前比赛入口仍保留 `use_static_map_obstacles=true` 和缺图 fail closed；“先验静态层只作引导/边界、局部障碍由实时观测决定”是 O1 的目标设计，不能写成全部模式已完成。
 - 测试：无先验测试必须使用显式的 TEST_PROFILE。不得改变现有 profile 对 PGM 和 PCD 的要求。
 - 验收（MuJoCo `lio` 模式，无 PGM、无 PCD）：
   - 建图中导航到目标（2026-11-06 用户授权放宽，数值为 `scripts/s3_mujoco_acceptance.py` 的默认参数，旧值可用参数复现）：中间路线点真值误差 ≤ 0.15 m（`--waypoint-tolerance-m`），终点与重载首目标 ≤ 0.08 m（`--final-tolerance-m`）；离散 footprint 冲突只统计被提交并由 MPC 执行（goal manager 下发 EXECUTE 且 `reference_stamp` 匹配）的 reference，必须为 0，READY 瞬态冲突只记录在 `summary.json` 的 `footprint_gate_collisions_transient_ready`。物理接触单独记为未验证，除非有独立接触评估；
@@ -235,6 +247,16 @@ P3 标记条件为同时满足以下各项：
 - 静态层坐标系采用混合方案：内部仍按 odom 系存储，修正 `map->odom` 时不搬移，障碍不跳动；保存时一次性变换到 map 系，输出 PGM、YAML 和三维 PCD，并记录保存时的 `map->odom`。规划链的坐标系在门 1 中单独决定。
 - 规划链坐标系采用 odom 系。ESDF、JPS、MINCO、MPC 在 odom 中完成，控制器位姿使用 Point-LIO 的 odom。目标点和全局引导路径在每次重规划时用当前 `map->odom` 转换到 odom。修正只改变目标在 odom 中的位置，障碍和位姿同源，不跳动。
 - 比赛起点固定。同一起点的下一场可直接复用建图地图。
+
+### 6.5 当前专项与后续路线
+
+H2 的 0.249 m 候选车高门尚未获充分净空证据；TUNNEL_FREE 未实现，真实 tunnel_B 往返、ramp_south、six_tunnels、持续 3 rad/s 平移与洞口切换、south 定位及有先验六隧道均未通过完整验收。隧道路线第 7 个前置 ramp_bridge 不算 tunnel_B 通过，实际 tunnel_B 位于第 10–13 点。
+
+M 路线通过后才执行已授权 H3：仅将已验证同组车高门写入 `src/ats_sentry_bringup/params/node_params.yaml`，独立 `[规范]` 提交，不操作实车。当前实车门仍为 `0.255+0.05=0.305 m`；2027 仿真两门为 0.249 m，2025 ROG 门 0.305 m、terrain 头顶过滤 0，分别记录，不混用。
+
+本专项的后续滚动规划、Point-LIO 数值优化、方向观测后端、机械升级不自动纳入当前任务。用户只要求审查/文档时，以完成审查/文档为交付；恢复优化时以当次授权范围推进，保留现有安全门与失败证据。
+
+domain 已用编号见 `docs/nav_acceptance/20261115_domain_ledger.md`；分配前同时核验宿主占用。使用工作区 `log/nav_acceptance/dds/wlan_env.sh` / `wlan.xml`、接口 `wlo1`、`ROS_LOCALHOST_ONLY=0`，配置缺失按 `20261114_runtime_inputs.json` 在工作区恢复，不改全局 DDS，不退回 lo。每次新 domain / 新 launch，范围 0..232，排除 5、77、91/92 及已尝试编号。
 
 ## 7. 测试与结果报告
 
