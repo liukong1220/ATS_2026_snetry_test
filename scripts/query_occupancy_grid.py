@@ -20,10 +20,17 @@ from planning_snapshot_grid import PLANNING_SNAPSHOT_TOPIC, snapshot_to_grid
 
 
 class GridCapture(Node):
-    def __init__(self, topic, start_odometry_topic=""):
+    def __init__(self, topic, start_odometry_topic="", transform_start_to_grid=False):
         super().__init__("ats_occupancy_grid_query")
         self.grid = None
         self.odometry = None
+        self.refresh_grid = bool(start_odometry_topic)
+        self.start_transform = None
+        self.tf_buffer = None
+        if transform_start_to_grid:
+            from tf2_ros import Buffer, TransformListener
+            self.tf_buffer = Buffer()
+            self.tf_listener = TransformListener(self.tf_buffer, self)
         if start_odometry_topic:
             self.odometry_subscription = self.create_subscription(
                 Odometry, start_odometry_topic, self._on_odometry,
@@ -47,15 +54,30 @@ class GridCapture(Node):
             )
 
     def _on_grid(self, message):
-        if self.grid is None:
+        if self.grid is None or self.refresh_grid:
             self.grid = message
 
     def _on_odometry(self, message):
         self.odometry = message
 
     def _on_snapshot(self, message):
-        if self.grid is None:
+        if self.grid is None or self.refresh_grid:
             self.grid = snapshot_to_grid(message)
+
+    def estimated_start(self):
+        transform = None
+        if (self.tf_buffer is not None and self.odometry is not None and
+                self.odometry.header.frame_id != self.grid.header.frame_id):
+            from tf2_ros import TransformException
+            try:
+                transform = self.tf_buffer.lookup_transform(
+                    self.grid.header.frame_id, self.odometry.header.frame_id,
+                    rclpy.time.Time())
+            except TransformException as error:
+                raise ValueError(f"fault start TF unavailable: {error}") from error
+        result = planning_start_from_odometry(self.grid, self.odometry, transform)
+        self.start_transform = transform
+        return result
 
 
 def parse_args():
@@ -72,6 +94,8 @@ def parse_args():
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--start-odometry-topic", default="",
                         help="Use an estimated pose in the planning grid frame; reject frame/time mismatch")
+    parser.add_argument("--transform-start-to-grid", action="store_true",
+                        help="Explicitly allow one fresh TF to map estimated odometry into the grid frame")
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
     value_parser = subparsers.add_parser("value")
@@ -122,6 +146,8 @@ def parse_args():
     publish_unknown_parser.add_argument("--count", type=int, default=3)
     publish_unknown_parser.add_argument("--period", type=float, default=0.2)
     args = parser.parse_args()
+    if args.transform_start_to_grid and not args.start_odometry_topic:
+        parser.error("--transform-start-to-grid requires --start-odometry-topic")
     if args.mode in ("farthest-free", "unreachable"):
         manual = args.start_x is not None or args.start_y is not None
         if (args.start_odometry_topic and manual) or (
@@ -131,18 +157,46 @@ def parse_args():
     return args
 
 
-def planning_start_from_odometry(grid, odometry):
+def planning_start_from_odometry(grid, odometry, transform=None):
     """Fault selection uses the planner's estimated frame, never map truth as odom."""
-    if not odometry or odometry.header.frame_id != grid.header.frame_id:
+    if not odometry or not odometry.header.frame_id:
         raise ValueError("fault start odometry and planning grid frames differ")
     def stamp(header):
         return header.stamp.sec + header.stamp.nanosec * 1e-9
     if abs(stamp(grid.header) - stamp(odometry.header)) > 0.5:
         raise ValueError("fault start odometry and planning grid stamps differ by >0.5s")
     p = odometry.pose.pose.position
-    if not math.isfinite(p.x) or not math.isfinite(p.y):
+    if not all(math.isfinite(v) for v in (p.x, p.y, p.z)):
         raise ValueError("non-finite fault start odometry")
-    return p.x, p.y
+    if odometry.header.frame_id == grid.header.frame_id:
+        return p.x, p.y
+    if transform is None:
+        raise ValueError("fault start odometry and planning grid frames differ")
+    if (transform.header.frame_id != grid.header.frame_id or
+            transform.child_frame_id != odometry.header.frame_id):
+        raise ValueError("fault start TF frame contract mismatch")
+    tf_stamp = stamp(transform.header)
+    if tf_stamp <= 0.0 or any(
+            abs(tf_stamp - stamp(header)) > 0.5
+            for header in (grid.header, odometry.header)):
+        raise ValueError("fault start TF stamp differs by >0.5s")
+    q = transform.transform.rotation
+    norm = math.sqrt(sum(v * v for v in (q.x, q.y, q.z, q.w)))
+    if not math.isfinite(norm) or norm < 1e-12:
+        raise ValueError("fault start TF quaternion is invalid")
+    v = transform.transform.translation
+    if not all(math.isfinite(value) for value in (v.x, v.y, v.z)):
+        raise ValueError("fault start TF translation is non-finite")
+    qx, qy, qz, qw = (value / norm for value in (q.x, q.y, q.z, q.w))
+    result = (
+        v.x + (1 - 2 * (qy * qy + qz * qz)) * p.x +
+        2 * (qx * qy - qz * qw) * p.y + 2 * (qx * qz + qy * qw) * p.z,
+        v.y + 2 * (qx * qy + qz * qw) * p.x +
+        (1 - 2 * (qx * qx + qz * qz)) * p.y + 2 * (qy * qz - qx * qw) * p.z,
+    )
+    if not all(math.isfinite(value) for value in result):
+        raise ValueError("fault start TF translation result is non-finite")
+    return result
 
 
 def validate_grid(grid):
@@ -408,11 +462,22 @@ def publish_unknown_copy(node, grid, output_topic, count, period):
 def main():
     args = parse_args()
     rclpy.init()
-    node = GridCapture(args.topic, args.start_odometry_topic)
+    node = GridCapture(args.topic, args.start_odometry_topic, args.transform_start_to_grid)
     try:
         deadline = time.monotonic() + max(0.1, args.timeout)
-        while (node.grid is None or (args.start_odometry_topic and node.odometry is None)) and time.monotonic() < deadline:
+        start = None
+        start_error = "fault start odometry timeout"
+        while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.2)
+            if node.grid is None or (args.start_odometry_topic and node.odometry is None):
+                continue
+            if args.start_odometry_topic:
+                try:
+                    start = node.estimated_start()
+                except ValueError as error:
+                    start_error = str(error)
+                    continue
+            break
         if node.grid is None:
             print("planning grid timeout", file=sys.stderr)
             return 2
@@ -421,7 +486,14 @@ def main():
             print("invalid planning grid", file=sys.stderr)
             return 3
         if args.start_odometry_topic:
-            args.start_x, args.start_y = planning_start_from_odometry(grid, node.odometry)
+            if start is None:
+                print(start_error, file=sys.stderr)
+                return 4
+            args.start_x, args.start_y = start
+            tf_stamp = node.start_transform.header.stamp if node.start_transform else None
+            print(f"estimated fault start frame={grid.header.frame_id} xy={start} "
+                  f"source_frame={node.odometry.header.frame_id} "
+                  f"TF_stamp={tf_stamp}", file=sys.stderr)
 
         if args.mode == "publish-unknown":
             cell_count = publish_unknown_copy(

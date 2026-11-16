@@ -1635,7 +1635,7 @@ publish_farthest_free_fault_goal() {
   # 角，其 JPS 路径过不了 MINCO 的矩形足迹门禁，前置段于是零控制量。
   query_output="$(timeout 30 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
     --topic /rog_map_adapter/planning_snapshot --timeout 10 \
-    --start-odometry-topic /localization farthest-free \
+    --start-odometry-topic /localization --transform-start-to-grid farthest-free \
     --threshold 100 --clearance 0.42 \
     --max-distance "${FARTHEST_GOAL_MAX_DISTANCE}" \
     2>"${query_error}")" || \
@@ -1710,7 +1710,7 @@ find_unreachable_goal() {
   local query_output
   query_output="$(timeout 20 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
     --topic /rog_map_adapter/planning_snapshot --timeout 10 \
-    --start-odometry-topic /localization unreachable \
+    --start-odometry-topic /localization --transform-start-to-grid unreachable \
     --threshold 100 --clearance "${clearance_floor}" \
     --assume-start-traversable --blocked-fallback \
     2>"${query_error}")" || fail "cannot select free unreachable goal: $(<"${query_error}")"

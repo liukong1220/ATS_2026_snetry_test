@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import math
 import unittest
 from pathlib import Path
 
 from nav_msgs.msg import OccupancyGrid, Odometry
+from geometry_msgs.msg import TransformStamped
 
 
 MODULE_PATH = Path(__file__).with_name("query_occupancy_grid.py")
@@ -26,6 +28,54 @@ def make_grid(width=11, height=11, resolution=1.0):
 
 
 class FarthestFreeGoalTest(unittest.TestCase):
+    def make_cross_frame_start(self):
+        grid = make_grid()
+        grid.header.stamp.sec = 10
+        odometry = Odometry()
+        odometry.header.frame_id = "odom"
+        odometry.header.stamp.sec = 10
+        odometry.pose.pose.position.x = 1.0
+        odometry.pose.pose.position.y = 2.0
+        odometry.pose.pose.position.z = 3.0
+        transform = TransformStamped()
+        transform.header.frame_id = "map"
+        transform.child_frame_id = "odom"
+        transform.header.stamp.sec = 10
+        transform.transform.rotation.w = 1.0
+        return grid, odometry, transform
+
+    def test_explicit_fresh_transform_uses_full_estimated_position(self):
+        grid, odometry, transform = self.make_cross_frame_start()
+        transform.transform.translation.x = 10.0
+        transform.transform.translation.y = 20.0
+        transform.transform.rotation.y = math.sqrt(0.5)
+        transform.transform.rotation.w = math.sqrt(0.5)
+        x, y = QUERY.planning_start_from_odometry(grid, odometry, transform)
+        self.assertAlmostEqual(x, 13.0)
+        self.assertAlmostEqual(y, 22.0)
+
+    def test_start_transform_rejects_wrong_frame_stale_and_invalid_values(self):
+        grid, odometry, transform = self.make_cross_frame_start()
+        transform.child_frame_id = "other_odom"
+        with self.assertRaisesRegex(ValueError, "TF frame"):
+            QUERY.planning_start_from_odometry(grid, odometry, transform)
+        transform.child_frame_id = "odom"
+        transform.header.stamp.sec = 9
+        with self.assertRaisesRegex(ValueError, "TF stamp"):
+            QUERY.planning_start_from_odometry(grid, odometry, transform)
+        transform.header.stamp.sec = 10
+        transform.transform.rotation.w = 0.0
+        with self.assertRaisesRegex(ValueError, "TF quaternion"):
+            QUERY.planning_start_from_odometry(grid, odometry, transform)
+        transform.transform.rotation.w = 1.0
+        transform.transform.translation.x = float("nan")
+        with self.assertRaisesRegex(ValueError, "TF translation"):
+            QUERY.planning_start_from_odometry(grid, odometry, transform)
+        transform.transform.translation.x = 1e308
+        odometry.pose.pose.position.x = 1e308
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            QUERY.planning_start_from_odometry(grid, odometry, transform)
+
     def test_estimated_start_requires_matching_frame_time_and_finite_pose(self):
         grid = make_grid()
         grid.header.frame_id = "odom"
