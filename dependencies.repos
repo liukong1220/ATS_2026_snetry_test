@@ -1,7 +1,17 @@
 # Root vcstool manifest for the ATS 2026 sentry workspace.
 #
 # Import from the workspace root with:
+#   ./import_workspace_repos.sh
+# The importer validates the complete manifest before cloning, converts GitHub
+# HTTP(S)/git URLs to SSH, and migrates existing fetch/push URLs to SSH without
+# touching working files. --no-sync imports only missing repositories and still
+# aligns remote URLs. VCS_WORKERS defaults to 1 to limit concurrent SSH sessions.
+# NETWORK_ATTEMPTS defaults to 3 for transient connection failures; existing
+# clean branches fast-forward to the fetched commit without fetching twice.
+# Direct vcstool imports also use SSH because every URL below is already SSH:
 #   vcs import --recursive --skip-existing . < dependencies.repos
+# Git LFS can use HTTPS for its API even when the Git remote uses SSH; do not
+# rewrite LFS API endpoints or disable lock verification as an SSH migration.
 #
 # src/ats_sentry_bringup is intentionally kept in the root workspace repository
 # because it owns the complete robot startup entrypoints, deployment parameters,
