@@ -46,8 +46,9 @@ def main():
     from rosgraph_msgs.msg import Clock
     from nav_msgs.msg import Path as PathMsg, Odometry
     from geometry_msgs.msg import Twist
-    from ats_navigation_interfaces.msg import ExecutionCommand, SwerveTelemetry
+    from ats_navigation_interfaces.msg import ExecutionCommand, SwerveTelemetry, LocalizationStatus
     from manda_can_control.msg import MotionCtrl
+    from std_msgs.msg import Bool
 
     rclpy.init()
     node = rclpy.create_node('navigation_spin_chain_evaluator', parameter_overrides=[
@@ -104,6 +105,10 @@ def main():
     ]
     for kind, topic, msg_type in (
         ('localization', '/localization', Odometry),
+        ('truth', '/simulation/ground_truth/odometry', Odometry),
+        ('localization_status', '/localization/status', LocalizationStatus),
+        ('emergency_stop', '/planner/emergency_stop', Bool),
+        ('map_ready', '/rog_map_adapter/ready', Bool),
         ('autonomy_raw', '/cmd_vel/autonomy_raw', Twist),
         ('selected', '/cmd_vel/selected', Twist),
         ('motion_control', '/motion_control', MotionCtrl),

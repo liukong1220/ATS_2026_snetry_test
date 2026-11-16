@@ -506,7 +506,17 @@ class Probe:
     def check_localization_health(self, msg):
         if msg.odom_identity_latched:
             raise RuntimeError("localization identity latched")
+        if getattr(msg, 'odom_instance_id', 0) and getattr(msg, 'odom_epoch', 0):
+            self._frontend_identity_seen = True
         if "/localization" in self.latest and msg.state == msg.STATE_LOST:
+            # Status and localization have independent DDS ordering. Before the
+            # first identified status arrives, a pre-input LOST may be paired
+            # with the first localization callback. ready() still requires
+            # healthy identified status/map evidence before any goal is sent.
+            if (not getattr(self, '_frontend_identity_seen', False)
+                    and getattr(msg, 'odom_instance_id', None) == 0
+                    and getattr(msg, 'odom_epoch', None) == 0):
+                return
             deadline = getattr(self, '_expected_localization_loss_deadline', None)
             if deadline is None or time.monotonic() >= deadline:
                 raise RuntimeError("localization lost after odometry input")

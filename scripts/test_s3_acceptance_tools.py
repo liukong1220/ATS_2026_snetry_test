@@ -76,6 +76,26 @@ class EvidenceTools(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'executed reference'):
             probe.check_executed_collisions()
 
+    def test_preidentity_status_waits_for_cross_topic_startup_pairing_only(self):
+        from types import SimpleNamespace as NS
+        probe = s3.Probe.__new__(s3.Probe)
+        probe.latest = {'/localization': (object(), 1.0)}
+        initial = NS(state=4, STATE_LOST=4, odom_identity_latched=False,
+                     odom_instance_id=0, odom_epoch=0)
+        probe.check_localization_health(initial)
+        bootstrap = NS(state=5, STATE_LOST=4, odom_identity_latched=False,
+                       odom_instance_id=101, odom_epoch=1)
+        probe.check_localization_health(bootstrap)
+        with self.assertRaisesRegex(RuntimeError, 'localization lost'):
+            probe.check_localization_health(initial)
+        bootstrap.state = 4
+        with self.assertRaisesRegex(RuntimeError, 'localization lost'):
+            probe.check_localization_health(bootstrap)
+        initial.odom_identity_latched = True
+        probe.__dict__.pop('_frontend_identity_seen', None)
+        with self.assertRaisesRegex(RuntimeError, 'identity latched'):
+            probe.check_localization_health(initial)
+
     def test_expected_localization_loss_is_bounded_and_ends_at_recovery(self):
         from types import SimpleNamespace as NS
         probe = s3.Probe.__new__(s3.Probe)
