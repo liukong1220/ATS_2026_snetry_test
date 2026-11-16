@@ -1,6 +1,6 @@
 # 2027 最终验收：隧道通过与对称点速度测试
 
-更新：2026-11-16。按用户最新指令，当前最终场景采用2027隧道和起点到中心对称点的速度测试。2025及2027红框仅作历史记录，不是本套件的执行入口或通过条件。本文件是待执行计划；此次只改文档，没有新建图、导航或速度运行结论。
+更新：2026-11-17。当前最终场景采用2027隧道和起点到中心对称点的速度测试。2025及2027红框仅作历史记录，不是本套件的执行入口或通过条件。11月16日制定计划；11月17日在 `/home/ats/ATS_2026_snetry_test` 实施O1-A/O0，实际结果见[本机证据说明](20261117_o1a_o0.md)和[索引](20261117_o1a_o0.json)。
 
 算法进度和分模块提示词见[主报告第5节](../调研/无先验地图钻洞高速导航优化调研报告.md)。历史失败不因切换测试场景而消失；S3完整设计与建图保存/重载要求继续单独记账。
 
@@ -49,12 +49,12 @@ T1→T2→T3先按显式无先验模式验证；有先验复验使用经核验�
 
 ## 4. 执行模板：先完成前置检查再运行
 
-每次选择一个未使用且宿主端口空闲的0..232 domain，排除5、77、91/92和[账本](20261115_domain_ledger.md)已尝试编号。使用工作区WLAN配置，保持`ROS_LOCALHOST_ONLY=0`，不退回lo。先核验Release构建、安装一致性、2027资产和健康；本机d103/d107首批身份化odom前LOST尚待解决，不能放宽定位/地图安全超时绕过。
+每次选择一个未使用且宿主端口空闲的0..232 domain，排除5、77、91/92和[账本](20261115_domain_ledger.md)已尝试编号。使用工作区WLAN配置，保持`ROS_LOCALHOST_ONLY=0`，不退回lo。先核验Release构建、安装一致性、2027资产和健康。d103/d107来自另一主机，本机d110复现初始无odom超时卡死，当前修复与首目标证据见11月17日索引；不能放宽定位/地图安全超时绕过。
 
 ### 4.1 隧道
 
 ```bash
-cd /home/kongliu/文档/27
+cd /home/ats/ATS_2026_snetry_test
 source install/setup.bash
 source log/nav_acceptance/dds/wlan_env.sh
 ROS_DOMAIN_ID="${ATS_DOMAIN:?先核验新domain}" \
@@ -70,13 +70,13 @@ T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起domain和证据目�
 ### 4.2 对称点速度
 
 ```bash
-cd /home/kongliu/文档/27
+cd /home/ats/ATS_2026_snetry_test
 source install/setup.bash
 source log/nav_acceptance/dds/wlan_env.sh
 SCENE=rmuc_2027 TEST_PROFILE=single \
   START_X=13.40 START_Y=2.00 START_Z=0.550 START_YAW=0.0 \
   GOAL_X=14.60 GOAL_Y=14.00 GOAL_YAW=0.0 P3_GOAL_FRAME=map \
-  GOAL_TOLERANCE=0.08 GOAL_TIMEOUT=300 \
+  GOAL_TOLERANCE=0.08 GOAL_TIMEOUT=300 GOAL_WALL_PER_SIM=20 \
   PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
   LIDAR_DOWNSAMPLE=0 NAV_TRACKING_MAX_LAYER_PAYLOADS=3000 \
   NAV_TRACKING_PROFILE_YAML="$PWD/src/ats_sentry_bringup/params/node_params.yaml" \
@@ -89,7 +89,9 @@ SCENE=rmuc_2027 TEST_PROFILE=single \
 
 命令显式指定`single`和2027场景，不依赖runner的默认2025值。记录器只从`NAV_TRACKING_PROFILE_YAML`取足迹长/宽/margin；三套已同步，因此这里用含完整字段的根参数，不能直接指向缺这些键的2027稀疏overlay。其余运行参数仍按正式2027覆盖链加载。
 
-在另一个已加载相同ROS、WLAN及domain的终端先录制速度证据，输出目录不得已存在；随后启动V1：
+本机11月17日实测实时率约0.08–0.10，客户端墙钟兜底用20倍；32逻辑核默认6倍的历史速度假设不适用。该值只防止客户端早于ATS目标的300s仿真时间截止，不改变目标本身、odom/证据/地图租约或失效零速门。长任务使用独立后台进程并保存PID/退出码，避免执行工具约15分钟会话中断；不能把进程仍在运行当作验收成功。
+
+先启动V1；在runner完成所有唯一所有权检查（日志出现`OK: /planner/emergency_stop has one publisher owned by ats_goal_manager`）后、下发目标前，用另一个已加载相同ROS、WLAN及domain的终端录制速度证据，输出目录不得已存在。只读记录器增加subscriber，若提前启动会破坏runner的前置精确计数；不得为此放宽所有权断言：
 
 ```bash
 ros2 bag record --use-sim-time -o "${ATS_BAG_OUT:?独立新目录}" \
@@ -99,11 +101,13 @@ ros2 bag record --use-sim-time -o "${ATS_BAG_OUT:?独立新目录}" \
   /rog_map_adapter/planning_snapshot
 ```
 
-bag的domain须与V1相同；它是同一测试的只读记录器，不另起场景。结束后导出对齐的速度CSV/曲线与统计；本轮未新增专用速度统计器，缺原始曲线时不能把runner退出0写成速度验收通过。`/cmd_vel_mpc`等兼容话题如存在可追加，正式出口以实际graph为准。
+bag的domain须与V1相同；它是同一测试的只读记录器，不另起场景。结束后导出对齐的速度CSV/曲线与统计；11月17日新增只读`record_navigation_spin_chain.py`扩展及`analyze_o0_handoffs.py`，同样需在所有权检查后、目标前启动；按实际运行参数传入`--mpc-dt`、`--terminal-radius`与`--odometry-timeout`。缺原始曲线时不能把runner退出0写成速度验收通过。`/cmd_vel_mpc`等兼容话题如存在可追加，正式出口以实际graph为准。
 
 ### 4.3 故障及建图能力
 
 P2故障用`adapter_lease/service_timeout/input_stale/unknown/unreachable`，在同一2027基线上每项新domain、新launch；替换V1的`P2_FAULT_CASE`，并先核对注入锚点/前置等待适配2027。不能仅凭`SCENE`可切换就声称每项已经通过。
+
+11月17日F首次前置采用 `(13.40,2.00)→map (13.40,3.00,0)`、真值门0.08m；d6因真值0.159192m及q1/q2失败而未注入。后续独立F改用原路线起点 `(3.37,9.03,0.465,0)→map (4.00,9.03,0)`，经静态PGM足迹检查，prior资产/profile/场景不变，在线门继续保持；两个配置与结果分别保留，均不冒充V1。故障在飞目标从实际快照和估计 `/localization` 选取；frame不同时显式用一条父子frame一致且与odom/快照均≤0.5s差的完整TF转换，不把map真值标为odom。未到在飞运动门或未实际注入须记“未注入”。
 
 S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正仍按现有CLI，在2027显式profile下独立运行；与P2矩阵分列。保存质量、动态不保存、重载、实体障碍延迟及完整2027 A–K继续验证，不用隧道或速度单次结果替代。
 
@@ -111,4 +115,6 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 
 统一报告T1/T2/T3/V1/F每项：未运行、启动失败、执行失败、已通过及其限制。保留domain、三仓commit、实际参数/命令、原始日志与hash、每个目标结果、穿越计数、q1/q2、接触评估和终点/速度曲线。未带RViz时明确写明，不能由配置验证推导实际画面通过。
 
-当前只有既有空场d108验证10Hz点云、200Hz IMU及5m/s执行器链；它没有规划器，不等于V1。2027导航d103/d107均未发目标。当前T1/T2/T3/V1/F没有新增通过结果；历史2025 q2、2027 south和H2/M/H3的失败/未验证状态保留。2025缺先验PCD属于历史兼容项，当前2027套件不以补齐2025资产作为前置条件。
+空场d108只验证10Hz点云、200Hz IMU及5m/s执行器链，没有规划器，不等于V1。11月17日本机原路线首目标d9的原ATS action成功，独立真值误差0.011176812m，6条执行参考q1无冲突、1103有效位姿q2无冲突；原runner的143编排中断与原UUID接续观测单列，不记正常runner退出0。后续独立d16自然退出0、action成功，真值0.005460892m，3条执行参考q1及524有效位姿q2均零冲突、无payload缺失，补齐首目标正常编排门；两次证据均保留，不作稳定性统计。T1 d8在第1目标因unknown足迹/重规划预算失败，0/13点到达、真实B穿越0；T2/T3按T1依赖未运行。V1 d7真值0.069451m达标，但q1失败、q2缺证、运行期LOST并恢复到epoch2，整体失败；实测真值峰值0.826715m/s，不计高速通过。F的d6前置失败未注入；新锚点独立adapter lease d4、service_timeout d3、input_stale d2、unknown d1均通过，含三路零速与恢复后旧参考不复活。unreachable d0实际自由断连目标得到A*无路并零速，但action提前以挂起预算code 5终止，与夹具预期code 3不符，严格记失败。O0无合格巡航换轨，原跌速门未触发。O1-A全部门与本套件均未通过，完整细节见11月17日说明及索引。
+
+历史2025 q2、2027 south和H2/M/H3的失败/未验证状态保留。2025默认/红框本轮未重跑；2025缺先验PCD属于历史兼容项，当前2027套件不以补齐2025资产作为前置条件。所有本轮运行未带RViz，物理接触仍未获独立验收。

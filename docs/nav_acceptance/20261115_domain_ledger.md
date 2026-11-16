@@ -121,3 +121,34 @@
 - 2026-11-16 domain 107：延后导航后仍在首批有效身份化 odom 前 LOST，目标执行 0，不计导航通过。
 - 2026-11-16 domain 108：宿主 DDS 端口核验空闲；最后行为修改后的传感器/5 m/s 专项，底盘固定雷达、自动 CPU 预算，未带 RViz。
 - 2026-11-16 domain 105/108：传感器/执行器专项通过；d108为最后行为版本，169帧/3400 IMU，10 Hz/200 Hz、指令5 m/s；无规划器，未带RViz，不计导航/物理接触验收。
+
+## 2026-11-17 本机 O1-A / O0
+
+本机 `ats-OMEN-by-HP-Gaming-Laptop-16-wf0xxx`、工作区 `/home/ats/ATS_2026_snetry_test`、WLAN `wlo1`；与11月16日 `/home/kongliu/文档/27` 主机分开记录。用户11月17日确认在本机实施。每次运行前核验宿主 UDP 端口，`ROS_LOCALHOST_ONLY=0`。
+
+- domain 109：Release 基线定位身份/MPC窄测试；端口核验见 `log/nav_acceptance/20261117_o1a_o0/domain109_preflight.json`。
+- domain 110：本机O1-A首次首目标复现，默认runner延迟、自动雷达预算、lio/WLAN、未带RViz；输出 `log/nav_acceptance/20261117_o1a_o0/baseline_d110`。
+- domain 111：O1-A首帧超时/跨topic配对回归的旧实现负对照；日志 `log/nav_acceptance/20261117_o1a_o0/startup_red_*`。
+- domain 112：O1-A修复后fusion全部直接节点/冷启动/身份及core窄回归；独立WLAN domain，结果见本轮索引。
+- domain 113：初始超时分类/runner跨topic配对修复后的2027首目标，原始延迟、自动雷达预算、lio/WLAN；独立速度链与身份bag，输出 `log/nav_acceptance/20261117_o1a_o0/startup_fix_d113`。
+- domain 114：本机lio/WLAN独立运行 `template_fix_d114`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/template_fix_d114*`。
+- domain 115：本机lio/WLAN独立运行 `candidate_diag_d115`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/candidate_diag_d115*`。
+- domain 116：矩形覆盖修复后 MINCO/Goal Manager/MPC 窄 CTest，WLAN 独立 domain。
+- domain 117：本机lio/WLAN独立运行 `footprint_fix_d117`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/footprint_fix_d117*`。
+- domain 118：O0 慢仿真时钟控制周期负对照与冻结时钟安全门，旧实现红测试。
+- domain 119：O0 时基修复最终窄 CTest，慢时钟/冻结租约/回拨旧参考及原有安全换轨门，独立WLAN。
+- domain 12：本机lio/WLAN独立运行 `final_first_goal_d12`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/final_first_goal_d12*`。
+- domain 11：同 epoch DEGRADED 续证确认的旧实现负对照，WLAN 独立节点窄测试。
+- domain 10：续证修复后 small_gicp 全部功能窄测试，含确认期限、身份、地图提交、运行期失效门。
+- domain 9：本机lio/WLAN独立运行 `final_first_goal_d9`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/final_first_goal_d9*`。
+- domain 8：本机lio/WLAN独立运行 `tunnel_b_d8`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/tunnel_b_d8*`。
+- domain 7：2027 lio/WLAN 独立 `v1_d7`，P2=none；完整命令/锚点/结果见本轮索引。
+- domain 6：2027 lio/WLAN 独立 `adapter_lease_d6`，P2=adapter_lease；完整命令/锚点/结果见本轮索引。
+- domain 4：2027 lio/WLAN 独立 `adapter_lease_d4`，P2=adapter_lease；完整命令/锚点/结果见本轮索引。
+- domain 3：2027 lio/WLAN 独立 `service_timeout_d3`，P2=service_timeout；完整命令/锚点/结果见本轮索引。
+- domain 2：2027 lio/WLAN 独立 `input_stale_d2`，P2=input_stale；完整命令/锚点/结果见本轮索引。
+- domain 1：2027 lio/WLAN 独立 `unknown_d1`，P2=unknown；完整命令/锚点/结果见本轮索引。
+- domain 0：2027 lio/WLAN 独立 `unreachable_d0`，P2=unreachable；完整命令/锚点/结果见本轮索引。
+
+11月17日逐号核验发现16号没有历史分配记录，不能推断编号已耗尽。端口预检后将其保留给正常编排的原首目标补验，实际分配条目在下方追加。独立F四项通过、unreachable严格失败；d6前置失败未注入，结果与证据见`20261117_o1a_o0.md/json`。
+- domain 16：本机lio/WLAN独立运行 `final_first_goal_d16`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/final_first_goal_d16*`。
