@@ -17,7 +17,7 @@
 
 ### 1.1 当前状态与文档维护
 
-当前模块进度以 `docs/调研/无先验地图钻洞高速导航优化调研报告.md` 第 5 节为准，执行阶段见 5.1；历史两场见9.5，11月16日行为专项见9.8.6，最新最终测试约定见9.8.7及2027最终方案。2026-11-15源码审查确认：S0/S1/S2a/S2b已有阶段交付；S3主干已实现、全场验收未通过；O1b地图简化已落地；O3钻洞部分提前实施；完整O2/O4及O5数值优化、方向后端、描述子恢复与前端A/B未完成。实车未验证，不按提交数或已写函数数估算总体完成百分比。
+当前模块进度以 `docs/调研/无先验地图钻洞高速导航优化调研报告.md` 第 5 节为准，执行阶段见 5.1；历史两场见9.5，11月16日行为专项见9.8.6，最终测试约定见9.8.7及2027最终方案，全文文档同步审查见9.8.8。2026-11-15源码审查确认：S0/S1/S2a/S2b已有阶段交付；S3主干已实现、全场验收未通过；O1b地图简化已落地；O3钻洞部分提前实施；完整O2/O4及O5数值优化、方向后端、描述子恢复与前端A/B未完成。实车未验证，不按提交数或已写函数数估算总体完成百分比。
 
 纯文档整理与代码审查只运行引用、JSON、证据 hash 和 Git 差异等必要检查，不自动启动新的算法修改、构建或仿真；行为修改仍执行本规范的完整验证链。主报告保留结论、契约、完成状态和剩余门，逐次 domain/PID/命令/日志放专门账本与证据索引，不追加重复流水账。
 
@@ -172,9 +172,9 @@ generation 的证据建议区分 `ROGMap source generation`、adapter `publicati
 
 ### 6.1 P2 ROGMap owner
 
-P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
+P2 回归使用 `ats_rog_map` 进程内的规划地图所有者，并验证；MuJoCo 兼容 launch 保留的 `planning_grid_owner:=rog_map` 不能推广为所有入口都接受的参数：
 
-- P2 有效参数建议落在受版本控制且由实际 launch 加载的 `ats_rog_map/config/rog_map_ground_planning_mujoco.yaml` 与 `ats_rog_map/config/rog_map_ground_planning.yaml`（adapter 已并入 `ats_rog_map`，原 `ats_rog_map_adapter` 包不再是活动构建输入）；高度带建议排除有运行证据的地面回波，同时保留墙体和低矮障碍的 terrain 语义；
+- 正式参数由根仓`src/ats_sentry_bringup/params/node_params.yaml`拥有；MuJoCo按实际launch叠加2025公共、2027场景及LIO覆盖。包内`ats_rog_map/config/rog_map_ground_planning_mujoco.yaml`和`rog_map_ground_planning.yaml`是独立`ats_rog_map.launch.py`的默认输入，不能写成正式入口的第二份参数源。adapter已并入`ats_rog_map`，原独立包不再是活动构建输入；高度带排除有证据的地面回波并保留墙体和低矮障碍语义；
 - 规划地图唯一所有者是 `ats_rog_map` 进程内的 adapter；`planning_grid_owner` 与 `rc_esdf_map` 的二选一入口已随 M3/M4 移除，`PLANNING_GRID_OWNER=rog_map` 仅作为测试脚本的兼容取值保留；
 - `/rog_map/occ`、`/rog_map/inf_occ`、`/rog_map/unk`、`/rog_map/esdf` 非空；
 - adapter 在进程内直接读取 ROGMap 数值状态，不订阅 `/rog_map/esdf`；
@@ -183,12 +183,12 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 - ROGMap 投影几何范围只定义其数据范围；范围外和 terrain/slope 的 `-1` 都表示缺少该来源证据，建议避免凭空覆盖另一来源的明确 free；
 - static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。只有完成对应 profile 的定向矩形栅格化和边界测试后，才评估启用；栅格化和验收读取对应 profile 的长/宽/margin（当前车体配置为 `0.581 x 0.571 m`，三套 margin 均为 `0.02`），不混用旧固定尺寸或余量；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
 - `ROGMap source generation`、adapter publication 与 epoch 可追溯、发布保持新鲜、单次规划固定 `MINCO local snapshot generation`；按 4.2 核对其与执行参考的绑定，不将字段存在当作端到端验证完成；
-- `/minco/raw_path`、`/minco/reference_path`、MPC reference/predicted、`/cmd_vel_mpc`、`/motion_control` 非空；
-- `/cmd_vel_mpc` 只有一个 publisher，bridge 只有一个 subscriber；
+- `/minco/raw_path`、`/minco/reference_path`、MPC reference/predicted、`/cmd_vel/autonomy_raw`、`/cmd_vel/selected`、`/motion_control` 非空；
+- MuJoCo 的 `/cmd_vel/autonomy_raw` 只有 MPC 一个 publisher，arbiter 读取该自主源；`/cmd_vel/selected` 只有 arbiter 一个 publisher，`twist_to_motion_ctrl` 是唯一底盘 Twist consumer。其他入口按实际 launch 推导速度 topic；历史 `/cmd_vel_mpc` 不作为现行验收话题；
 - `/motion_control` 只有一个 publisher，MuJoCo/底盘只有一个 subscriber；
 - map unready/stale、全 unknown、goal unreachable 时 `/planner/emergency_stop=true`，速度为零；unsafe trajectory 不进入发布链并保持或触发急停，未做专用运行注入时标为未验证门禁；
 - 名义路线固定 `P2_FAULT_CASE=none`；adapter lease、进程内 projection 超时（service_timeout）、Point-LIO input stale、真实 unknown cell 和 unreachable 目标建议使用新 `ROS_DOMAIN_ID` 与新 MuJoCo launch 分别注入，建议避免在一次仿真中串行污染机器人状态；
-- 使用 `SIGSTOP` 或输入中断分别注入进程内 projection 停滞、Point-LIO 输入 stale 和 adapter ready heartbeat 中断；建议在配置 deadline/lease 内观察 `ready=false -> emergency_stop=true -> cmd_vel_mpc=0 -> motion_control=0`；恢复后 generation 继续递增，没有新目标时迟到 response、旧 generation 和急停前 reference 保持失效；
+- 使用 `SIGSTOP` 或输入中断分别注入进程内 projection 停滞、Point-LIO 输入 stale 和 adapter ready heartbeat 中断；建议在配置 deadline/lease 内观察 `ready=false -> emergency_stop=true -> autonomy_raw=0 -> selected=0 -> motion_control=0`；恢复后 generation 继续递增，没有新目标时迟到 response、旧 generation 和急停前 reference 保持失效；
 - `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子顺序；P2 建议验证提交点重定时与恢复后旧轨迹不复活，并把结构化原子安全契约保留为后续加固项；
 - 成功到达时记录终点坐标、位置误差、MINCO 离散 footprint 冲突采样数、MuJoCo 物理接触评估结果、规划点数、reference 点数和失败/恢复次数；无独立 contact evaluator 时建议把物理接触写为“未验证”，建议避免由 `footprint_collisions=0` 推导物理碰撞为零。
 
@@ -255,7 +255,7 @@ H2 的 0.249 m 候选车高门尚未获充分净空证据；TUNNEL_FREE 未实�
 
 本专项的后续滚动规划、Point-LIO 数值优化、方向观测后端、机械升级不自动纳入当前任务。用户只要求审查/文档时，以完成审查/文档为交付；恢复优化时以当次授权范围推进，保留现有安全门与失败证据。
 
-domain 已用编号见 `docs/nav_acceptance/20261115_domain_ledger.md`；分配前同时核验宿主占用。使用工作区 `log/nav_acceptance/dds/wlan_env.sh` / `wlan.xml`、接口 `wlo1`、`ROS_LOCALHOST_ONLY=0`，配置缺失按 `20261114_runtime_inputs.json` 在工作区恢复，不改全局 DDS，不退回 lo。每次新 domain / 新 launch，范围 0..232，排除 5、77、91/92 及已尝试编号。
+domain 已用编号见 `docs/nav_acceptance/20261115_domain_ledger.md`；分配前同时核验宿主占用。使用工作区 `log/nav_acceptance/dds/wlan_env.sh` / `wlan.xml` 和 `ROS_LOCALHOST_ONLY=0`。旧记录的 `wlo1` 在当前宿主不存在，2026-11-16 工作区 XML 使用 `wlx500ff5500d30`；每次启动前核验实际在线 WLAN、XML 与环境一致，不把本机接口名硬编码为其他机器的要求。配置缺失按 `20261114_runtime_inputs.json` 在工作区恢复并记录路径/接口差异，不改全局 DDS，不退回 lo。每次新 domain / 新 launch，范围 0..232，排除 5、77、91/92 及已尝试编号。
 
 ## 7. 测试与结果报告
 
@@ -264,7 +264,7 @@ domain 已用编号见 `docs/nav_acceptance/20261115_domain_ledger.md`；分配�
 ```bash
 # 并发按当前机器计算：总任务数 = min(nproc, MemAvailable / 1.5 GiB)；整仓构建用 ./build.sh（自动计算）
 JOBS=$(awk -v n="$(nproc)" '/^MemAvailable:/ {j=int($2/1024/1536); if (j>n) j=n; if (j<1) j=1; print j}' /proc/meminfo)
-# 单包构建必须带 Release：不带时 CMAKE_BUILD_TYPE 为空，节点是 -O0（2026-10-30 实测，报告 5.1.6 H）；./build.sh 已带。
+# 单包构建必须带 Release；未显式设置可能生成 -O0 节点（历史实测），当前验证口径见报告第 6 节；./build.sh 已带。
 MAKEFLAGS=-j${JOBS} colcon build --base-paths src --packages-select <targets> --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=Release
 colcon test --base-paths src --packages-select <targets>
 colcon test-result --test-result-base build/<package> --verbose
@@ -307,9 +307,9 @@ git diff --check
 - 桌面锁屏（`loginctl` 的 `LockedHint=yes`）时 MuJoCo 的原生 Wayland 窗口出不来（窗口线程一直在等合成器，日志只有"正在后台打开窗口"，没有"已启动"），RViz 的 X11 窗口虽然还能被 `xwd` 截图，但没有人能现场观察；
   这样的运行要在报告里写明"无人现场观察"，窗口的画面和稳定性记为未验证。runner 的"当前位姿"（终点判据、故障注入的起点查询）在 `lio` 模式读 map 系的 `/simulation/ground_truth/odometry`，
   不读 `/localization`（`lio` 下它是 Point-LIO 的 odom 系直通，原点在出生点下方的地面）；truth 模式仍读 `/localization`。
-- 启动前先告诉用户命令、`ROS_DOMAIN_ID` 和预计时长（`lio` 模式 32 线程机器 8 线程约 0.4 倍实时，8 核机器 4 线程约 0.06 到 0.1 倍）；测试进行时不修改正在被脚本读取的文件。
+- 启动前先告诉用户命令、`ROS_DOMAIN_ID` 和预计时长；实时率须按本机、场景和本次射线预算测量，旧硬件的 0.06–0.4 倍实时记录不能作为当前 MID360 配置的性能承诺。测试进行时不修改正在被脚本读取的文件。
 - 结束后读取截图，在报告里分开写「RViz 上应该看到什么」和「实际看到什么」；截图只是单帧，不能替代终点测量与话题证据。
-- 只有批量故障矩阵等无法带显示的测试才无头运行，并在报告里写明哪些结果没有经过 RViz 观察。
+- 用户已允许无头闭环；每次均在报告里写明哪些结果没有经过 RViz 观察，画面项保持未验证。
 
 ## 8. 提交与推送
 

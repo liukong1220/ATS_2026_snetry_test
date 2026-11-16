@@ -1,12 +1,9 @@
-# Prior PCD (RMUC 2025)
+# 先验PCD与场景对应
 
-权威仿真先验（与 `map/rmuc_2025.yaml` / `.pgm` 同框）：
+当前最终测试使用RMUC 2027：`rmuc_2027.pcd`必须与`map/rmuc_2027.yaml/.pgm`及28×16 m模型同框。有先验入口缺图时拒绝启动，不换用其他场地；无先验使用显式`slam:=true`/建图profile，不能用空闲占位图替代缺图。命令、出生点与保存/重载要求见[2027最终方案](../../../docs/nav_acceptance/20261116_2027_final_test_plan.md)和[S3运维说明](../../../docs/运维/S3建图与身份闩锁恢复.md)。
 
-- `rmuc_2025.pcd` — 规范名（`world:=rmuc_2025` 默认解析到此文件）
-- `rmuc_2025_gazebo_fullfield.pcd` — STL 全场采样生成物（同内容）
-- `rmuc_2025_gazebo_prior.pcd` — 兼容别名（同内容）
+先验资产可能被Git忽略，源码拉取不保证PCD齐全；部署前检查实际文件、header/frame、来源和hash。2026-11-16专项检查发现本机2025先验缺失，此事实不影响2027最终套件的场景选择，但也不能把2027 PCD用于复现2025。
 
-生成：从 Gazebo `rmuc_2025.stl` 采样，变换 `p_map = p_stl + (10.92, -1.44, 0.20)`，
-体素 `0.03 m`，高度带 `[-0.2, 3.0]`。
+旧2025来源说明保留为历史：规范名`rmuc_2025.pcd`，旧别名`rmuc_2025_gazebo_fullfield.pcd`、`rmuc_2025_gazebo_prior.pcd`当时记录同内容。其Gazebo STL采样变换为`p_map=p_stl+(10.92,-1.44,0.20)`，体素0.03 m、高度带[-0.2,3.0]；这些名字和旧变换不证明本机文件存在，不套用到2027。
 
-`rmul_2025.pcd` 仅用于 RMUL 场地，与 RMUC 无关。
+`rmul_2025.pcd`与`rmul_2027.pcd`只用于相应RMUL场景，不能与RMUC的地图或出生点混用。实车和仿真的同名地图也须核验坐标来源，不按文件名直接认定几何一致。

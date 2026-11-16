@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-16",
+  "scope": "Documentation synchronization only; no behavior changes, builds, new unit tests, simulations, domains or real-robot operation.",
+  "source_checkpoints": {
+    ".": "9aa73e5c95cde4ebb115d087371a862d7f5822d3",
+    "src/ats_sentry_nav": "f7eb82a3a55dbf8d63563dd5e74041a464897c1d",
+    "src/sim/ats_mujoco_sim": "aaf059af1450e206074bc0ad669ccf659dc1a818"
+  },
+  "inventory": {
+    "tracked_markdown_count": 51,
+    "reviewed_current_documents": [
+      "AGENTS.md",
+      "README.md",
+      "docs/nav_acceptance/20261115_domain_ledger.md",
+      "docs/nav_acceptance/20261116_2027_final_test_plan.md",
+      "docs/代码框架设计/Gazebo与当前导航接口.md",
+      "docs/代码框架设计/代码范围与目录结构.md",
+      "docs/代码框架设计/仿真域说明.md",
+      "docs/代码框架设计/优化方向与验证状态.md",
+      "docs/代码框架设计/启动入口与运行链路.md",
+      "docs/代码框架设计/导航定位与轨迹链路.md",
+      "docs/代码框架设计/总览.md",
+      "docs/代码框架设计/接口消息与话题约定.md",
+      "docs/代码框架设计/构建与维护说明.md",
+      "docs/代码框架设计/行为树决策链路.md",
+      "docs/代码框架设计/视觉与串口桥说明.md",
+      "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "docs/运维/RMUL2027场地部署.md",
+      "docs/运维/S3建图与身份闩锁恢复.md",
+      "src/ats_sentry_bringup/pcd/readme.md",
+      "src/ats_sentry_nav/README.md",
+      "src/ats_sentry_nav/README_en.md",
+      "src/ats_sentry_nav/ats_rog_map/README.md",
+      "src/ats_sentry_nav/ats_swerve_mpc/README.md",
+      "src/ats_sentry_nav/ats_swerve_mpc/求解器.md",
+      "src/ats_sentry_nav/ats_teleop_twist_joy/README.md",
+      "src/ats_sentry_nav/fake_vel_transform/README.md",
+      "src/ats_sentry_nav/minco_planner/README.md",
+      "src/ats_sentry_nav/small_gicp_relocalization/README.md",
+      "src/sim/ats_mujoco_sim/README.md"
+    ],
+    "original_upstream_license_contribution_history_excluded_from_deployment_rewrite": [
+      "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md",
+      "src/ats_sentry_nav/CONTRIBUTING.md",
+      "src/ats_sentry_nav/ats_rog_map/include/super_utils/README.md",
+      "src/ats_sentry_nav/ats_teleop_twist_joy/CONTRIBUTING.md",
+      "src/ats_sentry_nav/livox_ros_driver2/CHANGELOG.md",
+      "src/ats_sentry_nav/livox_ros_driver2/README.md",
+      "src/ats_sentry_nav/minco_planner/THIRD_PARTY_NOTICES.md",
+      "src/ats_sentry_nav/point_lio/Log/guide.md",
+      "src/ats_sentry_nav/point_lio/PCD/readme.md",
+      "src/ats_sentry_nav/point_lio/README.md",
+      "src/ats_sentry_nav/point_lio/include/IKFoM/README.md",
+      "src/ats_sentry_nav/pointcloud_to_laserscan/README.md",
+      "src/ats_sentry_nav/small_gicp_relocalization/CONTRIBUTING.md",
+      "src/ats_sentry_nav/third_party/osqp/CHANGELOG.md",
+      "src/ats_sentry_nav/third_party/osqp/README.md",
+      "src/ats_sentry_nav/third_party/osqp/site/README.md",
+      "src/ats_sentry_nav/third_party/osqp/site/_pages/404.md",
+      "src/ats_sentry_nav/third_party/osqp/site/_pages/citing.md",
+      "src/ats_sentry_nav/third_party/osqp/site/_pages/index.md",
+      "src/ats_sentry_nav/third_party/osqp/tests/README.md",
+      "src/ats_sentry_nav/third_party/qdldl/CHANGELOG.md",
+      "src/ats_sentry_nav/third_party/qdldl/README.md"
+    ]
+  },
+  "findings_resolved": [
+    {
+      "id": "D01",
+      "issue": "Active docs retained 1.5/2.0 m/s and old wheel limits/horizon",
+      "current": "MINCO/reference/initial-speed 5, MPC axes/wheels 5, body exit 5, yaw 3, yaw acceleration 2, horizon 60 x 0.05 s; equivalent RPM is provisional."
+    },
+    {
+      "id": "D02",
+      "issue": "Footprint dimensions and margins mixed with code fallbacks",
+      "current": "Three merged profiles use length 0.581, width 0.571, margin 0.02, ROG/terrain gate 0.249, JPS config 0.36, tunnel yaw and spin enabled; initial preferred clearance about 0.435592."
+    },
+    {
+      "id": "D03",
+      "issue": "MuJoCo defaults listed wall-clock/24 downsampling and old sensors",
+      "current": "LiDAR 10 Hz sim-time, IMU 200 Hz, LIO physics 400 Hz, 200k rays/s max; adaptive density and runner overrides separately documented."
+    },
+    {
+      "id": "D04",
+      "issue": "CPU budget and mount/rotation descriptions incomplete",
+      "current": "Auto one third of allowed CPUs capped at eight, only lidar child affinity restricted; chassis-fixed radar, registered static world remains fixed."
+    },
+    {
+      "id": "D05",
+      "issue": "RViz groups described as all enabled and lidar invisible",
+      "current": "Current-frame registered Points/Decay=0 and vehicle/sensor axes enabled; voxel/planning/ESDF/path/safety parents disabled."
+    },
+    {
+      "id": "D06",
+      "issue": "Local tunnel segment/red-box described as full acceptance",
+      "current": "Current final suite T1 real B roundtrip, T2 ramp south, T3 six tunnels, V1 symmetric point, independent F faults; none newly passed."
+    },
+    {
+      "id": "D07",
+      "issue": "Deleted map interfaces, local_plan dependency, Nav2 joystick action and old velocity topic",
+      "current": "In-process adapter/PlanningMapSnapshot, ATS action, actual autonomy/selected/MotionCtrl ownership; Gazebo old entry explicitly inactive."
+    },
+    {
+      "id": "D08",
+      "issue": "Action/progress timeouts all described as wall clock and lease-scaled",
+      "current": "LIO action and motion progress use ROS time; input health leases use steady/wall time and only designated windows scale."
+    },
+    {
+      "id": "D09",
+      "issue": "Old fixed wlo1, loopback fallback, domain reuse and broken document/source links",
+      "current": "Workspace WLAN and actual interface; new domain from ledger plus host audit; relative links; historical evidence and October original unchanged."
+    },
+    {
+      "id": "D10",
+      "issue": "Solver duplicated old reports/continuation prompts and short-lookahead suggestions",
+      "current": "Math retained, old active parameter tables corrected, module prompts centralized in main report section 5; braking/preview limitations and manual joystick gains explicitly separated."
+    }
+  ],
+  "effective_profile_values": {
+    "real": {
+      "minco_planner": {
+        "footprint_length": 0.581,
+        "footprint_width": 0.571,
+        "footprint_safety_margin": 0.02,
+        "reference_speed": 5.0,
+        "max_velocity": 5.0,
+        "yaw_rate_limit": 3.0,
+        "yaw_acceleration_limit": 2.0,
+        "yaw_tunnel_enabled": true,
+        "spin_enabled": true,
+        "jps_safe_distance": 0.36
+      },
+      "ats_swerve_mpc": {
+        "max_vx": 5.0,
+        "max_vy": 5.0,
+        "max_wheel_speed": 5.0,
+        "max_wz": 3.0,
+        "max_awz": 2.0,
+        "max_ax": 2.0,
+        "max_ay": 2.0,
+        "horizon": 60,
+        "dt": 0.05
+      },
+      "terrain_analysis_ext": {
+        "traversabilityOverheadHeight": 0.249
+      },
+      "ats_rog_map": {
+        "odom_layer.robot_height": 0.242,
+        "odom_layer.top_margin": 0.007
+      },
+      "chassis_vel_transform": {
+        "max_linear_speed": 5.0
+      }
+    },
+    "rmuc_2025": {
+      "minco_planner": {
+        "footprint_length": 0.581,
+        "footprint_width": 0.571,
+        "footprint_safety_margin": 0.02,
+        "reference_speed": 5.0,
+        "max_velocity": 5.0,
+        "yaw_rate_limit": 3.0,
+        "yaw_acceleration_limit": 2.0,
+        "yaw_tunnel_enabled": true,
+        "spin_enabled": true,
+        "jps_safe_distance": 0.36
+      },
+      "ats_swerve_mpc": {
+        "max_vx": 5.0,
+        "max_vy": 5.0,
+        "max_wheel_speed": 5.0,
+        "max_wz": 3.0,
+        "max_awz": 2.0,
+        "max_ax": 2.0,
+        "max_ay": 2.0,
+        "horizon": 60,
+        "dt": 0.05
+      },
+      "terrain_analysis_ext": {
+        "traversabilityOverheadHeight": 0.249
+      },
+      "ats_rog_map": {
+        "odom_layer.robot_height": 0.242,
+        "odom_layer.top_margin": 0.007
+      },
+      "chassis_vel_transform": {
+        "max_linear_speed": 5.0
+      }
+    },
+    "rmuc_2027": {
+      "minco_planner": {
+        "footprint_length": 0.581,
+        "footprint_width": 0.571,
+        "footprint_safety_margin": 0.02,
+        "reference_speed": 5.0,
+        "max_velocity": 5.0,
+        "yaw_rate_limit": 3.0,
+        "yaw_acceleration_limit": 2.0,
+        "yaw_tunnel_enabled": true,
+        "spin_enabled": true,
+        "jps_safe_distance": 0.36
+      },
+      "ats_swerve_mpc": {
+        "max_vx": 5.0,
+        "max_vy": 5.0,
+        "max_wheel_speed": 5.0,
+        "max_wz": 3.0,
+        "max_awz": 2.0,
+        "max_ax": 2.0,
+        "max_ay": 2.0,
+        "horizon": 60,
+        "dt": 0.05
+      },
+      "terrain_analysis_ext": {
+        "traversabilityOverheadHeight": 0.249
+      },
+      "ats_rog_map": {
+        "odom_layer.robot_height": 0.242,
+        "odom_layer.top_margin": 0.007
+      },
+      "chassis_vel_transform": {
+        "max_linear_speed": 5.0
+      }
+    }
+  },
+  "sensor_contract": {
+    "lidar_hz_sim": 10,
+    "imu_hz_sim": 200,
+    "max_rays_per_s": 200000,
+    "native_rays_per_frame": 20000,
+    "lio_physics_hz": 400,
+    "truth_physics_hz": 300,
+    "lidar_segment_ms": 5,
+    "threads_auto": "max(1, min(8, allowed_CPU_count // 3))",
+    "density": "1 worker: 5000 rays/frame; 2-3: 10000; >=4: 20000",
+    "mount": "chassis",
+    "clock": "sim"
+  },
+  "speed_geometry_limits": {
+    "translation_cap_mps": 5,
+    "yaw_cap_rps": 3,
+    "yaw_accel_rps2": 2,
+    "wheel_radius_m": 0.0425,
+    "wheel_ctrlrange_radps": [
+      -117.6470588235294,
+      117.6470588235294
+    ],
+    "initial_preferred_clearance_m": 0.43559212573231854,
+    "braking_distance_at_5mps_2mps2_m": 6.25,
+    "symmetric_route_start_xy": [
+      13.4,
+      2
+    ],
+    "symmetric_goal_map_xy": [
+      14.6,
+      14
+    ],
+    "symmetric_straight_distance_m": 12.059850745345068,
+    "ideal_rest_to_rest_peak_at_2mps2": 4.91118127243234
+  },
+  "checks": {
+    "current_documents": 29,
+    "local_markdown_file_links": 134,
+    "broken_local_file_links": 0,
+    "bash_blocks_syntax_checked_without_execution": 74,
+    "placeholder_bash_blocks_skipped": [
+      "AGENTS.md:block1",
+      "src/ats_sentry_nav/README.md:block4"
+    ],
+    "strict_json_files_parsed": 8,
+    "three_profile_static_crosschecks": "PASS",
+    "RViz_parameter_crosscheck": "PASS",
+    "git_diff_check_three_repos": "PASS",
+    "october_original_sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+    "new_builds": false,
+    "new_unit_tests": false,
+    "new_simulations": false,
+    "new_domains": []
+  },
+  "source_sha256": {
+    "src/ats_sentry_bringup/params/node_params.yaml": "6ec08fe96c2d4505a790d645784400b81027ce4ddd5985050d959df1a0d89e40",
+    "src/ats_sentry_bringup/launch/bringup.launch.py": "051ae898fe1381216abdb1c1334dc3630adae8c409f56319b1c87df3de6f9aac",
+    "src/ats_sentry_bringup/launch/real_robot_navigation.launch.py": "b8e391bd56be56bea37548955cde18f13900ae864620533f7801c239bfad9ff0",
+    "scripts/test_mujoco_minco_mpc_chain.sh": "71d91dda0ddca132a6d865ef23a9b8c81cad5f1e9d80f25c16dc5eaf718a6687",
+    "scripts/s3_mujoco_acceptance.py": "98fdfbcbcd9018c69db6eb58e7800981a39b6a86edf7b791559ea70c763a9c0d",
+    "src/ats_sentry_nav/minco_planner/src/nodes/minco_planner_node.cpp": "d2230d0b56f6ade9d9c7fe03f263303b681a86782abe5048419f6ffdb5404b47",
+    "src/ats_sentry_nav/minco_planner/config/minco_planner_reality.yaml": "23e75eaa20ec910124c4083cd3191ad9cfa41eac32e9dc6f50fc9aeeaaccc536",
+    "src/ats_sentry_nav/ats_swerve_mpc/config/ats_swerve_mpc.yaml": "8b68e70741e0965e6a9ada87a44e850bb5b5435ed6ae377128f4b7d07ae18b26",
+    "src/ats_sentry_nav/ats_swerve_mpc/config/ats_swerve_mpc_reality.yaml": "d7daad4d4cab466e5786e7c0f84915af4c066a02c95b56e5b3b235b7b7c8bc1f",
+    "src/ats_sentry_nav/ats_swerve_mpc/src/ats_swerve_mpc_node.cpp": "a24fd1d323512393171ed8755980c8a54d5f9d0004c08d499916dbbd7e73d52a",
+    "src/ats_sentry_nav/ats_swerve_mpc/src/se2_mpc_controller.cpp": "775c45b9998d0119237ac000204eda1de31c932f31e14dca3fda67cb1f8122c2",
+    "src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp": "4c94218e91c8daafe1fe2908c8bade6de444e27732c231683134ed5036898a45",
+    "src/ats_sentry_nav/ats_goal_manager/include/ats_goal_manager/goal_deadline.hpp": "7fc97163aac5f5f6ad63c9cdb79cb5ff3a046ae0aad9ec6c8a8c9513edad4c0c",
+    "src/ats_sentry_nav/ats_rog_map/launch/ats_rog_map.launch.py": "c742763aef34d7a3f8416603753c31a5f07bcc2d38a0bb0643c90980c302c0ee",
+    "src/ats_sentry_nav/ats_rog_map/config/rog_map_ground_planning.yaml": "134d455aa1cb483cf55a0ad1d980f099e5bc136d877dd5b477f7094707fbd553",
+    "src/ats_sentry_nav/fake_vel_transform/src/fake_vel_transform.cpp": "5b052de791a9c413b4d5c13fcb0f08db6a683f660042491a5602a980b217f656",
+    "src/ats_sentry_nav/ats_teleop_twist_joy/src/ats_teleop_twist_joy.cpp": "e686b01907d9519b3dc412708c8d82d31dbd73fa429652bdf1fd94d66f8fe2d2",
+    "src/ats_sentry_nav/small_gicp_relocalization/src/small_gicp_relocalization.cpp": "8d1686baaaab3d2b9ef6a2d329cb13e3a1f5d3d5b735eccb41a5e356ec0bed2d",
+    "src/ats_sentry_nav/small_gicp_relocalization/src/localization_fusion_node.cpp": "bd70af40f00ae6c9520489705f8c5af591caec14ff5a1be5be2b699a859a9303",
+    "src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml": "c69b04dd0c7aa75f51386885df5b2a57065a887e12b44b2d1058c31e54f4e59f",
+    "src/sim/ats_mujoco_sim/config/rmuc_2027_navigation.yaml": "134413f36511aacbc37c8019ff95aa0ef7049d06c35ad76df30bb56133b5547b",
+    "src/sim/ats_mujoco_sim/config/rog_map_lio_odom.yaml": "4fa45df8d695613bdb2daa463257a7108bf227784ddb5a8959194eb62e9d9e04",
+    "src/sim/ats_mujoco_sim/config/s3_mapping_routes.yaml": "a717584817eb790250950018b186c70a23a49f0ac1e9cfd5f0301c20841e0c0c",
+    "src/sim/ats_mujoco_sim/launch/ats_mujoco_sim.launch.py": "970d3d38d75950442fdf9b675ff3e3a4807a3fa6055f5e628d34ad210dc6e3c1",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2025_mujoco.launch.py": "693ffd6497bb4dab52ea5ebb74107f6f01af7eef7c5b861f31a5e81083c2a76c",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2026_mujoco.launch.py": "a78b8d0fe2a468a1f12baa9721d16376d3da3b510843d330d293926d1c47599f",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py": "534cd0effc56f1c702f1d796246eb1fe4cb8c6df9b2a6a19dd4ed6cd8820ed2a",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/launch_args.py": "3477c72e6cb72cb10cc0e01fe24989903a44b6af545d885b4bcc26b18fe75c7f",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/parallel_lidar.py": "8d3dcfd4215c9b66897ffd09de7ba9d5910fb3f4f759a7b60bc13358e7cab934",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/livox_scan.py": "6451e31b992bb06a419a935ddd20bf7aa72c28c5dbbd662af35f9a9aee300a97",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/model_patch.py": "af70f244acbf30d1ef9d3e4c18aae76640667e482eb6ed3b17738e4f30746bfe",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/sim_node.py": "a0ea84fb88e082518a7302343a1878ce680727218f151cdca72b401e5cc4eb43",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/twist_to_motion_ctrl.py": "bd0e2b68f248185b98ad7fff8fe85b55a61a3deba4c917d3bba6f671a8a12047",
+    "src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz": "9aed9ca56066e87b536eeaed25aad1ccb255ce30e438253a23c72cf272b95df5",
+    "src/sim/ats_mujoco_sim/models/rmuc_2027_swerve.xml": "6407ca94fa2042de87780678b39be020d03c10a83d58dc88d943db672a9a7bdd"
+  },
+  "document_sha256": {
+    "AGENTS.md": {
+      "sha256": "3f91e6de8c188cc69818be617380c277819bd27303f7658780e5008b9fffd3ae"
+    },
+    "docs/nav_acceptance/20261115_domain_ledger.md": {
+      "sha256": "0f9c046e5d92cee7f5484b1f370062a1e211c15205a2f58d98615d63ca6150f0"
+    },
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md": {
+      "sha256": "219a09ffa9890fdfd3a02cb18f6f97698b41fb1b5b5d8ac39ec9ce42b02bb6c6"
+    },
+    "docs/代码框架设计/Gazebo与当前导航接口.md": {
+      "sha256": "77e0b973433957cd3460a14cbec73e7ef0f66e864f7bbc8432f6448704c028a6"
+    },
+    "docs/代码框架设计/代码范围与目录结构.md": {
+      "sha256": "f0f5e77c41dc520257dcff5ded584545a37fb65b1cf8521b5ed646aa3dc58f87"
+    },
+    "docs/代码框架设计/仿真域说明.md": {
+      "sha256": "69736c86ab21f1c0f5b72bfcb68e6a1a74d971df18de699b70df320ab3bbb2b1"
+    },
+    "docs/代码框架设计/优化方向与验证状态.md": {
+      "sha256": "b73aeb45798d7ade10970cfe11329e6dd9efab9a6193442d9d3c1086214a55a5"
+    },
+    "docs/代码框架设计/启动入口与运行链路.md": {
+      "sha256": "2dcb74ef904c772f4fcce401e21d8ac9f96ce898e5cd83d3274b8bcb236decd0"
+    },
+    "docs/代码框架设计/导航定位与轨迹链路.md": {
+      "sha256": "706eecee56b003a9358ebac14fcd8fe75a542363e3ebeed2c13a5335988caa40"
+    },
+    "docs/代码框架设计/总览.md": {
+      "sha256": "ed26851f62ae22e358e6fc25d4927bab7d14562aeef19a34c82157275bf6c71d"
+    },
+    "docs/代码框架设计/接口消息与话题约定.md": {
+      "sha256": "543a45b4f6ed6fa5cd0be095bc326d65b971207a59fdffa8a5e019be12a4c0f2"
+    },
+    "docs/代码框架设计/构建与维护说明.md": {
+      "sha256": "339d489cffd1cb00c68d82b038ef894c3b8cd5ff9c883b9f11bb03ffd5740405"
+    },
+    "docs/代码框架设计/行为树决策链路.md": {
+      "sha256": "0600003a9a49884c116de35c07b21229ec87b337aabdd85e0ffb21b9edb8b1ac"
+    },
+    "docs/代码框架设计/视觉与串口桥说明.md": {
+      "sha256": "c8c15a3c06af213e1fa5a85d51f18dcb09879b56b5f24e03fc56e7e6e257a763"
+    },
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md": {
+      "sha256": "96dded3a8a86252ce5602525241ee553daa97f9fb23906072735f110e9593cfd"
+    },
+    "docs/运维/RMUL2027场地部署.md": {
+      "sha256": "98882a4a931e3bfa92839a414605a4ab61e809d44011cbf71aacfbd67d89b699"
+    },
+    "docs/运维/S3建图与身份闩锁恢复.md": {
+      "sha256": "bce6319d888f0837dc93b5fcbaa554ee78a8a282c239b50c459729b61888da03"
+    },
+    "src/ats_sentry_bringup/pcd/readme.md": {
+      "sha256": "7781e77dcf8c63068e9afec82456e061de280ae5ba9d6e871349478ca83bed5c"
+    },
+    "src/ats_sentry_nav/README.md": {
+      "sha256": "9692144a609f2c01b269245ab45b3baf0def45d87f3daa37ae9bf0d1a2c919c7"
+    },
+    "src/ats_sentry_nav/README_en.md": {
+      "sha256": "8a8964342a1ca7b64529b19e7e4f46db7704b7d6bed0b444fbe21faf532e31ad"
+    },
+    "src/ats_sentry_nav/ats_rog_map/README.md": {
+      "sha256": "5fa95ee82e9feb5cb07ab296f4b64890377a6a0036d57aeefeb789f31b5ca653"
+    },
+    "src/ats_sentry_nav/ats_swerve_mpc/README.md": {
+      "sha256": "9ca233479467506fbf40ccccb26fae72b17c6136d333757bffbed67385c93f66"
+    },
+    "src/ats_sentry_nav/ats_swerve_mpc/求解器.md": {
+      "sha256": "ab60f7be32402ecdd66ba078bf7e0abd788a94e10c9197d62ac720545204f9a7"
+    },
+    "src/ats_sentry_nav/ats_teleop_twist_joy/README.md": {
+      "sha256": "7c2a196407fdddbc4a8dd29b5a51e6695aff32547ba50d503e804e9cde2a61eb"
+    },
+    "src/ats_sentry_nav/fake_vel_transform/README.md": {
+      "sha256": "d290a999a03faa7d5abf600a957ec02c71e7f0aaaed173e8dd2589519d9fce12"
+    },
+    "src/ats_sentry_nav/minco_planner/README.md": {
+      "sha256": "a0c54027fe037ece00edd9a3e71db431a4f495290282e642bba44f247401ffc1"
+    },
+    "src/ats_sentry_nav/small_gicp_relocalization/README.md": {
+      "sha256": "50234a778441a51c4a5f7eba8b541728a4fc9eb17165b0a303ed37b1bad37f29"
+    },
+    "src/sim/ats_mujoco_sim/README.md": {
+      "sha256": "1c8119710481a75b76255786f0a95217b9ed416ea4c6ea0da68ba393c7eeb17a"
+    },
+    "README.md": {
+      "sha256": "04696bacf464f3e9ceed1d7bfccfdfcd34615dcb306c5cf67ca9260adb759bc8",
+      "scope": "HEAD plus this task navigation/DDS edits only; excludes concurrent user environment-install sections"
+    }
+  },
+  "historical_checkpoint_sha256": {
+    "docs/nav_acceptance/20261116_module_comparison.json": "ea971c709c2f6d7a45d50761fd955e52625c72d545878f8e08b1b004029aa79f",
+    "docs/nav_acceptance/20261116_profile_sensor_update.json": "94897ca7f79831801b8ad653546fd8913b253616339779488dcc590f36183c85",
+    "docs/nav_acceptance/20261116_2027_final_test_plan.json": "118f4b359dca79b480a661fa94f3d2f11006bc844a9c400676118e2f725ed2c5"
+  },
+  "historical_scope": "Dated checkpoint hashes and old test results describe their original point in time; their internal document/source hashes are not asserted to match later documentation-only commits. No old JSON or October original was rewritten.",
+  "not_verified": [
+    "2027 T1/T2/T3/V1/F after final behavior changes",
+    "5 m/s navigation braking/terminal accuracy and translation combined with continuous spin",
+    "full-scene runtime factor and LIO startup recovery",
+    "RViz dynamic visual observation",
+    "independent physical contact evaluation",
+    "real-robot speed measurements and H2/M/H3/P3/P4 acceptance"
+  ],
+  "preserved_user_work": [
+    "README environment/dependency installation edits are excluded from this task commit",
+    "scripts/install_build_dependencies.sh",
+    "src/sim/ats_mujoco_sim/models/.ats_mujoco_no_walls_r9bi8608.xml"
+  ]
+}

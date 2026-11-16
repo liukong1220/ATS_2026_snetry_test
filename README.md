@@ -266,47 +266,33 @@ Point-LIO (/localization, /registered_scan)
 
 ### 直接启动（推荐）
 
+以下从工作区根目录运行，先核验新domain与实际WLAN：
+
 ```bash
-cd /home/ats/ATS_2026_snetry_test
 source /opt/ros/humble/setup.bash
 source install/setup.bash
+source log/nav_acceptance/dds/wlan_env.sh
+export ROS_DOMAIN_ID="${ATS_DOMAIN:?先核验账本和宿主占用，选择新domain}"
 
-# 带 MuJoCo viewer（本机可视化，默认 RMUC 2027 场景）
-ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
-  use_viewer:=true \
-  show_viewer:=true \
-  use_rviz:=false
-
-# 无 viewer，仅开 RViz
-# ros2 launch ats_mujoco_sim rmuc_2026_mujoco.launch.py \
-#   use_viewer:=false show_viewer:=false use_rviz:=true
+# 当前RMUC 2027入口；需要图形桌面时显式打开viewer
+ros2 launch ats_mujoco_sim rmuc_2027_mujoco.launch.py \
+  localization_source:=lio lidar_threads:=0 lidar_downsample:=0 \
+  use_viewer:=true show_viewer:=true use_rviz:=false
 ```
 
-`rmuc_2026_mujoco.launch.py` 是保留旧文件名的兼容入口，现转发到 `rmuc_2027_mujoco.launch.py`：
-默认模型 `rmuc_2027_swerve.xml`、静态图 `rmuc_2027.yaml`、先验 `rmuc_2027.pcd`，出生点为基地
-`map (3.37, 9.03, z=0.465)`、yaw `0`。启动参数仍可覆盖这些默认值。
-`mujoco_navigation.launch.py` 仍转发到 **2025**；需要旧场地时请显式使用
-`rmuc_2025_mujoco.launch.py`，不要混用两个入口。
+2027入口默认出生点为`map (13.40,2.00,z=0.550)`、yaw 0，加载同源`rmuc_2027.yaml/.pcd`。LIO启用Point-LIO与地图匹配；truth默认仅用于隔离诊断，不作为最终导航验收。雷达按仿真时间10 Hz、IMU 200 Hz，自动射线密度和CPU预算见[MuJoCo说明](src/sim/ats_mujoco_sim/README.md)。
 
-2026 兼容入口默认：`use_viewer:=false`、`show_viewer:=false`、`use_rviz:=false`、
-`launch_physics:=true`、`launch_navigation:=true`、`planning_grid_owner:=rog_map`、`solver_mode:=ilqr`。
-上面的命令显式打开 viewer。定位默认是仿真真值 `localization_source:=truth`；需要 Point-LIO + GICP
-时追加 `localization_source:=lio lidar_threads:=8`，运行速度会更慢。
-
-另开终端下发目标（会驱动仿真车，确认急停可用后再执行）：
+另开终端加载同一环境、使用相同domain后，可手工发当前对称点目标：
 
 ```bash
-cd /home/ats/ATS_2026_snetry_test
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 action send_goal --feedback \
-  /ats_navigate_to_pose \
+ros2 action send_goal --feedback /ats_navigate_to_pose \
   ats_navigation_interfaces/action/NavigateToPose \
-  "{goal_pose: {header: {frame_id: map}, pose: {position: {x: 9.8, y: 11.7, z: 0.0}, orientation: {w: 1.0}}}, timeout: {sec: 300, nanosec: 0}}"
+  "{goal_pose: {header: {frame_id: map}, pose: {position: {x: 14.60, y: 14.00, z: 0.0}, orientation: {w: 1.0}}}, timeout: {sec: 300, nanosec: 0}}"
 ```
 
-两个终端必须使用同一 `ROS_DOMAIN_ID`；不要与其他仿真实例共用 domain，不使用 `77`。
-上例从默认基地前往 `map (9.8, 11.7)`，可按场地中的实际可通行区域修改目标。
+这只是手工操作示例。正式测试按[2027最终方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)录制曲线并以真值误差0.08 m判定；action成功不能代替真值通过。5 m/s是暂定上限，路径长度、制动、曲率和逐轮约束仍限制实际速度。
+
+旧`rmuc_2026_mujoco.launch.py`转发2027，但把起点改为`(3.37,9.03,0.465,0)`；`mujoco_navigation.launch.py`仍转发2025。这些兼容入口不替代本次对称点速度的明确起终点。当前2027入口默认不打开窗口；RViz默认显示车体、当前点云和传感器轴，体素/滑窗/距离场/路径调试组关闭。
 
 ### 小陀螺：为什么只启动后车和雷达不旋转？
 
@@ -460,20 +446,13 @@ frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
 ## 常见问题
 
-### CycloneDDS 报 `wlo1: does not match an available interface` 或 `rmw_create_node: failed to create domain`
+### CycloneDDS 接口不匹配
 
-`$CYCLONEDDS_URI`（通常为 `~/.ros/cyclonedds.xml`）绑定的网卡当前不在线，节点无法创建 DDS
-domain。在该文件中把网卡标为非必需，并加回环兜底（CycloneDDS 0.10.5 支持）：
+`does not match an available interface`或`rmw_create_node: failed to create domain`时，核验`CYCLONEDDS_URI`与实际在线WLAN。使用工作区`log/nav_acceptance/dds/wlan_env.sh`和`wlan.xml`，保持`ROS_LOCALHOST_ONLY=0`。旧宿主`wlo1`在当前机器不存在；2026-11-16本机XML使用`wlx500ff5500d30`，其他机器必须按实际接口配置。
 
-```xml
-<Interfaces>
-  <NetworkInterface name="wlo1" multicast="true" presence_required="false"/>
-  <NetworkInterface name="lo" multicast="true"/>
-</Interfaces>
-```
+配置缺失时按[运行输入记录](docs/nav_acceptance/20261114_runtime_inputs.json)恢复到工作区，记录路径和接口差异；不修改全局DDS配置，不退回lo掩盖WLAN问题。
 
-多实例运行时选择空闲且互不相同的 `ROS_DOMAIN_ID`（本机使用 `0–232`，不要使用 `77`），
-同一实例的 launch、RViz 与 action 客户端必须保持一致。
+每次新launch选择新domain，范围0..232，先核对[已用账本](docs/nav_acceptance/20261115_domain_ledger.md)与宿主占用，排除5、77、91/92及全部已尝试编号。launch、RViz、录制器和action客户端使用同一domain；旧示例的固定编号不能直接复用。
 
 ## 📂 目录结构
 
