@@ -366,6 +366,8 @@ terrain_analysis:
 
 terrain_analysis_ext:
   ros__parameters:
+    # 与2027 ROG车高门一致；本次用户指定统一配置，净空仍待专项验证。
+    traversabilityOverheadHeight: 0.249
     scanVoxelSize: 0.035                 # 实机主入口默认远场体素尺寸；越小细节越多，但噪声更敏感。
     decayTime: 0.30                      # 点云残留时间；过大易拖尾，过小易闪烁。
     noDecayDis: 0.0                      # 近场永久保留半径，0 表示不额外保留。
@@ -433,16 +435,9 @@ chassis_vel_transform:
     # 出口节点只做坐标转换和保护，禁止任何放大：增益恒为 1.0。
     linear_gain: 1.0
     angular_gain: 1.0
-    # 出口限幅收紧到"不松于 MPC 可行域"，理由有两条，任何一条都足以否掉原来的 4.6/3.6/4.2：
-    # 1. 物理上限。舵轮驱动 450 rpm、滚动半径 0.0425 m，单轮线速度上限
-    #    $v_{\mathrm{wheel,max}} = 450 \times \frac{2\pi}{60} \times 0.0425
-    #      = 1.6689711\ \mathrm{m/s}$，
-    #    原 max_linear_speed=4.6 高出物理能力 2.75 倍，是不可达的假限幅。
-    # 2. 判据一致性。若出口比 MPC 松，则"MPC 限幅 = 底盘实际收到的限幅"不成立，
-    #    统一判据 `/cmd_vel/selected=0 -> /motion_control=0` 的上界推导失去依据。
-    # 这里取 MPC 可行域数值：max_vx/vy=1.5、max_ax/ay=2.0、max_wz=3.0（小陀螺 3.0 rad/s，2026-11-06 用户同意）、max_awz=2.0。
-    # ATS 正式 profile 也经过本节点；出口限幅不得宽于 MPC 可行域。
-    max_linear_speed: 1.5
+    # 2026-11-16 用户指定暂按5 m/s贯通速度链；8–10 m/s能力待实测，不采用旧450 rpm推定。
+    # 与MPC/单轮5 m/s上限一致；加速度、坐标变换和失效零速保护保持。
+    max_linear_speed: 5.0
     max_linear_accel: 2.0
     max_angular_speed: 3.0
     max_angular_accel: 2.0
@@ -860,8 +855,9 @@ ats_rog_map:
     odom_layer.save_persistence_ratio: 0.8
     # Heights are relative to connected local ground, including ramps.
     odom_layer.surface_max: 0.10
-    odom_layer.robot_height: 0.255
-    odom_layer.top_margin: 0.05
+    # 用户要求各profile使用2027候选门；配置同步不代表H2净空已获证。
+    odom_layer.robot_height: 0.242
+    odom_layer.top_margin: 0.007
     odom_layer.max_ground_slope: 0.6
     odom_layer.base_ground_offset: 0.07
     odom_layer.window_x: 12.0
@@ -917,7 +913,7 @@ ats_rog_map_adapter:
     signed_distance_max_m: 2.0
     footprint_length: 0.581
     footprint_width: 0.571
-    footprint_safety_margin: 0.05
+    footprint_safety_margin: 0.02
     robot_frame: gimbal_yaw_odom
     robot_unknown_clear_radius: 0.0
     # Startup-only authorization gate for every test-only fault fixture. It must
@@ -989,17 +985,14 @@ minco_planner:
     search_clearance_cost_distance: 0.8
     astar_fallback: true
     jps_max_expanded_nodes: -1
-    # 实车 58x58 cm 足迹 + 0.05 m 余量的全 yaw 半径 hypot(0.34, 0.34) = 0.4808 m。
-    # 节点会把低于全 yaw 半径的值抬到该半径,所以这里直接写 0.48。
-    jps_safe_distance: 0.48
+    # 统一采用2027配置值；实际准入仍执行矩形足迹/方向与快照安全检查。
+    jps_safe_distance: 0.36
     publish_unsafe_trajectory: false
-    # 1.2 m/s 与 yaw_rate_limit 1.22 成对取（2026-10-31 用户决定；沙盒 5 预设 x 30 张，报告 5.1.8 C）：
-    # 1.5 / 2.0 时 14% 的运动时长单轮速超过 MPC 的 max_wheel_speed 1.669（MPC 等比缩小整个 Twist），
-    # 1.2 / 1.22 时最大轮速 1.52、超限 0%、成功率 141/150（现状 142/150，少 1 张）、速度全变差 0.53 -> 0.35，代价是用时 +15%。
-    reference_speed: 1.2
+    # 用户暂定5 m/s，实测后再标定；近障/曲率/终点限速仍有效。
+    reference_speed: 5.0
     min_segment_time: 0.05
     sample_spacing: 0.12
-    max_velocity: 2.0
+    max_velocity: 5.0
     max_acceleration: 2.5
     max_jerk: 12.0
     max_lateral_acceleration: 1.5
@@ -1060,19 +1053,15 @@ minco_planner:
     path_fillet_radius: 0.35
     path_fillet_arc_samples: 3
     yaw_mode: clearance_aware
-    # 参考 yaw 速率不能超过 ats_swerve_mpc 的 max_wz（2.0），否则 MPC 会把整个 Twist 等比缩小
-    # （v、wz 同比例，沙盒实测参考 yaw 速率峰值 2.46 -> 1.31 rad/s）。这里取 1.22，比 max_wz 更紧：
-    # 旋转越快单轮线速度越大，1.22 与 reference_speed 1.2 配合才能把轮速压在 1.669 以内（沙盒 5.1.8 C）。
-    # 只降 yaw 速率（0.44）会多出 23 个 FOOTPRINT 失败，只降平移速度（0.90）用时多 40%，所以两项成对。
-    # 不设 yaw_acceleration_limit 时 applyGoalHeading 的五次曲线峰值角加速度 5.7735*|delta|/T^2 无上限，
-    # 小角度转向会远超 max_awz。
-    yaw_rate_limit: 1.22
+    # 用户确认yaw上限3 rad/s、角加速度2 rad/s²，与MPC保持一致。
+    # 5 m/s平移与3 rad/s自旋不能同时任意取满；组合命令继续受逐轮向量限速。
+    yaw_rate_limit: 3.0
     yaw_acceleration_limit: 2.0
     # 单轮线速度时间缩放（wheel_speed_*）不启用：用户 2026-10-30 决定，速度曲线优先平滑（启用时 TV 0.50 -> 0.77，报告 5.1.6 F）。
     narrow_clearance_enter: 1.20
     narrow_clearance_exit: 1.40
     terminal_yaw_sample_period: 0.10
-    yaw_tunnel_enabled: false
+    yaw_tunnel_enabled: true
     yaw_tunnel_yaw_offset: 0.0
     yaw_tunnel_clearance_enter: 0.45
     yaw_tunnel_clearance_exit: 0.50
@@ -1083,14 +1072,14 @@ minco_planner:
     yaw_tunnel_post_release_distance: 0.31
     footprint_length: 0.581
     footprint_width: 0.571
-    footprint_safety_margin: 0.05
+    footprint_safety_margin: 0.02
     swept_max_corner_step_cells: 0.5
     body_yaw_follow_clearance: 0.55
     force_body_yaw_follow: false
     # 小陀螺参数；实车默认关闭，台架/空旷场地验证并确认后再置 true。
-    spin_enabled: false
+    spin_enabled: true
     spin_rate: 3.0
-    spin_min_clearance: 0.55
+    spin_min_clearance: 0.30
     spin_align_lookahead: 3.0
     spin_blend_rate_limit: 2.0
     spin_angular_accel: 1.5
@@ -1159,7 +1148,7 @@ ats_goal_manager:
     max_consecutive_replans: 2
     footprint_length: 0.581
     footprint_width: 0.571
-    footprint_safety_margin: 0.05
+    footprint_safety_margin: 0.02
 
 
 cmd_vel_arbiter:
@@ -1209,8 +1198,8 @@ ats_swerve_mpc:
     # 终点区限速 |v| <= d / tau（报告 5.1.10 第 1 项）：底盘对指令的响应滞后约 0.4 s（MuJoCo
     # 2025 红框 171/172 指令与真值速度互相关），容差圆内单靠降速出口仍会冲出 0.3-0.4 m 再拉回；
     # 一阶趋近在 tau > e * 滞后（约 1.1 s）时不过冲。只在终点区内、reference 终点速度为零时生效。
-    # 半径要覆盖 1.2 m/s 进区时的滞后行程加制动距离 1.2*0.4 + 1.2^2/(2*2.0) = 0.84 m；
-    # 0.5 m 时直线 domain 193/194 以 1.17 m/s 进区，仍冲过 0.14-0.15 m。
+    # 当前1 m终端区来自低速历史回归，不承担5 m/s的完整制动距离；
+    # 高速制动还依赖轨迹速度剖面与MPC预测约束，5 m/s终点效果待专项验证。
     terminal_approach_time_constant: 1.2
     terminal_approach_radius: 1.0
     # 换代宽限（报告 5.1.10 第 2 项）：同一定位 epoch 内 MINCO 新 generation 的 REFERENCE_READY
@@ -1227,7 +1216,8 @@ ats_swerve_mpc:
     cross_track_slowdown_end: 0.60
     min_reference_progress_scale: 0.10
     command_latency_compensation: 0.01
-    horizon: 30
+    # 60*0.05=3 s，覆盖5 m/s在2 m/s²下2.5 s制动时间；需运行测量求解开销。
+    horizon: 60
     dt: 0.05
     max_iterations: 6
     regularization: 1.0e-5
@@ -1239,8 +1229,8 @@ ats_swerve_mpc:
     control_weight: [0.12, 0.12, 0.08]
     # 转角段提高 wz 增量惩罚，抑制相邻周期角速度突变；与 yaw_acceleration_limit 同步为 2.0。
     control_delta_weight: [0.70, 0.70, 0.60]
-    max_vx: 1.5
-    max_vy: 1.5
+    max_vx: 5.0
+    max_vy: 5.0
     max_wz: 3.0
     max_ax: 2.0
     max_ay: 2.0
@@ -1251,10 +1241,11 @@ ats_swerve_mpc:
     wheel_radius: 0.0425
     drive_gear_ratio: 1.0
     steer_gear_ratio: 1.0
-    motor_max_rpm: 450.0
+    # 与显式5 m/s轮速一致的暂定等效转速，非电机实测铭牌值。
+    motor_max_rpm: 1348.1359885
     steer_max_rpm: 120.0
     actuator_redundancy: 1.2
-    max_wheel_speed: 1.6689711
+    max_wheel_speed: 5.0
     max_wheel_acceleration: 2.0
     max_steer_rate: 10.4719755
 

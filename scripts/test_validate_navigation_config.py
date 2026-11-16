@@ -106,6 +106,13 @@ class NavigationRvizContractTest(unittest.TestCase):
     def load_mujoco_rviz(self):
         return VALIDATOR.load_yaml(WORKSPACE / "src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz")
 
+    def test_mujoco_point_cloud_view_rejects_obscuring_debug_groups(self):
+        rviz = self.load_mujoco_rviz()
+        VALIDATOR.assert_mujoco_sensor_view(rviz)
+        VALIDATOR.named_display(rviz, "ROG-Map native voxels (local box)")["Enabled"] = True
+        with self.assertRaisesRegex(AssertionError, "disabled"):
+            VALIDATOR.assert_mujoco_sensor_view(rviz)
+
     def test_mujoco_view_may_show_rog_map_native_clouds_but_the_default_view_may_not(self):
         mujoco = self.load_mujoco_rviz()
         VALIDATOR.assert_rog_map_native_displays(mujoco, "MuJoCo RViz")

@@ -3,6 +3,7 @@
 
 import argparse
 import ast
+import math
 import sys
 from pathlib import Path
 
@@ -352,6 +353,49 @@ def assert_robot_model_display(document, description_topic: str, context: str):
     assert display["TF Prefix"] == "", f"{context} robot model must use the global TF tree"
 
 
+def assert_mujoco_sensor_view(document):
+    """Default view must not obscure chassis/sensor rotation with voxel boxes."""
+    for group in ("局部规划窗口", "距离场", "路径", "安全", "ROG-Map native voxels (local box)"):
+        assert named_display(document, group)["Enabled"] is False, f"{group} debug group must be disabled"
+    scan = single_display_for_topic(document, "/registered_scan", "MuJoCo sensor view")
+    assert scan["Enabled"] is True and scan["Style"] == "Points"
+    assert scan["Decay Time"] == 0, "sensor view must not accumulate ghost clouds"
+    axes = named_display(document, "MID360 chassis-mounted sensor axes")
+    assert axes["Enabled"] is True and axes["Reference Frame"] == "front_mid360"
+
+
+def assert_shared_profile_contract(workspace, base):
+    """Catch lower downstream limits or profile overrides of the user contract."""
+    canonical = {
+        "footprint_length": 0.581, "footprint_width": 0.571,
+        "footprint_safety_margin": 0.02,
+    }
+    current = {name: dict(value.get("ros__parameters", {})) for name, value in base.items()}
+    for profile in (None, "rmuc_2025_navigation.yaml", "rmuc_2027_navigation.yaml"):
+        if profile:
+            override = load_yaml(workspace / "src/sim/ats_mujoco_sim/config" / profile)
+            for name, value in override.items():
+                current.setdefault(name, {}).update(value.get("ros__parameters", {}))
+        for name in ("ats_rog_map_adapter", "minco_planner", "ats_goal_manager"):
+            for key, value in canonical.items():
+                assert current[name][key] == value, f"{profile or 'real'} {name}.{key} mismatch"
+        planner = current["minco_planner"]
+        assert planner["jps_safe_distance"] == 0.36
+        assert planner["yaw_tunnel_enabled"] and planner["spin_enabled"]
+        assert planner["reference_speed"] == planner["max_velocity"] == 5.0
+        assert planner["yaw_rate_limit"] == 3.0 and planner["yaw_acceleration_limit"] == 2.0
+        assert current["terrain_analysis_ext"]["traversabilityOverheadHeight"] == 0.249
+        assert current["ats_rog_map"]["odom_layer.robot_height"] == 0.242
+        assert current["ats_rog_map"]["odom_layer.top_margin"] == 0.007
+    mpc = current["ats_swerve_mpc"]
+    assert mpc["max_vx"] == mpc["max_vy"] == mpc["max_wheel_speed"] == 5.0
+    assert mpc["horizon"] * mpc["dt"] >= 5.0 / min(mpc["max_ax"], mpc["max_ay"])
+    inferred = 2 * math.pi * mpc["wheel_radius"] * mpc["motor_max_rpm"] / (
+        60 * mpc["drive_gear_ratio"] * mpc["actuator_redundancy"])
+    assert math.isclose(inferred, mpc["max_wheel_speed"], abs_tol=1e-8)
+    assert current["chassis_vel_transform"]["max_linear_speed"] == 5.0
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -368,6 +412,7 @@ def main():
         else workspace / args.params_file
     )
     document = load_yaml(params_path)
+    assert_shared_profile_contract(workspace, document)
     navigation_root_nodes = (
         "bt_navigator",
         "controller_server",
@@ -854,6 +899,7 @@ def main():
     assert_robot_model_display(mujoco_rviz, "robot_description", "MuJoCo RViz")
     assert_esdf_cloud_display(mujoco_rviz, "MuJoCo RViz")
     assert_rviz_groups_and_clearance_contours(mujoco_rviz, "MuJoCo RViz")
+    assert_mujoco_sensor_view(mujoco_rviz)
     mujoco_rviz_text = mujoco_rviz_path.read_text(encoding="utf-8")
     localization_displays = displays_for_topic(mujoco_rviz, "/localization")
     assert len(localization_displays) == 1, "MuJoCo RViz must have one localization display"
