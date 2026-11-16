@@ -4,7 +4,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Odometry
 
 
 MODULE_PATH = Path(__file__).with_name("query_occupancy_grid.py")
@@ -26,6 +26,27 @@ def make_grid(width=11, height=11, resolution=1.0):
 
 
 class FarthestFreeGoalTest(unittest.TestCase):
+    def test_estimated_start_requires_matching_frame_time_and_finite_pose(self):
+        grid = make_grid()
+        grid.header.frame_id = "odom"
+        grid.header.stamp.sec = 10
+        odometry = Odometry()
+        odometry.header.frame_id = "map"
+        odometry.header.stamp.sec = 10
+        with self.assertRaisesRegex(ValueError, "frames differ"):
+            QUERY.planning_start_from_odometry(grid, odometry)
+        odometry.header.frame_id = "odom"
+        odometry.pose.pose.position.x = 1.25
+        odometry.pose.pose.position.y = -0.75
+        self.assertEqual(QUERY.planning_start_from_odometry(grid, odometry), (1.25, -0.75))
+        odometry.header.stamp.sec = 9
+        with self.assertRaisesRegex(ValueError, "stamps differ"):
+            QUERY.planning_start_from_odometry(grid, odometry)
+        odometry.header.stamp.sec = 10
+        odometry.pose.pose.position.x = float("nan")
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            QUERY.planning_start_from_odometry(grid, odometry)
+
     def test_zero_limit_preserves_unbounded_selection(self):
         grid = make_grid()
         unlimited = QUERY.find_farthest_free(grid, 5.5, 5.5, 50, 0.0)

@@ -1616,26 +1616,16 @@ publish_fault_goal_with_motion_gate() {
 
 publish_relative_fault_goal() {
   local label="$1"
-  local pose_file="/tmp/ats_p2_fault_${label}_pose.out"
-  local current_x current_y p3_goal_x
-  capture_pose "${pose_file}" || fail "cannot capture pose for ${label}"
-  current_x="$(pose_axis "${pose_file}" x)"
-  current_y="$(pose_axis "${pose_file}" y)"
-  # nominal single 由西向东完成；故障前置段改为反向 1.80 m，复用已经通过
-  # footprint gate 的自由走廊，并给 DDS 采样与故障注入保留稳定 tracking 窗口。
-  p3_goal_x="$(awk -v x="${current_x}" 'BEGIN {printf "%.6f", x - 1.80}')"
-  publish_fault_goal_with_motion_gate "${label}" odom "${p3_goal_x}" "${current_y}" 30
+  # Historical westward/map-truth anchors assumed the 2025 corridor. Select
+  # a reachable cell in the actual snapshot frame for every 2027 injection.
+  publish_farthest_free_fault_goal "${label}" 90
 }
 
 publish_farthest_free_fault_goal() {
   local label="$1"
   local timeout_sec="${2:-90}"
-  local pose_file="/tmp/ats_p2_fault_${label}_pose.out"
   local query_error="/tmp/ats_p2_fault_${label}_farthest.err"
-  local query_output start_x start_y
-  capture_pose "${pose_file}" || fail "cannot capture pose for ${label}"
-  start_x="$(pose_axis "${pose_file}" x)"
-  start_y="$(pose_axis "${pose_file}" y)"
+  local query_output
   # 固定 1.80 m 的相对前置目标会在故障生效前自然完成：domain 226 实测该段
   # SUCCEEDED（final_distance=0.055），而 ready=false 落在注入后约 6.6 s，于是
   # 没有在飞目标可被 abort，用例只能超时。改为在同一张实时规划栅格上取"距起点
@@ -1644,8 +1634,9 @@ publish_farthest_free_fault_goal() {
   # 距离上限见 FARTHEST_GOAL_MAX_DISTANCE：无上限时"最远可达"会退化成全场最远
   # 角，其 JPS 路径过不了 MINCO 的矩形足迹门禁，前置段于是零控制量。
   query_output="$(timeout 30 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-    --topic /rog_map_adapter/planning_snapshot --timeout 10 farthest-free \
-    --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance 0.42 \
+    --topic /rog_map_adapter/planning_snapshot --timeout 10 \
+    --start-odometry-topic /localization farthest-free \
+    --threshold 100 --clearance 0.42 \
     --max-distance "${FARTHEST_GOAL_MAX_DISTANCE}" \
     2>"${query_error}")" || \
     fail "cannot select farthest free goal for ${label}: $(<"${query_error}")"
@@ -1715,15 +1706,12 @@ find_unreachable_goal() {
   clearance_floor="$(planner_clearance_floor)" || \
     fail "cannot read the planner graph-search clearance floor from ${LAUNCH_LOG}"
   UNREACHABLE_CLEARANCE_FLOOR="${clearance_floor}"
-  local pose_file="/tmp/ats_p2_fault_unreachable_pose.out"
   local query_error="/tmp/ats_p2_fault_unreachable_query.err"
-  local query_output start_x start_y
-  capture_pose "${pose_file}" || fail "cannot capture start pose for unreachable goal"
-  start_x="$(pose_axis "${pose_file}" x)"
-  start_y="$(pose_axis "${pose_file}" y)"
+  local query_output
   query_output="$(timeout 20 python3 "${WORKSPACE_DIR}/scripts/query_occupancy_grid.py" \
-    --topic /rog_map_adapter/planning_snapshot --timeout 10 unreachable \
-    --start-x "${start_x}" --start-y "${start_y}" --threshold 100 --clearance "${clearance_floor}" \
+    --topic /rog_map_adapter/planning_snapshot --timeout 10 \
+    --start-odometry-topic /localization unreachable \
+    --threshold 100 --clearance "${clearance_floor}" \
     --assume-start-traversable --blocked-fallback \
     2>"${query_error}")" || fail "cannot select free unreachable goal: $(<"${query_error}")"
   read -r UNREACHABLE_GOAL_X UNREACHABLE_GOAL_Y UNREACHABLE_GOAL_INDEX \

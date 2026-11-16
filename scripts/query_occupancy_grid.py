@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rclpy
 from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
@@ -19,9 +20,15 @@ from planning_snapshot_grid import PLANNING_SNAPSHOT_TOPIC, snapshot_to_grid
 
 
 class GridCapture(Node):
-    def __init__(self, topic):
+    def __init__(self, topic, start_odometry_topic=""):
         super().__init__("ats_occupancy_grid_query")
         self.grid = None
+        self.odometry = None
+        if start_odometry_topic:
+            self.odometry_subscription = self.create_subscription(
+                Odometry, start_odometry_topic, self._on_odometry,
+                QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT),
+            )
         qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
@@ -43,6 +50,9 @@ class GridCapture(Node):
         if self.grid is None:
             self.grid = message
 
+    def _on_odometry(self, message):
+        self.odometry = message
+
     def _on_snapshot(self, message):
         if self.grid is None:
             self.grid = snapshot_to_grid(message)
@@ -60,6 +70,8 @@ def parse_args():
         ),
     )
     parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--start-odometry-topic", default="",
+                        help="Use an estimated pose in the planning grid frame; reject frame/time mismatch")
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
     value_parser = subparsers.add_parser("value")
@@ -69,8 +81,8 @@ def parse_args():
     all_value_parser.add_argument("--value", type=int, required=True)
 
     unreachable_parser = subparsers.add_parser("unreachable")
-    unreachable_parser.add_argument("--start-x", type=float, required=True)
-    unreachable_parser.add_argument("--start-y", type=float, required=True)
+    unreachable_parser.add_argument("--start-x", type=float)
+    unreachable_parser.add_argument("--start-y", type=float)
     unreachable_parser.add_argument("--threshold", type=int, default=50)
     unreachable_parser.add_argument("--clearance", type=float, default=0.57)
     unreachable_parser.add_argument(
@@ -86,8 +98,8 @@ def parse_args():
     )
 
     farthest_parser = subparsers.add_parser("farthest-free")
-    farthest_parser.add_argument("--start-x", type=float, required=True)
-    farthest_parser.add_argument("--start-y", type=float, required=True)
+    farthest_parser.add_argument("--start-x", type=float)
+    farthest_parser.add_argument("--start-y", type=float)
     farthest_parser.add_argument("--threshold", type=int, default=50)
     farthest_parser.add_argument("--clearance", type=float, default=0.57)
     farthest_parser.add_argument("--unknown-traversable", action="store_true")
@@ -109,7 +121,28 @@ def parse_args():
     publish_unknown_parser.add_argument("--output-topic", required=True)
     publish_unknown_parser.add_argument("--count", type=int, default=3)
     publish_unknown_parser.add_argument("--period", type=float, default=0.2)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.mode in ("farthest-free", "unreachable"):
+        manual = args.start_x is not None or args.start_y is not None
+        if (args.start_odometry_topic and manual) or (
+            not args.start_odometry_topic and (args.start_x is None or args.start_y is None)
+        ):
+            parser.error("select --start-odometry-topic OR both --start-x/--start-y")
+    return args
+
+
+def planning_start_from_odometry(grid, odometry):
+    """Fault selection uses the planner's estimated frame, never map truth as odom."""
+    if not odometry or odometry.header.frame_id != grid.header.frame_id:
+        raise ValueError("fault start odometry and planning grid frames differ")
+    def stamp(header):
+        return header.stamp.sec + header.stamp.nanosec * 1e-9
+    if abs(stamp(grid.header) - stamp(odometry.header)) > 0.5:
+        raise ValueError("fault start odometry and planning grid stamps differ by >0.5s")
+    p = odometry.pose.pose.position
+    if not math.isfinite(p.x) or not math.isfinite(p.y):
+        raise ValueError("non-finite fault start odometry")
+    return p.x, p.y
 
 
 def validate_grid(grid):
@@ -375,10 +408,10 @@ def publish_unknown_copy(node, grid, output_topic, count, period):
 def main():
     args = parse_args()
     rclpy.init()
-    node = GridCapture(args.topic)
+    node = GridCapture(args.topic, args.start_odometry_topic)
     try:
         deadline = time.monotonic() + max(0.1, args.timeout)
-        while node.grid is None and time.monotonic() < deadline:
+        while (node.grid is None or (args.start_odometry_topic and node.odometry is None)) and time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.2)
         if node.grid is None:
             print("planning grid timeout", file=sys.stderr)
@@ -387,6 +420,8 @@ def main():
         if not validate_grid(grid):
             print("invalid planning grid", file=sys.stderr)
             return 3
+        if args.start_odometry_topic:
+            args.start_x, args.start_y = planning_start_from_odometry(grid, node.odometry)
 
         if args.mode == "publish-unknown":
             cell_count = publish_unknown_copy(
