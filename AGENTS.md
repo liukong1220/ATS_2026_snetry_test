@@ -17,7 +17,7 @@
 
 ### 1.1 当前状态与文档维护
 
-当前模块进度以 `docs/调研/无先验地图钻洞高速导航优化调研报告.md` 第 5 节为准，执行阶段见 5.1，最新行为验收见 9.5 / 9.8.5。2026-11-15 源码审查确认：S0/S1/S2a/S2b 已有阶段交付；S3 主干已实现、全场验收未通过；O1b 地图简化已落地；O3 钻洞部分提前实施；完整 O2/O4 及 O5 数值优化、方向后端、描述子恢复与前端 A/B 未完成。实车未验证，不按提交数或已写函数数估算总体完成百分比。
+当前模块进度以 `docs/调研/无先验地图钻洞高速导航优化调研报告.md` 第 5 节为准，执行阶段见 5.1；历史两场见9.5，11月16日行为专项见9.8.6，最新最终测试约定见9.8.7及2027最终方案。2026-11-15源码审查确认：S0/S1/S2a/S2b已有阶段交付；S3主干已实现、全场验收未通过；O1b地图简化已落地；O3钻洞部分提前实施；完整O2/O4及O5数值优化、方向后端、描述子恢复与前端A/B未完成。实车未验证，不按提交数或已写函数数估算总体完成百分比。
 
 纯文档整理与代码审查只运行引用、JSON、证据 hash 和 Git 差异等必要检查，不自动启动新的算法修改、构建或仿真；行为修改仍执行本规范的完整验证链。主报告保留结论、契约、完成状态和剩余门，逐次 domain/PID/命令/日志放专门账本与证据索引，不追加重复流水账。
 
@@ -83,7 +83,7 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 
 | 仓库 | 路径 | 主要所有权 |
 | --- | --- | --- |
-| 根仓库 | `/home/ats/ATS_2026_snetry_test` | `docs/`、`scripts/`、`src/ats_sentry_bringup`、顶层规范 |
+| 根仓库 | `/home/kongliu/文档/27`（当前工作区） | `docs/`、`scripts/`、`src/ats_sentry_bringup`、顶层规范 |
 | 导航仓库 | `src/ats_sentry_nav` | ROGMap、adapter、RC-ESDF、JPS/MINCO、MPC、导航 launch |
 | MuJoCo 仓库 | `src/sim/ats_mujoco_sim` | 仿真模型、传感器桥、MuJoCo launch |
 
@@ -166,7 +166,7 @@ generation 的证据建议区分 `ROGMap source generation`、adapter `publicati
 5. 保存失败日志并修复后重跑；建议避免把 topic 存在写成闭环通过。
 6. 最后一次影响地图、规划、安全或控制行为的源码修改后，建议重跑对应闭环；建议避免沿用该修改前的 MuJoCo 结果作为最终证据。
 7. 文档内容以已有源码与本轮实际运行证据为依据。
-8. 建议更新 `docs/nav2_to_3desdf_minco_mpc_optimization_direction.md`，分别记录 P2 已完成、未完成、红框实际结果、P3 边界和未复现性能。
+8. 更新主报告及 `docs/nav_acceptance/20261116_2027_final_test_plan.md`，分别记录 P2 已完成/未完成、2027 隧道与对称点速度实际结果、P3 边界和未复现性能。旧优化方向文件在本机不存在，不为此新建重复报告。
 
 ## 6. P2/P3 验收门禁
 
@@ -192,22 +192,19 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 - `/planner/emergency_stop` 与 `/minco/reference_path` 仍是两个独立 topic，不具备 DDS 跨 topic 原子顺序；P2 建议验证提交点重定时与恢复后旧轨迹不复活，并把结构化原子安全契约保留为后续加固项；
 - 成功到达时记录终点坐标、位置误差、MINCO 离散 footprint 冲突采样数、MuJoCo 物理接触评估结果、规划点数、reference 点数和失败/恢复次数；无独立 contact evaluator 时建议把物理接触写为“未验证”，建议避免由 `footprint_collisions=0` 推导物理碰撞为零。
 
-### 6.2 ATS 默认、历史 Nav2 与红框
+### 6.2 当前最终套件：2027 隧道与对称点速度
 
-旧 `scripts/test_mujoco_nav_chain.sh` 已在根仓 `9b1b79a` 删除，不执行不存在的入口。当前 `scripts/test_mujoco_minco_mpc_chain.sh` 的默认与红框使用 `/ats_navigate_to_pose`，类型为 `ats_navigation_interfaces/action/NavigateToPose`；runner 断言没有 Nav2 进程及 `/plan`。不要再描述为默认 `launch_nav2:=true` 或调用 Nav2 action。
+用户2026-11-16最新指令：最终测试改为2027场景真实隧道通过和初始点到场地中心对称点的导航速度测试。旧2025/2027红框保留为历史兼容，不再是当前最终套件入口或必过项。完整坐标、命令和结果字段以[2027最终测试方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)为准。
 
-ATS 默认使用 `TEST_PROFILE=default`；红框使用：
+- 隧道：`scripts/s3_mujoco_acceptance.py --profile rmuc_2027_tunnels --route tunnel_b_roundtrip`，完成真实B往返后分别运行`ramp_south`、`six_tunnels`；第7个前置`ramp_bridge`不算B通过，真实B位于第10–13点。连续次数N运行前声明，不用片段替代全路线。
+- 速度：`SCENE=rmuc_2027 TEST_PROFILE=single`，起点采用当前2027 launch默认`(13.40,2.00,0.550,0)`，以当前模型28×16m中心`(14,8)`得到目标`map (14.60,14.00)`，`GOAL_YAW=0`、`GOAL_TOLERANCE=0.08`。不依赖runner的默认2025起点，也不使用`red_box_2027`别名。
+- 速度必须经ATS导航action到达；记录参考、MPC/仲裁/底盘命令和独立真值速度曲线。5m/s只是暂定上限，实际受距离、制动、曲率和净空约束；没有高速请求段时记未触发，不以直接发底盘命令或空场d108代替导航速度通过。
+- 实际测试使用新domain、`lio`、工作区WLAN；有先验使用同源2027 PGM/PCD，无先验使用显式建图profile。2025缺先验不作为当前2027套件的前置条件。
+- 最后行为修改后重跑对应2027隧道/速度用例和2027独立P2故障矩阵；注入锚点和前置等待须逐项核验，不能仅切换`SCENE`就宣称适配或通过。
 
-```bash
-PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  TEST_PROFILE=red_box GOAL_TIMEOUT=300 scripts/test_mujoco_minco_mpc_chain.sh
-```
+旧`scripts/test_mujoco_nav_chain.sh`已删除，不执行不存在的入口。正式runner使用`/ats_navigate_to_pose`、`ats_navigation_interfaces/action/NavigateToPose`，断言没有Nav2进程和`/plan`。`PLANNING_GRID_OWNER=rog_map`仅是兼容取值，实际核验进程内adapter和唯一快照发布者；不能以变量取值或topic存在代替闭环通过。
 
-`PLANNING_GRID_OWNER=rog_map` 是现行 runner 保留的兼容取值；正式链已没有 owner 二选一入口。验收核对实际进程内 adapter 和唯一快照发布者，避免仅凭环境变量或手工 launch 宣称通过。
-
-实际验收使用独立新 domain、公共 `lio` / WLAN 环境及对应先验 PCD；2025 红框保留 `NAV_TRACKING_MAX_LAYER_PAYLOADS=3000`。最终行为修改后运行默认、2025 红框和 P2 独立故障矩阵；旧源码结果不替代。
-
-历史 Nav2 要求保留，隔离入口已补为 `scripts/nav2_compat.launch.py`、`scripts/prepare_nav2_compat.py`、`scripts/test_mujoco_nav2_compat.py`，按实际 CLI 和兼容工作区运行，不将 Nav2 加回正式 ATS 链。历史原默认 checker 的 d57 虽协议成功，额外真值门失败（0.167386 m）；d15 显式 `--strict-xy-goal-tolerance 0.05` 变体通过（0.049105 m）。两种配置分列，变体不替代原基线，也不替代两场 `lio`、ATS 默认或 P3 验收。
+历史Nav2隔离入口及d57原默认真值失败、d15严格0.05m变体通过继续归档，变体不替代原基线。2025 q2、2027 south及旧两场A–K未通过事实保留，不能因切换最终场景而标为已修复；历史兼容不自动加入当前2027最终套件。
 
 ### 6.3 P3 Nav2-free
 
@@ -220,17 +217,17 @@ P3 标记条件为同时满足以下各项：
 - MINCO 不订阅 `/plan`；
 - 目标入口不调用 `nav2_msgs/action/NavigateToPose`；
 - 自研 goal/action 支持 feedback、result、cancel、preempt、timeout；
-- 扩大矩形与红框均在自研入口下通过。
+- 2027真实隧道与对称点速度导航均在自研入口下通过，并满足本节其他条件；历史矩形/红框不替代当前套件。
 
 ### 6.4 建图模式与无先验导航（S3，部分实现，验收未通过）
 
-当前状态（2026-11-15 代码审查，最近行为验收为 11-14）：`slam:=true` 已接入身份链、建图健康判据、射线清除、odom 全局层、增长地图匹配及显式 odom 到 map 保存。导航 `e7bf500` / 仿真 `c42576a` 对应的最新两场运行均失败：2025 d17 到达 37/54 点后，第 37 段 q2 最长冲突 5 tick 跨 2 快照；2027 d14 前 7/64 点真值通过，第 8 点 south 真值 0.194165 m 超差，尽管 action 成功且该次 8 段 q1/q2 通过。两场均未完成最终保存/动态排除/重载和完整 A–K；d13 重启测试在注入前超时，不能计故障通过。完整范围与证据见报告 9.5 / 9.8.5 和 `docs/nav_acceptance/20261114_stage.json`，旧 54 点、首目标或 small_10x10 结果不替代最终两场验收。
+完整路线历史基线（2026-11-14行为、11-15审查）：`slam:=true`已接入身份链、建图健康、射线清除、odom全局层、增长图匹配及显式保存。导航`e7bf500`/仿真`c42576a`的两场均失败：2025 d17到37/54点，第37段q2最长5 tick跨2快照；2027 d14前7/64点真值通过，第8点south误差0.194165m超差，action成功仍判失败。两场未完成最终保存/动态排除/重载及完整A–K，d13在注入前超时，不能计故障通过。11月16日已同步profile/5m/s/MID360；d103/d107首批有效身份化odom前LOST、目标执行0，d108只是空场传感器/执行器通过。当前2027最终套件仍未运行通过；旧失败不清零，来源见报告9.5/9.8.5–9.8.7及对应索引。
 
 - 定位：建图期间 Point-LIO 持续提供位姿，并累积扫描形成地图。“无先验”只表示不加载先验 PCD，不表示没有定位。
 - 漂移校正：采用地图匹配（方式 3）。当前扫描与增长中的全局点云地图配准，修正写入 `map->odom`，经 `localization_fusion` 门控接受或拒绝。本阶段不做回环检测、位姿图和关键帧存储。
 - 全局静态层：固定大数组，建图模式 40×30 m、0.1 m 分辨率，原点为建图起点，留出外延和漂移余量。超出范围的观测计数并记录。
 - 计算窗口：12×12 m，跟随机器人，只服务 ESDF、JPS、MINCO。窗口移出时全局层保留，不随窗口丢弃。
-- 场地尺寸：比赛场地 28×15 m。10×10 m 只用于建图和测试场地。所有尺寸参数化，比赛配置与测试配置分开。
+- 场地尺寸：比赛概念尺寸28×15m与当前2027仿真模型/PGM的28×16m分开记录；本轮对称点计算使用实际2027模型中心(14,8)。10×10m只用于小测试，所有尺寸参数化，不据此修改比赛配置。
 - unknown：参数 `allow_unknown_goal`，只在建图模式生效，默认 `false`。开启时，目标和引导段可以穿过 unknown；已提交段必须 known-free。比赛模式保持 6.1 的 unknown 规则。
 - 保存：只写静态层中未被射线清除、且观测占比达到阈值的格，输出 PGM+YAML（符合 map_server 契约）和 PCD。动态层不保存。
 - 比赛（定位）模式：加载建图保存的 PCD 与静态层，`small_gicp_relocalization` 做先验重定位，输出 `map->odom`。比赛起点固定，重定位初值为建图起点。当前比赛入口仍保留 `use_static_map_obstacles=true` 和缺图 fail closed；“先验静态层只作引导/边界、局部障碍由实时观测决定”是 O1 的目标设计，不能写成全部模式已完成。
@@ -286,7 +283,7 @@ git diff --check
 
 - 修改文件；
 - 实际执行的命令与结果；
-- 默认回归与红框终点结果；
+- 2027隧道穿越结果与对称点速度曲线/终点真值；历史红框另列归档；
 - 路径/reference/MPC/底盘话题与唯一所有权；
 - MINCO 离散 footprint 冲突采样数、MuJoCo 物理接触评估结果和每个失败原因；
 - stale/unknown/unreachable 安全停机结果；
@@ -301,13 +298,12 @@ git diff --check
 
 - 用 `USE_RVIZ=true`（`RVIZ_DELAY_SEC` 默认 18 s）运行 `scripts/test_mujoco_minco_mpc_chain.sh`；runner 会拉起
   `src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz` 并把窗口截图存到 `/tmp/ats_minco_mpc_<profile>_<domain>_rviz.png`。
-  需要 `DISPLAY`（本机为 `:0`）。该配置已显示 `/localization`（红箭头）、`/odometry`（Point-LIO，绿箭头）、
-  `/simulation/ground_truth/odometry`（仿真真值，蓝箭头）、`/registered_scan`、静态图、规划栅格、ESDF、ROGMap 范围、
-  MINCO 路径、MPC 参考与预测、TF；新增话题时同步加进这个 `.rviz` 文件。
+  需要可用的`DISPLAY`，启动前读取当前桌面环境，不沿用旧宿主的固定值。该配置显示`/localization`（红箭头）、`/odometry`（Point-LIO，绿箭头）、
+  `/simulation/ground_truth/odometry`（仿真真值，蓝箭头）、`/registered_scan`、车辆、传感器坐标轴和TF；静态图、规划栅格、ESDF、ROGMap范围、路径及安全调试组默认关闭，可手动打开。新增话题时同步维护该`.rviz`。
 - `USE_RVIZ=true` 时 runner 同时打开 MuJoCo 自带的 3D 窗口（`USE_MUJOCO_VIEWER` 默认等于 `USE_RVIZ`，可显式设为 `false`）。
   关闭这个窗口会让仿真停止；Wayland 会话里它是原生 Wayland 窗口，`xwd` 抓不到，runner 只在 X11 窗口存在时才保存
   `/tmp/ats_minco_mpc_<profile>_<domain>_mujoco.png`，否则打印 NOTE。`mujoco_navigation.rviz` 现在还显示车辆模型（RobotModel，
-  由 `ats_robot_description/urdf/ats_sentry.urdf.xacro` 生成，只在 `/tf_static` 发布 `gimbal_yaw_odom -> part_*` 恒等边）和 ROG-Map 原生的 occ / inf_occ / unk / esdf 点云（仅仿真视图）。
+  由 `ats_robot_description/urdf/ats_sentry.urdf.xacro` 生成，只在 `/tf_static` 发布 `gimbal_yaw_odom -> part_*` 恒等边）；ROGMap原生occ/inf_occ/unk/esdf体素默认关闭，当前点云采用Points、Decay Time=0，不能再描述为默认显示灰色体素。
 - 桌面锁屏（`loginctl` 的 `LockedHint=yes`）时 MuJoCo 的原生 Wayland 窗口出不来（窗口线程一直在等合成器，日志只有"正在后台打开窗口"，没有"已启动"），RViz 的 X11 窗口虽然还能被 `xwd` 截图，但没有人能现场观察；
   这样的运行要在报告里写明"无人现场观察"，窗口的画面和稳定性记为未验证。runner 的"当前位姿"（终点判据、故障注入的起点查询）在 `lio` 模式读 map 系的 `/simulation/ground_truth/odometry`，
   不读 `/localization`（`lio` 下它是 Point-LIO 的 odom 系直通，原点在出生点下方的地面）；truth 模式仍读 `/localization`。
@@ -323,7 +319,7 @@ git diff --check
 [接口] 定义ROGMap地面数值快照与generation契约
 [适配] 融合ROGMap地面投影与2.5D可通行语义
 [安全] 固化MINCO地图快照并收敛规划急停状态
-[仿真] 切换MuJoCo规划地图唯一所有权并扩展红框验收
+[仿真] 使用2027隧道与对称点速度验收
 [文档] 记录P2已验证边界与未完成范围
 [建图] 增加建图模式全局静态层与地图匹配校正
 [规范] 建立ATS多仓导航闭环研发与验收规则
@@ -344,4 +340,4 @@ git diff --check
 - 数学公式使用规范 LaTeX：行内 `$...$`，块级 `$$...$$`。
 - 区分 `已验证`、`已实现未运行`、`推断`、`未实现`。
 - 对未验证假设标注 `[Confidence: High/Medium/Low]` 并说明证据边界。
-- 建议避免用编译通过、topic 存在或单次局部运动替代闭环与红框验收。
+- 建议避免用编译通过、topic存在、端点地图预检或单次局部运动替代2027隧道/导航速度闭环验收。

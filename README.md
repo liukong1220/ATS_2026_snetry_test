@@ -451,6 +451,10 @@ MuJoCo 在同一 `node_params.yaml` 之上叠加仿真 profile
 `map_config_file` 与显式 ROS 参数同时生效。`static_map_publisher.py` 建议保留 `/map` 的
 frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 
+当前最终验收采用[2027隧道与对称点速度方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)：
+真实B往返、南坡和六隧道；速度从当前默认起点`(13.40,2.00)`到中心对称点`(14.60,14.00)`。
+红框仅作历史兼容，当前方案尚未运行通过；`AGENTS.md`已同步同一口径。
+
 导航模块的细化配置、接口语义和 action 用法见
 [`src/ats_sentry_nav/README.md`](src/ats_sentry_nav/README.md)。
 

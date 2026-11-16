@@ -1,0 +1,225 @@
+{
+  "date": "2026-11-16",
+  "scope": "文档及规范修复；最终套件改为2027隧道和实际起点中心对称点导航速度；无代码行为修改/构建/单测/仿真",
+  "current_final_suite": [
+    "T1 tunnel_B roundtrip",
+    "T2 ramp_south",
+    "T3 six_tunnels",
+    "V1 navigation to center-symmetric point",
+    "F independent 2027 safety fault cases"
+  ],
+  "red_box": "historical compatibility only; not a current final gate or entry",
+  "coordinate_selection": {
+    "policy": "use current 2027 launch default start; central symmetry about actual model/PGM center",
+    "selection_note": "用户未提供替代坐标，已在执行前说明采用当前launch默认值",
+    "bounds_m": [
+      28.0,
+      16.0
+    ],
+    "origin_m": [
+      0.0,
+      0.0
+    ],
+    "center_m": [
+      14.0,
+      8.0
+    ],
+    "speed_start_m": [
+      13.4,
+      2.0
+    ],
+    "speed_start_z_m": 0.55,
+    "speed_goal_m": [
+      14.6,
+      14.0
+    ],
+    "goal_frame": "map",
+    "start_goal_yaw_rad": 0,
+    "speed_final_truth_tolerance_m": 0.08,
+    "tunnel_route_start": [
+      3.37,
+      9.03,
+      0.465,
+      0.0
+    ],
+    "geometry_is_competition_28x15": false
+  },
+  "static_preflight": {
+    "endpoint_footprints": [
+      {
+        "name": "start",
+        "xy": [
+          13.4,
+          2.0
+        ],
+        "yaw": 0,
+        "covered_cells": 196,
+        "occupied_or_unknown_cells": 0
+      },
+      {
+        "name": "goal",
+        "xy": [
+          14.6,
+          14.0
+        ],
+        "yaw": 0,
+        "covered_cells": 196,
+        "occupied_or_unknown_cells": 0
+      }
+    ],
+    "circle_connectivity_diagnostics": [
+      {
+        "circle_radius_m": 0,
+        "raster_radius_cells": 0,
+        "labels": [
+          1,
+          1
+        ],
+        "connected": true
+      },
+      {
+        "circle_radius_m": 0.3055,
+        "raster_radius_cells": 7,
+        "labels": [
+          2,
+          0
+        ],
+        "connected": false
+      },
+      {
+        "circle_radius_m": 0.43559212573231854,
+        "raster_radius_cells": 9,
+        "labels": [
+          0,
+          0
+        ],
+        "connected": false
+      }
+    ],
+    "limitation": "center-cell connectivity and free endpoint footprints do not prove SE2/3D route feasibility; circle inflation/rounding failure is diagnostic only",
+    "runtime_acceptance": false
+  },
+  "speed_interpretation": {
+    "provisional_cap_mps": 5,
+    "distance_straight_m": 12.059850745345068,
+    "symmetric_acceleration_deceleration_mps2": 2,
+    "ideal_distance_to_accelerate_and_brake_at_5mps_m": 12.5,
+    "ideal_straight_rest_to_rest_peak_mps": 4.91118127243234,
+    "plateau_requirement": "no forced 5 m/s on a geometrically or dynamically limited path; report reference, command and truth curves; unexercised capability stays unverified"
+  },
+  "route_waypoint_counts": {
+    "tunnel_b_roundtrip": 13,
+    "ramp_south": 13,
+    "six_tunnels": 42
+  },
+  "actual_B_goal_indices_1_based": [
+    10,
+    11,
+    12,
+    13
+  ],
+  "ramp_bridge_goal_7_is_B_acceptance": false,
+  "implementation_boundary": {
+    "existing_cli_reused": true,
+    "speed_profile": "SCENE=rmuc_2027 TEST_PROFILE=single",
+    "speed_frame_environment": "P3_GOAL_FRAME=map",
+    "footprint_recording_yaml": "src/ats_sentry_bringup/params/node_params.yaml (only length/width/margin, matching merged 2027 values)",
+    "new_speed_analyzer_implemented": false,
+    "new_test_run": false,
+    "new_ROS_domain_allocated": false,
+    "new_code_build_or_unit_tests": false
+  },
+  "previous_behavior_results": "docs/nav_acceptance/20261116_profile_sensor_update.json (checkpoint before this documentation revision)",
+  "historical_failures_retained": [
+    "2025 d17 q2",
+    "2027 d14 south truth error",
+    "d13 no actual fault injection",
+    "d103/d107 startup LOST",
+    "H2/M/H3 not accepted"
+  ],
+  "current_prerequisites": [
+    "2027 matching assets and source/install consistency",
+    "resolve startup before first valid identified odometry; keep existing fail-safe health gates",
+    "WLAN, legal new domain and graph/ownership proof"
+  ],
+  "2025_missing_prior_blocks_current_2027_suite": false,
+  "source_hashes": {
+    "src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py": {
+      "sha256": "534cd0effc56f1c702f1d796246eb1fe4cb8c6df9b2a6a19dd4ed6cd8820ed2a",
+      "bytes": 7420
+    },
+    "src/ats_sentry_bringup/map/rmuc_2027.yaml": {
+      "sha256": "a93feb59474dca194d190ff28707a55bd6e5ad5f12b740a60efa0b1049854a25",
+      "bytes": 113
+    },
+    "src/ats_sentry_bringup/map/rmuc_2027.pgm": {
+      "sha256": "8b578562011c59e4555e22e00db7a829186aebdceff7c83b01f9d4ec7af81ed5",
+      "bytes": 179215
+    },
+    "src/sim/ats_mujoco_sim/config/s3_mapping_routes.yaml": {
+      "sha256": "a717584817eb790250950018b186c70a23a49f0ac1e9cfd5f0301c20841e0c0c",
+      "bytes": 10046
+    },
+    "src/sim/ats_mujoco_sim/models/rmuc_2027_swerve.xml": {
+      "sha256": "6407ca94fa2042de87780678b39be020d03c10a83d58dc88d943db672a9a7bdd",
+      "bytes": 13367
+    },
+    "scripts/test_mujoco_minco_mpc_chain.sh": {
+      "sha256": "71d91dda0ddca132a6d865ef23a9b8c81cad5f1e9d80f25c16dc5eaf718a6687",
+      "bytes": 147244
+    },
+    "scripts/s3_mujoco_acceptance.py": {
+      "sha256": "98fdfbcbcd9018c69db6eb58e7800981a39b6a86edf7b791559ea70c763a9c0d",
+      "bytes": 49056
+    }
+  },
+  "document_hashes": {
+    "AGENTS.md": {
+      "sha256": "3caec483c66647160f8bd582dc2469c497e8ce42adb155b78368fa2f18963d5b",
+      "bytes": 33267
+    },
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md": {
+      "sha256": "3b13fa1460f0b1833413445a83441805c86bddfac4efc270d7676d68a1e15e96",
+      "bytes": 66062
+    },
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md": {
+      "sha256": "219a09ffa9890fdfd3a02cb18f6f97698b41fb1b5b5d8ac39ec9ce42b02bb6c6",
+      "bytes": 9270
+    },
+    "src/sim/ats_mujoco_sim/README.md": {
+      "sha256": "8a015108e2e5a74fd84861a3041c98e7b8a1acc5229151c6e23314a5ae40a9ac",
+      "bytes": 49431
+    }
+  },
+  "readme_navigation_only_staging": {
+    "sha256": "79958c346b143617bc09915e56da7fa662c1ff1face8cd25d38d510325fedbc9",
+    "bytes": 27686
+  },
+  "excluded_user_changes": [
+    "README dependency/environment changes",
+    "dependencies.repos",
+    "import_workspace_repos.sh",
+    "scripts/install_build_dependencies.sh",
+    "scripts/workspace_git_ssh.py",
+    "untracked temporary MuJoCo model"
+  ],
+  "file_discovery": {
+    "active_instruction_file": "AGENTS.md",
+    "separate_agent_md_found": false
+  },
+  "status": {
+    "T1": "not run",
+    "T2": "not run",
+    "T3": "not run",
+    "V1": "not run",
+    "F": "not run"
+  },
+  "validation": {
+    "source_and_document_hashes_checked": 11,
+    "relative_document_links_checked": 48,
+    "bash_templates_syntax_checked": 3,
+    "three_repository_diff_checks": "passed",
+    "ROS_launches": 0,
+    "builds_and_unit_tests": 0
+  }
+}
