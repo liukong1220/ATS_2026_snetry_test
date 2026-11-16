@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-16",
+  "scope": "Prompt/document review only; no behavior changes, builds, unit tests, simulation or hardware operation.",
+  "request": "Check prompt ambiguities before starting a new conversation.",
+  "repository_heads_before": {
+    "root": "d8151da8db9d26daf3eb5ee09b4da1a66768068a",
+    "navigation": "8a6733c9be1fa88c65c41c986d78854cb28d572c",
+    "mujoco": "bdb022ec08b0d6b5e3e4fa71b8f7fa7bcdbe8c0c"
+  },
+  "modified_documents": [
+    "AGENTS.md",
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md"
+  ],
+  "new_artifact": "docs/nav_acceptance/20261116_prompt_clarity_review.json",
+  "default_next_conversation_task": "O1-A: 2027 LIO startup health and the first original rmuc_2027 goal, plus required regressions; not full S3.",
+  "issues": [
+    {
+      "id": "P01",
+      "ambiguity": "Document-only context could suppress later implementation",
+      "resolution": "Separate this document review from a future selected behavior task."
+    },
+    {
+      "id": "P02",
+      "ambiguity": "Copied prompts lacked an explicit report path or required extra pasted constraints",
+      "resolution": "All 11 module prompts reference the report and 9.1; 9.7 is a standalone entry."
+    },
+    {
+      "id": "P03",
+      "ambiguity": "Startup repair and full S3/A-K/O3 backlog shared one completion target",
+      "resolution": "Default O1-A is startup/first goal; O1-B full S3 and new O3 algorithms are selected separately. Required regressions remain."
+    },
+    {
+      "id": "P04",
+      "ambiguity": "Historical LOST could be assumed current or treated only with longer delays",
+      "resolution": "Reproduce on current HEAD/environment, explain non-reproduction, identify the owner; d107 already extended delays."
+    },
+    {
+      "id": "P05",
+      "ambiguity": "A ban on real-profile changes could block necessary shared-owner repairs",
+      "resolution": "Freeze physical geometry, speed targets and hardware operation; minimal shared-source fixes require impact review and regression."
+    },
+    {
+      "id": "P06",
+      "ambiguity": "A single diagnostic goal could count as V1, a full tunnel or map-quality acceptance",
+      "resolution": "Specify the original first goal and truncated-final 0.08m gate; automatic partial-map save does not prove full map quality."
+    },
+    {
+      "id": "P07",
+      "ambiguity": "5m/s cap and 1.5m/s S-curve benchmark could conflict",
+      "resolution": "Keep provisional cap 5m/s; 8-10m/s awaits measurement. O4 1.5m/s is a benchmark, not a new cap or high-speed proof."
+    },
+    {
+      "id": "P08",
+      "ambiguity": "Simulation frequency and performance latency used ambiguous clocks",
+      "resolution": "Separate ROS/simulation rates, wall-clock latency, throughput, sample counts, retry/failure accounting and maxima."
+    },
+    {
+      "id": "P09",
+      "ambiguity": "Cloud rotation and 20k points could imply repeated transforms or fabricated returns",
+      "resolution": "Raw sensor frame follows chassis; world-frame registered static points stay fixed; 20k is a ray budget and auto parameters are explicit."
+    },
+    {
+      "id": "P10",
+      "ambiguity": "P3 demanded an undeclared launch_nav2 parameter",
+      "resolution": "Require no-Nav2 source/graph behavior; pass false only to a compatibility entry that actually declares the switch."
+    },
+    {
+      "id": "P11",
+      "ambiguity": "Continuous goals could cancel final-goal stopping",
+      "resolution": "Local rolling tails remain continuous; final goals of independent actions still stop safely."
+    },
+    {
+      "id": "P12",
+      "ambiguity": "QP shadow success could silently activate a production backend",
+      "resolution": "Keep production iLQR; a production QP switch is a separately selected task with acceptance scope."
+    },
+    {
+      "id": "P13",
+      "ambiguity": "H2 and repeat count N could be bypassed or chosen after successes",
+      "resolution": "Validate H2 before new semantics, report partial gates, declare N and rationale before testing; N=1 proves only a single run."
+    },
+    {
+      "id": "P14",
+      "ambiguity": "Old temporary dependencies or checkpoint hashes could dictate current state",
+      "resolution": "Probe resolved current environment/HEAD; old dependencies are only for reproducing old artifacts; do not revert files to old hashes."
+    },
+    {
+      "id": "P15",
+      "ambiguity": "Descriptor recovery could imply a keyframe/loop-closure backend",
+      "resolution": "Store only necessary recovery metadata and map identity; no general keyframe storage, loop closure or pose graph."
+    }
+  ],
+  "validation": {
+    "module_prompts": {
+      "passed": true,
+      "count": 11,
+      "all_reference_report_and_9_1": true
+    },
+    "standalone_default_prompt": {
+      "passed": true,
+      "section": "9.7"
+    },
+    "local_markdown_links": {
+      "passed": true,
+      "count": 47
+    },
+    "bash_fence_syntax": {
+      "passed": true,
+      "count": 7,
+      "placeholder_blocks": 1,
+      "method": "bash -n after replacing AGENTS example placeholders targets/package/changed_launch_files; commands not executed"
+    },
+    "first_goal": {
+      "passed": true,
+      "start": [
+        3.37,
+        9.03,
+        0.465,
+        0.0
+      ],
+      "goal_map": [
+        5.975,
+        6.225,
+        -0.785398163
+      ],
+      "full_route_goals": 64,
+      "truncated_final_tolerance_m": 0.08,
+      "method": "YAML and runner source/AST inspection"
+    },
+    "tunnel_route_counts": {
+      "passed": true,
+      "counts": {
+        "tunnel_b_roundtrip": 13,
+        "ramp_south": 13,
+        "six_tunnels": 42
+      }
+    },
+    "runner_cli": {
+      "passed": true,
+      "required_options": [
+        "--case",
+        "--launch-arg",
+        "--max-goals",
+        "--output",
+        "--prior",
+        "--profile",
+        "--record-column-inputs",
+        "--registration-details",
+        "--reload",
+        "--route"
+      ],
+      "truncated_final_and_automatic_save_inspected": true
+    },
+    "launch_nav2_switch_absent": {
+      "passed": true,
+      "files_checked": 19,
+      "method": "source inspection, not a runtime graph check"
+    },
+    "historical_checkpoints": {
+      "passed": true,
+      "count": 4,
+      "method": "strict JSON duplicate/nonfinite check and byte equality to root HEAD"
+    },
+    "original_20261022_report": {
+      "passed": true,
+      "path": "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md",
+      "sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+      "method": "byte equality to original report in Git commit 24612e2859a5f00739d7f4677740e23c881ffe1c"
+    },
+    "git_diff_check": {
+      "passed": true,
+      "repositories": [
+        "root",
+        "navigation",
+        "mujoco"
+      ]
+    }
+  },
+  "document_hashes_before": {
+    "AGENTS.md": "3f91e6de8c188cc69818be617380c277819bd27303f7658780e5008b9fffd3ae",
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md": "96dded3a8a86252ce5602525241ee553daa97f9fb23906072735f110e9593cfd",
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md": "219a09ffa9890fdfd3a02cb18f6f97698b41fb1b5b5d8ac39ec9ce42b02bb6c6"
+  },
+  "document_hashes_after": {
+    "AGENTS.md": "96f203636d552b9b4fcfee63fc36ed7ad79a76691e0a37396394e0cf07045abb",
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md": "5b1f88eb0fbb665ad53508dbd4a3bafbb78c2a193c123cf9a5a1683605ec7fb6",
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md": "2b3096f0a795c1ce901f534f4b5e8787e67b11f579cf8aa9eecc99491ab8498b"
+  },
+  "source_input_hashes": {
+    "scripts/s3_mujoco_acceptance.py": "98fdfbcbcd9018c69db6eb58e7800981a39b6a86edf7b791559ea70c763a9c0d",
+    "src/sim/ats_mujoco_sim/config/s3_mapping_routes.yaml": "a717584817eb790250950018b186c70a23a49f0ac1e9cfd5f0301c20841e0c0c",
+    "src/ats_sentry_bringup/launch/bringup.launch.py": "051ae898fe1381216abdb1c1334dc3630adae8c409f56319b1c87df3de6f9aac",
+    "src/ats_sentry_bringup/launch/decision_vision_test.launch.py": "1a3c12144d159ffcf538eba826aebf451a9fa9e8f64e8790750f0ae6c4980504",
+    "src/ats_sentry_bringup/launch/real_robot_navigation.launch.py": "b8e391bd56be56bea37548955cde18f13900ae864620533f7801c239bfad9ff0",
+    "src/ats_sentry_nav/ats_nav_bringup/launch/prior_pcd_preflight.launch.py": "8c44fd8f0a0c6129183b56e1c624dccb9cb595eca5f1aa8de1cb8f9d707c0d11",
+    "src/ats_sentry_nav/ats_rog_map/launch/ats_rog_map.launch.py": "c742763aef34d7a3f8416603753c31a5f07bcc2d38a0bb0643c90980c302c0ee",
+    "src/ats_sentry_nav/ats_swerve_mpc/launch/ats_swerve_mpc.launch.py": "0f14b21d0ed5d5fa96b55f24431742f4af9c7ee8090f61de23eee4dd69818058",
+    "src/ats_sentry_nav/minco_planner/launch/minco_planner.launch.py": "024cfc571d54d7e881c663296c1efbe1e578790c23b750728e5118ebd5a01d62",
+    "src/ats_sentry_nav/point_lio/launch/point_lio.launch.py": "0f37e3e047e2b83a4b0dc481e61d52a08008f13509966eab3e4bc9576b4a27a7",
+    "src/ats_sentry_nav/sensor_scan_generation/launch/sensor_scan_generation.launch.py": "b3f37633981458896df512c4f1e4f918d3a0b8fb3887de6142252ad210ab84f0",
+    "src/sim/ats_mujoco_sim/launch/ats_mujoco_sim.launch.py": "970d3d38d75950442fdf9b675ff3e3a4807a3fa6055f5e628d34ad210dc6e3c1",
+    "src/sim/ats_mujoco_sim/launch/lio_localization_test.launch.py": "58970c296e63a9799943ab1177b97c351d9a4022b6e055bda23e8ca78abc7564",
+    "src/sim/ats_mujoco_sim/launch/mujoco_navigation.launch.py": "9043d251a01ba1b379c60d6233c4c539b2e05a7e776ebe2ab38882b460bec12b",
+    "src/sim/ats_mujoco_sim/launch/planner_mujoco.launch.py": "a73f14d09589bb0447ede94891cbb19b21c335ece1b930ea757d519dc7e881bb",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2025_mujoco.launch.py": "693ffd6497bb4dab52ea5ebb74107f6f01af7eef7c5b861f31a5e81083c2a76c",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2025_navigation_stack.launch.py": "1baed7db63ec2a982ce92c13b086878b8655c2d42dcce94ea806fc0f3b0f2a1f",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2025_physics.launch.py": "124956ea5e8d22a274eec9c623b33560d4559321130939cf1e10a13d282044c4",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2026_mujoco.launch.py": "a78b8d0fe2a468a1f12baa9721d16376d3da3b510843d330d293926d1c47599f",
+    "src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py": "534cd0effc56f1c702f1d796246eb1fe4cb8c6df9b2a6a19dd4ed6cd8820ed2a",
+    "src/sim/ats_mujoco_sim/launch/rmul_2027_mujoco.launch.py": "02020fde4eeb60e96adcd605e362cf34288d4067fe44955175a980c4bcdfbad0"
+  },
+  "historical_checkpoint_hashes": {
+    "docs/nav_acceptance/20261116_2027_final_test_plan.json": "118f4b359dca79b480a661fa94f3d2f11006bc844a9c400676118e2f725ed2c5",
+    "docs/nav_acceptance/20261116_documentation_sync_audit.json": "e949a1026ca986e5225e5ce90e8d55685cabefd4b076cb93b6cca1a40eb5b6e7",
+    "docs/nav_acceptance/20261116_module_comparison.json": "ea971c709c2f6d7a45d50761fd955e52625c72d545878f8e08b1b004029aa79f",
+    "docs/nav_acceptance/20261116_profile_sensor_update.json": "94897ca7f79831801b8ad653546fd8913b253616339779488dcc590f36183c85"
+  },
+  "preserved_unrelated_paths": [
+    "README.md",
+    "scripts/install_build_dependencies.sh",
+    "src/sim/ats_mujoco_sim/models/.ats_mujoco_no_walls_r9bi8608.xml"
+  ],
+  "limitations": [
+    "Static documentation/CLI/source checks only; existing navigation failures were not newly reproduced or fixed.",
+    "O1-A, full S3, H2/M/H3 and T1/T2/T3/V1/F keep existing unpassed/unverified states.",
+    "Repeat-stability N is unspecified by the existing contract; record N and rationale before running. A single run is not repeat-stability evidence.",
+    "Source hashes are checkpoint inputs and do not prove any runtime acceptance gate passed."
+  ]
+}
