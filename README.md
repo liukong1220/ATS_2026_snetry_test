@@ -434,16 +434,20 @@ MuJoCo 在同一 `node_params.yaml` 之上叠加仿真 profile
 `ats_rog_map`、`ats_rog_map_adapter`、`minco_planner`、`ats_goal_manager` 与 `terrain_analysis_ext`；
 仿真 launch 另外以内联参数指定 `cmd_vel_arbiter` 等节点的 topic。
 
-当前 2027 车体足迹为 `0.571 x 0.581 m`；隧道模式只允许 `0.571 m` 面正对隧道，实车和仿真仍使用不同安全余量：
+按用户 2026-11-16 指令，三套 profile 的车体长×宽使用实车值，余量、车高门及隧道开关使用 2027 仿真值：
 
 | 参数 | 实车 `node_params.yaml` | 仿真 `rmuc_2025_navigation.yaml` |
 | :--- | :--- | :--- |
-| `footprint_length/width` | `0.571 / 0.581` | `0.571 / 0.581` |
-| `footprint_safety_margin` | `0.05` | `0.02` |
-| `minco_planner.jps_safe_distance` | `0.54` | `0.44` |
+| `footprint_length/width` | `0.581 / 0.571` | `0.581 / 0.571` |
+| `footprint_safety_margin` | `0.02` | `0.02` |
+| ROG 车高门 / terrain 头顶门 | `0.249 / 0.249 m` | `0.249 / 0.249 m` |
+| `minco_planner.jps_safe_distance` | `0.36` | `0.36` |
+| `yaw_tunnel_enabled` / `spin_enabled` | `true / true` | `true / true` |
+| MINCO 参考/最大速度、MPC/出口平移上限 | `5.0 m/s` | `5.0 m/s` |
 
-仿真 profile 的放宽项和仿真专用开关不能直接迁入实车，每迁一项都要有仿真证据；已迁入实车的项见
-`docs/调研/无先验地图钻洞高速导航优化调研报告.md` 5.1.6 F 与 5.1.7 E。ROGMap 的正式 profile 不接受
+2027 仿真继承同组数值。5 m/s 是待实测的暂定上限；MINCO 起点保护与 MuJoCo 轮速执行器同步，yaw 上限为
+`3 rad/s`、角加速度 `2 rad/s²`。本次配置同步没有实车运行，也不代表候选车高门和全场导航已验收。当前配置与模块进度见
+[导航优化报告](docs/调研/无先验地图钻洞高速导航优化调研报告.md)第 2 节和第 5 节。ROGMap 的正式 profile 不接受
 `map_config_file` 与显式 ROS 参数同时生效。`static_map_publisher.py` 建议保留 `/map` 的
 frame、origin/yaw、resolution、占据语义和 transient-local QoS。
 

@@ -1,0 +1,819 @@
+{
+  "date": "2026-11-16",
+  "checkpoint_scope": "profile/传感器行为修改前的文档整理检查点；其中参数、源码hash及report hash均描述该时点，不能用于声称当前工作树或新行为已验证",
+  "superseded_for_current_state_by": "docs/nav_acceptance/20261116_profile_sensor_update.json",
+  "scope": "全文重写当前报告：保留与10月22日原稿的模块对照、现行架构/配置/门禁和失败证据；移除过期/重复正文并按O0–O5与后续子模块提供提示词，最小对齐README；无算法修改或新运行",
+  "review_input_heads": {
+    "root": "1bb36ae2b92b16bd268518934fc5f9af19bf9434",
+    "nav": "e7bf50023cbdeb1943f85525bc636b206dec2bb5",
+    "sim": "c42576a5687c0c347ff1b73d340ca5edbeed6034"
+  },
+  "original_report": {
+    "commit": "24612e2859a5f00739d7f4677740e23c881ffe1c",
+    "author_time": "2026-10-22T17:29:42+08:00",
+    "committer_time": "2026-10-22T17:29:42+08:00",
+    "subject": "[文档] 新增无先验地图钻洞高速导航优化调研报告",
+    "path_at_commit": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+    "local_path": "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md",
+    "git_blob": "dd241ab81a6fdeba4c26f3d31bbdb4ccf86c0199",
+    "sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+    "bytes": 52503,
+    "exact_bytes_match": true,
+    "oldest_git_version": true,
+    "text_labels_itself_version": 3,
+    "uncommitted_earlier_drafts_recoverable": false
+  },
+  "baseline_repositories": {
+    "root": {
+      "commit": "24612e2859a5f00739d7f4677740e23c881ffe1c",
+      "author_time": "2026-10-22T17:29:42+08:00",
+      "committer_time": "2026-10-22T17:29:42+08:00",
+      "subject": "[文档] 新增无先验地图钻洞高速导航优化调研报告"
+    },
+    "nav": {
+      "commit": "9e20f8f92b5231bcbee62ede0d75c1a2a8590462",
+      "author_time": "2026-10-17T19:53:11+08:00",
+      "committer_time": "2026-10-17T19:53:11+08:00",
+      "subject": "[安全] MPC 拒绝非法执行授权时间戳并进入失效停车"
+    },
+    "sim": {
+      "commit": "c89ac95c959f07c51f04471abd726d70fa042ccc",
+      "author_time": "2026-10-17T16:45:11+08:00",
+      "committer_time": "2026-10-17T16:45:11+08:00",
+      "subject": "[文档] 更新MuJoCo隧道回归说明"
+    },
+    "relationship_note": "导航/仿真取原报告时点各仓最近可追溯提交；根仓未原子锁定嵌套仓SHA，三仓组合Confidence Medium"
+  },
+  "original_modules": [
+    {
+      "original_id": "O0",
+      "original_row": "| O0 修正（低风险） | 实车打开已有分级处理：`retain_safe_reference_on_snapshot_change`、`replan_advisory_enabled`、`replan_without_stop_enabled`、`progress_along_reference`（与 MuJoCo `rmuc_2025_navigation.yaml:182-265` 对齐），补 retain/advisory/no-stop 路径单测；`installPath` 改为跨换轨保留 `last_control_` 与热启动；统一限幅（规划 `max_velocity`=MPC 1.5，启用 `wheel_speed_time_scaling_limit`≈1.6 与 `yaw_acceleration_limit`）；MPC 使用 IMU 频率 odom；关闭不进规划的 `terrain_analysis`，`terrain_ext` 降到 20 Hz；GICP `multi_guess` 仅初始化使用 | `minco_planner`、`ats_goal_manager`、`ats_swerve_mpc`、P | 换图不急停；换轨瞬间指令速度跌落 <0.2 m/s；fault matrix 仍 fail-closed |",
+      "current_section": "5.2",
+      "status": "主要修正已实现；原目标未逐项通过",
+      "findings": [
+        "分级重规划开关及控制状态保留已实现",
+        "max_velocity仍2.0；wheel时间缩放按后续决定不启用",
+        "IMU频率odom移至O5a仍欠缺",
+        "terrain_ext主循环100Hz且按新帧处理，未证明固定20Hz",
+        "LOST多猜测基线已有且继续保留",
+        "原跌速<0.2m/s及最终故障/红框缺同口径验证"
+      ]
+    },
+    {
+      "original_id": "O1",
+      "original_row": "| O1 odom 地图 | ROGMap 进程内列语义 + 增量 2D ESDF（参照 BIT `projection_layer.cpp`）；odom 系场地尺寸静态层 + 局部动态层（第 0.2 节判据）；静态 PGM 退出障碍层，仅做引导与 map 系 geofence；unknown 语义改为“已提交段必须 known-free、引导段可乐观”；地图 ready 与 `/localization/status` 解耦；建图模式入口与赛后保存静态层 | `ats_rog_map`、`ats_rog_map_adapter`、`ats_rc_esdf`、`minco_planner`（目标准入/子目标）、`mapping.sh`、bringup | 新障碍到规划器可见 p95 <150 ms；无 PGM、无 PCD 时全场可规划可避障；重定位修正时障碍不跳变 |",
+      "current_section": "5.3",
+      "status": "主干已实现；两场全场A–K未通过",
+      "findings": [
+        "新增odom全局层/列语义/增长图匹配/显式保存",
+        "栅格动静态实现，不等于对象级跟踪/速度前向膨胀",
+        "比赛模式先验障碍仍保留，规则geofence未发现实现",
+        "建图ready解除先验匹配阻塞，但保留身份/新鲜度门",
+        "增量2D ESDF未实现",
+        "原150ms与当前250ms门分列，最终实体延迟与保存重载未验收"
+      ]
+    },
+    {
+      "original_id": "O2",
+      "original_row": "| O2 滚动规划 | 10–15 Hz 重规划，起点取已提交轨迹 $t+\\Delta$ 的 p/v/a/ψ；局部目标非零末速度；地图变化走“重验 -> 分级”；输出带导数的轨迹消息；JPS 改查距离场、复用缓冲区；单次 MINCO 时间预算 ≤20 ms | `minco_planner`、`ats_goal_manager`、`ats_navigation_interfaces` | 规划耗时 p95 <30 ms；连续多目标不停车；红框通过 |",
+      "current_section": "5.5",
+      "status": "部分基础实现；完整滚动规划未完成",
+      "findings": [
+        "新起点前推p/v/a/yaw及回归存在",
+        "非零局部尾状态与带导数正式消息未实现",
+        "安全复验定时器不是10–15Hz滚动求解",
+        "A*支持复用快照距离场；JPS仍圆盘扫描",
+        "JPS/A*每次搜索仍分配数组",
+        "20ms整次规划预算/p95<30ms/连续目标不停车未通过"
+      ]
+    },
+    {
+      "original_id": "O3",
+      "original_row": "| O3 钻洞 | 第 4 节全部内容 | `minco_planner`（yaw/footprint/tunnel）、`ats_rog_map` | 2027 隧道 MuJoCo/Gazebo 连续 N 次通过且离散 footprint 冲突 =0，物理接触单独评估 |",
+      "current_section": "5.6",
+      "status": "部分提前开发；专项闭环未通过",
+      "findings": [
+        "按原第4节六项逐条对照",
+        "列语义/支撑/terrain门及矩形尺寸配置新增",
+        "矩形足迹和分段扫掠采样基线已有且源码相同",
+        "TUNNEL_FREE/PCA轴线/动力学预对齐/完整执行契约未完成",
+        "原余量一半采样要求不能由当前半格采样推导满足",
+        "H2净空、真实B/南坡/六隧道、持续自旋与H3未通过；物理接触和实车未验证"
+      ]
+    },
+    {
+      "original_id": "O4",
+      "original_row": "| O4 MPC | 延迟增广模型（一阶滞后 + 命令延迟缓冲）；轮速线性约束进 QP（小规模稠密 active-set，参照 holonomic_mpc_ekf）；沿迹/横迹权重；预测 rollout 查最新 ESDF -> SLOWDOWN/BRAKE | `ats_swerve_mpc` | 1.5 m/s S 弯横向误差 RMS 目标 <5 cm；求解 p99 <2 ms |",
+      "current_section": "5.7",
+      "status": "原计划核心升级未完成",
+      "findings": [
+        "模型和QP构造与基线逐字节相同",
+        "正式QP仍拒绝，shadow不计为新增后端",
+        "未实现执行器/延迟缓冲增广、沿横迹代价及最新ESDF预测安全",
+        "O0换轨/相位/终端修正与O4核心后端区分",
+        "1.5m/s S弯RMS<5cm、求解p99<2ms缺当前通过证据"
+      ]
+    },
+    {
+      "original_id": "O5",
+      "original_row": "| O5 定位降载 | Batch-LIO 批量更新移植（与 `point_lio` 逐段 diff）；GICP 退化门（特征值/条件数/重叠率）；必要时下位机陀螺 yaw 速度旋转 | `point_lio`、`small_gicp_relocalization`、下位机协议 | 导航全链 CPU 实测下降并记录；长走廊/隧道内无错误重定位跳变 |",
+      "current_section": "5.8–5.11",
+      "status": "低风险底座已实现；数值优化及扩展后端未完成",
+      "findings": [
+        "逐点更新/QR/VoxelGrid仍存在，Batch-LIO等数值改造未完成",
+        "GICP标量门基线已有，当前实车特征值/条件数门仍0",
+        "未接入拟议下位机yaw替换，保留后续决定的fake-yaw链",
+        "当前全链CPU可比下降及走廊/隧道定位验收欠缺",
+        "方向后端/Scan Context/前端A/B是后续细化或扩展，不倒写为初始完成项"
+      ]
+    }
+  ],
+  "later_module_lineage": {
+    "O1b": "O1后来拆出的正确性/数值场所有权/进程与话题简化工作；非原第5节独立行",
+    "O5a": "承接原O5定位降载及原O0移入的IMU频率odom",
+    "O5b": "由原O5标量退化门扩展为方向信息后端",
+    "O5c": "后续描述子全局恢复扩展；原LOST多猜测不等于Scan Context",
+    "O5d": "后续同bag前端A/B与选型细化"
+  },
+  "inherited_source_hash_check": {
+    "index": "docs/nav_acceptance/20261115_module_review.json",
+    "index_sha256": "1d5d5529a156bedea9af1526e9b06c4c886e1a053b1a3329ce1b0fb93b8a9fe2",
+    "total": 30,
+    "verified": 30,
+    "missing": [],
+    "hash_mismatches": []
+  },
+  "additional_source_files": {
+    "src/ats_sentry_nav/ats_nav_bringup/launch/navigation_launch.py": {
+      "sha256": "315b18797829ff32986cb1e6801790af2177a5246c1cd81ecdefaba271e71dae",
+      "bytes": 11504
+    },
+    "src/ats_sentry_nav/terrain_analysis_ext/src/terrainAnalysisExt.cpp": {
+      "sha256": "030ddc10dff97cc722b3695889a2b393ca30fa76905dec6bc1b9981dc7cb814b",
+      "bytes": 45195
+    },
+    "src/ats_sentry_bringup/launch/bringup.launch.py": {
+      "sha256": "051ae898fe1381216abdb1c1334dc3630adae8c409f56319b1c87df3de6f9aac",
+      "bytes": 14206
+    },
+    "src/ats_sentry_nav/ats_rog_map/include/ats_rog_map/odom_layer.hpp": {
+      "sha256": "12cc813276a8a248920ad894f33843853edadacb663f05f036428639c17b7d72",
+      "bytes": 5547
+    },
+    "src/ats_sentry_nav/minco_planner/src/planning/grid_jps.cpp": {
+      "sha256": "1334e572450aad34820820c0c1c66d77406772e4be4065fa9a3ea3b7072d78a9",
+      "bytes": 13066
+    },
+    "src/ats_sentry_nav/minco_planner/src/planning/grid_astar.cpp": {
+      "sha256": "c05ce4fb172137936fab379f0032955fdedbada8295aa62095041e479947dc4f",
+      "bytes": 13295
+    },
+    "src/ats_sentry_nav/minco_planner/include/minco_planner/planning/grid_clearance.hpp": {
+      "sha256": "4f844701338901de9fcf67049e8561a7b76805bc1f5a9622da8ef7e467104846",
+      "bytes": 9007
+    },
+    "src/ats_sentry_nav/minco_planner/src/safety/footprint_safety_checker.cpp": {
+      "sha256": "627ec9be2388c1f342a4d3b18442d8c63b6e03002564d39dcd34ab4e89748256",
+      "bytes": 7517
+    },
+    "src/ats_sentry_nav/minco_planner/test/test_footprint_swept_safety.cpp": {
+      "sha256": "feb4e7230955e6bb3d8af074cdd7f681708f50b78892a2b6292350ca5dc133c9",
+      "bytes": 7109
+    },
+    "src/ats_sentry_nav/minco_planner/src/trajectory/tunnel_yaw_alignment.cpp": {
+      "sha256": "1f268eca2deed463e58b0d5af3912e1ab47246c8943c80a2430ba23fee6d9b34",
+      "bytes": 5255
+    },
+    "src/ats_sentry_nav/minco_planner/include/minco_planner/trajectory/tunnel_yaw_alignment.hpp": {
+      "sha256": "5d22f26ac5f02579fddd73d6cd3df68c9a9d6805c2406f93fb6be5b92d44abac",
+      "bytes": 1244
+    },
+    "src/ats_sentry_nav/ats_navigation_interfaces/msg/ExecutionCommand.msg": {
+      "sha256": "3292a9a49933772bdba0cf843ad2386757129a92c76952037e777ff0f9404cde",
+      "bytes": 2048
+    },
+    "src/sim/ats_mujoco_sim/launch/rmuc_2025_mujoco.launch.py": {
+      "sha256": "e369933cde6a6b65c106b2415e45fd821d9fd99bd23f0c8c9e279b0db81145d7",
+      "bytes": 33300
+    },
+    "src/ats_sentry_nav/ats_swerve_mpc/src/se2_mpc_controller.cpp": {
+      "sha256": "775c45b9998d0119237ac000204eda1de31c932f31e14dca3fda67cb1f8122c2",
+      "bytes": 25009
+    }
+  },
+  "baseline_file_comparisons": [
+    {
+      "path": "src/ats_sentry_nav/minco_planner/src/safety/footprint_safety_checker.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "627ec9be2388c1f342a4d3b18442d8c63b6e03002564d39dcd34ab4e89748256",
+      "current_sha256": "627ec9be2388c1f342a4d3b18442d8c63b6e03002564d39dcd34ab4e89748256",
+      "identical": true
+    },
+    {
+      "path": "src/ats_sentry_nav/minco_planner/test/test_footprint_swept_safety.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "feb4e7230955e6bb3d8af074cdd7f681708f50b78892a2b6292350ca5dc133c9",
+      "current_sha256": "feb4e7230955e6bb3d8af074cdd7f681708f50b78892a2b6292350ca5dc133c9",
+      "identical": true
+    },
+    {
+      "path": "src/ats_sentry_nav/minco_planner/src/trajectory/tunnel_yaw_alignment.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "fde00a579705fc0728e99110fafe2a9536a53b7f4c5a45387991f5e3ad0d939d",
+      "current_sha256": "1f268eca2deed463e58b0d5af3912e1ab47246c8943c80a2430ba23fee6d9b34",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/minco_planner/src/planning/grid_jps.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "45a4235faf12994f92782c17b36fa3d11438b3a1aa34736fc5033c734a47d94d",
+      "current_sha256": "1334e572450aad34820820c0c1c66d77406772e4be4065fa9a3ea3b7072d78a9",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/minco_planner/src/planning/grid_astar.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "9ecf90e3b922f35fe1cbe9256881426440e61824334825ea0694317aaa45e1ce",
+      "current_sha256": "c05ce4fb172137936fab379f0032955fdedbada8295aa62095041e479947dc4f",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/minco_planner/include/minco_planner/trajectory/replan_start.hpp",
+      "baseline_exists": false,
+      "baseline_sha256": null,
+      "current_sha256": "5b99b55894481b5b21046cc008238a216111dfb22d5c85c94774ed5b064a813f",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/odom_layer.cpp",
+      "baseline_exists": false,
+      "baseline_sha256": null,
+      "current_sha256": "b91b1fb1ac4c215d49a6f1acbb6f88f3c632790de147a55338f6bb984b1d19c5",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/ground_column.cpp",
+      "baseline_exists": false,
+      "baseline_sha256": null,
+      "current_sha256": "71f2228716ef21654cb73478f74b866d2f2af19bc5030d897d18ef77b4da3bbe",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/planning/planning_map_publisher.cpp",
+      "baseline_exists": false,
+      "baseline_sha256": null,
+      "current_sha256": "a7d9badfa3eb087e75e27307432b7148e72c293f5fc9d569e726040941a5abf1",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/src/ltv_qp_problem.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "e21b69ba54c1176b3819c23c5e12dab7659abee04d4a02d8081bee417192e196",
+      "current_sha256": "e21b69ba54c1176b3819c23c5e12dab7659abee04d4a02d8081bee417192e196",
+      "identical": true
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/src/se2_model.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "5c82635d038ea91c0391ce55e4eeb3de152b095f2c8765be6a6be88af5734b76",
+      "current_sha256": "5c82635d038ea91c0391ce55e4eeb3de152b095f2c8765be6a6be88af5734b76",
+      "identical": true
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_navigation_interfaces/msg/PlanningMapSnapshot.msg",
+      "baseline_exists": true,
+      "baseline_sha256": "802a0d4b2d6de2d1131e6b84232a1a474fd01152abd3f610a93718d6192c1107",
+      "current_sha256": "e51f5b88096c952579a92487c67068aa3cec1f435e99669ceb65b67b93144b57",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/small_gicp_relocalization/src/small_gicp_relocalization.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "aec1745038496e6a21632b1043bfeb1fd7f1d44d46d6a0f9641096dc128330bc",
+      "current_sha256": "8d1686baaaab3d2b9ef6a2d329cb13e3a1f5d3d5b735eccb41a5e356ec0bed2d",
+      "identical": false
+    },
+    {
+      "path": "src/ats_sentry_nav/point_lio/src/laserMapping.cpp",
+      "baseline_exists": true,
+      "baseline_sha256": "4d074c4ed76f2a578a597c2ed5ee431580c5faaf7d33a36d31f07c4c4fb978b5",
+      "current_sha256": "4898faa1bbc77929269228840823d86991239e2a82f05e1028e6728e962a97d3",
+      "identical": false
+    }
+  ],
+  "real_robot_parameter_comparison": {
+    "path": "src/ats_sentry_bringup/params/node_params.yaml",
+    "missing_value_note": "null配合explicit=false表示YAML未显式设置，不等于代码默认值",
+    "nodes": {
+      "minco_planner": {
+        "retain_safe_reference_on_snapshot_change": {
+          "baseline": null,
+          "current": true,
+          "baseline_explicit": false,
+          "current_explicit": true
+        },
+        "replan_advisory_enabled": {
+          "baseline": null,
+          "current": true,
+          "baseline_explicit": false,
+          "current_explicit": true
+        },
+        "reference_speed": {
+          "baseline": 1.5,
+          "current": 1.2,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "max_velocity": {
+          "baseline": 2,
+          "current": 2,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "wheel_speed_time_scaling_limit": {
+          "baseline": null,
+          "current": null,
+          "baseline_explicit": false,
+          "current_explicit": false
+        },
+        "wheel_speed_time_scaling_offset": {
+          "baseline": null,
+          "current": null,
+          "baseline_explicit": false,
+          "current_explicit": false
+        },
+        "yaw_rate_limit": {
+          "baseline": 2.5,
+          "current": 1.22,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "yaw_acceleration_limit": {
+          "baseline": null,
+          "current": 2,
+          "baseline_explicit": false,
+          "current_explicit": true
+        },
+        "footprint_length": {
+          "baseline": 0.58,
+          "current": 0.581,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "footprint_width": {
+          "baseline": 0.58,
+          "current": 0.571,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "footprint_safety_margin": {
+          "baseline": 0.05,
+          "current": 0.05,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "swept_max_corner_step_cells": {
+          "baseline": 0.5,
+          "current": 0.5,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "yaw_tunnel_enabled": {
+          "baseline": null,
+          "current": false,
+          "baseline_explicit": false,
+          "current_explicit": true
+        },
+        "yaw_tunnel_pre_align_distance": {
+          "baseline": null,
+          "current": 0.53,
+          "baseline_explicit": false,
+          "current_explicit": true
+        },
+        "joint_center_clearance": {
+          "baseline": 0.54,
+          "current": 0.54,
+          "baseline_explicit": true,
+          "current_explicit": true
+        }
+      },
+      "ats_goal_manager": {
+        "replan_without_stop_enabled": {
+          "baseline": null,
+          "current": true,
+          "baseline_explicit": false,
+          "current_explicit": true
+        },
+        "progress_along_reference": {
+          "baseline": null,
+          "current": true,
+          "baseline_explicit": false,
+          "current_explicit": true
+        }
+      },
+      "ats_swerve_mpc": {
+        "odom_topic": {
+          "baseline": "/localization",
+          "current": "/localization",
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "max_vx": {
+          "baseline": 1.5,
+          "current": 1.5,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "max_vy": {
+          "baseline": 1.5,
+          "current": 1.5,
+          "baseline_explicit": true,
+          "current_explicit": true
+        }
+      },
+      "small_gicp_relocalization": {
+        "registration_mode": {
+          "baseline": "initial_guess",
+          "current": "initial_guess",
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "num_threads": {
+          "baseline": 3,
+          "current": 1,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "recovery_num_threads": {
+          "baseline": null,
+          "current": 3,
+          "baseline_explicit": false,
+          "current_explicit": true
+        },
+        "min_overlap_ratio": {
+          "baseline": 0.3,
+          "current": 0.3,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "min_information_eigenvalue": {
+          "baseline": 0,
+          "current": 0,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "max_information_condition_number": {
+          "baseline": 0,
+          "current": 0,
+          "baseline_explicit": true,
+          "current_explicit": true
+        },
+        "auto_multi_guess_on_lost": {
+          "baseline": true,
+          "current": true,
+          "baseline_explicit": true,
+          "current_explicit": true
+        }
+      }
+    }
+  },
+  "bounded_negative_searches": {
+    "geofence": {
+      "argv": [
+        "rg",
+        "-n",
+        "geofence",
+        "src/ats_sentry_nav/ats_goal_manager/src",
+        "src/ats_sentry_nav/minco_planner/src",
+        "src/ats_sentry_nav/minco_planner/include/minco_planner",
+        "src/ats_sentry_nav/ats_rog_map/src",
+        "src/ats_sentry_nav/ats_rog_map/include/ats_rog_map"
+      ],
+      "exit_code": 1,
+      "matches": [],
+      "limit": "限定生产模块的符号搜索，结合所读接口/调用点；不是对任何同义实现都不存在的证明",
+      "confidence": "Medium"
+    },
+    "dynamic_object_tracker": {
+      "argv": [
+        "rg",
+        "-n",
+        "object_tracker|Hungarian|Kalman|dynamic.*track",
+        "src/ats_sentry_nav/ats_rog_map/src",
+        "src/ats_sentry_nav/ats_rog_map/include/ats_rog_map"
+      ],
+      "exit_code": 1,
+      "matches": [],
+      "limit": "限定生产模块的符号搜索，结合所读接口/调用点；不是对任何同义实现都不存在的证明",
+      "confidence": "Medium"
+    },
+    "tunnel_free": {
+      "argv": [
+        "rg",
+        "-n",
+        "TUNNEL_FREE",
+        "src/ats_sentry_nav/ats_rog_map/src",
+        "src/ats_sentry_nav/ats_rog_map/include/ats_rog_map",
+        "src/ats_sentry_nav/minco_planner/src",
+        "src/ats_sentry_nav/minco_planner/include/minco_planner",
+        "src/ats_sentry_nav/terrain_analysis_ext/src"
+      ],
+      "exit_code": 1,
+      "matches": [],
+      "limit": "限定生产模块的符号搜索，结合所读接口/调用点；不是对任何同义实现都不存在的证明",
+      "confidence": "Medium"
+    },
+    "scan_context": {
+      "argv": [
+        "rg",
+        "-n",
+        "ScanContext|scan_context",
+        "src/ats_sentry_nav/small_gicp_relocalization",
+        "src/ats_sentry_nav/ats_navigation_interfaces"
+      ],
+      "exit_code": 1,
+      "matches": [],
+      "limit": "限定生产模块的符号搜索，结合所读接口/调用点；不是对任何同义实现都不存在的证明",
+      "confidence": "Medium"
+    },
+    "direction_interface": {
+      "argv": [
+        "rg",
+        "-n",
+        "weak_mask|weak_direction|information_matrix",
+        "src/ats_sentry_nav/ats_navigation_interfaces/msg/RelocalizationObservation.msg"
+      ],
+      "exit_code": 1,
+      "matches": [],
+      "limit": "限定生产模块的符号搜索，结合所读接口/调用点；不是对任何同义实现都不存在的证明",
+      "confidence": "Medium"
+    }
+  },
+  "historical_behavior_evidence": {
+    "index": "docs/nav_acceptance/20261115_module_review.json",
+    "total": 15,
+    "locally_verified": [],
+    "missing": [
+      "log/nav_acceptance/20261114_stage/s3_2025_d17/summary.json",
+      "log/nav_acceptance/20261114_stage/s3_2027_d14/summary.json",
+      "log/nav_acceptance/20261114_stage/s3_2027_restart_d13/summary.json",
+      "log/nav_acceptance/20261114_stage/d17_result_summary.json",
+      "log/nav_acceptance/20261114_stage/d14_spin_chain_final_summary.json",
+      "log/nav_acceptance/20261114_stage/nav2_d15/summary.json",
+      "log/nav_acceptance/20261114_stage/nav2_d57/summary.json",
+      "log/nav_acceptance/20261114_stage/local_support_trial/d171_summary.json",
+      "log/nav_acceptance/20261114_stage/local_support_trial/d173_summary.json",
+      "log/nav_acceptance/20261114_stage/local_support_final_results.log",
+      "log/nav_acceptance/20261114_stage/terminal_yaw_green_results.log",
+      "log/nav_acceptance/20261114_stage/p_results.log",
+      "log/nav_acceptance/20261114_stage/p_test.log",
+      "log/nav_acceptance/20261114_stage/near_clearance_validation.json",
+      "log/nav_acceptance/20261114_stage/final_delivery/final_source_install_audit.json"
+    ],
+    "hash_mismatches": [],
+    "interpretation": "缺失原始产物的行为结论只转引已跟踪的历史索引，本轮未在本机复验；不新增通过结论"
+  },
+  "behavior_index": {
+    "path": "docs/nav_acceptance/20261114_stage.json",
+    "sha256": "18ddce1cd6276cad90e8ac305e595854b0319b6a9fb3ec0d2ea50cc6ff17c4d1",
+    "confidence": "Medium for locally rechecking historical runtime outcomes",
+    "current_stage": "S3主干已实现、两场全场验收未通过；O3部分提前实施"
+  },
+  "new_builds": false,
+  "new_tests": false,
+  "new_ros_nodes": false,
+  "new_simulations": false,
+  "new_domain_allocations": [],
+  "real_robot": "未操作、未验证",
+  "physical_contact": "未验证",
+  "performance_gain_percentage": null,
+  "file_scope": [
+    "README.md",
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+    "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md",
+    "docs/nav_acceptance/20261116_module_comparison.json"
+  ],
+  "validation": {
+    "status": "passed",
+    "scope": "全文文档/来源/hash/引用、命令静态参数与Git范围；不是新的构建、单测或行为验收",
+    "historical_report_byte_identical": true,
+    "historical_report_git_blob_verified": true,
+    "historical_report_sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+    "source_hashes_verified": 44,
+    "prior_source_hashes_verified": 30,
+    "additional_source_hashes_verified": 14,
+    "baseline_source_files_compared": 14,
+    "historical_raw_artifacts_missing": 15,
+    "local_links_checked": 36,
+    "broken_links": [],
+    "headings_unique": true,
+    "preserved_anchor_sections": [
+      "2.1.8",
+      "5",
+      "5.1",
+      "9.5",
+      "9.8.5"
+    ],
+    "markdown_table_rows_checked": 131,
+    "original_modules_covered": 6,
+    "later_module_lineage_covered": 5,
+    "module_prompts": {
+      "O0": {
+        "section": "5.2",
+        "sha256": "ac182a359a1ecd32186aaffc225e132d6943e294e72c0ea828b2179592a751db",
+        "lines": 10
+      },
+      "O1": {
+        "section": "5.3",
+        "sha256": "8c42747c11b66b145b408f3674f7ad105e8df4396c50e844638a4eef3a210d8b",
+        "lines": 14
+      },
+      "O1b": {
+        "section": "5.4",
+        "sha256": "9d25e543322ccb47133932347566b829dadafd464ed3232bd9c0a6618088b9ba",
+        "lines": 10
+      },
+      "O2": {
+        "section": "5.5",
+        "sha256": "4933babc489ec566c905aec7b682af57031fa80b16e3b5328085f2372fcddab4",
+        "lines": 13
+      },
+      "O3": {
+        "section": "5.6",
+        "sha256": "597a3acaf1f8e942bddfb9d7afc871c46a4cb5fb874453aecc8eb6e6690f9d26",
+        "lines": 14
+      },
+      "O4": {
+        "section": "5.7",
+        "sha256": "3f81ed61c3293cfb855834ea2bfe4786d6eb583c9655910f9fbf671aa4007f03",
+        "lines": 12
+      },
+      "O5a": {
+        "section": "5.8",
+        "sha256": "71dfaa506f68eba76b08eea554c472f5dba4a3041baface708fa5eef8b87dc65",
+        "lines": 11
+      },
+      "O5b": {
+        "section": "5.9",
+        "sha256": "b0561892e6cbd75f57212e22f0b551266f2fd8f1aae8a5252af4f6084496e2ac",
+        "lines": 10
+      },
+      "O5c": {
+        "section": "5.10",
+        "sha256": "47c57f05e764e4e2cf8b196bc0adc082b405ce1e408221004690865e730c0f06",
+        "lines": 9
+      },
+      "O5d": {
+        "section": "5.11",
+        "sha256": "98b441ac369eb46516c92546f9e6d5ba2592261fc25bba03f3fa63562b67edde",
+        "lines": 9
+      }
+    },
+    "bash_templates_syntax_checked": 3,
+    "cli_options_and_named_routes_checked": true,
+    "readme_values_verified_against_yaml": true,
+    "stale_active_references_absent": [
+      "## 附录 A",
+      "/home/ats/",
+      "develop-robot-vision-navigation",
+      "20261114_resume_prompt.txt",
+      "5.1.6 F",
+      "5.1.7 E",
+      "见0.8",
+      "见第0.8"
+    ],
+    "report_sha256": "625a504d17124bfb2c6145e9ccbdce5aa642ca469729c240476cdc750628e93e",
+    "readme_sha256": "0541e0c1c38844de172dbc3940f9a470e0a50b67a58963547cc3c5d9088f6e5a",
+    "report_lines_before_refresh": 917,
+    "report_lines_after_refresh": 584,
+    "algorithm_appendix_removed_as_requested": true,
+    "repositories": {
+      "root": {
+        "head": "1bb36ae2b92b16bd268518934fc5f9af19bf9434",
+        "head_unchanged": true,
+        "diff_check": 0,
+        "status": "## develop...origin/develop\n M README.md\n M \"docs/\\350\\260\\203\\347\\240\\224/\\346\\227\\240\\345\\205\\210\\351\\252\\214\\345\\234\\260\\345\\233\\276\\351\\222\\273\\346\\264\\236\\351\\253\\230\\351\\200\\237\\345\\257\\274\\350\\210\\252\\344\\274\\230\\345\\214\\226\\350\\260\\203\\347\\240\\224\\346\\212\\245\\345\\221\\212.md\"\n?? docs/nav_acceptance/20261116_module_comparison.json\n?? \"docs/\\350\\260\\203\\347\\240\\224/\\345\\216\\206\\345\\217\\262\\347\\211\\210\\346\\234\\254/\""
+      },
+      "nav": {
+        "head": "e7bf50023cbdeb1943f85525bc636b206dec2bb5",
+        "head_unchanged": true,
+        "diff_check": 0,
+        "status": "## develop...origin/develop"
+      },
+      "sim": {
+        "head": "c42576a5687c0c347ff1b73d340ca5edbeed6034",
+        "head_unchanged": true,
+        "diff_check": 0,
+        "status": "## develop...origin/develop"
+      }
+    },
+    "changed_file_scope_verified": [
+      "README.md",
+      "docs/nav_acceptance/20261116_module_comparison.json",
+      "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md",
+      "docs/调研/无先验地图钻洞高速导航优化调研报告.md"
+    ],
+    "new_file_whitespace_checks": "passed",
+    "navigation_or_simulation_source_changed": false,
+    "commit_or_push_performed": false,
+    "command_input_hashes": {
+      "scripts/s3_mujoco_acceptance.py": "98fdfbcbcd9018c69db6eb58e7800981a39b6a86edf7b791559ea70c763a9c0d",
+      "src/sim/ats_mujoco_sim/config/s3_mapping_routes.yaml": "a717584817eb790250950018b186c70a23a49f0ac1e9cfd5f0301c20841e0c0c"
+    }
+  },
+  "previous_documentation_validation": {
+    "status": "passed",
+    "scope": "文档/来源/hash/引用及Git边界验证，不是新的构建、测试执行或行为验收",
+    "historical_report_byte_identical": true,
+    "historical_report_git_blob_verified": true,
+    "source_hashes_verified": 44,
+    "prior_source_hashes_verified": 30,
+    "additional_source_hashes_verified": 14,
+    "baseline_source_files_compared": 14,
+    "local_links_checked": 60,
+    "broken_links": [],
+    "required_headings_checked": 11,
+    "section5_table_rows_checked": 79,
+    "original_modules_covered": 6,
+    "later_module_lineage_covered": 5,
+    "algorithm_appendix_byte_identical": true,
+    "report_sha256": "63881232f84bd44d1e858fbedc32c95e960ce3ad4e7df9895c5b712c3cd94613",
+    "historical_report_sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+    "report_lines_before": 816,
+    "report_lines_after": 917,
+    "repositories": {
+      "root": {
+        "diff_check": 0,
+        "head_unchanged": true
+      },
+      "nav": {
+        "diff_check": 0,
+        "head_unchanged": true
+      },
+      "sim": {
+        "diff_check": 0,
+        "head_unchanged": true
+      }
+    },
+    "changed_file_scope_verified": [
+      "docs/nav_acceptance/20261116_module_comparison.json",
+      "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md",
+      "docs/调研/无先验地图钻洞高速导航优化调研报告.md"
+    ],
+    "new_file_whitespace_checks": "passed; git diff --no-index --check exit 1 only indicates file differences and returned no whitespace diagnostics",
+    "historical_runtime_raw_artifacts_missing": 15,
+    "navigation_or_simulation_source_changed": false,
+    "commit_or_push_performed": false
+  },
+  "full_document_refresh": {
+    "request": "整份报告对比原版后更新，清理旧报告/无效过期内容，明确当前停点，并按第5节模块提供后续优化提示词",
+    "current_stage": "O1/S3：主干已实现，两场全场验收未通过",
+    "recommended_prompt": "5.3 O1",
+    "preserved_anchor_sections": [
+      "2.1.8",
+      "5",
+      "5.1",
+      "9.5",
+      "9.8.5"
+    ],
+    "module_prompt_sections": {
+      "O0": "5.2",
+      "O1": "5.3",
+      "O1b": "5.4",
+      "O2": "5.5",
+      "O3": "5.6",
+      "O4": "5.7",
+      "O5a": "5.8",
+      "O5b": "5.9",
+      "O5c": "5.10",
+      "O5d": "5.11"
+    },
+    "common_prompt_constraints": "9.1",
+    "removed_from_current_report": [
+      "重复的历史试跑流水、失效章节交叉引用和旧宿主绝对路径",
+      "已被后续决定替代的默认方案，旧的CPU/时延基准和参考项目自述收益",
+      "22节旧算法长附录中的过期状态、未落实的参考默认参数和旧提示词入口",
+      "依赖本会话未提供skill的后续操作要求"
+    ],
+    "retained_in_current_report": [
+      "原始O0–O5目标及后续O1b/O5a–d来源、真实增量与尚欠缺项",
+      "现行地图/时间/坐标/身份/执行/安全契约、profile差异及失效零速",
+      "2025 q2、2027 south、d13未注入及H2/T/M/Y/H3未完成事实",
+      "当前A–K与默认/红框/P2/历史Nav2边界，原始与后续授权门分列",
+      "10份模块提示词、共同约束、静态核对的后续命令模板和证据缺失限制"
+    ],
+    "historical_algorithm_appendix_preserved_in_current_report": false,
+    "historical_materials_note": "10月22日原稿逐字节不变；旧主文与长附录可由根仓既有Git版本取回；11月14/15索引与旧提示词归档保持原样。previous_documentation_validation记录本轮全文重写前的局部第5节整理检查，非当前正文验证。",
+    "retired_as_current_entry": "docs/nav_acceptance/20261114_resume_prompt.txt",
+    "readme_alignment": [
+      "footprint_length/width按源码修正为0.581/0.571",
+      "实车minco_planner.jps_safe_distance按源码修正为0.48",
+      "旧5.1.6 F/5.1.7 E引用替换为当前报告第2/5节"
+    ],
+    "report_lines_before_refresh": 917,
+    "report_lines_after_refresh": 584,
+    "behavior_changes": false,
+    "new_runtime_acceptance": false,
+    "current_report_sha256": "625a504d17124bfb2c6145e9ccbdce5aa642ca469729c240476cdc750628e93e"
+  }
+}

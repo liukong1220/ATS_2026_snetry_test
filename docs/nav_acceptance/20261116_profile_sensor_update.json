@@ -1,0 +1,835 @@
+{
+  "date": "2026-11-16",
+  "scope": "用户追加的三套profile、5 m/s速度链、MID360仿真/CPU分配/点云视图专项；保留S3与实车未通过边界",
+  "preceding_documentation_checkpoint": "docs/nav_acceptance/20261116_module_comparison.json",
+  "original_report_unchanged": {
+    "commit": "24612e2859a5f00739d7f4677740e23c881ffe1c",
+    "path": "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md",
+    "exact_git_bytes_verified": true,
+    "sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+    "bytes": 52503
+  },
+  "rollback_heads": {
+    "root": "1bb36ae2b92b16bd268518934fc5f9af19bf9434",
+    "nav": "e7bf50023cbdeb1943f85525bc636b206dec2bb5",
+    "sim": "c42576a5687c0c347ff1b73d340ca5edbeed6034"
+  },
+  "behavior_commits": {
+    "root": "6bea4b856a5913ef5cf80c65d940699c444476fa",
+    "nav": "f7eb82a3a55dbf8d63563dd5e74041a464897c1d",
+    "sim": "e286e824524cdba62a82239a2f3994d88635d8d4"
+  },
+  "branch": "develop",
+  "root_document_commit": "the commit containing this index; not self-referenced",
+  "done": {
+    "profiles_synchronized": true,
+    "legacy_minco_initial_speed_cap_removed": true,
+    "mujoco_velocity_actuator_range_updated": true,
+    "mid360_cadence_and_ray_budget_updated": true,
+    "chassis_mount_default": true,
+    "rviz_configuration_simplified": true,
+    "navigation_acceptance_passed": false,
+    "real_robot_operated": false
+  },
+  "shared_profile": {
+    "profiles": [
+      "real",
+      "rmuc_2025",
+      "rmuc_2027"
+    ],
+    "footprint_length_m": 0.581,
+    "footprint_width_m": 0.571,
+    "footprint_margin_m": 0.02,
+    "rog_robot_height_m": 0.242,
+    "rog_top_margin_m": 0.007,
+    "terrain_overhead_height_m": 0.249,
+    "jps_safe_distance_config_m": 0.36,
+    "preferred_search_clearance_runtime_m": 0.43559212573231854,
+    "runtime_clearance_note": "原有全航向半径保护及无路放宽阶梯保持；YAML配置值不等于所有阶段的实际净空",
+    "yaw_tunnel_enabled": true,
+    "spin_enabled": true,
+    "reference_speed_mps": 5.0,
+    "max_velocity_mps": 5.0,
+    "yaw_rate_radps": 3.0,
+    "yaw_acceleration_radps2": 2.0,
+    "wheel_speed_time_scaling": "disabled per existing user decision",
+    "height_gate_acceptance": "candidate only; H2/M/H3 not passed"
+  },
+  "speed_chain": {
+    "minco_initial_state_max_speed": "follows positive max_velocity",
+    "mpc_max_vx_vy_mps": 5.0,
+    "mpc_wheel_limit_mps": 5.0,
+    "mpc_horizon_steps": 60,
+    "mpc_dt_s": 0.05,
+    "mpc_horizon_s": 3.0,
+    "linear_acceleration_mps2": 2.0,
+    "braking_time_at_5mps_s": 2.5,
+    "wheel_radius_m": 0.0425,
+    "mujoco_wheel_ctrlrange_radps": [
+      -117.6470588235294,
+      117.6470588235294
+    ],
+    "motor_max_rpm_equivalent": 1348.1359885,
+    "motor_rpm_is_measured": false,
+    "user_reported_eventual_mps": [
+      8,
+      10
+    ],
+    "actuator_force_limits_changed": false,
+    "terminal_approach_radius_m": 1.0,
+    "full_5mps_braking_and_terminal_acceptance": "not verified"
+  },
+  "lidar": {
+    "primary_spec": "https://www.livoxtech.com/cn/mid-360/specs",
+    "frame_rate_hz_sim_time": 10,
+    "typical_full_ray_rate_hz": 200000,
+    "max_rays_per_frame": 20000,
+    "project_imu_rate_hz": 200,
+    "segment_max_ms": 5,
+    "auto_threads": "one third of allowed CPU affinity, minimum 1 maximum 8",
+    "auto_density_by_threads": {
+      "1": 5000,
+      "2": 10000,
+      "4_or_more": 20000
+    },
+    "explicit_downsample_override": true,
+    "full_pattern_uniform_sampling": true,
+    "child_affinity_only": true,
+    "observed_d108_threads": 4,
+    "observed_d108_cpu_ids": [
+      8,
+      9,
+      10,
+      11
+    ],
+    "blas_omp_threads": 1,
+    "wall_clock_realtime_guaranteed": false,
+    "complex_field_performance_gain_claimed": false
+  },
+  "rviz": {
+    "enabled": [
+      "current registered scan as Points, decay=0",
+      "robot model",
+      "front_mid360 sensor axes",
+      "localization/TF diagnostics"
+    ],
+    "disabled_groups": [
+      "ROG-Map native voxels (local box)",
+      "局部规划窗口",
+      "距离场",
+      "路径",
+      "安全"
+    ],
+    "raw_mid360_optional": true,
+    "actual_screen_observed": false,
+    "reason": "all runs headless; configuration tests only"
+  },
+  "verification": {
+    "release_build": {
+      "packages": [
+        "minco_planner",
+        "ats_rog_map",
+        "ats_swerve_mpc",
+        "ats_mujoco_sim",
+        "ats_sentry_bringup"
+      ],
+      "passed": true,
+      "base_paths": "src",
+      "cmake_build_type": "Release",
+      "parallel_workers": 1,
+      "make_jobs": 4,
+      "note": "首次5包构建、后续受影响包重建均通过；ROGMap有既有CMake开发警告"
+    },
+    "cpp_tests": {
+      "minco_planner": {
+        "groups": {
+          "test_footprint_swept_safety.gtest.xml": {
+            "tests": 7,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          },
+          "test_minco_planner_node_ongrid.gtest.xml": {
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          },
+          "test_minco_trajectory_optimizer.gtest.xml": {
+            "tests": 18,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          },
+          "test_replan_start.gtest.xml": {
+            "tests": 8,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          }
+        },
+        "tests": 42,
+        "failures": 0
+      },
+      "ats_swerve_mpc": {
+        "groups": {
+          "test_emergency_stop_watchdog.gtest.xml": {
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          },
+          "test_se2_model.gtest.xml": {
+            "tests": 3,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          },
+          "test_se2_mpc_controller.gtest.xml": {
+            "tests": 13,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          },
+          "test_trajectory_tracker.gtest.xml": {
+            "tests": 15,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          },
+          "test_zero_speed_guard.gtest.xml": {
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "disabled": 0
+          }
+        },
+        "tests": 35,
+        "failures": 0
+      }
+    },
+    "python_sensor_tests": {
+      "passed": 43,
+      "failed": 0,
+      "log": "log/nav_acceptance/20261116_profile_sensor/pytest_last_behavior.log"
+    },
+    "root_config_regressions": {
+      "passed": 17,
+      "failed": 0,
+      "log": "log/nav_acceptance/20261116_profile_sensor/config_validation_final.log"
+    },
+    "python_compile_files": 16,
+    "yaml_rviz_parsed": 8,
+    "launch_show_args": [
+      "ats_mujoco_sim.launch.py",
+      "rmuc_2025_mujoco.launch.py",
+      "rmuc_2027_mujoco.launch.py"
+    ],
+    "whole_package_lint_pass_claimed": false,
+    "three_repo_diff_check": "passed",
+    "reproduction_commands": [
+      "source log/nav_acceptance/20261116_profile_sensor/runtime_env.sh",
+      "MAKEFLAGS=-j4 colcon build --base-paths src --packages-select minco_planner ats_rog_map ats_swerve_mpc ats_mujoco_sim ats_sentry_bringup --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=Release",
+      "python3 scripts/validate_navigation_config.py && python3 scripts/test_validate_navigation_config.py",
+      "/tmp/ats27_mujoco_env/bin/python -m pytest src/sim/ats_mujoco_sim/test/test_lio_sensor_models.py src/sim/ats_mujoco_sim/test/test_parallel_lidar.py src/sim/ats_mujoco_sim/test/test_navigation_launch_defaults.py src/sim/ats_mujoco_sim/test/test_wheel_velocity_limit.py -q",
+      "colcon test --base-paths src --packages-select minco_planner --ctest-args -R test_minco_trajectory_optimizer\\|test_replan_start\\|test_minco_planner_node_ongrid\\|test_footprint_swept_safety",
+      "colcon test --base-paths src --packages-select ats_swerve_mpc --ctest-args -R test_se2_mpc_controller\\|test_trajectory_tracker\\|test_zero_speed_guard\\|test_se2_model\\|test_emergency_stop_watchdog",
+      "ROS_DOMAIN_ID=${NEW_CHECKED_DOMAIN} python3 scripts/validate_mujoco_sensor_speed.py --output ${NEW_UNIQUE_OUTPUT} --timeout 120"
+    ]
+  },
+  "final_sensor_actuator_run": {
+    "summary_path": "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d108/summary.json",
+    "scope": "isolated sensor/actuator diagnostic; no planner, no navigation acceptance",
+    "passed": true,
+    "checks": {
+      "completed": true,
+      "sensor_frame": true,
+      "lidar_10hz_sim_time": true,
+      "imu_200hz_sim_time": true,
+      "motion_control_accepts_5mps": true,
+      "body_rotates": true,
+      "bounded_ray_budget": true
+    },
+    "error": null,
+    "domain": 108,
+    "wall_seconds": 18.851763536000362,
+    "frames": 169,
+    "imu_samples": 3400,
+    "lidar_period_median_s": 0.09999999999999964,
+    "lidar_period_max_s": 0.10000000000000142,
+    "motion_control_max_planar_mps": 5.0,
+    "truth_max_planar_mps": 5.00472855770443,
+    "truth_yaw_span_rad": 14.839018349179508,
+    "lidar_stats_tail": [
+      [
+        16.399999999999963,
+        11.962530985329067,
+        87.26828799262876,
+        16.0,
+        20000.0,
+        20.0
+      ],
+      [
+        16.499999999999964,
+        12.63338400167413,
+        87.04468599898973,
+        16.0,
+        20000.0,
+        20.0
+      ],
+      [
+        16.599999999999966,
+        12.052845006110147,
+        87.12404699690524,
+        16.0,
+        20000.0,
+        20.0
+      ],
+      [
+        16.699999999999967,
+        11.937726008909522,
+        87.49714200894232,
+        16.0,
+        20000.0,
+        20.0
+      ],
+      [
+        16.79999999999997,
+        18.26173400695552,
+        81.26790999085642,
+        16.0,
+        20000.0,
+        20.0
+      ]
+    ],
+    "physical_contact": "not evaluated",
+    "rviz": "not used"
+  },
+  "navigation_attempts": [
+    {
+      "domain": 103,
+      "passed": false,
+      "error": "RuntimeError: localization lost after odometry input",
+      "targets_executed": 0,
+      "localization_message": "initial odometry input timed out",
+      "identity_latched": false,
+      "emergency_stop": true,
+      "command_file": "log/nav_acceptance/20261116_profile_sensor/s3_2027_d103/command.json",
+      "summary_file": "log/nav_acceptance/20261116_profile_sensor/s3_2027_d103/summary.json"
+    },
+    {
+      "domain": 107,
+      "passed": false,
+      "error": "RuntimeError: localization lost after odometry input",
+      "targets_executed": 0,
+      "localization_message": "initial odometry input timed out",
+      "identity_latched": false,
+      "emergency_stop": true,
+      "command_file": "log/nav_acceptance/20261116_profile_sensor/s3_2027_d107/command.json",
+      "summary_file": "log/nav_acceptance/20261116_profile_sensor/s3_2027_d107/summary.json"
+    }
+  ],
+  "default_redbox_p2_fault_matrix": {
+    "executed": false,
+    "reason": "本机缺少真实2025先验PCD；不以2027资产或空闲占位图替代",
+    "missing_paths": [
+      "src/ats_sentry_bringup/pcd/rmuc_2025.pcd",
+      "/home/ats/ats_evidence/rmuc_2025_prior.pcd"
+    ],
+    "cases": [
+      "default",
+      "red_box",
+      "adapter_lease",
+      "service_timeout",
+      "input_stale",
+      "unknown",
+      "unreachable"
+    ]
+  },
+  "invalid_and_failed_preparations": [
+    {
+      "domain": 102,
+      "result": "empty diagnostic XML lacked production IMU sensors; zero frames"
+    },
+    {
+      "domain": 104,
+      "result": "strict mesh path preflight failed; zero frames"
+    },
+    {
+      "domain": 106,
+      "result": "stale installed launch preflight rejected before DDS/launch; rebuilt owner"
+    },
+    {
+      "domain": 101,
+      "result": "initial CTest attempts lacked isolated CycloneDDS/multiarch dependencies; final tests passed after environment restoration"
+    }
+  ],
+  "test_adjustments": [
+    "CDR alignment padding bytes are unspecified; compare round-tripped field equality instead of raw padding",
+    "common launch expected yaw cap updated from obsolete 2 to confirmed 3 rad/s; added actual sensor parameter forwarding test"
+  ],
+  "environment": {
+    "mujoco_initially_missing": true,
+    "mujoco_isolated_env": "/tmp/ats27_mujoco_env",
+    "cyclonedds_initially_missing": true,
+    "cyclonedds_isolated_root": "/tmp/ats27_cyclone_runtime",
+    "wlan_interface": "wlx500ff5500d30",
+    "old_wlo1_absent": true,
+    "rmuc_2025_prior_pcd_missing": true,
+    "systems_files_modified": false,
+    "allowed_cpu_count": 12,
+    "mujoco_version": "3.4.0",
+    "dds": "CycloneDDS 0.10.5, rmw_cyclonedds_cpp 1.3.5, extracted under /tmp; no system installation",
+    "ros_localhost_only": 0,
+    "wlan_difference": "old host wlo1 absent; actual WLAN wlx500ff5500d30 verified on host; workspace XML only",
+    "runtime_env": "log/nav_acceptance/20261116_profile_sensor/runtime_env.sh",
+    "runtime_dependencies_temporary": true,
+    "host_ports_checked": "log/nav_acceptance/20261116_profile_sensor/domain108_preflight.json"
+  },
+  "source_hashes": {
+    "scripts/test_validate_navigation_config.py": {
+      "sha256": "982ac04b484146030063ea9b89b411b34e68c187d8dfea9da783e92d1aa2a68c",
+      "bytes": 8708
+    },
+    "scripts/validate_mujoco_sensor_speed.py": {
+      "sha256": "b5f8b4a4222b564efcae45cb6a0302d496113ca80894744a54f71f6432adb46a",
+      "bytes": 8362
+    },
+    "scripts/validate_navigation_config.py": {
+      "sha256": "dbfd16c68203012de9bdfb6566349de28659dbf154aae7679e1ccf6b40d41265",
+      "bytes": 45040
+    },
+    "src/ats_sentry_bringup/params/node_params.yaml": {
+      "sha256": "6ec08fe96c2d4505a790d645784400b81027ce4ddd5985050d959df1a0d89e40",
+      "bytes": 62313
+    },
+    "src/ats_sentry_nav/ats_rog_map/config/rog_map_ground_planning.yaml": {
+      "sha256": "134d455aa1cb483cf55a0ad1d980f099e5bc136d877dd5b477f7094707fbd553",
+      "bytes": 2795
+    },
+    "src/ats_sentry_nav/ats_swerve_mpc/config/ats_swerve_mpc.yaml": {
+      "sha256": "8b68e70741e0965e6a9ada87a44e850bb5b5435ed6ae377128f4b7d07ae18b26",
+      "bytes": 6805
+    },
+    "src/ats_sentry_nav/ats_swerve_mpc/config/ats_swerve_mpc_reality.yaml": {
+      "sha256": "d7daad4d4cab466e5786e7c0f84915af4c066a02c95b56e5b3b235b7b7c8bc1f",
+      "bytes": 4094
+    },
+    "src/ats_sentry_nav/ats_swerve_mpc/test/test_se2_mpc_controller.cpp": {
+      "sha256": "98c6205c4faa2b037dc2a186ba0df8f58fc4f3f37b14a0b782e4719a210bfa53",
+      "bytes": 19159
+    },
+    "src/ats_sentry_nav/minco_planner/config/minco_planner_reality.yaml": {
+      "sha256": "23e75eaa20ec910124c4083cd3191ad9cfa41eac32e9dc6f50fc9aeeaaccc536",
+      "bytes": 4325
+    },
+    "src/ats_sentry_nav/minco_planner/src/nodes/minco_planner_node.cpp": {
+      "sha256": "d2230d0b56f6ade9d9c7fe03f263303b681a86782abe5048419f6ffdb5404b47",
+      "bytes": 147398
+    },
+    "src/ats_sentry_nav/minco_planner/test/test_minco_trajectory_optimizer.cpp": {
+      "sha256": "a53ffadcb27d704c110ea992ea2c49184ef63b02428325dbc11836f44828ff0e",
+      "bytes": 28268
+    },
+    "src/sim/ats_mujoco_sim/README.md": {
+      "sha256": "af71356fa2129cae9804856f3f581df691dc1e35429a113e123749df0509b276",
+      "bytes": 48379
+    },
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/kinematics.py": {
+      "sha256": "8666692bc027c1bdd63c6ce1c171ea0ef0ce03e7c65f81334c3e013b9458f434",
+      "bytes": 8428
+    },
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/launch_args.py": {
+      "sha256": "3477c72e6cb72cb10cc0e01fe24989903a44b6af545d885b4bcc26b18fe75c7f",
+      "bytes": 1466
+    },
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/livox_scan.py": {
+      "sha256": "6451e31b992bb06a419a935ddd20bf7aa72c28c5dbbd662af35f9a9aee300a97",
+      "bytes": 3897
+    },
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/model_patch.py": {
+      "sha256": "af70f244acbf30d1ef9d3e4c18aae76640667e482eb6ed3b17738e4f30746bfe",
+      "bytes": 2030
+    },
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/parallel_lidar.py": {
+      "sha256": "8d3dcfd4215c9b66897ffd09de7ba9d5910fb3f4f759a7b60bc13358e7cab934",
+      "bytes": 5094
+    },
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/sim_node.py": {
+      "sha256": "a0ea84fb88e082518a7302343a1878ce680727218f151cdca72b401e5cc4eb43",
+      "bytes": 154813
+    },
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/twist_to_motion_ctrl.py": {
+      "sha256": "bd0e2b68f248185b98ad7fff8fe85b55a61a3deba4c917d3bba6f671a8a12047",
+      "bytes": 3078
+    },
+    "src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml": {
+      "sha256": "c69b04dd0c7aa75f51386885df5b2a57065a887e12b44b2d1058c31e54f4e59f",
+      "bytes": 28530
+    },
+    "src/sim/ats_mujoco_sim/config/rmul_2027_navigation.yaml": {
+      "sha256": "4e6f27aa53b19d2b53632c58abe24e460c4c976b977369b8ec4886582d709de1",
+      "bytes": 2247
+    },
+    "src/sim/ats_mujoco_sim/launch/ats_mujoco_sim.launch.py": {
+      "sha256": "970d3d38d75950442fdf9b675ff3e3a4807a3fa6055f5e628d34ad210dc6e3c1",
+      "bytes": 14612
+    },
+    "src/sim/ats_mujoco_sim/launch/rmuc_2025_mujoco.launch.py": {
+      "sha256": "693ffd6497bb4dab52ea5ebb74107f6f01af7eef7c5b861f31a5e81083c2a76c",
+      "bytes": 33189
+    },
+    "src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz": {
+      "sha256": "9aed9ca56066e87b536eeaed25aad1ccb255ce30e438253a23c72cf272b95df5",
+      "bytes": 18939
+    },
+    "src/sim/ats_mujoco_sim/test/test_lio_sensor_models.py": {
+      "sha256": "868c70e9939a5e90fa592a97d2b94a0e6d54bb8b52ba8800a3c041fa74af6481",
+      "bytes": 9653
+    },
+    "src/sim/ats_mujoco_sim/test/test_navigation_launch_defaults.py": {
+      "sha256": "ccba46c58ba614280ae211961d787ce3f7df387c48f20732bb2f131d92816478",
+      "bytes": 7539
+    },
+    "src/sim/ats_mujoco_sim/test/test_parallel_lidar.py": {
+      "sha256": "e93de1a0647ca102ab47953cee654ec7d30dd9065457750547581b2a7ce4350a",
+      "bytes": 5930
+    },
+    "src/sim/ats_mujoco_sim/test/test_wheel_velocity_limit.py": {
+      "sha256": "d74ce0ca51083e5bd4dc3105fde0e910671a3b8757f88efaf86020c399bbe10d",
+      "bytes": 1303
+    }
+  },
+  "document_hashes": {
+    "AGENTS.md": {
+      "sha256": "60d3306e4c5037bdb31871af649509160c012d44729f53188ab0aee2e78590ec",
+      "bytes": 32012
+    },
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md": {
+      "sha256": "4fa16675fd940dfcc53438c8a5adde0c1de8991b9ad4afd0381a2c3ffec51211",
+      "bytes": 63749
+    },
+    "docs/调研/历史版本/20261022_无先验地图钻洞高速导航优化调研报告.md": {
+      "sha256": "f9f9d5fa56199631b88037457ffaf7b3d428ffe34f7031c10e68afef06600ed0",
+      "bytes": 52503
+    },
+    "docs/nav_acceptance/20261116_module_comparison.json": {
+      "sha256": "ea971c709c2f6d7a45d50761fd955e52625c72d545878f8e08b1b004029aa79f",
+      "bytes": 35668
+    },
+    "docs/nav_acceptance/20261115_domain_ledger.md": {
+      "sha256": "0f9c046e5d92cee7f5484b1f370062a1e211c15205a2f58d98615d63ca6150f0",
+      "bytes": 18139
+    }
+  },
+  "readme_navigation_only_staging": {
+    "sha256": "0d8117dceed3cb675cf3ba8acf72620a8ad0a468eb60c5db09a29db82e3eca8d",
+    "bytes": 27356
+  },
+  "artifact_hashes": {
+    "log/nav_acceptance/20261116_profile_sensor/build.log": {
+      "sha256": "ede13f29d2efb3cb2500ddcc90a1ddf1f0d5d922b61aa008d9d48349cf3d5e8f",
+      "bytes": 898
+    },
+    "log/nav_acceptance/20261116_profile_sensor/build_config_final.log": {
+      "sha256": "164697521caf052479b54ef83abe641837e690cb1f20a40411e782e98d0394b2",
+      "bytes": 228
+    },
+    "log/nav_acceptance/20261116_profile_sensor/build_final.log": {
+      "sha256": "900e65b089ba4cb63882c8e3b159d9168c6afb7c68068c39cf959e33109433fa",
+      "bytes": 1029
+    },
+    "log/nav_acceptance/20261116_profile_sensor/build_last_behavior.log": {
+      "sha256": "d25ec460aa3a0d35f2c2b999ddcd4511a9b12d89aa44074b7f5fce7b2b7a6982",
+      "bytes": 174
+    },
+    "log/nav_acceptance/20261116_profile_sensor/build_mpc_test.log": {
+      "sha256": "93fd55f3091a5f7ff23bb25e9451261aad48ffe9f2f0a236836b172d4596db50",
+      "bytes": 969
+    },
+    "log/nav_acceptance/20261116_profile_sensor/config_validation_final.log": {
+      "sha256": "ead25c8809a8ed8c6222c207f716a9772389b67719ee310b2e796809824db14c",
+      "bytes": 310
+    },
+    "log/nav_acceptance/20261116_profile_sensor/ctest.log": {
+      "sha256": "69e6a3f3de051b4b5d6a76f353ac8894b1d22235a5234757a35a677ac267a22a",
+      "bytes": 25851
+    },
+    "log/nav_acceptance/20261116_profile_sensor/ctest_minco_final.log": {
+      "sha256": "6072566a150e638c43eb475af4d1aed5e404f8424dd75d5c6d2c56186e6bcce8",
+      "bytes": 10531
+    },
+    "log/nav_acceptance/20261116_profile_sensor/ctest_minco_final2.log": {
+      "sha256": "c6d91710b50389f980e3e1a5492ed3fb14d784e390c4f4aa580f6de8c973992c",
+      "bytes": 25223
+    },
+    "log/nav_acceptance/20261116_profile_sensor/cyclone_ldd.log": {
+      "sha256": "370134e6e8ba5aaf080f3ba7ea5ab3625da1f1bc876159ae3315fc0a928db695",
+      "bytes": 2199
+    },
+    "log/nav_acceptance/20261116_profile_sensor/launch_defaults_last.log": {
+      "sha256": "e294d58817276d5377bf3bcb35039ecb555722eb3cfdba356c1a9238baaf8280",
+      "bytes": 98
+    },
+    "log/nav_acceptance/20261116_profile_sensor/launch_tests_final.log": {
+      "sha256": "9f5fca75b3047a6b50338570acc3b84d6f91fc01f7616bf565c9c7f9222d4381",
+      "bytes": 98
+    },
+    "log/nav_acceptance/20261116_profile_sensor/minco_test_result.log": {
+      "sha256": "7279398ba8f0247b706be6cb282b0cdc33de424af9913bc995d1a9b4abe0e686",
+      "bytes": 6038
+    },
+    "log/nav_acceptance/20261116_profile_sensor/minco_test_result_final.log": {
+      "sha256": "c0281efb99b5acf3bd409193f737c7c38af1795ff4979e046bcba8f193c8c382",
+      "bytes": 51
+    },
+    "log/nav_acceptance/20261116_profile_sensor/mpc_test_result.log": {
+      "sha256": "67b18484288ea677bac9e9c1ba7a0cd79813d9f98851148bccefc84e0cf6b83e",
+      "bytes": 51
+    },
+    "log/nav_acceptance/20261116_profile_sensor/mpc_test_result_final.log": {
+      "sha256": "67b18484288ea677bac9e9c1ba7a0cd79813d9f98851148bccefc84e0cf6b83e",
+      "bytes": 51
+    },
+    "log/nav_acceptance/20261116_profile_sensor/pytest_clean_final.log": {
+      "sha256": "169b986390cc327ddfb870e1117266c7eb95f91296c3b612c6deb410ae1d0207",
+      "bytes": 110
+    },
+    "log/nav_acceptance/20261116_profile_sensor/pytest_last_behavior.log": {
+      "sha256": "b93212691cd0e24250ca8b472f971d071f32b5659c90a3590edde3287db1145d",
+      "bytes": 110
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d103.log": {
+      "sha256": "9f7821b71766a8c69991361efda394bacc2f17b4c15872f717597194551445aa",
+      "bytes": 2638
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d106.log": {
+      "sha256": "ad30a77dc914e35c62872831afdebd1829b82482ef79b2690493b72d53ba412b",
+      "bytes": 699
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d107.log": {
+      "sha256": "92f4c83dad09ed5cefca41a6cb5a31fa83bd0b4ecd9d3f57cafef19a42f08518",
+      "bytes": 2731
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d102.log": {
+      "sha256": "e629061ae9f6488e85c31f353f93943a2131f5bba58e9dff9645fe1a10974139",
+      "bytes": 850
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d104.log": {
+      "sha256": "f88c77881abb8e21fcfdcdd7895451a87c8dc00e36961b1ab9618ff268bc166c",
+      "bytes": 850
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d105.log": {
+      "sha256": "8b095ac7b7a65c0aef614e2f865db320c6b6b2b29db02b0ca218cd1d78e73193",
+      "bytes": 1530
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d108.log": {
+      "sha256": "5ea860b08fa307fe831cf1666301da01e5a15dcd8fa078935a9cc2a49bc2c9bf",
+      "bytes": 1529
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_tests.log": {
+      "sha256": "bf6d3f5c6e8bc74bdc543464804c8e8b421c50c9ac0e25fc702de73c85c98396",
+      "bytes": 17696
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_tests_final.log": {
+      "sha256": "d9fece5dfc2bbc09d324dc29855c72729a82b04f577366f73c19d5ee6709491f",
+      "bytes": 992
+    },
+    "log/nav_acceptance/20261116_profile_sensor/show_args_2025.log": {
+      "sha256": "280285baacef99adac7efb960d8b9e79d391034c03e8313ddf214543bc0eb65c",
+      "bytes": 11452
+    },
+    "log/nav_acceptance/20261116_profile_sensor/show_args_2025_final.log": {
+      "sha256": "5510d34ac5ae311637c1d643b105ecd4c7ecddc6f4d2a9f4fc2ea726493965c7",
+      "bytes": 11452
+    },
+    "log/nav_acceptance/20261116_profile_sensor/show_args_2027.log": {
+      "sha256": "68db15b274ca9276a1cf2ba64c02490024f10577fa96b08f5148a3cdce968436",
+      "bytes": 10909
+    },
+    "log/nav_acceptance/20261116_profile_sensor/show_args_2027_final.log": {
+      "sha256": "c260f65832f42f9c4dd9abcd00e66e91535165d2166fc9de0029223d66e11977",
+      "bytes": 10909
+    },
+    "log/nav_acceptance/20261116_profile_sensor/show_args_base_final.log": {
+      "sha256": "6f0fbca1364b763e70b316c475d6f7e7fd36bee057af3103ef75cff1f4097325",
+      "bytes": 7827
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d102/summary.json": {
+      "sha256": "c461898567ae5bfc1f06c51bca9b6ef8303eaa2025d132aaa35b9da4ec0e3b28",
+      "bytes": 720
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d102/command.json": {
+      "sha256": "612ac105176408a1670eeea43e00822d069f560bc6aa066ddcf3e2d866992cd6",
+      "bytes": 544
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d102/launch.log": {
+      "sha256": "8b1e3d1635a68df065b1f3b64ec01b35924f5268525edc424e96ee735f5831bb",
+      "bytes": 2273
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d102/samples.json": {
+      "sha256": "daabf1fdfaee243d43ab99bf508a09d0148c89b5efdde9495fa37b017c1c3039",
+      "bytes": 86
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d104/summary.json": {
+      "sha256": "705921e5da66b8291898cdb77ccd9a2f63f1dcfcab84be4adc96ac8a2ea2c77d",
+      "bytes": 720
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d104/command.json": {
+      "sha256": "5b68c520b195b9d4bf01c5bb3958ecea0b706ba171dc9c0564bb519e1e525119",
+      "bytes": 576
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d104/launch.log": {
+      "sha256": "c1bafc61e81ea9eb6814ff8aed5eb0225a069b67c9ee9bcee72a7a633e5a2f61",
+      "bytes": 1772
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d104/samples.json": {
+      "sha256": "daabf1fdfaee243d43ab99bf508a09d0148c89b5efdde9495fa37b017c1c3039",
+      "bytes": 86
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d105/summary.json": {
+      "sha256": "960e441d3f32180a28a4e4ed2f42fc880496f523caed1f6b2dee744e02fb5603",
+      "bytes": 1400
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d105/command.json": {
+      "sha256": "af4211a569d8333cbecd682c4bb9e2dbf2eb7d3c664856c433f292cc72a00307",
+      "bytes": 576
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d105/launch.log": {
+      "sha256": "c828a9af3158bf8d9b47b481973ee20e9491b6a75a13e6a62a789a7a9eb468e5",
+      "bytes": 4557
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d105/samples.json": {
+      "sha256": "6d57fcc0b47d6b78613967543315529ea4589f8c1559f9010b98f4b95c5359b8",
+      "bytes": 1396455
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d108/summary.json": {
+      "sha256": "d7bc6bfb369380fd3a1cc37350a5428810dc9db3a560366b28622170a694d139",
+      "bytes": 1399
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d108/command.json": {
+      "sha256": "4850d448128b74879158a8702cd2de1cbca2f147e542e034c7b37afbfa4d46d7",
+      "bytes": 576
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d108/launch.log": {
+      "sha256": "87b32f52449026f299f0f3015b19fa053cd69e55a6edcbd7be861584e2a33bd7",
+      "bytes": 4557
+    },
+    "log/nav_acceptance/20261116_profile_sensor/sensor_speed_d108/samples.json": {
+      "sha256": "623f9cb793ee5e00795cf71110372565aeb5398c5b78fab8da8fe4bab04d5fd5",
+      "bytes": 1468331
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d103/summary.json": {
+      "sha256": "023fe22c2182553554ccbcd1f8ef5fd04eb8153adf0eadbd5c75554aafcca6f6",
+      "bytes": 2177
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d103/command.json": {
+      "sha256": "42c5ce4512aa77550dc5d3783da03c81541ed43f8883e9732a62318c40994c8f",
+      "bytes": 5494
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d103/launch.log": {
+      "sha256": "64773f5d91d5cf224a81e2a99c84659e098a6d2cf18f05cea0275ef1b80ce965",
+      "bytes": 1084605
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d107/summary.json": {
+      "sha256": "1ab5795e32afef43bffa4d1046e60f4ed465355aeace995bcb15038717d525b1",
+      "bytes": 2173
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d107/command.json": {
+      "sha256": "16c577eff107915382230716c9d86e1f35e664a2e3e47f0f523c239ddd08af9f",
+      "bytes": 5615
+    },
+    "log/nav_acceptance/20261116_profile_sensor/s3_2027_d107/launch.log": {
+      "sha256": "57215d8097ea7aa9bc8bbe72284fe76cfc02a857220d6b0f0368074d74bbd158",
+      "bytes": 168704
+    },
+    "log/nav_acceptance/20261116_profile_sensor/initial_environment.json": {
+      "sha256": "d99fc7e7c569af381df76831712451fc21a3c0536128afc5ebf59cb3e8d43c6c",
+      "bytes": 329
+    },
+    "log/nav_acceptance/20261116_profile_sensor/runtime_env.sh": {
+      "sha256": "b297a0ef846b02cbb8eede58ce5d46c4c7c10eeb504ff6c0a8c79b3eb736f26b",
+      "bytes": 621
+    },
+    "log/nav_acceptance/20261116_profile_sensor/domain108_preflight.json": {
+      "sha256": "136de9f42069794cfd5d27526cffc339262367f8680b1c8e6a4b98adeac6619b",
+      "bytes": 76
+    },
+    "build/minco_planner/test_results/minco_planner/test_footprint_swept_safety.gtest.xml": {
+      "sha256": "4018ee52a00b324c7d4be30c5f51b38e78b47061f7188c63ad49b28aafee1f57",
+      "bytes": 1583
+    },
+    "build/minco_planner/test_results/minco_planner/test_minco_planner_node_ongrid.gtest.xml": {
+      "sha256": "d38e9c33ab6e4fdd9d8ddb3b809b1e3fd8bd7cfadd280ef09cafc893845146cf",
+      "bytes": 2184
+    },
+    "build/minco_planner/test_results/minco_planner/test_minco_trajectory_optimizer.gtest.xml": {
+      "sha256": "1d9ac7027913fa9094969ff40fcf9dad7beee522226279d89b8e2c969632423d",
+      "bytes": 3916
+    },
+    "build/minco_planner/test_results/minco_planner/test_replan_start.gtest.xml": {
+      "sha256": "62cb56d87aa7e828a90c72c2538fd629468bf1aa845ab21976c502b6b6ed6ccd",
+      "bytes": 1736
+    },
+    "build/ats_swerve_mpc/test_results/ats_swerve_mpc/test_emergency_stop_watchdog.gtest.xml": {
+      "sha256": "9c3fbafbf5a41f72906f50a745915d28dbd5021d7f7195a6e3732728ebe504a0",
+      "bytes": 685
+    },
+    "build/ats_swerve_mpc/test_results/ats_swerve_mpc/test_se2_model.gtest.xml": {
+      "sha256": "ecceaf903b4a313fe1f7b23c4b97dfa923a2b1998804794a2f490d4e8b8d3eea",
+      "bytes": 827
+    },
+    "build/ats_swerve_mpc/test_results/ats_swerve_mpc/test_se2_mpc_controller.gtest.xml": {
+      "sha256": "5d36475de9049179c8d9762dbbf3c3a8085bea6912f3db46896eee0ba4225ba7",
+      "bytes": 2663
+    },
+    "build/ats_swerve_mpc/test_results/ats_swerve_mpc/test_trajectory_tracker.gtest.xml": {
+      "sha256": "322b1ca89c9b43ea08de43d7dc3e1130da3e15e730e7a6e5a558765c526ea826",
+      "bytes": 3090
+    },
+    "build/ats_swerve_mpc/test_results/ats_swerve_mpc/test_zero_speed_guard.gtest.xml": {
+      "sha256": "cded0a8c21f13e2ece60246820a9adafde0041ac8cb283ca43a17c928afded22",
+      "bytes": 671
+    }
+  },
+  "remaining": [
+    "2027 startup before first valid identified odometry; no target executed in d103/d107",
+    "2025 valid prior PCD and current default/redbox/P2 fault regressions",
+    "both full S3 A-K routes and existing q2/south failures",
+    "5 m/s complex-field braking, endpoint accuracy and realtime load",
+    "RViz visual observation, independent physical contact and real robot validation"
+  ],
+  "unrelated_user_edits_preserved": [
+    "README environment/dependency changes remain unstaged",
+    "scripts/install_build_dependencies.sh remains untracked",
+    "untracked temporary MuJoCo model excluded from commits"
+  ],
+  "commit_identity": "existing common author from three repository histories, supplied per-command -c only; no global Git configuration change",
+  "guidance_file_note": "docs/nav2_to_3desdf_minco_mpc_optimization_direction.md is absent; current route, result and next steps maintained in the requested main report",
+  "current_stage": "S3/O1 full acceptance not passed; next use report 5.3 after startup/assets are restored",
+  "repository_sync": {
+    "nav": {
+      "HEAD": "f7eb82a3a55dbf8d63563dd5e74041a464897c1d",
+      "origin_develop": "f7eb82a3a55dbf8d63563dd5e74041a464897c1d",
+      "push": "succeeded",
+      "force": false
+    },
+    "sim": {
+      "HEAD": "e286e824524cdba62a82239a2f3994d88635d8d4",
+      "origin_develop": "e286e824524cdba62a82239a2f3994d88635d8d4",
+      "push": "succeeded",
+      "force": false
+    },
+    "root": {
+      "behavior_commit": "6bea4b856a5913ef5cf80c65d940699c444476fa",
+      "documentation_and_final_push": "performed after writing this index; see containing commit and final Git verification"
+    }
+  },
+  "final_document_validation": {
+    "source_document_artifact_hashes_verified": 99,
+    "report_relative_links_verified": 37,
+    "strict_json_files": 2,
+    "git_diff_check_three_repositories": "passed",
+    "readme_staging": "navigation block only; unrelated local environment edits excluded"
+  }
+}

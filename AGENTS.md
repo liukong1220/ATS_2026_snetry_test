@@ -75,6 +75,8 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 - 下游仍要求底盘坐标速度时，建议避免只关闭 chassis transform。
 - 固定雷达迁移优先通过启动参数关闭兼容层，同时保持 topic、TF 和速度 frame 契约完整。
 
+2026-11-16 用户要求三套 profile 统一为实车长宽 `0.581 x 0.571 m`、2027 仿真余量 `0.02 m`、ROG/terrain 车高门 `0.249 m`、`jps_safe_distance=0.36`、隧道 yaw/自旋启用；暂定平移上限 `5 m/s`、yaw `3 rad/s`、角加速度 `2 rad/s²`，MINCO 起点保护与 MuJoCo 轮速范围同步。此条取代旧的实车余量/车高配置保留要求；同步配置不代表 H2/M/H3 或实车验证通过。
+
 ## 3. 多仓库与文件所有权
 
 以下是三个独立 Git 仓库，建议分别检查、提交和推送：
@@ -179,7 +181,7 @@ P2 回归建议显式使用 `planning_grid_owner:=rog_map`，并验证：
 - `/rog_map_adapter/planning_snapshot` publisher 数为 1 且 owner 为 adapter，`/rc_esdf/*` 话题不存在；
 - 任一有效来源 occupied 保持 occupied；任一新鲜来源的明确 free 可消解其他来源 unknown；所有来源均无 free/occupied 证据时输出最终 unknown，并默认按障碍处理（建图模式例外见 6.4）；静态细栅格到 planning grid 优先按输出 footprint 保守聚合；真值表、非整除分辨率、平移 origin 与 yaw 建议由单测锁定；
 - ROGMap 投影几何范围只定义其数据范围；范围外和 terrain/slope 的 `-1` 都表示缺少该来源证据，建议避免凭空覆盖另一来源的明确 free；
-- static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。只有完成对应 profile 的定向矩形栅格化和边界测试后，才评估启用；栅格化和验收读取对应 profile 的长/宽/margin（当前车体配置为 `0.581 x 0.571 m`，仿真 margin `0.02`、实车 `0.05`），不混用旧固定尺寸或余量；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
+- static wall、height band、terrain、slope 和全来源 unknown 可阻断规划；ego unknown 清理默认值为 `0.0`。只有完成对应 profile 的定向矩形栅格化和边界测试后，才评估启用；栅格化和验收读取对应 profile 的长/宽/margin（当前车体配置为 `0.581 x 0.571 m`，三套 margin 均为 `0.02`），不混用旧固定尺寸或余量；外接圆不作为 footprint 外 unknown 的清理依据，occupied 始终保留；
 - `ROGMap source generation`、adapter publication 与 epoch 可追溯、发布保持新鲜、单次规划固定 `MINCO local snapshot generation`；按 4.2 核对其与执行参考的绑定，不将字段存在当作端到端验证完成；
 - `/minco/raw_path`、`/minco/reference_path`、MPC reference/predicted、`/cmd_vel_mpc`、`/motion_control` 非空；
 - `/cmd_vel_mpc` 只有一个 publisher，bridge 只有一个 subscriber；
@@ -237,7 +239,7 @@ P3 标记条件为同时满足以下各项：
   - 建图中导航到目标（2026-11-06 用户授权放宽，数值为 `scripts/s3_mujoco_acceptance.py` 的默认参数，旧值可用参数复现）：中间路线点真值误差 ≤ 0.15 m（`--waypoint-tolerance-m`），终点与重载首目标 ≤ 0.08 m（`--final-tolerance-m`）；离散 footprint 冲突只统计被提交并由 MPC 执行（goal manager 下发 EXECUTE 且 `reference_stamp` 匹配）的 reference，必须为 0，READY 瞬态冲突只记录在 `summary.json` 的 `footprint_gate_collisions_transient_ready`。物理接触单独记为未验证，除非有独立接触评估；
   - `/rog_map_adapter/planning_snapshot` 发布者数为 1，owner 为 adapter；
   - 新障碍到规划器可见的延迟 p95 < 250 ms（`--latency-p95-limit-ms`，150 可复现旧门），同时报告最大值；
-  - 导航跟踪记录器：q1（参考发布时无冲突）必过；q2（实际足迹进入后续快照占据格）仅当冲突持续 ≥ 3 个 tick 且跨 ≥ 2 个快照发布时判失败，其余记为诊断；q3（同一位姿跨快照翻转）为诊断，不判失败。参数 `NAV_TRACKING_PERSIST_MIN_TICKS`、`NAV_TRACKING_PERSIST_MIN_SNAPSHOTS`，`NAV_TRACKING_STRICT=1` 复现旧门；记录器判定用的足迹长宽与 margin 读自 `NAV_TRACKING_PROFILE_YAML` 的 `minco_planner` 段（默认是 2025 仿真 profile，margin 0.02；与实车 0.05 不同，换 profile 或比对实车口径时必须显式设置）；
+  - 导航跟踪记录器：q1（参考发布时无冲突）必过；q2（实际足迹进入后续快照占据格）仅当冲突持续 ≥ 3 个 tick 且跨 ≥ 2 个快照发布时判失败，其余记为诊断；q3（同一位姿跨快照翻转）为诊断，不判失败。参数 `NAV_TRACKING_PERSIST_MIN_TICKS`、`NAV_TRACKING_PERSIST_MIN_SNAPSHOTS`，`NAV_TRACKING_STRICT=1` 复现旧门；记录器判定用的足迹长宽与 margin 读自 `NAV_TRACKING_PROFILE_YAML` 的 `minco_planner` 段（默认是 2025 仿真 profile，margin 0.02；当前实车配置已同步为 0.02，仍须显式选择与本次运行一致的 profile）；
   - 地图修正前后不出现无法解释的跳变；
   - 保存地图与场景真值比对，报告漏检和误检格数；动态障碍不写入保存地图；
   - 地图失效、无路、unsafe 轨迹时 `/planner/emergency_stop=true`，速度为零。
@@ -252,7 +254,7 @@ P3 标记条件为同时满足以下各项：
 
 H2 的 0.249 m 候选车高门尚未获充分净空证据；TUNNEL_FREE 未实现，真实 tunnel_B 往返、ramp_south、six_tunnels、持续 3 rad/s 平移与洞口切换、south 定位及有先验六隧道均未通过完整验收。隧道路线第 7 个前置 ramp_bridge 不算 tunnel_B 通过，实际 tunnel_B 位于第 10–13 点。
 
-M 路线通过后才执行已授权 H3：仅将已验证同组车高门写入 `src/ats_sentry_bringup/params/node_params.yaml`，独立 `[规范]` 提交，不操作实车。当前实车门仍为 `0.255+0.05=0.305 m`；2027 仿真两门为 0.249 m，2025 ROG 门 0.305 m、terrain 头顶过滤 0，分别记录，不混用。
+2026-11-16 用户直接授权将实车、2025/2027 仿真的 ROG 门和 terrain 头顶门同步为 `0.242+0.007=0.249 m`。旧的“等待 M 后再迁移参数”约定被本次指令取代；H2 净空证据、M 路线和 H3 实车验收仍未通过，不操作实车，也不把配置同步写成验收通过。
 
 本专项的后续滚动规划、Point-LIO 数值优化、方向观测后端、机械升级不自动纳入当前任务。用户只要求审查/文档时，以完成审查/文档为交付；恢复优化时以当次授权范围推进，保留现有安全门与失败证据。
 
