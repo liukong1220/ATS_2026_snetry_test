@@ -152,3 +152,15 @@
 
 11月17日逐号核验发现16号没有历史分配记录，不能推断编号已耗尽。端口预检后将其保留给正常编排的原首目标补验，实际分配条目在下方追加。独立F四项通过、unreachable严格失败；d6前置失败未注入，结果与证据见`20261117_o1a_o0.md/json`。
 - domain 16：本机lio/WLAN独立运行 `final_first_goal_d16`，命令与结果见 `log/nav_acceptance/20261117_o1a_o0/final_first_goal_d16*`。
+
+## 2026-11-17 本轮获授权的历史编号复用
+
+用户明确允许本轮 O1/O1b/O0 复用历史编号，按[清场规则](20261117_domain_reuse_rules.md)执行；本节不是首次分配记录，不覆盖上方历史。排除 5、77、91、92，WLAN 为本机 `wlo1`。
+
+| 复用编号 | 独立批次 | 结果与清场 |
+| --- | --- | --- |
+| 20 | `20261117_o1_o0_completion/unit_d20` | Goal Manager 13 组通过；guard command_exit=0，进程/端口清空 |
+| 21 | `20261117_o1_o0_completion/unit_d21` | 记录器、MINCO/ROG/RC-ESDF/MPC 窄回归与 launch 参数检查通过；command_exit=0，清空 |
+| 22 | `20261117_o1_o0_completion/v1_d22` | V1 action 定位恢复超时，q1 通过、q2 失败、O0 未触发；command_exit=1，清空 |
+
+完整命令、PID/kernel start time、运行前检查和运行后检查分别保存在每个批次的 `domain_guard.json`，不把本机清场推导为其他 WLAN 主机参与者已排除。

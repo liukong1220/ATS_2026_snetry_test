@@ -2066,13 +2066,23 @@ run_p2_fault_injection() {
       find_unreachable_goal
       publish_relative_fault_goal unreachable_precondition
       log_start_line=$(( $(wc -l < "${LAUNCH_LOG}") + 1 ))
-      # NO_PATH is recoverable on a changing map. Bound this test action inside
-      # the existing 12s observer window, without altering server recovery policy.
-      # A timeout alone is NOT no-path evidence: keep the planner cause and zero gates.
+      # The first expired server budget wins: the ROS goal deadline returns 3;
+      # the steady suspended-plan budget returns 5 on healthy infrastructure.
+      # Require the exact cause/message pair, same-goal search failure and zero
+      # outputs. The observer wall bound follows the runner's sim/wall factor.
       send_fault_goal unreachable "${UNREACHABLE_GOAL_FRAME}" "${UNREACHABLE_GOAL_X}" "${UNREACHABLE_GOAL_Y}" 8
-      wait_for_fault_action_result unreachable 3 12
-      grep -q 'message: goal timeout' "${FAULT_ACTION_OUTPUT}" || \
-        fail "unreachable action did not finish at its bounded goal deadline"
+      wait_for_fault_action_result unreachable '[35]' "$(goal_wall_timeout_s 12)"
+      if grep -Eq 'result_code: 3([[:space:]]|$)' "${FAULT_ACTION_OUTPUT}"; then
+        grep -Eq '^message: goal timeout$' "${FAULT_ACTION_OUTPUT}" || \
+          fail "unreachable timeout code has a different terminal cause"
+      else
+        grep -Eq '^message: progress watchdog exhausted the bounded suspended-replan wait$' \
+          "${FAULT_ACTION_OUTPUT}" || fail "unreachable planning failure is not the bounded wait"
+      fi
+      local unreachable_action_goal_id
+      unreachable_action_goal_id="$(awk '$1 == "goal_id:" {id=$2} END {print id}' "${FAULT_ACTION_OUTPUT}")"
+      [[ "${unreachable_action_goal_id}" =~ ^[1-9][0-9]*$ ]] || \
+        fail "unreachable action has no numeric feedback goal identity"
       wait_for_command "unreachable goal triggers emergency stop" 10 \
         topic_field_equals /planner/emergency_stop data true
       # 当前 footprint 下规划栅格没有与起点断开的自由孤岛（domain 183 诊断：
@@ -2080,13 +2090,15 @@ run_p2_fault_injection() {
       # 规划器归类为 goal occupied 而不是 no path。急停、超时和零速断言不变。
       if [[ "${UNREACHABLE_GOAL_KIND}" == "no_path" ]]; then
         wait_for_command "free unreachable goal is classified no-path" 8 \
-          bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq 'jps failed: no path expanded=[1-9][0-9]* clearance=${UNREACHABLE_CLEARANCE_FLOOR}'"
+          bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq '(jps|astar).*failed: no path expanded=[1-9][0-9]* clearance=${UNREACHABLE_CLEARANCE_FLOOR}.*[[:space:]]goal=${unreachable_action_goal_id}([[:space:]]|$)'"
       else
         echo "NOTE: no disconnected free pocket; using footprint-blocked free goal (class: occupied)"
         wait_for_command "footprint-blocked free goal is classified occupied" 8 \
-          bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq 'goal (is )?occupied'"
+          bash -c "tail -n +${log_start_line} '${LAUNCH_LOG}' | grep -Eq 'goal (is )?occupied.*[[:space:]]goal=${unreachable_action_goal_id}([[:space:]]|$)'"
       fi
       capture_zero_outputs unreachable
+      assert_no_old_reference_revival \
+        "/tmp/ats_p2_unreachable_old_reference_${ROS_DOMAIN_ID}.out"
       ;;
     freeze)
       # 机器人保持静止，但 MuJoCo、LiDAR、里程计和 ROGMap 继续运行；这只
@@ -2654,6 +2666,51 @@ NAV_TRACKING_STOP_TIMEOUT="${NAV_TRACKING_STOP_TIMEOUT:-20}"
 NAV_TRACKING_PROFILE_YAML="${NAV_TRACKING_PROFILE_YAML:-${WORKSPACE_DIR}/src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml}"
 NAV_TRACKING_PID=""
 NAV_TRACKING_LEG_DIR=""
+O0_CHAIN_PID=""
+
+start_o0_chain_recorder() {
+  local dir="$1"
+  [[ "${O0_CHAIN_RECORDER:-0}" == 1 ]] || return 0
+  python3 "${WORKSPACE_DIR}/scripts/record_navigation_spin_chain.py" \
+    --output "${dir}/o0_chain.jsonl" >"${dir}/o0_chain.out" 2>&1 &
+  O0_CHAIN_PID=$!
+  CAPTURE_PIDS+=("${O0_CHAIN_PID}")
+  local deadline=$((SECONDS + NAV_TRACKING_START_TIMEOUT))
+  while (( SECONDS < deadline )); do
+    if ! kill -0 "${O0_CHAIN_PID}" 2>/dev/null; then
+      cat "${dir}/o0_chain.out" || true
+      fail "O0 chain recorder exited before initial speed evidence"
+    fi
+    if grep -q "^CHAIN_READY pid=${O0_CHAIN_PID}$" "${dir}/o0_chain.out"; then
+      echo "OK: O0 speed chain ready before goal -> ${dir}/o0_chain.jsonl"
+      return 0
+    fi
+    sleep 0.2
+  done
+  fail "O0 chain recorder missing initial speed/health evidence"
+}
+
+stop_o0_chain_recorder() {
+  local pid="${O0_CHAIN_PID:-}" status=0
+  [[ -n "${pid}" ]] || return 0
+  kill -INT "${pid}" 2>/dev/null || true
+  local deadline=$((SECONDS + NAV_TRACKING_STOP_TIMEOUT))
+  while kill -0 "${pid}" 2>/dev/null && (( SECONDS < deadline )); do
+    sleep 0.2
+  done
+  if kill -0 "${pid}" 2>/dev/null; then
+    stop_capture_process "${pid}"
+    RECORDER_STATUS=failed
+  fi
+  wait "${pid}" 2>/dev/null || status=$?
+  [[ "${status}" == 0 ]] || RECORDER_STATUS=failed
+  local kept_pids=() candidate
+  for candidate in "${CAPTURE_PIDS[@]:-}"; do
+    [[ "${candidate}" == "${pid}" ]] || kept_pids+=("${candidate}")
+  done
+  CAPTURE_PIDS=("${kept_pids[@]}")
+  O0_CHAIN_PID=""
+}
 
 # footprint 几何必须来自本次运行真正生效的 profile。写死数字会让 analyzer 用一个
 # 机器人没用过的足迹去判定这次运行；因此读不到就 fail，不回退到某个默认值。
@@ -2684,7 +2741,8 @@ start_nav_tracking_recorder() {
     --output-dir "${dir}" --rate-hz "${NAV_TRACKING_RATE_HZ}" \
     --startup-timeout-sec "${NAV_TRACKING_START_TIMEOUT}" \
     --grid-frame "${grid_frame}" \
-    --max-layer-payloads "${NAV_TRACKING_MAX_LAYER_PAYLOADS:-200}" \
+    --max-snapshot-payloads "${NAV_TRACKING_MAX_SNAPSHOT_PAYLOADS:--1}" \
+    --max-layer-payloads "${NAV_TRACKING_MAX_LAYER_PAYLOADS:--1}" \
     >"${dir}/recorder.out" 2>&1 &
   NAV_TRACKING_PID=$!
   CAPTURE_PIDS+=("${NAV_TRACKING_PID}")
@@ -2697,6 +2755,7 @@ start_nav_tracking_recorder() {
     fi
     if grep -q "^RECORDER_READY pid=${NAV_TRACKING_PID} first_tick=1$" "${dir}/recorder.out"; then
       echo "OK: ${label} nav tracking recorder initial evidence ready -> ${dir}"
+      start_o0_chain_recorder "${dir}"
       return 0
     fi
     sleep 0.5
@@ -2708,6 +2767,7 @@ start_nav_tracking_recorder() {
 
 stop_nav_tracking_recorder() {
   local label="$1"
+  stop_o0_chain_recorder
   local recorder_pid="${NAV_TRACKING_PID}"
   [[ -n "${recorder_pid}" ]] || return 0
   local kept_pids=()

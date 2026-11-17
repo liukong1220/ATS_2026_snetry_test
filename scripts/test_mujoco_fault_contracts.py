@@ -217,7 +217,7 @@ set_unknown_fixture_lidar_occlusion "$2"
 
 
 class UnreachableRunnerContractTest(unittest.TestCase):
-    def test_bounded_timeout_requires_independent_no_path_and_zero_evidence(self):
+    def test_earliest_bounded_failure_requires_same_goal_cause_and_zero_evidence(self):
         text = (ROOT / 'scripts/test_mujoco_minco_mpc_chain.sh').read_text()
         def function(name):
             start = text.index(name + '() {')
@@ -229,7 +229,7 @@ class UnreachableRunnerContractTest(unittest.TestCase):
 set -eu -o pipefail
 LAUNCH_LOG="$1/launch.log"
 FAULT_ACTION_OUTPUT="$1/action.out"
-CAUSE="$2" CODE="$3"
+CAUSE="$2" CODE="$3" MESSAGE="$4"
 : >"${LAUNCH_LOG}"
 fail() { echo "FAIL: $*" >&2; exit 97; }
 find_unreachable_goal() {
@@ -237,10 +237,12 @@ find_unreachable_goal() {
   UNREACHABLE_GOAL_KIND=no_path UNREACHABLE_CLEARANCE_FLOOR=0.341
 }
 publish_relative_fault_goal() { :; }
+goal_wall_timeout_s() { printf '%s' "$1"; }
+ROS_DOMAIN_ID=20
 send_fault_goal() {
   [[ "$1" == unreachable && "$5" == 8 ]] || fail 'deadline does not fit observer'
   GOAL_DEADLINE="$5"
-  printf 'result_code: %s\nmessage: goal timeout\nGoal finished with status: ABORTED\n' "${CODE}" >"${FAULT_ACTION_OUTPUT}"
+  printf 'goal_id: 3\nresult_code: %s\nmessage: %s\nGoal finished with status: ABORTED\n' "${CODE}" "${MESSAGE}" >"${FAULT_ACTION_OUTPUT}"
   printf '%s\n' "${CAUSE}" >>"${LAUNCH_LOG}"
 }
 wait_for_command() {
@@ -252,20 +254,32 @@ wait_for_command() {
 }
 topic_field_equals() { [[ "$1" == /planner/emergency_stop && "$3" == true ]]; }
 capture_zero_outputs() { echo 'observed fresh selected and motion zero'; }
+assert_no_old_reference_revival() { echo 'observed no old reference revival'; }
 '''
         with tempfile.TemporaryDirectory() as directory:
-            for cause, code, success in (
-                    ('jps failed: no path expanded=24123 clearance=0.341 m', '3', True),
-                    ('jps failed: goal is occupied expanded=0 clearance=0.341 m', '3', False),
-                    ('jps failed: no path expanded=24123 clearance=0.341 m', '5', False),
-                    ('', '3', False)):
+            budget_message = 'progress watchdog exhausted the bounded suspended-replan wait'
+            for cause, code, message, success in (
+                    ('jps failed: no path expanded=24123 clearance=0.341 m goal=3 epoch=1',
+                     '3', 'goal timeout', True),
+                    ('astar 失败（failed: no path expanded=24123 clearance=0.341 m） goal=3 epoch=1',
+                     '5', budget_message, True),
+                    ('jps failed: goal is occupied expanded=0 clearance=0.341 m goal=3 epoch=1',
+                     '3', 'goal timeout', False),
+                    ('jps failed: no path expanded=24123 clearance=0.341 m goal=4 epoch=1',
+                     '3', 'goal timeout', False),
+                    ('jps failed: no path expanded=24123 clearance=0.341 m goal=3 epoch=1',
+                     '5', 'optimizer failed', False),
+                    ('jps failed: no path expanded=24123 clearance=0.341 m goal=3 epoch=1',
+                     '3', budget_message, False),
+                    ('', '3', 'goal timeout', False)):
                 with self.subTest(cause=cause, code=code):
                     result = subprocess.run(['bash', '-c', script + '\n' + functions +
                                              '\nrun_p2_fault_injection unreachable', 'test',
-                                             directory, cause, code], capture_output=True, text=True)
+                                             directory, cause, code, message], capture_output=True, text=True)
                     self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
                     if success:
                         self.assertIn('observed fresh selected and motion zero', result.stdout)
+                        self.assertIn('observed no old reference revival', result.stdout)
                     else:
                         self.assertNotIn('PASS:', result.stdout)
 

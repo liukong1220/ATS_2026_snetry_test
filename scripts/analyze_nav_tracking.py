@@ -43,6 +43,7 @@ independent contact evaluator it stays unverified here.
 from __future__ import annotations
 
 import argparse
+from collections import OrderedDict
 import gzip
 import json
 import math
@@ -94,7 +95,26 @@ def load_gzip_json(path):
 # ---- frames ---------------------------------------------------------------
 
 
-def transform_pose(transform, pose):
+def unit_quaternion(value):
+    return (isinstance(value, (list, tuple)) and len(value) == 4 and
+            all(isinstance(v, (float, int)) and math.isfinite(v) for v in value) and
+            math.isclose(sum(v * v for v in value), 1.0, rel_tol=1e-3, abs_tol=1e-3))
+
+
+def quaternion_yaw(q):
+    x, y, z, w = q
+    return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+
+
+def pose_se3_matches_planar(full, planar):
+    return (isinstance(full, (list, tuple)) and len(full) == 7 and
+            all(isinstance(v, (float, int)) and math.isfinite(v) for v in full) and
+            unit_quaternion(full[3:]) and
+            abs(full[0] - planar[0]) <= 1e-6 and abs(full[1] - planar[1]) <= 1e-6 and
+            abs(fe.normalize_angle(quaternion_yaw(full[3:]) - planar[2])) <= 1e-6)
+
+
+def transform_pose(transform, pose, pose_se3=None):
     """Apply a recorded ``map <- odom`` transform to an ``(x, y, yaw)`` pose.
 
     Returns ``None`` when the transform is missing, so a caller has to decide
@@ -102,6 +122,24 @@ def transform_pose(transform, pose):
     """
     if transform is None:
         return None
+    if "quaternion" in transform:
+        q = transform["quaternion"]
+        if (not unit_quaternion(q) or not pose_se3_matches_planar(pose_se3, pose) or
+                not all(isinstance(transform.get(key), (float, int)) and
+                        math.isfinite(transform[key]) for key in ("x", "y", "z"))):
+            return None
+        # q * [p, 0] * inverse(q), then compose the complete orientations.
+        x, y, z, w = q
+        px, py, pz = pose_se3[:3]
+        tx, ty, tz = 2 * (y * pz - z * py), 2 * (z * px - x * pz), 2 * (x * py - y * px)
+        ox, oy, oz, ow = pose_se3[3:]
+        composed = (w * ox + x * ow + y * oz - z * oy,
+                    w * oy - x * oz + y * ow + z * ox,
+                    w * oz + x * oy - y * ox + z * ow,
+                    w * ow - x * ox - y * oy - z * oz)
+        return (transform["x"] + px + w * tx + y * tz - z * ty,
+                transform["y"] + py + w * ty + z * tx - x * tz,
+                fe.normalize_angle(quaternion_yaw(composed)))
     cos_yaw = math.cos(transform["yaw"])
     sin_yaw = math.sin(transform["yaw"])
     x, y, yaw = pose[0], pose[1], pose[2]
@@ -112,10 +150,19 @@ def transform_pose(transform, pose):
     )
 
 
-def transform_poses(transform, poses):
+def transform_poses(transform, poses, poses_se3=None):
     if transform is None:
         return None
+    if "quaternion" in transform:
+        if poses_se3 is None or len(poses_se3) != len(poses):
+            return None
+        result = [transform_pose(transform, pose, full) for pose, full in zip(poses, poses_se3)]
+        return None if any(pose is None for pose in result) else result
     return [transform_pose(transform, pose) for pose in poses]
+
+
+def payload_key(snapshot):
+    return snapshot.get("payload_key") or snapshot.get("occupancy_digest")
 
 
 def frames_agree(pose_frame, grid_frame):
@@ -141,11 +188,11 @@ class PayloadStore(object):
 
     def __init__(self, input_dir, snapshot_records):
         self._input_dir = input_dir
-        self._cache = {}
+        self._cache = OrderedDict()
         self._by_digest = {}
         self._missing_payload = set()
         for record in snapshot_records:
-            digest = record.get("occupancy_digest")
+            digest = payload_key(record)
             if digest is None:
                 continue
             self._by_digest.setdefault(digest, record)
@@ -165,17 +212,18 @@ class PayloadStore(object):
     def payload(self, digest):
         """Full snapshot payload, or ``None`` when it was truncated away."""
         if digest in self._cache:
+            self._cache.move_to_end(digest)
             return self._cache[digest]
         record = self._by_digest.get(digest)
         if record is None or not record.get("payload"):
-            self._cache[digest] = None
             return None
         path = os.path.join(self._input_dir, record["payload"])
         if not os.path.exists(path):
-            self._cache[digest] = None
             return None
         payload = load_gzip_json(path)
         self._cache[digest] = payload
+        while len(self._cache) > 8:
+            self._cache.popitem(last=False)
         return payload
 
     def grid(self, digest):
@@ -296,13 +344,17 @@ class LayerStore(object):
 
     def __init__(self, input_dir):
         self._payloads = {}
+        self._cache = OrderedDict()
         directory = os.path.join(input_dir, "layers")
         if not os.path.isdir(directory):
             return
         for name in sorted(os.listdir(directory)):
             if not name.endswith(".json.gz"):
                 continue
-            payload = load_gzip_json(os.path.join(directory, name))
+            path = os.path.join(directory, name)
+            payload = load_gzip_json(path)
+            payload.pop("data", None)
+            payload["payload_file"] = path
             topic = payload.get("topic", name)
             self._payloads.setdefault(topic, []).append(payload)
         for entries in self._payloads.values():
@@ -326,7 +378,14 @@ class LayerStore(object):
         # zero; if every payload is later than the instant asked for, the earliest
         # is still the only evidence available and is reported with its own time
         # so the artifact shows the ordering rather than hiding it.
-        return chosen if chosen is not None else entries[0]
+        chosen = chosen if chosen is not None else entries[0]
+        path = chosen["payload_file"]
+        if path not in self._cache:
+            self._cache[path] = load_gzip_json(path)
+        self._cache.move_to_end(path)
+        while len(self._cache) > 8:
+            self._cache.popitem(last=False)
+        return self._cache[path]
 
     def provenance(self, mono_s, grid_frame, wx, wy, params):
         """Per-source value at one world point in the grid frame."""
@@ -501,22 +560,33 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
             continue
         if any(command.get("reference_frame_id") != reference.get("frame_id") or
                command.get("reference_poses") != reference.get("poses") or
-               command.get("reference_pose_count") != reference.get("pose_count")
+               command.get("reference_pose_count") != reference.get("pose_count") or
+               (reference.get("poses_se3") is not None and
+                command.get("reference_poses_se3") != reference.get("poses_se3"))
                for command in candidates):
             entry["reason"] = "EXECUTE reference frame/content mismatch or ambiguity"
             continue
         identities = {(command.get("localization_epoch"),
                        command.get("map_publication_sequence"),
-                       command.get("map_generation")) for command in candidates}
-        if len(identities) != 1 or None in next(iter(identities)):
+                       command.get("map_generation"),
+                       command.get("validation_map_publication_sequence", 0),
+                       command.get("validation_map_source_generation", 0),
+                       json.dumps(command.get("validation_from_reference"), sort_keys=True))
+                      for command in candidates}
+        if len(identities) != 1 or None in next(iter(identities))[:3]:
             entry["reason"] = "missing or ambiguous EXECUTE snapshot identity"
             continue
-        epoch, publication, generation = next(iter(identities))
+        epoch, planned_publication, generation, validated_publication, validated_source, _ = \
+            next(iter(identities))
+        bound_validation = bool(validated_publication)
+        publication = validated_publication if bound_validation else planned_publication
         sample = first_sample_for_reference(
             samples, digest, reference.get("stamp_identity"), epoch, publication)
         entry["execution_identity"] = {
-            "localization_epoch": epoch, "map_publication_sequence": publication,
+            "localization_epoch": epoch, "map_publication_sequence": planned_publication,
             "map_generation": generation,
+            "validation_map_publication_sequence": validated_publication,
+            "validation_map_source_generation": validated_source,
             "command_sequences": sorted({command.get("command_sequence", 0)
                                          for command in candidates}),
         }
@@ -533,13 +603,17 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
             continue
         snapshot = next(iter(unique.values()))
         entry["snapshot_identity"] = snapshot
+        if bound_validation and (not validated_source or
+                                 validated_source != snapshot.get("source_generation")):
+            entry["reason"] = "EXECUTE validation source generation mismatch"
+            continue
         if not snapshot.get("ready") or not snapshot.get("cell_count"):
             entry["reason"] = "authorized snapshot not ready or empty"
             continue
         if sample is not None:
             entry["observed_tick"] = sample.get("tick")
             entry["observed_mono_s"] = sample.get("mono_s")
-        snapshot_digest = snapshot.get("occupancy_digest")
+        snapshot_digest = payload_key(snapshot)
         exact_store = PayloadStore(store._input_dir, [snapshot])
         try:
             payload = exact_store.payload(snapshot_digest)
@@ -569,7 +643,26 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
             entry["reason"] = "committed reference has no poses"
             continue
         transform = (sample or {}).get("map_from_odom")
-        if not frames_agree(reference.get("frame_id"), grid.frame_id):
+        if bound_validation:
+            transform = candidates[0].get("validation_from_reference")
+            entry["transform_evidence"] = "EXECUTE-bound validation transform"
+            if (not transform or not unit_quaternion(transform.get("quaternion")) or
+                    transform.get("frame_id") != grid.frame_id or
+                    transform.get("child_frame_id") != reference.get("frame_id")):
+                entry["frame_unpaired"] = True
+                entry["reason"] = "EXECUTE validation transform frame mismatch"
+                continue
+            if frames_agree(reference.get("frame_id"), grid.frame_id) and (
+                    any(abs(transform.get(key, float("inf"))) > 1e-9
+                        for key in ("x", "y", "z")) or
+                    not unit_quaternion(transform.get("quaternion")) or
+                    any(abs(v) > 1e-9 for v in transform["quaternion"][:3])):
+                entry["reason"] = "same-frame validation transform is not identity"
+                continue
+            grid_poses = transform_poses(transform, poses, reference.get("poses_se3"))
+            entry["transform_applied"] = not frames_agree(reference.get("frame_id"), grid.frame_id)
+            entry["map_from_odom"] = transform
+        elif not frames_agree(reference.get("frame_id"), grid.frame_id):
             execution = (sample or {}).get("execution") or {}
             entry["transform_evidence"] = (
                 "tick-sampled map<-odom; TF carries no localization epoch; "
@@ -580,13 +673,12 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
                 entry["frame_unpaired"] = True
                 entry["reason"] = "transform tick lacks matching EXECUTE epoch/reference"
                 continue
-        if frames_agree(reference.get("frame_id"), grid.frame_id):
-            grid_poses = poses
-            entry["transform_applied"] = False
-        else:
-            grid_poses = transform_poses(transform, poses)
+            grid_poses = transform_poses(transform, poses, reference.get("poses_se3"))
             entry["transform_applied"] = True
             entry["map_from_odom"] = transform
+        else:
+            grid_poses = poses
+            entry["transform_applied"] = False
         if grid_poses is None:
             entry["evaluated"] = False
             entry["frame_unpaired"] = True
@@ -761,17 +853,19 @@ def analyze_actual_tracking(samples, store, layers, params,
             previous = None
             close_run()
             continue
-        digest = snapshot.get("occupancy_digest")
+        digest = payload_key(snapshot)
         grid = store.grid(digest)
         if grid is None:
             result["ticks_without_snapshot_payload"] += 1
             previous = None
             close_run()
             continue
+        grid.identity.update({key: value for key, value in snapshot.items()
+                              if key not in ("payload", "mono_s", "info")})
         if frames_agree(actual.get("frame_id"), grid.frame_id):
             grid_pose = pose
         else:
-            grid_pose = transform_pose(sample.get("map_from_odom"), pose)
+            grid_pose = transform_pose(sample.get("map_from_odom"), pose, actual.get("pose_se3"))
         if grid_pose is None:
             result["ticks_unpaired_frame"] += 1
             previous = None
@@ -872,6 +966,7 @@ def analyze_snapshot_flip(probes, store, params):
         previous = None
         for record in ordered:
             digest = record.get("occupancy_digest")
+            storage_key = payload_key(record)
             if probe_reason:
                 entry["timeline"].append({
                     "occupancy_digest": digest,
@@ -880,7 +975,7 @@ def analyze_snapshot_flip(probes, store, params):
                     "reason": probe_reason,
                 })
                 continue
-            grid = store.grid(digest)
+            grid = store.grid(storage_key)
             if grid is None:
                 entry["timeline"].append({
                     "occupancy_digest": digest,
@@ -902,7 +997,9 @@ def analyze_snapshot_flip(probes, store, params):
                 })
                 continue
             verdict = fe.check(grid, params, [pose], max_collisions=4)
-            payload = store.payload(digest)
+            grid.identity.update({key: value for key, value in record.items()
+                                  if key not in ("payload", "mono_s", "info")})
+            payload = store.payload(storage_key)
             step = {
                 "occupancy_digest": digest,
                 "publication_sequence": record.get("publication_sequence"),
@@ -1055,7 +1152,7 @@ def grid_pose_for_sample(sample, store):
     snapshot = sample.get("snapshot")
     if not actual or not snapshot:
         return None
-    grid = store.grid(snapshot.get("occupancy_digest"))
+    grid = store.grid(payload_key(snapshot))
     if grid is None:
         return None
     pose = (actual["x"], actual["y"], actual["yaw"])
@@ -1063,7 +1160,7 @@ def grid_pose_for_sample(sample, store):
         return pose, grid.frame_id
     if actual.get("frame_id") != "odom" or grid.frame_id != "map":
         return None
-    transformed = transform_pose(sample.get("map_from_odom"), pose)
+    transformed = transform_pose(sample.get("map_from_odom"), pose, actual.get("pose_se3"))
     if transformed is None:
         return None
     return transformed, grid.frame_id

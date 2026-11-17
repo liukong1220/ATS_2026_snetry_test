@@ -57,6 +57,7 @@ scripts/footprint_evaluator.py (geometry) and the runner's contact gate
 """
 
 import argparse
+from array import array
 import gzip
 import hashlib
 import json
@@ -155,6 +156,8 @@ def plan_layer_retention(retained, topic, budget):
     write already fits.  ``budget <= 0`` disables payload writing entirely and is
     reported as ``False``.
     """
+    if budget == -1:
+        return (None, None)
     if budget <= 0:
         return False
     total = sum(len(names) for names in retained.values())
@@ -208,6 +211,30 @@ def path_poses(msg):
     return poses
 
 
+def pose_se3(pose):
+    position, orientation = pose.position, pose.orientation
+    return [float(position.x), float(position.y), float(position.z),
+            float(orientation.x), float(orientation.y),
+            float(orientation.z), float(orientation.w)]
+
+
+def transform_record(transform):
+    translation, rotation = transform.transform.translation, transform.transform.rotation
+    return {"stamp_identity": stamp_identity(transform.header.stamp),
+            "frame_id": transform.header.frame_id, "child_frame_id": transform.child_frame_id,
+            "x": float(translation.x), "y": float(translation.y), "z": float(translation.z),
+            "quaternion": [float(rotation.x), float(rotation.y), float(rotation.z), float(rotation.w)],
+            "yaw": yaw_from_quaternion(rotation.x, rotation.y, rotation.z, rotation.w)}
+
+
+def snapshot_payload_key(identity):
+    """Occupancy bytes alone cannot identify a moving grid or numeric field."""
+    content = {key: identity.get(key) for key in (
+        "frame_id", "info", "occupancy_digest", "distance_digest",
+        "occupied_value_threshold", "unknown_is_obstacle")}
+    return digest_bytes(json.dumps(content, sort_keys=True).encode("utf-8"))
+
+
 def grid_metadata(info):
     orientation = info.origin.orientation
     return {
@@ -216,6 +243,7 @@ def grid_metadata(info):
         "resolution": float(info.resolution),
         "origin_x": float(info.origin.position.x),
         "origin_y": float(info.origin.position.y),
+        "origin_z": float(info.origin.position.z),
         "origin_yaw": yaw_from_quaternion(
             float(orientation.x), float(orientation.y),
             float(orientation.z), float(orientation.w)),
@@ -429,6 +457,7 @@ class NavTrackingRecorder(Node):
             "x": float(msg.pose.pose.position.x),
             "y": float(msg.pose.pose.position.y),
             "z": float(msg.pose.pose.position.z),
+            "pose_se3": pose_se3(msg.pose.pose),
             "yaw": yaw_from_quaternion(
                 float(orientation.x), float(orientation.y),
                 float(orientation.z), float(orientation.w)),
@@ -497,7 +526,8 @@ class NavTrackingRecorder(Node):
         sequence changed between cycles.
         """
         poses = path_poses(msg)
-        payload = json.dumps(poses, sort_keys=True).encode("utf-8")
+        full_poses = [pose_se3(pose.pose) for pose in msg.poses]
+        payload = json.dumps([msg.header.frame_id, full_poses], sort_keys=True).encode("utf-8")
         digest = digest_bytes(payload)
         key = (source, stamp_identity(msg.header.stamp), digest)
         reference = {
@@ -507,6 +537,7 @@ class NavTrackingRecorder(Node):
             "digest": digest,
             "pose_count": len(poses),
             "poses": poses,
+            "poses_se3": full_poses,
         }
         if key not in self._seen_reference_keys:
             self._seen_reference_keys.add(key)
@@ -564,6 +595,13 @@ class NavTrackingRecorder(Node):
             "reference_frame_id": msg.reference.header.frame_id,
             "reference_stamp_identity": stamp_identity(msg.reference.header.stamp),
             "reference_pose_count": len(reference_poses),
+            "validation_map_publication_sequence": int(
+                getattr(msg, "validation_map_publication_sequence", 0)),
+            "validation_map_source_generation": int(
+                getattr(msg, "validation_map_source_generation", 0)),
+            "validation_from_reference": (
+                transform_record(msg.validation_from_reference)
+                if getattr(msg, "validation_map_publication_sequence", 0) else None),
         }
         previous = self._execution
         self._execution = execution
@@ -576,6 +614,7 @@ class NavTrackingRecorder(Node):
             # "did the executed reference match the published one" question is
             # answerable from one message rather than by cross-topic guessing.
             event["reference_poses"] = reference_poses
+            event["reference_poses_se3"] = [pose_se3(pose.pose) for pose in msg.reference.poses]
             self._event("execution_command", event)
 
     def _on_emergency_stop(self, msg):
@@ -622,9 +661,11 @@ class NavTrackingRecorder(Node):
             "source_generation": int(msg.source_generation),
             "publication_sequence": int(msg.publication_sequence),
             "occupancy_digest": digest,
+            "distance_digest": digest_bytes(array("f", msg.signed_distance_m).tobytes()),
             "cell_count": len(occupancy),
             "info": grid_metadata(msg.info),
         }
+        identity["payload_key"] = snapshot_payload_key(identity)
         self._snapshot_identity = identity
         self._snapshot_mono = time.monotonic()
         identity_key = json.dumps(identity, sort_keys=True)
@@ -633,11 +674,13 @@ class NavTrackingRecorder(Node):
         self._seen_snapshot_identities.add(identity_key)
         record = dict(identity)
         record["mono_s"] = time.monotonic() - self._start_mono
-        if digest in self._snapshot_payload_by_digest:
-            record["payload"] = self._snapshot_payload_by_digest[digest]
-        elif self._snapshot_payloads_written < self._args.max_snapshot_payloads:
+        payload_key = identity["payload_key"]
+        if payload_key in self._snapshot_payload_by_digest:
+            record["payload"] = self._snapshot_payload_by_digest[payload_key]
+        elif (self._args.max_snapshot_payloads == -1 or
+              self._snapshot_payloads_written < self._args.max_snapshot_payloads):
             name = "snapshot_%020d_%s.json.gz" % (
-                int(msg.publication_sequence), digest)
+                int(msg.publication_sequence), payload_key)
             path = os.path.join(self._output_dir, "snapshot_payload", name)
             payload = {
                 "identity": identity,
@@ -653,7 +696,7 @@ class NavTrackingRecorder(Node):
         else:
             self._snapshot_payloads_truncated = True
             record["payload"] = None
-        self._snapshot_payload_by_digest[digest] = record["payload"]
+        self._snapshot_payload_by_digest[payload_key] = record["payload"]
         self._snapshots.write(record)
 
     def _on_layer(self, topic, msg):
@@ -667,9 +710,11 @@ class NavTrackingRecorder(Node):
         self._count(topic)
         data = list(msg.data)
         digest = digest_int8_array(data)
-        if self._seen_layer_digests.get(topic) == digest:
+        content_key = digest_bytes(json.dumps(
+            [msg.header.frame_id, grid_metadata(msg.info), digest], sort_keys=True).encode("utf-8"))
+        if self._seen_layer_digests.get(topic) == content_key:
             return
-        self._seen_layer_digests[topic] = digest
+        self._seen_layer_digests[topic] = content_key
         plan = plan_layer_retention(
             self._layer_retained, topic, self._args.max_layer_payloads)
         if plan is False:
@@ -691,7 +736,8 @@ class NavTrackingRecorder(Node):
                 "reason": "max_layer_payloads budget reached; newest content kept",
             })
         safe_topic = topic.strip("/").replace("/", "__")
-        name = "%s_%s.json.gz" % (safe_topic, digest)
+        # A -> B -> A keeps both receipt-time intervals rather than overwrite A.
+        name = "%s_%012d_%s.json.gz" % (safe_topic, self._layer_payloads_written, content_key)
         path = os.path.join(self._output_dir, "layers", name)
         payload = {
             "topic": topic,
@@ -752,14 +798,7 @@ class NavTrackingRecorder(Node):
                     rotation.x, rotation.y, rotation.z, rotation.w)),
                     1.0, rel_tol=1e-3, abs_tol=1e-3)):
             return None
-        return {
-            "stamp_identity": stamp_identity(transform.header.stamp),
-            "x": float(translation.x),
-            "y": float(translation.y),
-            "yaw": yaw_from_quaternion(
-                float(rotation.x), float(rotation.y),
-                float(rotation.z), float(rotation.w)),
-        }
+        return transform_record(transform)
 
     def _initial_missing(self, map_from_odom):
         """Initial evidence only; after the first sample no tick is filtered."""
@@ -778,7 +817,7 @@ class NavTrackingRecorder(Node):
                 snapshot["info"]["width"] * snapshot["info"]["height"] or
                 not math.isfinite(snapshot["info"]["resolution"]) or
                 snapshot["info"]["resolution"] <= 0 or
-                not self._snapshot_payload_by_digest.get(snapshot["occupancy_digest"])):
+                not self._snapshot_payload_by_digest.get(snapshot["payload_key"])):
             missing.append("ready_snapshot")
         return missing
 
@@ -994,12 +1033,15 @@ def parse_args(argv=None):
     parser.add_argument("--static-map-topic", default="/map")
     parser.add_argument("--traversability-grid-topic", default="/traversability_grid")
     parser.add_argument("--slope-grid-topic", default="/traversability_slope_grid")
-    parser.add_argument("--max-snapshot-payloads", type=int, default=400,
-                        help="bound on stored full snapshots; excess is flagged")
-    parser.add_argument("--max-layer-payloads", type=int, default=200)
+    parser.add_argument("--max-snapshot-payloads", type=int, default=-1,
+                        help="-1 keeps all distinct payloads; zero disables; cap excess is flagged")
+    parser.add_argument("--max-layer-payloads", type=int, default=-1,
+                        help="-1 keeps full provenance; zero disables; positive caps evict oldest")
     args = parser.parse_args(argv)
     if not math.isfinite(args.startup_timeout_sec) or args.startup_timeout_sec <= 0:
         parser.error("--startup-timeout-sec must be finite and positive")
+    if args.max_snapshot_payloads < -1 or args.max_layer_payloads < -1:
+        parser.error("payload limits must be -1, zero or positive")
     return args
 
 

@@ -10,6 +10,7 @@ import collections
 import json
 import math
 import os
+import signal
 from pathlib import Path
 import time
 
@@ -40,6 +41,7 @@ def main():
     if not os.environ.get('ROS_DOMAIN_ID'):
         parser.error('set ROS_DOMAIN_ID explicitly')
     import rclpy
+    from rclpy.signals import SignalHandlerOptions
     from rclpy.parameter import Parameter
     from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profile_sensor_data
     from rosidl_runtime_py.convert import message_to_ordereddict
@@ -50,7 +52,15 @@ def main():
     from manda_can_control.msg import MotionCtrl
     from std_msgs.msg import Bool
 
-    rclpy.init()
+    stop_requested = False
+
+    def request_stop(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+
+    previous_handlers = {sig: signal.signal(sig, request_stop)
+                         for sig in (signal.SIGINT, signal.SIGTERM)}
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     node = rclpy.create_node('navigation_spin_chain_evaluator', parameter_overrides=[
         Parameter('use_sim_time', value=True)])
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -117,24 +127,35 @@ def main():
         subscriptions.append(node.create_subscription(
             msg_type, topic, lambda msg, key=kind: generic(key, msg), qos_profile_sensor_data))
     reason = 'duration'
+    ready = False
+    ready_topics = {'clock', 'execution', 'truth', 'localization', 'localization_status',
+                    'autonomy_raw', 'selected', 'motion_control', 'map_ready', 'emergency_stop'}
     try:
-        while time.monotonic() - start < args.duration:
+        while not stop_requested and time.monotonic() - start < args.duration:
             rclpy.spin_once(node, timeout_sec=0.2)
+            if not ready and all(received[kind] for kind in ready_topics):
+                ready = True
+                print('CHAIN_READY pid=%d' % os.getpid(), flush=True)
             limit = args.idle_timeout if received['clock'] else args.startup_timeout
             if time.monotonic() - last_clock[0] > limit:
                 reason = 'clock_receive_timeout'
                 break
+        if stop_requested:
+            reason = 'signal'
     finally:
         stream.close()
         args.output.with_suffix('.summary.json').write_text(json.dumps({
             'domain': os.environ['ROS_DOMAIN_ID'], 'pid': os.getpid(), 'pgid': os.getpgrp(),
             'elapsed_wall_s': time.monotonic() - start, 'reason': reason,
+            'ready_before_stop': ready,
             'received': received, 'written': counts,
             'scope': 'subscriber receive trace; execution references deduplicated; '
                      'not an atomic internal MPC snapshot; horizon dt requires parameter capture',
         }, indent=2) + '\n')
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == '__main__':
