@@ -66,6 +66,8 @@ import os
 import signal
 import time
 
+from nav_tracking_payload import reference_payload_key
+
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.signals import SignalHandlerOptions
@@ -360,6 +362,7 @@ class NavTrackingRecorder(Node):
         self._reference_mono = None
 
         self._seen_reference_keys = set()
+        self._execution_payload_keys = set()
         self._seen_snapshot_identities = set()
         self._snapshot_payload_by_digest = {}
         self._seen_layer_digests = {}
@@ -581,6 +584,17 @@ class NavTrackingRecorder(Node):
     def _on_execution(self, msg):
         self._count(self._args.execution_command_topic)
         reference_poses = path_poses(msg.reference)
+        payload = {
+            "frame_id": msg.reference.header.frame_id,
+            "stamp_identity": stamp_identity(msg.reference.header.stamp),
+            "pose_count": len(reference_poses),
+            "poses": reference_poses,
+            "poses_se3": [pose_se3(pose.pose) for pose in msg.reference.poses],
+            "pose_stamp_identities": [stamp_identity(pose.header.stamp)
+                                      for pose in msg.reference.poses],
+            "pose_frame_ids": [pose.header.frame_id for pose in msg.reference.poses],
+        }
+        payload_key = reference_payload_key(payload)
         execution = {
             "stamp_identity": stamp_identity(msg.header.stamp),
             "mode": int(msg.mode),
@@ -595,6 +609,7 @@ class NavTrackingRecorder(Node):
             "reference_frame_id": msg.reference.header.frame_id,
             "reference_stamp_identity": stamp_identity(msg.reference.header.stamp),
             "reference_pose_count": len(reference_poses),
+            "reference_payload_key": payload_key,
             "validation_map_publication_sequence": int(
                 getattr(msg, "validation_map_publication_sequence", 0)),
             "validation_map_source_generation": int(
@@ -606,16 +621,17 @@ class NavTrackingRecorder(Node):
         previous = self._execution
         self._execution = execution
         self._execution_mono = time.monotonic()
+        if payload_key not in self._execution_payload_keys:
+            self._event("execution_reference_payload", {"key": payload_key,
+                                                         "reference": payload})
+            self._execution_payload_keys.add(payload_key)
         if previous is None or previous.get("command_sequence") != \
                 execution.get("command_sequence") or \
-                previous.get("mode") != execution.get("mode"):
-            event = dict(execution)
-            # The lease carries its own copy of the reference; keep it so a
-            # "did the executed reference match the published one" question is
-            # answerable from one message rather than by cross-topic guessing.
-            event["reference_poses"] = reference_poses
-            event["reference_poses_se3"] = [pose_se3(pose.pose) for pose in msg.reference.poses]
-            self._event("execution_command", event)
+                previous.get("mode") != execution.get("mode") or \
+                previous.get("reference_payload_key") != payload_key:
+            # Every lease keeps its authority and validation identity. Complete
+            # path content is retained once, never inferred from its stamp.
+            self._event("execution_command", dict(execution))
 
     def _on_emergency_stop(self, msg):
         self._count(self._args.emergency_stop_topic)

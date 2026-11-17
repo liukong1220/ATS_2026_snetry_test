@@ -53,6 +53,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import footprint_evaluator as fe  # noqa: E402
+from nav_tracking_payload import execution_commands  # noqa: E402
 
 
 def load_jsonl(path):
@@ -534,8 +535,7 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
     leases with the same reference/map identity are replay, not ambiguity.
     """
     results = []
-    commands = [event.get("payload", {}) for event in events
-                if event.get("kind") == "execution_command"]
+    commands = execution_commands(events)
     for reference in references:
         if reference.get("source") != reference_topic:
             continue
@@ -557,6 +557,9 @@ def analyze_reference_at_publish(samples, references, store, layers, params,
                       reference.get("stamp_identity")]
         if not candidates:
             entry["reason"] = "no matching EXECUTE reference authority recorded"
+            continue
+        if any(command.get("reference_payload_error") for command in candidates):
+            entry["reason"] = "EXECUTE reference payload missing, corrupt or ambiguous"
             continue
         if any(command.get("reference_frame_id") != reference.get("frame_id") or
                command.get("reference_poses") != reference.get("poses") or

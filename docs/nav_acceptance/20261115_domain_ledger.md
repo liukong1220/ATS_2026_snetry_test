@@ -162,5 +162,11 @@
 | 20 | `20261117_o1_o0_completion/unit_d20` | Goal Manager 13 组通过；guard command_exit=0，进程/端口清空 |
 | 21 | `20261117_o1_o0_completion/unit_d21` | 记录器、MINCO/ROG/RC-ESDF/MPC 窄回归与 launch 参数检查通过；command_exit=0，清空 |
 | 22 | `20261117_o1_o0_completion/v1_d22` | V1 action 定位恢复超时，q1 通过、q2 失败、O0 未触发；command_exit=1，清空 |
+| 23 | `20261117_o1_o0_completion/plane_negative_d23` | 参考平面旧实现负对照：3 失败、1 通过，符合预期；command_exit=1，清空 |
+| 24 | `20261117_o1_o0_completion/plane_tests_d24` | 参考平面修复后 MINCO 8 组通过，含 5 个相关节点用例；command_exit=0，清空 |
+| 25 | `20261117_o1_o0_completion/v1_plane_d25` | 重复里程计接收超时后按风险条件取消目标，V1 未通过；18 条参考 q1 通过，q2 无持续冲突；command_exit=1，清空 |
+| 26 | `20261117_o1_o0_completion/unit_payload_d26` | 内容去重 13 例、捕获器 11 例（含 ROS 收发）及原跟踪/故障/O0 回归通过；command_exit=0，清空 |
 
 完整命令、PID/kernel start time、运行前检查和运行后检查分别保存在每个批次的 `domain_guard.json`，不把本机清场推导为其他 WLAN 主机参与者已排除。
+
+记录器负对照期间还发现旧 `test_runner_topic_capture.py` 的端到端用例自行按 PID 选择 200..229。该次调用没有 guard 前置记录，不计验收通过；已改为只继承显式隔离 domain。事后审计 `capture_legacy_random_domain_audit.json` 未发现该范围的 ROS domain 进程；204/205/208/211 存在 UDP 端口占用，未终止未知进程，也不声称这些编号已清空。

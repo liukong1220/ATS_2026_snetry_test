@@ -2522,6 +2522,7 @@ start_topic_capture() {
   local mode=all
   if [[ "${RUNNER_CAPTURE}" == inprocess ]]; then
     [[ "${message_type}" == nav_msgs/msg/Path ]] && mode=path
+    [[ "${message_type}" == ats_navigation_interfaces/msg/ExecutionCommand ]] && mode=execution
     STARTED_CAPTURE_PID=""
     capture_daemon_open "${topic}" "${message_type}" "${output_file}" "${mode}" "${reliability}" ||
       STARTED_CAPTURE_PID="capd_failed"

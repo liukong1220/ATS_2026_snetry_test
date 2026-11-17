@@ -51,7 +51,7 @@ T1→T2→T3先按显式无先验模式验证；有先验复验使用经核验�
 
 每次选择一个未使用且宿主端口空闲的0..232 domain，排除5、77、91/92和[账本](20261115_domain_ledger.md)已尝试编号。使用工作区WLAN配置，保持`ROS_LOCALHOST_ONLY=0`，不退回lo。先核验Release构建、安装一致性、2027资产和健康。d103/d107来自另一主机，本机d110复现初始无odom超时卡死，当前修复与首目标证据见11月17日索引；不能放宽定位/地图安全超时绕过。
 
-截至d16收尾，账本与排除项已覆盖全部0..232编号。以下为条件满足后的模板；后续ROS运行须先明确满足AGENTS规则的隔离分配安排，端口空闲不等于可复用历史编号。未满足时可继续源码和已有证据审查。
+截至d16收尾，账本与排除项已覆盖全部0..232编号。用户随后明确授权本轮O1/O1b/O0复用历史编号，按[本轮清场规则](20261117_domain_reuse_rules.md)和guard执行；以下模板只适用于这次授权。排除项不变，每次运行必须重新检查进程和端口，不把空闲写成首次使用。
 
 ### 4.1 隧道
 
@@ -59,8 +59,10 @@ T1→T2→T3先按显式无先验模式验证；有先验复验使用经核验�
 cd /home/ats/ATS_2026_snetry_test
 source install/setup.bash
 source log/nav_acceptance/dds/wlan_env.sh
-ROS_DOMAIN_ID="${ATS_DOMAIN:?先核验新domain}" \
-  python3 scripts/s3_mujoco_acceptance.py \
+python3 -s scripts/nav_domain_guard.py run \
+  --domain "${ATS_DOMAIN:?先核验本轮复用domain}" \
+  --run-dir "${ATS_GUARD_OUT:?独立guard批次目录}" --reuse-authorized -- \
+  python3 -s scripts/s3_mujoco_acceptance.py \
   --profile rmuc_2027_tunnels --route tunnel_b_roundtrip \
   --case route --output "${ATS_OUT:?全新的证据目录}" \
   --record-column-inputs --registration-details \
@@ -80,18 +82,23 @@ SCENE=rmuc_2027 TEST_PROFILE=single \
   GOAL_X=14.60 GOAL_Y=14.00 GOAL_YAW=0.0 P3_GOAL_FRAME=map \
   GOAL_TOLERANCE=0.08 GOAL_TIMEOUT=300 GOAL_WALL_PER_SIM=20 \
   PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  LIDAR_DOWNSAMPLE=0 NAV_TRACKING_MAX_LAYER_PAYLOADS=3000 \
+  LIDAR_DOWNSAMPLE=0 NAV_TRACKING_MAX_SNAPSHOT_PAYLOADS=-1 \
+  NAV_TRACKING_MAX_LAYER_PAYLOADS=-1 O0_CHAIN_RECORDER=1 \
   NAV_TRACKING_PROFILE_YAML="$PWD/src/ats_sentry_bringup/params/node_params.yaml" \
   USE_RVIZ=false USE_MUJOCO_VIEWER=false \
-  ROS_DOMAIN_ID="${ATS_DOMAIN:?先核验新domain}" \
   LOG_DIR="${ATS_OUT:?全新的runner日志目录}" \
   EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=false lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim prior_pcd_file:=$PWD/src/ats_sentry_bringup/pcd/rmuc_2027.pcd" \
-  scripts/test_mujoco_minco_mpc_chain.sh
+  python3 -s scripts/nav_domain_guard.py run \
+    --domain "${ATS_DOMAIN:?先核验本轮复用domain}" \
+    --run-dir "${ATS_GUARD_OUT:?独立guard批次目录}" --reuse-authorized -- \
+    bash scripts/test_mujoco_minco_mpc_chain.sh
 ```
 
 命令显式指定`single`和2027场景，不依赖runner的默认2025值。记录器只从`NAV_TRACKING_PROFILE_YAML`取足迹长/宽/margin；三套已同步，因此这里用含完整字段的根参数，不能直接指向缺这些键的2027稀疏overlay。其余运行参数仍按正式2027覆盖链加载。
 
-**记录完整性前置尚待修复。** 当前runner只将`NAV_TRACKING_MAX_LAYER_PAYLOADS`传给`--max-layer-payloads`；`nav_tracking_recorder.py`的`--max-snapshot-payloads`仍用默认400。上面的3000只影响来源层，d7的snapshot与layer均出现截断、q2缺863 tick。下一阶段需分别设计两类载荷的保留预算/策略及完整性检查，再更新此模板；本文件不编造尚未接入的环境变量。保留V1的q1失败，补证后再判断其原因。
+**本轮已修复记录完整性链。** runner分别传入两种载荷预算，默认`-1`全程保留，`0`关闭、正数显式限额仍记录缺证；分析器按LRU只缓存8份解压载荷。记录器保存完整SE3及几何/距离场身份，EXECUTE单独绑定最终验证快照与TF。d22的892个快照、1161个来源层载荷未截断，16条执行参考q1通过；q2仍失败。d7的历史失败和缺证保留，不回写为通过。
+
+`O0_CHAIN_RECORDER=1`由runner在唯一所有权检查后、目标下发前启动，并等待时钟、执行授权、真值、定位和三路速度等初始证据；退出时优雅收尾。输出位于该目标跟踪目录的`o0_chain.jsonl`。按运行时参数生成曲线，例如d22的`dt=0.05`、终点半径1.0m、steady里程计超时1.0s；其他批次须重新核验，不套用默认值。
 
 本机11月17日实测实时率约0.08–0.10，客户端墙钟兜底用20倍；32逻辑核默认6倍的历史速度假设不适用。该值只防止客户端早于ATS目标的300s仿真时间截止，不改变目标本身、odom/证据/地图租约或失效零速门。长任务使用独立后台进程并保存PID/退出码，避免执行工具约15分钟会话中断；不能把进程仍在运行当作验收成功。
 
@@ -119,7 +126,7 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 
 统一报告T1/T2/T3/V1/F每项：未运行、启动失败、执行失败、已通过及其限制。保留domain、三仓commit、实际参数/命令、原始日志与hash、每个目标结果、穿越计数、q1/q2、接触评估和终点/速度曲线。未带RViz时明确写明，不能由配置验证推导实际画面通过。
 
-以下是11月17日运行结果，本次文档整理没有新增运行通过项；完整原始记录见[本机说明](20261117_o1a_o0.md)与[冻结索引](20261117_o1a_o0.json)。
+以下保留11月17日前一轮结果，并追加本轮实际证据；前一轮原始记录见[本机说明](20261117_o1a_o0.md)与[冻结索引](20261117_o1a_o0.json)，本轮进度见[优化账本](20261117_o1_o0_completion.md)。
 
 | 项目 | 结果 | 结论边界 |
 | --- | --- | --- |
@@ -127,6 +134,8 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 | T1 d8 | **失败**：首目标unknown足迹/重规划预算阻断，0/13到达、真实B穿越0 | 该段q1/q2及失败零速通过，路线仍失败 |
 | T2 / T3 | **未执行** | T1前置未通过 |
 | V1 d7 | **失败**：action成功、真值0.069451m达标；q1为7/9可评价参考冲突、另1条缺证，q2缺863 tick；运行期LOST后epoch1→2 | 真值峰值0.826715m/s；snapshot/layer截断及首次EXECUTE前位移待归因，未证明精确对称起点或高速能力 |
+| V1 d22（本轮） | **失败**：action code 6定位恢复超时；16条执行参考q1通过；q2共30冲突tick，最长24 tick跨12快照，持续段2个 | 892快照与1161来源层未截断、无frame配对缺失；真值峰值0.449983m/s；接触计数增量0不替代独立物理评估 |
+| V1 d25（本轮） | **提前终止、未通过**：重复里程计 steady 接收超时，绑定本次目标 UUID 取消，action code 1；18条执行参考q1通过；1388有效实际位姿中2个诊断冲突tick、无持续段 | 参考控制平面修复后独立运行；载荷/配对完整，接触计数增量0仍不是独立物理评估；O0为2次换轨、合格巡航0次，真值峰值0.439118m/s；清场完成 |
 | F：adapter lease / service_timeout / input_stale / unknown | **各独立通过**：d4/d3/d2/d1，新锚点名义前置及三路零速、恢复后旧参考不复活获证 | 新锚点见4.3；d6前置失败未注入、非零接触计数保留。四项不能代表整个F通过 |
 | F：unreachable d0 | **失败**：自由断连目标实际触发A*无路及零速，约3.02s仿真时返回挂起预算code 5，夹具预期code 3 | 结果码优先级与JPS/A*断言需先明确契约再修复；专用恢复门未执行 |
 | O0 / 5m/s能力 | **未触发**：d9/d16/V1合格巡航换轨为0；导航运行未触发5m/s平台 | 已修时基问题，原跌速门未获证；空场d108只验证传感器/执行器，不替代V1 |

@@ -58,6 +58,15 @@ def cdr_path(frame_id, count, little=True):
 
 
 class ParseCommandTest(unittest.TestCase):
+    def test_execution_summary_mode_is_explicit_and_type_checked(self):
+        _, fields = capture.parse_command(
+            "open lease /planner/execution_command ats_navigation_interfaces/msg/ExecutionCommand "
+            "/tmp/lease.out execution reliable")
+        self.assertEqual(fields["mode"], "execution")
+        with self.assertRaises(ValueError):
+            capture.parse_command(
+                "open lease /path nav_msgs/msg/Path /tmp/lease.out execution reliable")
+
     def test_open(self):
         verb, fields = capture.parse_command(
             "open c1 /minco/raw_path nav_msgs/msg/Path /tmp/a.out path reliable")
@@ -77,6 +86,25 @@ class ParseCommandTest(unittest.TestCase):
     def test_close_and_quit(self):
         self.assertEqual(capture.parse_command("close c3"), ("close", {"id": "c3"}))
         self.assertEqual(capture.parse_command("quit"), ("quit", {}))
+
+
+class ExecutionSummaryTest(unittest.TestCase):
+    def test_header_summary_preserves_authority_without_mutating_the_input(self):
+        from types import SimpleNamespace as NS
+        original = NS(mode=1, command_sequence=31, map_generation=8,
+                      validation_map_publication_sequence=12,
+                      validation_map_source_generation=10,
+                      reference=NS(header=NS(frame_id="odom", stamp=NS(sec=2, nanosec=3)),
+                                   poses=[NS(pose=NS(x=1))] * 500))
+        summary, count = capture.compact_execution_message(original)
+        self.assertEqual(count, 500)
+        self.assertEqual(len(original.reference.poses), 500)
+        self.assertEqual(summary.reference.poses, [])
+        self.assertIsNot(summary.reference, original.reference)
+        self.assertIs(summary.reference.header, original.reference.header)
+        for key in ("mode", "command_sequence", "map_generation",
+                    "validation_map_publication_sequence", "validation_map_source_generation"):
+            self.assertEqual(getattr(summary, key), getattr(original, key))
 
 
 class CdrHeaderTest(unittest.TestCase):
@@ -145,15 +173,21 @@ def awk_frame(path, expected):
 class EndToEndTest(unittest.TestCase):
     def test_path_and_twist_capture(self):
         import rclpy
+        from ats_navigation_interfaces.msg import ExecutionCommand
         from geometry_msgs.msg import PoseStamped, Twist
         from nav_msgs.msg import Path as PathMsg
 
         tmp = tempfile.mkdtemp(prefix="runner_capture_test_")
         fifo, ack = os.path.join(tmp, "c.fifo"), os.path.join(tmp, "c.ack")
         os.mkfifo(fifo)
-        # Private domain only.  ROS_LOCALHOST_ONLY=1 together with a CYCLONEDDS_URI that names another
-        # interface makes Cyclone fail to create the domain, so neither is changed here.
-        env = dict(os.environ, ROS_DOMAIN_ID=str(200 + os.getpid() % 30))
+        # Allocation/cleanup belong to nav_domain_guard, never a PID-derived ID.
+        # The pure tests remain runnable without starting a ROS participant.
+        domain = os.environ.get("ROS_DOMAIN_ID")
+        if domain is None:
+            self.skipTest("run the ROS integration case under nav_domain_guard with ROS_DOMAIN_ID")
+        if not domain.isdecimal() or not 0 <= int(domain) <= 232 or int(domain) in (5, 77, 91, 92):
+            self.fail("invalid explicitly allocated ROS_DOMAIN_ID")
+        env = dict(os.environ)
         proc = subprocess.Popen([sys.executable, str(SCRIPTS / "runner_topic_capture.py"),
                                  "--control", fifo, "--ack", ack], env=env)
 
@@ -176,15 +210,20 @@ class EndToEndTest(unittest.TestCase):
             self.assertTrue(wait_ack("ready"))
             path_pub = node.create_publisher(PathMsg, "/test/path", 10)
             twist_pub = node.create_publisher(Twist, "/test/cmd", 10)
+            execution_pub = node.create_publisher(ExecutionCommand, "/test/execution", 10)
             path_out, twist_out = os.path.join(tmp, "path.out"), os.path.join(tmp, "cmd.out")
+            execution_out = os.path.join(tmp, "execution.out")
             send(f"open c1 /test/path nav_msgs/msg/Path {path_out} path reliable")
             send(f"open c2 /test/cmd geometry_msgs/msg/Twist {twist_out} all auto")
+            send(f"open c4 /test/execution ats_navigation_interfaces/msg/ExecutionCommand "
+                 f"{execution_out} execution reliable")
             send("open c3 /test/x nav_msgs/msg/Path /nonexistent_dir/x.out path reliable")
-            self.assertTrue(wait_ack("ok c1") and wait_ack("ok c2"))
+            self.assertTrue(wait_ack("ok c1") and wait_ack("ok c2") and wait_ack("ok c4"))
             self.assertTrue(any(l.startswith("err c3 ") for l in read_text(ack).split("\n")))
             deadline = time.time() + 10
             while time.time() < deadline and (path_pub.get_subscription_count() < 1 or
-                                               twist_pub.get_subscription_count() < 1):
+                                               twist_pub.get_subscription_count() < 1 or
+                                               execution_pub.get_subscription_count() < 1):
                 rclpy.spin_once(node, timeout_sec=0.05)
             empty = PathMsg()
             empty.header.frame_id = "odom"
@@ -193,14 +232,23 @@ class EndToEndTest(unittest.TestCase):
             full.poses = [PoseStamped() for _ in range(3)]
             twist = Twist()
             twist.linear.y = 0.5
+            execution = ExecutionCommand()
+            execution.mode = ExecutionCommand.MODE_EXECUTE
+            execution.reference.header.frame_id = "odom"
+            execution.reference.poses = [PoseStamped() for _ in range(500)]
+            execution.validation_map_publication_sequence = 17
             for msg in (empty, empty, full, full, full):
                 path_pub.publish(msg)
                 twist_pub.publish(twist)
+                execution.command_sequence += 1
+                execution_pub.publish(execution)
                 time.sleep(0.05)
             time.sleep(0.5)
             send("close c1")
             send("close c2")
-            self.assertTrue(wait_ack("closed c1") and wait_ack("closed c2"))
+            send("close c4")
+            self.assertTrue(wait_ack("closed c1") and wait_ack("closed c2") and
+                            wait_ack("closed c4"))
             self.assertEqual(read_text(path_out + ".count").split(), ["5", "2"])
             self.assertEqual(read_text(twist_out + ".count").split(), ["5", "5"])
             self.assertTrue(awk_has_nonempty_path(path_out))
@@ -208,6 +256,14 @@ class EndToEndTest(unittest.TestCase):
             self.assertFalse(awk_frame(path_out, "map"))
             self.assertEqual(read_text(twist_out).count("---\n"), 5)
             self.assertIn("y: 0.5", read_text(twist_out))
+            self.assertEqual(read_text(execution_out + ".count").split(), ["5", "5"])
+            execution_text = read_text(execution_out)
+            self.assertEqual(execution_text.count("reference_pose_count: 500"), 5)
+            self.assertEqual(execution_text.count("poses: []"), 5)
+            self.assertIn("validation_map_publication_sequence: 17", execution_text)
+            for sequence in range(1, 6):
+                self.assertIn(f"command_sequence: {sequence}\n", execution_text)
+            self.assertLess(len(execution_text), 15000)
             send("quit")
             self.assertTrue(wait_ack("bye"))
             self.assertEqual(proc.wait(timeout=10), 0)

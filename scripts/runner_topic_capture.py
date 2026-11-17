@@ -12,7 +12,10 @@ slowed the simulation and stole CPU from the nodes being measured.  This process
   to survive one second before.
 * The files keep the ``ros2 topic echo`` YAML layout (``message_to_yaml`` + ``---``, arrays truncated
   at 128 like ros2cli's default), so every awk gate in the runner reads them unchanged.
-* ``mode all`` writes every message (Twist command streams, ExecutionCommand).
+* ``mode all`` writes every message (Twist command streams).
+* ``mode execution`` writes every lease with all authority fields and the reference header,
+  followed by a comment with its original pose count. Complete path content belongs to
+  nav_tracking_recorder; repeatedly expanding hundreds of poses into YAML wastes CPU.
 * ``mode path`` is for nav_msgs/Path.  The runner only asks whether a non-empty Path with the expected
   frame_id arrived.  The subscription is raw: frame_id and the pose count are read from the CDR bytes,
   and a message is deserialised and written only when (frame_id, empty/non-empty) differs from the last
@@ -34,6 +37,7 @@ tested with ``python3 -I scripts/test_runner_topic_capture.py``.
 """
 
 import argparse
+import copy
 import os
 import select
 import signal
@@ -41,7 +45,7 @@ import struct
 import sys
 
 TRUNCATE_LENGTH = 128  # ros2topic.verb.echo DEFAULT_TRUNCATE_LENGTH
-MODES = ("all", "path")
+MODES = ("all", "path", "execution")
 RELIABILITIES = ("reliable", "best_effort", "auto")
 
 
@@ -57,6 +61,8 @@ def parse_command(line):
         _, cid, topic, msg_type, path, mode, reliability = parts
         if mode not in MODES:
             raise ValueError("bad_mode")
+        if mode == "execution" and msg_type != "ats_navigation_interfaces/msg/ExecutionCommand":
+            raise ValueError("execution_mode_requires_ExecutionCommand")
         if reliability not in RELIABILITIES:
             raise ValueError("bad_reliability")
         if not topic.startswith("/") or msg_type.count("/") != 2:
@@ -129,6 +135,18 @@ def choose_reliability(requested, publisher_reliabilities, reliable_value, best_
     return best_effort_value
 
 
+def compact_execution_message(msg):
+    """Keep every authority field; the tracking recorder owns complete paths.
+
+    Copy the two containers so summarizing never mutates the received message.
+    """
+    compact = copy.copy(msg)
+    compact.reference = copy.copy(msg.reference)
+    count = len(msg.reference.poses)
+    compact.reference.poses = []
+    return compact, count
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--control", required=True, help="control FIFO (created by the runner)")
@@ -154,7 +172,15 @@ def main(argv=None):
         ack.flush()
 
     def write_message(capture, msg):
+        pose_count = None
+        if capture["mode"] == "execution":
+            msg, pose_count = compact_execution_message(msg)
         capture["file"].write(message_to_yaml(msg, truncate_length=TRUNCATE_LENGTH) + "---\n")
+        if pose_count is not None:
+            # A separate YAML comment avoids changing the ROS message schema or
+            # pretending this summary contains the complete reference geometry.
+            capture["file"].write("# reference_pose_count: %d; full path: nav_tracking_recorder\n"
+                                  % pose_count)
         capture["file"].flush()
 
     def open_capture(spec):

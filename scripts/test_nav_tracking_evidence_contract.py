@@ -4,6 +4,7 @@
 Imports ROS message definitions but never creates a ROS context or participant.
 """
 import gzip
+import hashlib
 import json
 import math
 import os
@@ -14,6 +15,7 @@ import unittest
 import analyze_nav_tracking as analysis
 import footprint_evaluator as fe
 import nav_tracking_recorder as recorder
+import nav_tracking_payload as payload_archive
 from test_analyze_nav_tracking import Fixture, wall_grid
 
 
@@ -151,6 +153,130 @@ class CommitEvidenceTest(unittest.TestCase):
         self.assertAlmostEqual(projected[2], 0.0)
         self.assertIsNone(analysis.transform_pose(transform, (0, 0, 0)),
                           "missing 3D pose was silently promoted into complete evidence")
+
+
+class ExecutionPayloadTest(unittest.TestCase):
+    fixture = CommitEvidenceTest.fixture
+    evaluate = CommitEvidenceTest.evaluate
+
+    @staticmethod
+    def payload_key(payload):
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    def compact_fixture(self, directory):
+        fixture, command, reference, _, _ = self.fixture(directory)
+        payload = {
+            "frame_id": command["reference_frame_id"],
+            "stamp_identity": command["reference_stamp_identity"],
+            "pose_count": command["reference_pose_count"],
+            "poses": command.pop("reference_poses"),
+            "poses_se3": command.pop("reference_poses_se3"),
+            "pose_stamp_identities": [reference["stamp_identity"]] * reference["pose_count"],
+            "pose_frame_ids": [reference["frame_id"]] * reference["pose_count"],
+        }
+        key = self.payload_key(payload)
+        command["reference_payload_key"] = key
+        definition = {"kind": "execution_reference_payload",
+                      "payload": {"key": key, "reference": payload}, "mono_s": 0.0}
+        fixture.events.insert(0, definition)
+        return fixture, command, definition
+
+    def test_compact_authority_reconstructs_the_same_q1_verdict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture, _, _ = self.compact_fixture(directory)
+            verdict = self.evaluate(fixture)
+            self.assertTrue(verdict["evaluated"], verdict)
+            self.assertTrue(verdict["verdict"]["safe"], verdict)
+
+    def test_missing_or_corrupt_payload_cannot_pass_q1(self):
+        for corruption in ("missing", "hash", "frame", "count", "conflicting_definition"):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as directory:
+                fixture, command, definition = self.compact_fixture(directory)
+                if corruption == "missing":
+                    fixture.events.remove(definition)
+                elif corruption == "hash":
+                    definition["payload"]["reference"]["poses"][0][0] += 0.01
+                elif corruption == "frame":
+                    command["reference_frame_id"] = "wrong_frame"
+                elif corruption == "count":
+                    command["reference_pose_count"] += 1
+                else:
+                    import copy
+                    conflicting = copy.deepcopy(definition)
+                    conflicting["payload"]["reference"]["poses"][0][0] += 0.01
+                    fixture.events.append(conflicting)
+                self.assertFalse(self.evaluate(fixture)["evaluated"])
+
+    def test_same_stamp_changed_content_remains_ambiguous(self):
+        with tempfile.TemporaryDirectory() as directory:
+            import copy
+            fixture, command, definition = self.compact_fixture(directory)
+            changed = copy.deepcopy(definition)
+            changed["payload"]["reference"]["poses"][0][0] += 0.01
+            key = self.payload_key(changed["payload"]["reference"])
+            changed["payload"]["key"] = key
+            other_command = dict(command, reference_payload_key=key, command_sequence=999)
+            fixture.events.extend([changed, {"kind": "execution_command",
+                                             "payload": other_command, "mono_s": 1.1}])
+            self.assertFalse(self.evaluate(fixture)["evaluated"])
+
+    def test_payload_resolution_rejects_forward_or_nonstring_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture, command, definition = self.compact_fixture(directory)
+            fixture.events.remove(definition)
+            fixture.events.append(definition)
+            resolved = payload_archive.execution_commands(fixture.events)
+            self.assertTrue(resolved[0].get("reference_payload_error"))
+            command["reference_payload_key"] = []
+            self.assertTrue(payload_archive.execution_commands(fixture.events)[0].get(
+                "reference_payload_error"))
+
+    def test_repeated_identical_definitions_share_the_resolved_pose_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture, command, definition = self.compact_fixture(directory)
+            fixture.events.append(definition)
+            fixture.events.append({"kind": "execution_command", "payload": dict(command)})
+            resolved = payload_archive.execution_commands(fixture.events)
+            self.assertEqual(len(resolved), 2)
+            self.assertFalse(any(c.get("reference_payload_error") for c in resolved))
+            self.assertIs(resolved[0]["reference_poses"], resolved[1]["reference_poses"])
+
+    def test_recorder_keeps_each_lease_but_writes_reference_content_once(self):
+        events = []
+        sink = NS(_args=NS(execution_command_topic="/execution"),
+                  _count=lambda topic: None, _execution=None,
+                  _execution_payload_keys=set(),
+                  _event=lambda kind, payload: events.append({"kind": kind, "payload": payload}))
+        stamp = NS(sec=10, nanosec=5)
+        pose = NS(position=NS(x=1.0, y=2.0, z=0.3),
+                  orientation=NS(x=0.0, y=0.0, z=0.0, w=1.0))
+        path = NS(header=NS(stamp=stamp, frame_id="odom"),
+                  poses=[NS(header=NS(stamp=stamp, frame_id="odom"), pose=pose)])
+        msg = NS(header=NS(stamp=stamp), mode=1, manager_incarnation=1,
+                 command_sequence=1, goal_id=1, localization_epoch=1,
+                 map_generation=1, map_publication_sequence=1, failure_reason=0,
+                 yaw_authority=3, reference=path)
+        for sequence in range(1, 31):
+            msg.command_sequence = sequence
+            recorder.NavTrackingRecorder._on_execution(sink, msg)
+        commands = [e["payload"] for e in events if e["kind"] == "execution_command"]
+        definitions = [e["payload"] for e in events if e["kind"] == "execution_reference_payload"]
+        self.assertEqual([c["command_sequence"] for c in commands], list(range(1, 31)))
+        self.assertEqual(len(definitions), 1)
+        self.assertTrue(all(c["reference_payload_key"] == definitions[0]["key"]
+                            for c in commands))
+        self.assertTrue(all("reference_poses" not in c for c in commands))
+        # Reusing a stamp never authorizes dropping a changed pose or timing.
+        pose.position.x += 0.01
+        msg.command_sequence += 1
+        recorder.NavTrackingRecorder._on_execution(sink, msg)
+        path.poses[0].header.stamp = NS(sec=10, nanosec=6)
+        msg.command_sequence += 1
+        recorder.NavTrackingRecorder._on_execution(sink, msg)
+        definitions = [e["payload"] for e in events if e["kind"] == "execution_reference_payload"]
+        self.assertEqual(len(definitions), 3)
+        self.assertEqual(len({d["key"] for d in definitions}), 3)
 
 
 if __name__ == "__main__":
