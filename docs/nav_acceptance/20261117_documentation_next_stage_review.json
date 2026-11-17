@@ -1,0 +1,272 @@
+{
+  "updated": "2026-11-17T16:01:37.472826+08:00",
+  "scope": "documentation optimization and next-phase planning only",
+  "workspace": "/home/ats/ATS_2026_snetry_test",
+  "input_repositories": {
+    "root": {
+      "path": "/home/ats/ATS_2026_snetry_test",
+      "head": "df2735d763949ec98e9ad732aab64776698089ef",
+      "branch": "develop"
+    },
+    "nav": {
+      "path": "/home/ats/ATS_2026_snetry_test/src/ats_sentry_nav",
+      "head": "a51ce3a273dfa5ea7916f11405774bae28215a44",
+      "branch": "develop"
+    },
+    "sim": {
+      "path": "/home/ats/ATS_2026_snetry_test/src/sim/ats_mujoco_sim",
+      "head": "0b0d5df449ccff3c1e0145f1b33301657bd34541",
+      "branch": "develop"
+    }
+  },
+  "dod": [
+    "current and historical facts separated",
+    "one next-phase order and copyable entry",
+    "each priority has evidence/owner/acceptance gate",
+    "all failed/not-run/not-triggered results retained",
+    "no behavior, launch, profile or safety-threshold changes"
+  ],
+  "modified_documents": [
+    {
+      "path": "AGENTS.md",
+      "size": 35748,
+      "sha256": "af65a0a216b9f03256cfd0ff07396bf8b2ca7ab6d6619dae77f85634ec08c9c1"
+    },
+    {
+      "path": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "size": 84907,
+      "sha256": "5ca693695330bbbfa73f913d81686b2fa8f82e0edeaf589d7d073ce5ccc94788"
+    },
+    {
+      "path": "docs/nav_acceptance/20261116_2027_final_test_plan.md",
+      "size": 14527,
+      "sha256": "29cbf29378dfb2c48e7b86db66f5b0957d582fa00f29c8da155e686f18c48cfd"
+    },
+    {
+      "path": "docs/nav_acceptance/20261117_o1a_o0.md",
+      "size": 17511,
+      "sha256": "57a4c6ba7f06b0209780f53238606ac790fb4329724dd1c1fc868085a265b911"
+    }
+  ],
+  "new_index": "docs/nav_acceptance/20261117_documentation_next_stage_review.json",
+  "priorities": [
+    "V1 commit safety and complete evidence",
+    "unreachable result/cause contract",
+    "T1 known-free coverage and safe replanning",
+    "O0 eligible cruise handoff measurement"
+  ],
+  "hypothesis": {
+    "map_odom_commit_transform": {
+      "state": "unproven, candidate inspection point",
+      "confidence": "Medium",
+      "limitation": "d7 lacks exact commit-time TF; recorded correlation does not establish cause or introduction by this repair"
+    }
+  },
+  "acceptance_facts": {
+    "first_goal_d16_truth_error_m": 0.0054608916116244055,
+    "first_goal_scope": "local point passed, not full route",
+    "V1": "failed q1, incomplete q2, runtime LOST/epoch recovery, startup displacement unresolved",
+    "T1": "failed first point, 0/13 reached, B crossings0",
+    "T2_T3": "not run: T1 prerequisite",
+    "F": {
+      "adapter_lease": "passed",
+      "service_timeout": "passed",
+      "input_stale": "passed",
+      "unknown": "passed",
+      "unreachable": "failed"
+    },
+    "O0": "not triggered: zero eligible cruise handoffs",
+    "high_speed": "5m/s navigation platform not triggered",
+    "physical_contact": "unverified"
+  },
+  "recording_budget_finding": {
+    "source_snapshot_default": 400,
+    "V1_saved_snapshot_payloads": 400,
+    "snapshot_truncated": true,
+    "layer_truncated": true,
+    "runner_exposes_snapshot_budget": false,
+    "runner_layer_budget_scope": "NAV_TRACKING_MAX_LAYER_PAYLOADS controls layer payloads only",
+    "proposed_work": "separate retention policies and integrity checks; preserve q1 failure pending cause audit"
+  },
+  "runtime_prerequisite": {
+    "domain_range": [
+      0,
+      232
+    ],
+    "unallocated": [],
+    "action": "satisfy existing isolation rules before ROS tests; continue read-only analysis meanwhile"
+  },
+  "evidence": [
+    {
+      "path": "docs/nav_acceptance/20261117_o1a_o0.json",
+      "size": 235496,
+      "sha256": "2f3e917e0b20ad96ff5d7f0f2e887936ea57d86dff1ac52d5613e128c7bc9208"
+    },
+    {
+      "path": "docs/nav_acceptance/20261115_domain_ledger.md",
+      "size": 21918,
+      "sha256": "e6c1eb2a0c64468c4c39832c74a579e836ca3b9b7993fa509b5fb4c13f605b52"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/final_first_goal_d16_result.json",
+      "size": 12771,
+      "sha256": "91f90be2821edde95819f66143e1e2546dc0f8ebc0afac013aed8387c7bd69aa"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/v1_d7_result.json",
+      "size": 3870,
+      "sha256": "9f19d1f80b039f54eed39634a0386d7d1667def3b7a619d9debb79267b19242c"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/v1_d7/nav_tracking/goal_1_single/summary.json",
+      "size": 5679,
+      "sha256": "b79a28d828d3f61abc730aab37a791d19f1b141abb927f0891e40aee1e75aaec"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/tunnel_b_d8/summary.json",
+      "size": 4602,
+      "sha256": "4cdb9f55691a8fc29543270d2129c757899b4b147b2ba7558a3d3cb65b4835ee"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/unreachable_d0_result.json",
+      "size": 3292,
+      "sha256": "89fde5b1af95933c4bbbf61c91a86e8575c2c78475f39da14587abc2245d20c2"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/domain_allocation_final_audit.json",
+      "size": 381,
+      "sha256": "445ec1a104e5199a1bb2f69587b7df731ade02850f5048ab1a21344804639236"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/closing_manifest.json",
+      "size": 7817,
+      "sha256": "cf3c5db645110485df9d14165f702ce64ce0c7b7ac030222571c8d609219f000"
+    },
+    {
+      "path": "log/nav_acceptance/20261117_o1a_o0/fault_fixture_source_manifest.json",
+      "size": 8962,
+      "sha256": "a53f8a745950ff9f52ed942164a6ef14e0969ec503498cc5f359489070c784f7"
+    }
+  ],
+  "source_candidates": [
+    {
+      "path": "src/ats_sentry_nav/minco_planner/src/nodes/minco_planner_node.cpp",
+      "size": 147398,
+      "sha256": "d2230d0b56f6ade9d9c7fe03f263303b681a86782abe5048419f6ffdb5404b47"
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp",
+      "size": 119000,
+      "sha256": "4c94218e91c8daafe1fe2908c8bade6de444e27732c231683134ed5036898a45"
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/ats_rog_map_node.cpp",
+      "size": 80613,
+      "sha256": "f79d033f02dc15e60981e757a98fec731425cd2929ad10c7096f7d11bc8d20b2"
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/odom_layer.cpp",
+      "size": 26081,
+      "sha256": "b91b1fb1ac4c215d49a6f1acbb6f88f3c632790de147a55338f6bb984b1d19c5"
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_rog_map/src/odom_layer_integration.cpp",
+      "size": 11466,
+      "sha256": "0f608eccf6df204dcb4476a1b31339dffbba81aeb49402160ba497c7c095c976"
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/src/ats_swerve_mpc_node.cpp",
+      "size": 96797,
+      "sha256": "8902e128d4c2e1c833f78679b32af4fd9b29aad779cea425fa8c2bcda78fc606"
+    },
+    {
+      "path": "src/ats_sentry_nav/ats_swerve_mpc/src/se2_mpc_controller.cpp",
+      "size": 25009,
+      "sha256": "775c45b9998d0119237ac000204eda1de31c932f31e14dca3fda67cb1f8122c2"
+    },
+    {
+      "path": "scripts/nav_tracking_recorder.py",
+      "size": 49436,
+      "sha256": "2ffa690a19856ac687de9367aee2207af0972d19257fd41363972adf4ed56928"
+    },
+    {
+      "path": "scripts/analyze_nav_tracking.py",
+      "size": 65592,
+      "sha256": "73a779344fe0902c6692d21147b201e5d10f12693f06114e54b32040a97bd459"
+    },
+    {
+      "path": "scripts/test_mujoco_minco_mpc_chain.sh",
+      "size": 146402,
+      "sha256": "e7fec660e4e9e4eeb99e7c995e63b8d44630fcccb44b449c9834ee417fe71a88"
+    },
+    {
+      "path": "scripts/analyze_o0_handoffs.py",
+      "size": 11549,
+      "sha256": "3465ad83dd88cad8dda4ed8a3a20fce288a20d1e5854461165780f7ffa81d33e"
+    }
+  ],
+  "checks": {
+    "commands": [
+      {
+        "repository": "root",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "repository": "nav",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "repository": "sim",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit": 0,
+        "output": ""
+      }
+    ],
+    "local_file_links": 62,
+    "local_anchors": 6,
+    "code_fences_balanced": true,
+    "prior_index_unmodified": true,
+    "prior_index_artifact_hashes_verified": 287,
+    "frozen_source_config_release_hashes_match": 27,
+    "protected_sections": [
+      {
+        "path": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+        "section": "## 2...## 3.",
+        "sha256": "161ec57154649ae73bb6ab784564e0b5f1ec84332b8d6bea42f7491ae51144c4",
+        "unchanged": true
+      },
+      {
+        "path": "docs/nav_acceptance/20261116_2027_final_test_plan.md",
+        "section": "## 1...## 4.",
+        "sha256": "3a9cbe04d2962fc91a566a496343cbbdcf1ea14b39563d3db3619d51e2183d36",
+        "unchanged": true
+      }
+    ],
+    "three_repo_source_changes": false
+  },
+  "not_run_this_turn": [
+    "build",
+    "unit/component tests",
+    "MuJoCo/ROS simulation",
+    "real robot"
+  ],
+  "no_new_runtime_claims": true,
+  "commit_lookup": "git log -1 --format=%H -- docs/nav_acceptance/20261117_documentation_next_stage_review.json",
+  "post_commit_push_receipt": "log/nav_acceptance/20261117_documentation_next_stage/closing_manifest.json (post-commit, excluded to avoid self-reference)"
+}
