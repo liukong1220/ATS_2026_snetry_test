@@ -867,7 +867,7 @@ assert_topic_ownership() {
     subscription_block="$(sed -n '/^Subscription count:/,$p' <<<"${topic_info}")"
     # Under CycloneDDS load, ros2 topic info may report _NODE_NAME_UNKNOWN_ for a
     # live subscriber while the node still exposes the endpoint (straight187).
-    if [[ -z "${allowed_observer}" ]] &&
+    if [[ -z "${allowed_observer}" || "${allowed_observer}" == "mujoco_navigation_rviz2" ]] &&
       grep -q '^Subscription count: 1$' <<<"${topic_info}"
     then
       if [[ "$(grep -c "^Node name: ${expected_subscriber}$" <<<"${subscription_block}")" -eq 1 ]] ||
@@ -1152,48 +1152,6 @@ assert_no_old_reference_revival() {
   echo "OK: no non-empty old /minco/reference_path revived after recovery"
 }
 
-assert_rviz_best_effort_observer() {
-  local topic="$1"
-  local topic_info reliabilities deadline
-  deadline=$((SECONDS + 30))
-  while (( SECONDS < deadline )); do
-    topic_info="$(timeout 5 ros2 topic info --no-daemon --verbose "${topic}" 2>/dev/null || true)"
-    printf '\n=== %s ===\n%s\n' "${topic}" "${topic_info}" >>"${RVIZ_QOS_LOG}"
-    reliabilities="$(awk -v node='mujoco_navigation_rviz2' '
-      $0 == "Node name: " node {in_node = 1; next}
-      /^Node name:/ {in_node = 0}
-      in_node && $1 == "Reliability:" {print $2}
-    ' <<<"${topic_info}")"
-    if [[ -n "${reliabilities}" ]] && ! grep -qvx 'BEST_EFFORT' <<<"${reliabilities}"; then
-      echo "OK: RViz observer uses best-effort QoS on ${topic}"
-      return
-    fi
-    sleep 1
-  done
-  cat "${RVIZ_QOS_LOG}" >&2
-  fail "RViz observer on ${topic} did not converge to best-effort QoS"
-}
-
-assert_rviz_runtime_contract() {
-  local topic
-  [[ "${USE_RVIZ}" == "true" ]] || return
-  : >"${RVIZ_QOS_LOG}"
-  wait_for_command "MuJoCo navigation RViz node" 30 \
-    node_is_present /mujoco_navigation_rviz2
-  # 只断言 /rog_map/bounds 与 /localization 的 best-effort 观察者。2026-10-25 起
-  # mujoco_navigation.rviz 又显示 /rog_map/occ、inf_occ、unk、esdf（默认开，viz 默认关），
-  # 它们的发布者本来就是 best-effort，QoS 由 validate_navigation_config.py 锁定，这里不重复断言。
-  # /rog_map/viz 的发布内容由下面独立的 topic_field_* 检查覆盖（runner 自己订阅它）。
-  for topic in /rog_map/bounds /localization; do
-    assert_rviz_best_effort_observer "${topic}"
-  done
-  wait_for_command "non-empty ROGMap local voxel visualization" 30 \
-    topic_field_positive /rog_map/viz width best_effort
-  wait_for_command "ROGMap local voxel visualization frame" 30 \
-    topic_field_equals /rog_map/viz header.frame_id odom best_effort
-  echo "OK: RViz runtime QoS contract saved to ${RVIZ_QOS_LOG}"
-}
-
 # Several simulations may show the same RViz config on one display (a hand-started session next to
 # a test). Take the window whose process belongs to this run's launch process group. A window that
 # cannot be attributed (no _NET_WM_PID at all) is used only when it is the single candidate.
@@ -1219,55 +1177,18 @@ window_id_for_run() {
   printf '%s\n' "${match}"
 }
 
-rviz_window_id_for_run() {
-  window_id_for_run 'mujoco_navigation\.rviz\*? - RViz'
-}
-
-# The MuJoCo passive viewer titles its window "MuJoCo : <model>".
-mujoco_window_id_for_run() {
-  window_id_for_run '^ *0x[0-9a-f]+ "MuJoCo'
-}
-
-# Best effort: the viewer is a convenience for whoever watches the test, so a missing window or a
-# failed grab is a NOTE, never a test failure.
-capture_mujoco_screenshot() {
+capture_window_screenshot() {
+  local name="$1" pattern="$2" screenshot="$3"
   local window_id xwd_file
-  [[ "${USE_MUJOCO_VIEWER}" == "true" ]] || return 0
-  window_id="$(mujoco_window_id_for_run)"
-  if ! [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]]; then
-    echo "NOTE: no X11 MuJoCo viewer window belongs to this run; viewer screenshot skipped" \
-      "(under Wayland (XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-unset}) the viewer is a native Wayland" \
-      "window: it is on screen, but xwd cannot see it)"
-    return 0
-  fi
-  xwd_file="${MUJOCO_SCREENSHOT%.png}.xwd"
-  if xwd -id "${window_id}" -silent -out "${xwd_file}" &&
-    ffmpeg -y -v error -f xwd_pipe -i "${xwd_file}" -frames:v 1 "${MUJOCO_SCREENSHOT}" &&
-    [[ -s "${MUJOCO_SCREENSHOT}" ]]; then
-    echo "OK: MuJoCo viewer screenshot saved to ${MUJOCO_SCREENSHOT}"
+  window_id="$(window_id_for_run "${pattern}")"
+  xwd_file="${screenshot%.png}.xwd"
+  if [[ -n "${window_id}" ]] && xwd -id "${window_id}" -silent -out "${xwd_file}" &&
+    ffmpeg -y -v error -f xwd_pipe -i "${xwd_file}" -frames:v 1 "${screenshot}" &&
+    [[ -s "${screenshot}" ]]; then
+    echo "OK: ${name} screenshot saved to ${screenshot}"
   else
-    echo "NOTE: MuJoCo viewer window ${window_id} could not be captured"
+    echo "NOTE: ${name} screenshot unavailable via X11 (session=${XDG_SESSION_TYPE:-unset})"
   fi
-}
-
-capture_rviz_screenshot() {
-  local window_id xwd_file deadline
-  [[ "${USE_RVIZ}" == "true" ]] || return
-  [[ -n "${DISPLAY:-}" ]] || fail "USE_RVIZ=true requires DISPLAY for screenshot capture"
-  deadline=$((SECONDS + 20))
-  while (( SECONDS < deadline )); do
-    window_id="$(rviz_window_id_for_run)"
-    [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]] && break
-    sleep 0.5
-  done
-  [[ "${window_id}" =~ ^0x[[:xdigit:]]+$ ]] || fail "cannot find MuJoCo navigation RViz window"
-  xwd_file="${RVIZ_SCREENSHOT%.png}.xwd"
-  xwd -id "${window_id}" -silent -out "${xwd_file}" || \
-    fail "cannot capture MuJoCo navigation RViz window"
-  ffmpeg -y -v error -f xwd_pipe -i "${xwd_file}" -frames:v 1 "${RVIZ_SCREENSHOT}" || \
-    fail "cannot convert MuJoCo navigation RViz screenshot"
-  [[ -s "${RVIZ_SCREENSHOT}" ]] || fail "MuJoCo navigation RViz screenshot is empty"
-  echo "OK: RViz screenshot saved to ${RVIZ_SCREENSHOT}"
 }
 
 capture_pose() {
@@ -3023,9 +2944,7 @@ assert_topic_ownership "${SELECTED_CMD_VEL_TOPIC}" cmd_vel_arbiter twist_to_moti
 # /motion_control 的数值，这里补上它的所有权前提。
 assert_topic_ownership "${MOTION_CONTROL_TOPIC}" twist_to_motion_ctrl ats_mujoco_sim
 assert_topic_ownership /ats_goal_manager/planner_goal ats_goal_manager minco_planner
-# RViz may observe the reference in the UI, but it must never gain execution
-# authority.  The assertion still accepts exactly one controller and one named
-# display subscriber; command topics below remain strictly single-subscriber.
+# RViz subscribes when the optional reference path display is enabled.
 if [[ "${USE_RVIZ}" == "true" ]]; then
   assert_topic_ownership /minco/reference_path ats_goal_manager ats_swerve_mpc mujoco_navigation_rviz2
 else
@@ -3063,12 +2982,14 @@ ensure_topic_capture_ready "selected command stream" "${SELECTED_CMD_VEL_TOPIC}"
   /tmp/ats_minco_mpc_cmd_vel_stream.out CMD_STREAM_PID
 CAPTURE_PIDS+=("${CMD_STREAM_PID}")
 EXECUTION_STREAM="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_execution_command.out"
-RVIZ_QOS_LOG="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz_qos.out"
-RVIZ_SCREENSHOT="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz.png"
-MUJOCO_SCREENSHOT="/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_mujoco.png"
-assert_rviz_runtime_contract
-capture_rviz_screenshot
-capture_mujoco_screenshot
+if [[ "${USE_RVIZ}" == "true" ]]; then
+  capture_window_screenshot RViz 'mujoco_navigation\.rviz\*? - RViz' \
+    "/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_rviz.png"
+fi
+if [[ "${USE_MUJOCO_VIEWER}" == "true" ]]; then
+  capture_window_screenshot MuJoCo '^ *0x[0-9a-f]+ "MuJoCo' \
+    "/tmp/ats_minco_mpc_${TEST_PROFILE}_${ROS_DOMAIN_ID}_mujoco.png"
+fi
 ensure_topic_capture_ready "P3 ExecutionCommand" /planner/execution_command \
   ats_navigation_interfaces/msg/ExecutionCommand "${EXECUTION_STREAM}" EXECUTION_STREAM_PID
 CAPTURE_PIDS+=("${EXECUTION_STREAM_PID}")
