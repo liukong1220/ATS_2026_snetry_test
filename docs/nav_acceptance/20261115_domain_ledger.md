@@ -166,6 +166,20 @@
 | 24 | `20261117_o1_o0_completion/plane_tests_d24` | 参考平面修复后 MINCO 8 组通过，含 5 个相关节点用例；command_exit=0，清空 |
 | 25 | `20261117_o1_o0_completion/v1_plane_d25` | 重复里程计接收超时后按风险条件取消目标，V1 未通过；18 条参考 q1 通过，q2 无持续冲突；command_exit=1，清空 |
 | 26 | `20261117_o1_o0_completion/unit_payload_d26` | 内容去重 13 例、捕获器 11 例（含 ROS 收发）及原跟踪/故障/O0 回归通过；command_exit=0，清空 |
+| 27 | `20261117_o1_o0_completion/unreachable_d27` | 独立不可达门通过：同目标搜索/终止原因、三路零速、恢复后旧参考不复活；command_exit=0，清空。后续容差/仿真调度修改后仍须最终重跑 |
+| 28 | `20261117_o1_o0_completion/tolerance_negative_d28` | 每目标容差旧接口负对照按预期失败；command_exit=1，清空 |
+| 29 | `20261117_o1_o0_completion/unit_tolerance_d29` | Goal Manager 14 组、MINCO 9 组、MPC 6 组、记录链与两套 launch 参数检查通过；command_exit=0，清空 |
+| 30 | `20261117_o1_o0_completion/t1_tolerance_d30` | 临时入口导入路径遗漏，Probe 初始化失败、未下发目标；首轮自动清场报告未清空。按独立参数路径、完整命令和 start-time 保存归属核验后补清，最终 clear=true；不计 T1 通过 |
+| 31 | `20261117_o1_o0_completion/t1_tolerance_d31` | T1全路线尝试N=1，前6/13点到达，第7点搜索/准入失败后有界预算code5；10条执行参考q1、1475实际位姿q2零冲突，真实B未进入；command_exit=1，进程/端口清空 |
+| 32 | `20261117_o1_o0_completion/o1b_visualization_d32` | O1b三种显示订阅开/关集成回归通过；command_exit=0，进程/端口清空；未带RViz，实际画面仍未验证 |
+| 33 | `20261117_o1_o0_completion/v1_tolerance_d33` | 11月18日续接，ROGMap CMake测试更新后增量构建未重新链接节点，运行产物预检拒绝；未启动仿真，command_exit=3，已清空 |
+| 34 | `20261117_o1_o0_completion/v1_tolerance_d34` | `./build.sh` Release 后运行 V1，N=1。action 成功，真值误差 0.029575m，15 条执行参考及 1642 个实际样本 q1/q2 无冲突。command_exit=0，已清空 |
+| 35 | `20261117_o1_o0_completion/unreachable_simplified_d35` | 简化版 runner 独立 2027 unreachable，N=1，goal 3 的 A* 无路及 code 5 有界终止，三路零速、旧参考未恢复，command_exit=0，已清空 |
+| 36 | `20261117_o1_o0_completion/t1_incremental_edt_d36` | 无窗口 T1 全路线尝试 N=1。首目标在两条安全执行参考后多次规划失败，返回 code 5，真值误差 1.281819m。command_exit=1，已清空 |
+| 37 | `20261117_o1_o0_completion/v1_incremental_edt_d37` | 无窗口 V1 N=1，按用户现场观察要求中止并保存局部记录。9 条参考 q1 通过，1 段扫掠诊断冲突。command_exit=-15，已清空 |
+| 38 | `20261117_o1_o0_completion/v1_viewer_d38` | V1 N=1，RViz2 与 MuJoCo 窗口均启动。旧 runner 把 RViz 的可选参考路径订阅误设为运行前置，目标未下发。command_exit=1，已清空 |
+| 39 | `20261117_o1_o0_completion/v1_viewer_simple_d39` | 简化显示流程后的有先验 V1 N=1。RViz 与解锁后的 MuJoCo 原生窗口已启动。自研 action 开始后按用户要求切换无先验建图，保留局部记录。command_exit=1，已清空 |
+| 40 | `20261117_o1_o0_completion/mapping_viewer_d40` | 2027 无先验建图首目标 N=1，真值误差 0.004659m，2 条参考和 386 个实际位姿无冲突，ESDF 在线显示并成功保存 PGM/YAML/PCD。MuJoCo 查看器等待解锁。command_exit=0，已清空 |
 
 完整命令、PID/kernel start time、运行前检查和运行后检查分别保存在每个批次的 `domain_guard.json`，不把本机清场推导为其他 WLAN 主机参与者已排除。
 

@@ -65,11 +65,17 @@ python3 -s scripts/nav_domain_guard.py run \
   python3 -s scripts/s3_mujoco_acceptance.py \
   --profile rmuc_2027_tunnels --route tunnel_b_roundtrip \
   --case route --output "${ATS_OUT:?全新的证据目录}" \
+  --waypoint-control-tolerance-m 0.08 \
   --record-column-inputs --registration-details \
+  --launch-arg use_rviz:=true --launch-arg show_viewer:=true \
   --launch-arg lidar_threads:=0 --launch-arg lidar_downsample:=0
 ```
 
 T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起domain和证据目录。无先验入口不加载PGM/PCD；有先验入口添加已核验的`--prior "${ATS_2027_PRIOR_PREFIX:?同源地图前缀}"`，不要编造不存在的路线或CLI选项。
+
+无先验建图显示和保存使用 `--profile rmuc_2027 --case route --max-goals 1`，省略 `--prior` 与 `--reload`，runner 会启动 `slam:=true`。两窗口参数与上方相同。RViz 的「距离场」组显示 `/rog_map_adapter/viz/esdf_cloud`，「局部规划窗口」组可打开 `/rog_map/odom_layer`。正常完成后调用 `/rog_map/save_map`，在输出目录生成 `map.pgm`、`map.yaml`、`map.pcd`。 [首段建图与保存过程](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存)
+
+本轮中间目标显式请求0.08m的控制/准入半径，最后目标及重载首目标仍请求0、使用服务器原默认；独立真值验收仍为中间≤0.15m、最后/重载≤0.08m。该请求随同目标重规划传递，不改坐标或unknown/footprint规则。为复现历史默认收敛契约，可省略`--waypoint-control-tolerance-m`或传0。d29已验证非法/越界拒绝、默认不变及抢占后不串用。
 
 ### 4.2 对称点速度
 
@@ -85,7 +91,7 @@ SCENE=rmuc_2027 TEST_PROFILE=single \
   LIDAR_DOWNSAMPLE=0 NAV_TRACKING_MAX_SNAPSHOT_PAYLOADS=-1 \
   NAV_TRACKING_MAX_LAYER_PAYLOADS=-1 O0_CHAIN_RECORDER=1 \
   NAV_TRACKING_PROFILE_YAML="$PWD/src/ats_sentry_bringup/params/node_params.yaml" \
-  USE_RVIZ=false USE_MUJOCO_VIEWER=false \
+  USE_RVIZ=true USE_MUJOCO_VIEWER=true \
   LOG_DIR="${ATS_OUT:?全新的runner日志目录}" \
   EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=false lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim prior_pcd_file:=$PWD/src/ats_sentry_bringup/pcd/rmuc_2027.pcd" \
   python3 -s scripts/nav_domain_guard.py run \
@@ -98,11 +104,11 @@ SCENE=rmuc_2027 TEST_PROFILE=single \
 
 **本轮已修复记录完整性链。** runner分别传入两种载荷预算，默认`-1`全程保留，`0`关闭、正数显式限额仍记录缺证；分析器按LRU只缓存8份解压载荷。记录器保存完整SE3及几何/距离场身份，EXECUTE单独绑定最终验证快照与TF。d22的892个快照、1161个来源层载荷未截断，16条执行参考q1通过；q2仍失败。d7的历史失败和缺证保留，不回写为通过。
 
-`O0_CHAIN_RECORDER=1`由runner在唯一所有权检查后、目标下发前启动，并等待时钟、执行授权、真值、定位和三路速度等初始证据；退出时优雅收尾。输出位于该目标跟踪目录的`o0_chain.jsonl`。按运行时参数生成曲线，例如d22的`dt=0.05`、终点半径1.0m、steady里程计超时1.0s；其他批次须重新核验，不套用默认值。
+`O0_CHAIN_RECORDER=1` 由 runner 在目标下发前自动启动。初始证据缺失记入记录状态，导航仍可下发。输出位于该目标跟踪目录的 `o0_chain.jsonl`。分析时使用该次运行的控制周期、终点半径和里程计接收超时。
 
 本机11月17日实测实时率约0.08–0.10，客户端墙钟兜底用20倍；32逻辑核默认6倍的历史速度假设不适用。该值只防止客户端早于ATS目标的300s仿真时间截止，不改变目标本身、odom/证据/地图租约或失效零速门。长任务使用独立后台进程并保存PID/退出码，避免执行工具约15分钟会话中断；不能把进程仍在运行当作验收成功。
 
-先启动V1；在runner完成所有唯一所有权检查（日志出现`OK: /planner/emergency_stop has one publisher owned by ats_goal_manager`）后、下发目标前，用另一个已加载相同ROS、WLAN及domain的终端录制速度证据，输出目录不得已存在。只读记录器增加subscriber，若提前启动会破坏runner的前置精确计数；不得为此放宽所有权断言：
+若需要留存 ROS 原始消息，可在 runner 完成所有权检查后用同一 ROS、WLAN 及 domain 另录 bag：
 
 ```bash
 ros2 bag record --use-sim-time -o "${ATS_BAG_OUT:?独立新目录}" \
@@ -112,7 +118,7 @@ ros2 bag record --use-sim-time -o "${ATS_BAG_OUT:?独立新目录}" \
   /rog_map_adapter/planning_snapshot
 ```
 
-bag的domain须与V1相同；它是同一测试的只读记录器，不另起场景。结束后导出对齐的速度CSV/曲线与统计；11月17日新增只读`record_navigation_spin_chain.py`扩展及`analyze_o0_handoffs.py`，同样需在所有权检查后、目标前启动；按实际运行参数传入`--mpc-dt`、`--terminal-radius`与`--odometry-timeout`。缺原始曲线时不能把runner退出0写成速度验收通过。`/cmd_vel_mpc`等兼容话题如存在可追加，正式出口以实际graph为准。
+用 `scripts/analyze_o0_handoffs.py` 分析 runner 自动保存的记录，按运行值传入 `--mpc-dt`、`--terminal-radius` 和 `--odometry-timeout`。保存对齐的速度 CSV、曲线与各窗分类。两个窗口用于现场观察，锁屏会延迟原生 Wayland 窗口出现，截图按实际结果记载。
 
 ### 4.3 故障及建图能力
 
@@ -131,15 +137,24 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 | 项目 | 结果 | 结论边界 |
 | --- | --- | --- |
 | 原64点路线首目标d16 | **局部通过**：runner退出0、action成功、独立真值0.005460892m；3条执行参考q1和524有效位姿q2零冲突，无payload缺失 | 仅首点；小范围保存成功不计全场保存质量/重载。d9的143中断及原UUID成功接续证据保留，不作重复稳定性结论 |
+| 原64点路线首目标 d40 | **建图首段与保存通过**。无 PGM/PCD 输入，真值误差 `0.004659 m`，2 条执行参考和 386 个实际位姿无冲突，清场完成 | RViz 规划 ESDF 实时更新；终点 PGM 为 `400×300`，PCD 为 3,227 点。MuJoCo 原生画面等待解锁。 [记录与地图](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存) |
 | T1 d8 | **失败**：首目标unknown足迹/重规划预算阻断，0/13到达、真实B穿越0 | 该段q1/q2及失败零速通过，路线仍失败 |
+| T1 d31（本轮） | **失败**：全路线尝试N=1，前6/13点到达，最大真值误差0.049200236m；第7点搜索/准入失败后有界预算code5，真值误差1.718364284m | 10条已执行参考q1、1475有效实际位姿q2零冲突，载荷/配对无缺口；第7点无执行参考，真实B未进入；接触计数增量0仍不是独立物理评估；清场完成 |
+| T1 d36（本轮） | **失败**。首目标调用返回有界重试 code 5，真值误差 `1.281819 m`，真实 B 未进入 | 两条已提交参考及 166 个实际位姿无冲突。231 张线上快照的数值场与旧 EDT 回放一致。 [独立结果](../../log/nav_acceptance/20261117_o1_o0_completion/t1_incremental_edt_d36/run/summary.json) |
 | T2 / T3 | **未执行** | T1前置未通过 |
 | V1 d7 | **失败**：action成功、真值0.069451m达标；q1为7/9可评价参考冲突、另1条缺证，q2缺863 tick；运行期LOST后epoch1→2 | 真值峰值0.826715m/s；snapshot/layer截断及首次EXECUTE前位移待归因，未证明精确对称起点或高速能力 |
 | V1 d22（本轮） | **失败**：action code 6定位恢复超时；16条执行参考q1通过；q2共30冲突tick，最长24 tick跨12快照，持续段2个 | 892快照与1161来源层未截断、无frame配对缺失；真值峰值0.449983m/s；接触计数增量0不替代独立物理评估 |
 | V1 d25（本轮） | **提前终止、未通过**：重复里程计 steady 接收超时，绑定本次目标 UUID 取消，action code 1；18条执行参考q1通过；1388有效实际位姿中2个诊断冲突tick、无持续段 | 参考控制平面修复后独立运行；载荷/配对完整，接触计数增量0仍不是独立物理评估；O0为2次换轨、合格巡航0次，真值峰值0.439118m/s；清场完成 |
+| V1 d34（本轮） | **路线和执行足迹通过**。action 成功，真值误差 `0.029575 m`，15 条执行参考、1642 个实际足迹样本均无冲突，退出码 0，清场完成 | 参考、MPC/仲裁/底盘、真值峰值分别 `2.148`、`1.068`、`0.892 m/s`。接触计数增量 0，独立接触评估未执行。 [速度曲线](../../log/nav_acceptance/20261117_o1_o0_completion/v1_tolerance_d34/o0/speeds.png) |
+| V1 d37–d39（本轮） | d37 为切换窗口而中止。d38 双窗口已打开，旧 runner 要求可选 RViz 路径订阅，目标未发。d39 用简化 runner 运行，按用户要求切换无先验建图后中止 | 三轮均清场。d39 RViz 截图含车模和点云，MuJoCo 原生查看器在解锁后启动。 [RViz 截图](../../log/nav_acceptance/20261117_o1_o0_completion/v1_viewer_simple_d39/rviz.png) |
 | F：adapter lease / service_timeout / input_stale / unknown | **各独立通过**：d4/d3/d2/d1，新锚点名义前置及三路零速、恢复后旧参考不复活获证 | 新锚点见4.3；d6前置失败未注入、非零接触计数保留。四项不能代表整个F通过 |
 | F：unreachable d0 | **失败**：自由断连目标实际触发A*无路及零速，约3.02s仿真时返回挂起预算code 5，夹具预期code 3 | 结果码优先级与JPS/A*断言需先明确契约再修复；专用恢复门未执行 |
-| O0 / 5m/s能力 | **未触发**：d9/d16/V1合格巡航换轨为0；导航运行未触发5m/s平台 | 已修时基问题，原跌速门未获证；空场d108只验证传感器/执行器，不替代V1 |
+| F：unreachable d27（本轮） | **独立门通过**：夹具绑定同目标搜索及严格终止原因，三路零速、恢复后旧参考不复活 | 此后新增每目标容差和仿真CPU亲和性修改；最终行为版本仍须逐项重跑整个F，不沿用d27作最终矩阵 |
+| F：unreachable d35（本轮） | **独立通过**。同一目标 A* 无路，有界等待 code 5，急停、三路零速、旧参考保持失效，退出码 0，清场完成 | 简化版 runner，含每目标容差和仿真 CPU 亲和性版本。其余四项仍需复验 |
+| O0 / 高速能力 | **低速窗口达标**。d34 共 9 次换轨，1 次合格窗口中三路指令跌速最大 `0.040405 m/s`，真值无跌速 | 该事件前真值中位 `0.0327 m/s`，其余窗口含参考主动减速或健康变化。参考出现 `>2 m/s`，三路指令与真值均未达 `2 m/s`，`5 m/s` 和高速换轨仍待验 |
 
 **O1-A全部门与本套件仍未通过。** 后续实施顺序由主报告5.1统一维护；该表只随新的实际运行证据更新，不由文档整理、端点预检或源码存在改变判定。
+
+隧道计数器另修复portal与墙间通道端区无交集的问题：计数沿portal定义的方向，使用该轴与墙间corridor重叠区的两个端区，要求中间采样持续留在通道内；路线全部目标及真值/足迹门不变。六个真实配置的旧实现均把完整往返记为0次，修复后的6项相关回归通过，绕行/中途离开通道不计数。d31实际尚未进入任何声明通道，因此修复不改变该次失败结论。O1b三种可视化订阅开/关的数值及唯一owner集成回归在d32通过，不代替RViz画面观察。
 
 历史2025 q2、2027 south和H2/M/H3的失败/未验证状态保留。2025默认/红框本轮未重跑；2025缺先验PCD属于历史兼容项，当前2027套件不以补齐2025资产作为前置条件。所有本轮运行未带RViz，物理接触仍未获独立验收。
