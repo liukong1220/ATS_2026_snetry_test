@@ -25,14 +25,13 @@ def test_prior_and_reload_preserve_distinct_route_contracts(tmp_path, mode):
     probe.contact_seen, probe.counts = {}, {}
     process = Mock()
     process.poll.return_value = 0
-    modules = {'rclpy': Mock(), 'ament_index_python.packages': NS(
-        get_package_share_directory=lambda _: str(s3.SIM)),
+    modules = {'rclpy': Mock(),
         's3_tracking_evidence': NS(TrackingLeg=lambda *_: nullcontext())}
     args = NS(profile='rmuc_2027_tunnels', route='six_tunnels', output=str(tmp_path / 'run'),
               prior=str(prefix) if mode == 'prior' else None,
               reload=str(prefix) if mode == 'reload' else None,
               max_goals=0, case='route', post_route_case=None, startup_timeout=1., launch_arg=[])
-    with patch.dict('sys.modules', modules), patch.object(s3, 'verify_installed_files'), \
+    with patch.dict('sys.modules', modules), \
             patch.object(s3, 'prepare_scene', return_value=([], Path('scene.xml'))), \
             patch.object(s3, 'Probe', return_value=probe), \
             patch.object(s3.subprocess, 'Popen', return_value=process) as launch, \
@@ -59,9 +58,7 @@ def test_prior_and_reload_preserve_distinct_route_contracts(tmp_path, mode):
 def test_prior_missing_assets_stops_before_launch(tmp_path):
     args = NS(profile='rmuc_2027_tunnels', route='six_tunnels', output=str(tmp_path / 'run'),
               prior=str(tmp_path / 'missing'), reload=None)
-    modules = {'rclpy': Mock(), 'ament_index_python.packages': NS(
-        get_package_share_directory=lambda _: str(s3.SIM))}
-    with patch.dict('sys.modules', modules), patch.object(s3, 'verify_installed_files'), \
+    with patch.dict('sys.modules', {'rclpy': Mock()}), \
             patch.object(s3.subprocess, 'Popen') as launch:
         with pytest.raises(FileNotFoundError):
             s3.run(args)

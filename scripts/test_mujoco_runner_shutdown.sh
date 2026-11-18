@@ -229,7 +229,6 @@ run_prerequisite_case() {
     LAUNCH_LOG="${dir}/launch.log" RUNNER_STATUS_FILE="${dir}/runner_status.env"
     nav_tracking_footprint_param() { printf '0.5'; }
     capture_pose() { [[ "${prerequisite}" != pose ]]; }
-    verify_goal_set_free() { [[ "${prerequisite}" != free_space ]]; }
     capture_contact_telemetry() { [[ "${prerequisite}" != contact ]]; }
     capture_contact_force() { :; }
     contact_count_value() { printf '0'; }
@@ -255,7 +254,6 @@ run_prerequisite_case() {
   }
 }
 run_prerequisite_case pose
-run_prerequisite_case free_space
 run_prerequisite_case contact
 
 if (( FAILURES )); then

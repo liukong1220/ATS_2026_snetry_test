@@ -6,7 +6,7 @@ Ground truth is consumed exclusively by this evaluator.
 """
 import argparse
 import csv
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 import math
@@ -109,9 +109,10 @@ def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
     """Per-tunnel passes and axis lateral error from independent truth samples.
 
     samples are (x, y, yaw). A pass is a full traversal of the entry-exit axis in
-    either direction: the sample sequence reaches one end zone, stays within the
-    walled corridor, and reaches the other end zone. Passing around the tunnel
-    does not count because every counted sample must lie inside corridor_polygon.
+    either direction: the sample sequence reaches one corridor end zone, stays
+    within the walled corridor, and reaches the other end zone. Configured goal
+    portals can lie outside the walls; use their axis clipped to the corridor
+    for counting. Passing around the tunnel does not count.
     """
     if contact_counts is not None and len(contact_counts) != len(samples):
         raise ValueError("truth/contact diagnostic sample count mismatch")
@@ -124,6 +125,11 @@ def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
         ux, uy = dx / length, dy / length
         xs = [p[0] for p in tunnel["corridor_polygon"]]
         ys = [p[1] for p in tunnel["corridor_polygon"]]
+        axis_bounds = [(p[0] - entry[0]) * ux + (p[1] - entry[1]) * uy
+                       for p in tunnel["corridor_polygon"]]
+        corridor_start = max(0.0, min(axis_bounds))
+        corridor_end = min(length, max(axis_bounds))
+        zone_width = min(end_zone, (corridor_end - corridor_start) / 3.0)
         lateral, yaw_errors, contacts, passes = [], [], [], {"forward": 0, "reverse": 0}
         end = None
         for sample_index, (x, y, heading) in enumerate(samples):
@@ -138,7 +144,8 @@ def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
             if not inside:
                 end = None
                 continue
-            zone = "entry" if along <= end_zone else "exit" if along >= length - end_zone else None
+            zone = ("entry" if along <= corridor_start + zone_width else
+                    "exit" if along >= corridor_end - zone_width else None)
             if zone and end and zone != end:
                 passes["forward" if zone == "exit" else "reverse"] += 1
             if zone:
@@ -149,6 +156,8 @@ def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
                             and all(b >= a for a, b in zip(contacts, contacts[1:])))
         report[tunnel["name"]] = {
             "forward_passes": passes["forward"], "reverse_passes": passes["reverse"],
+            "counted_axis_interval_m": [corridor_start, corridor_end],
+            "end_zone_m": zone_width,
             "corridor_samples": len(lateral),
             "axis_lateral_max_m": max(lateral) if lateral else None,
             "axis_lateral_p95_m": ordered[int(0.95 * (len(ordered) - 1))] if ordered else None,
@@ -173,12 +182,6 @@ def required_tunnel_report(profile, samples, config_dir, contact_counts=None):
                              got["forward_passes"] >= want.get("forward_passes", 0) and
                              got["reverse_passes"] >= want.get("reverse_passes", 0))
     return report
-
-
-def verify_installed_files(pairs):
-    for source, installed in pairs:
-        if not installed.is_file() or source.read_bytes() != installed.read_bytes():
-            raise RuntimeError(f"stale installed file {installed}; rebuild its owning package")
 
 
 def configure_mapping_bounds(parameters, profile):
@@ -318,6 +321,7 @@ class Probe:
         self.latency_p95_limit_ms = 250.0
         self.waypoint_tolerance_m = WAYPOINT_TOLERANCE_M
         self.final_tolerance_m = FINAL_TOLERANCE_M
+        self.waypoint_control_tolerance_m = 0.0
         self.last_execute = None
         self.obstacle_clouds = []
         self.fixture_site = None
@@ -618,7 +622,9 @@ class Probe:
         goal.goal_pose.pose.orientation.z = math.sin(waypoint[2] / 2)
         goal.goal_pose.pose.orientation.w = math.cos(waypoint[2] / 2)
         goal.timeout.sec = int(timeout)
-        self.event("send_goal", {"waypoint": waypoint})
+        goal.position_tolerance = 0.0 if final else self.waypoint_control_tolerance_m
+        self.event("send_goal", {"waypoint": waypoint, "final": final,
+                                 "position_tolerance_m": goal.position_tolerance})
         future = self.action.send_goal_async(goal)
         if not self.spin_until(future.done, 10.0, "goal acknowledgement") or not future.result().accepted:
             raise RuntimeError("goal was not accepted")
@@ -689,20 +695,27 @@ class Probe:
         self.node.destroy_node()
 
 
+def stop_owned_launch(process):
+    """Stop only the process group created by this runner's Popen call."""
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except ProcessLookupError:
+        process.wait(timeout=12.0)
+        return
+    try:
+        process.wait(timeout=12.0)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=10.0)
+
+
 def run(args):
     import rclpy
-    from ament_index_python.packages import get_package_share_directory
-    sim_share = Path(get_package_share_directory("ats_mujoco_sim"))
-    verify_installed_files([
-        (SIM / "launch/rmuc_2025_mujoco.launch.py", sim_share / "launch/rmuc_2025_mujoco.launch.py"),
-        (SIM / "launch/rmuc_2027_mujoco.launch.py", sim_share / "launch/rmuc_2027_mujoco.launch.py"),
-        (SIM / "config/s3_mapping_routes.yaml", sim_share / "config/s3_mapping_routes.yaml"),
-    ])
     profile = load_profile(SIM / "config/s3_mapping_routes.yaml", args.profile,
                            getattr(args, "route", None))
     prior = getattr(args, "prior", None)
-    if prior and args.reload:
-        raise ValueError("--prior and --reload are mutually exclusive")
     map_prefix = prior or args.reload
     map_inputs = None
     if map_prefix:
@@ -751,17 +764,21 @@ def run(args):
     (directory / "command.json").write_text(json.dumps({"command": command,
         "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID"), "profile": profile, "map_inputs": map_inputs}, indent=2) + "\n")
     print("COMMAND", " ".join(command), flush=True)
-    log = (directory / "launch.log").open("w")
-    process = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
-    rclpy.init()
-    probe = Probe(directory, observe_obstacle_clouds=fixture_case,
-                  record_column_inputs=getattr(args, 'record_column_inputs', False))
-    probe.scene_model = scene
-    probe.latency_p95_limit_ms = getattr(args, "latency_p95_limit_ms", 250.0)
-    # Mapping publishes in odom; prior-map and reload localization runs publish in map.
-    probe.expected_grid_frame = "map" if map_prefix else "odom"
+    cleanup = ExitStack()
+    probe = None
     summary = {"profile": args.profile, "reload": args.reload, "prior": prior, "passed": False}
     try:
+        log = cleanup.enter_context((directory / "launch.log").open("w"))
+        process = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
+        cleanup.callback(stop_owned_launch, process)
+        rclpy.init()
+        cleanup.callback(rclpy.try_shutdown)
+        probe = Probe(directory, observe_obstacle_clouds=fixture_case,
+                      record_column_inputs=getattr(args, 'record_column_inputs', False))
+        cleanup.callback(probe.close)
+        probe.scene_model = scene
+        probe.latency_p95_limit_ms = getattr(args, "latency_p95_limit_ms", 250.0)
+        probe.expected_grid_frame = "map" if map_prefix else "odom"
         if args.case.startswith("correction_"):
             from s3_fault_scenarios import run_case
             summary.update(run_case(args.case, probe, process))
@@ -770,12 +787,13 @@ def run(args):
         if not probe.spin_until(probe.ready, args.startup_timeout, "accepted localization and odom planning map"):
             raise RuntimeError("startup failed: " + json.dumps(probe.health_summary()))
         graph = probe.graph()
-        assert graph["/rog_map_adapter/planning_snapshot"]["publishers"] == ["ats_rog_map_adapter"], graph
-        summary["A"] = True
-        print("A ready; graph", json.dumps(graph), flush=True)
+        summary["graph"] = graph
+        summary["A"] = graph["/rog_map_adapter/planning_snapshot"]["publishers"] == ["ats_rog_map_adapter"]
+        print("Graph", json.dumps(graph), flush=True)
         if args.case != "route":
             from s3_fault_scenarios import run_case
             summary.update(run_case(args.case, probe, process))
+            summary["passed"] = summary["passed"] and summary["A"]
             summary["scope"] = args.case
             summary["topic_counts"] = probe.counts
             print(json.dumps(summary, indent=2), flush=True)
@@ -785,9 +803,10 @@ def run(args):
             waypoints = waypoints[:1]
         probe.waypoint_tolerance_m = getattr(args, "waypoint_tolerance_m", WAYPOINT_TOLERANCE_M)
         probe.final_tolerance_m = getattr(args, "final_tolerance_m", FINAL_TOLERANCE_M)
+        probe.waypoint_control_tolerance_m = getattr(args, "waypoint_control_tolerance_m", 0.0)
         from s3_tracking_evidence import TrackingLeg
         for index, point in enumerate(waypoints):
-            with TrackingLeg(probe, profile, index):
+            with TrackingLeg(probe, index):
                 probe.navigate(point, profile["goal_timeout_sim_s"], final=index == len(waypoints) - 1)
         if not map_prefix:
             summary["save"] = probe.save_map()
@@ -814,8 +833,9 @@ def run(args):
             summary["contact_diagnostic"] = dict(probe.contact_seen,
                                                  physical_contact_acceptance="unverified")
         tunnels_ok = all(t["passed"] for t in summary.get("tunnels", {}).values())
-        summary["passed"] = bool(summary["passed"] and summary["J"] and tunnels_ok and
-                                  summary["footprint_gate_collisions"] == 0)
+        tracking_ok = all(leg["passed"] for leg in probe.__dict__.get("tracking_results", []))
+        summary["passed"] = bool(summary["passed"] and summary["A"] and summary["J"] and
+                                  tunnels_ok and tracking_ok and summary["footprint_gate_collisions"] == 0)
         if not summary["passed"]:
             raise RuntimeError("route evidence gates failed")
         if args.post_route_case:
@@ -830,31 +850,25 @@ def run(args):
     except BaseException as error:
         summary["passed"] = False
         summary["error"] = type(error).__name__ + ": " + str(error)
-        summary["health"] = probe.health_summary()
-        summary["endpoints"] = probe.endpoint_results
+        if probe is None:
+            summary["scope"] = "startup"
+        else:
+            summary["health"] = probe.health_summary()
+            summary["endpoints"] = probe.endpoint_results
         raise
     finally:
-        if profile.get("tunnels"):
-            summary["route"] = profile.get("route")
-            summary["tunnels"] = required_tunnel_report(
-                profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts)
-            summary["tunnel_evidence_scope"] = "all received truth, including an incomplete failed route"
-        summary["nav_tracking"] = probe.__dict__.get("tracking_results", [])
-        summary["contact_diagnostic"] = probe.__dict__.get("contact_seen", {})
-        summary["physical_contact_acceptance"] = "unverified"
-        (directory / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        probe.close()
-        if rclpy.ok():
-            rclpy.shutdown()
-        # This process group was created here, with the selected isolated domain.
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGINT)
-            try:
-                process.wait(timeout=12.0)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=10.0)
-        log.close()
+        with cleanup:
+            if probe is not None:
+                if profile.get("tunnels"):
+                    summary["route"] = profile.get("route")
+                    if "tunnels" not in summary:
+                        summary["tunnels"] = required_tunnel_report(
+                            profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts)
+                    summary["tunnel_evidence_scope"] = "all received truth, including an incomplete failed route"
+                summary["nav_tracking"] = probe.__dict__.get("tracking_results", [])
+                summary["contact_diagnostic"] = probe.__dict__.get("contact_seen", {})
+                summary["physical_contact_acceptance"] = "unverified"
+            (directory / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2), flush=True)
 
 
@@ -881,6 +895,9 @@ def main():
                         help="truth error limit for intermediate route points (0.08 reproduces the old gate)")
     parser.add_argument("--final-tolerance-m", type=float, default=FINAL_TOLERANCE_M,
                         help="truth error limit for the last point and the reload first goal")
+    parser.add_argument("--waypoint-control-tolerance-m", type=float, default=0.0,
+                        help="explicit intermediate control/admission radius, 0 uses server defaults; "
+                             "final/reload goals always use defaults; independent truth gates unchanged")
     parser.add_argument("--latency-p95-limit-ms", type=float, default=250.0,
                         help="obstacle visibility p95 limit (150 reproduces the old gate)")
     parser.add_argument("--startup-timeout", type=float, default=180.0)

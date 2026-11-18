@@ -20,7 +20,6 @@ class TunnelStartYawTest(unittest.TestCase):
         )[0]
         commands = [
             "set -eu",
-            "require_static_map_current() { :; }",
             'SCENE=rmuc_2027; TUNNEL=tunnel_ramp_bridge',
             f'WORKSPACE_DIR="{RUNNER.parent.parent}"',
             'START_Z_USER_SET=0; GOAL_TIMEOUT=300',
@@ -60,10 +59,9 @@ class TunnelGoalYawTest(unittest.TestCase):
         )[0]
         orientations = text.split(
             '# 未指定逐目标朝向的 profile', 1
-        )[1].split('if [[ "${SCENE}"', 1)[0].split('\n', 1)[1]
+        )[1].split('\ndone\n', 1)[0].split('\n', 1)[1] + '\ndone'
         commands = [
             "set -eu",
-            "require_static_map_current() { :; }",
             f'WORKSPACE_DIR="{RUNNER.parent.parent}"',
             f'SCENE=rmuc_2027; TEST_PROFILE={test_profile}',
             f'TUNNEL="{tunnels}"; TUNNEL_START="{start}"',

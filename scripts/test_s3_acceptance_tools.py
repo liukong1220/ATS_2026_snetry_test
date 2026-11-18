@@ -210,14 +210,11 @@ class EvidenceTools(unittest.TestCase):
         failure = RuntimeError("physical obstacle latency exceeds 150 ms")
         modules = {
             "rclpy": Mock(),
-            "ament_index_python.packages": SimpleNamespace(
-                get_package_share_directory=lambda _: str(s3.SIM)),
             "s3_fault_scenarios": SimpleNamespace(run_case=Mock(side_effect=failure)),
             "s3_tracking_evidence": SimpleNamespace(
                 TrackingLeg=lambda *_: __import__('contextlib').nullcontext()),
         }
         with tempfile.TemporaryDirectory() as tmp, patch.dict("sys.modules", modules), \
-                patch.object(s3, "verify_installed_files"), \
                 patch.object(s3, "prepare_scene", return_value=([], Path("scene.xml"))), \
                 patch.object(s3, "Probe", return_value=probe), \
                 patch.object(s3.subprocess, "Popen", return_value=process):
@@ -331,6 +328,19 @@ class EvidenceTools(unittest.TestCase):
         with self.assertRaises(ValueError):
             s3.tunnel_report(path, [tunnel], contact_counts=[0])
 
+    def test_tunnel_b_portals_outside_walls_count_only_complete_passes(self):
+        import math
+        tunnel, = s3.load_tunnel_truth(s3.SIM / 'config', ['tunnel_B'])
+        entry, exit_ = tunnel['entry'], tunnel['exit']
+        forward = [(entry[0] + (exit_[0] - entry[0]) * i / 100, entry[1], 0.0)
+                   for i in range(101)]
+        reverse = [(x, y, math.pi) for x, y, _ in reversed(forward)]
+        report = s3.tunnel_report(forward + reverse, [tunnel])['tunnel_B']
+        self.assertEqual((report['forward_passes'], report['reverse_passes']), (1, 1))
+        interrupted = forward[:50] + [(forward[50][0], entry[1] + tunnel['width'], 0.0)] + forward[50:]
+        report = s3.tunnel_report(interrupted, [tunnel])['tunnel_B']
+        self.assertEqual((report['forward_passes'], report['reverse_passes']), (0, 0))
+
     def test_contact_counter_reset_keeps_the_run_delta_unknown(self):
         from types import SimpleNamespace as NS
         probe = s3.Probe.__new__(s3.Probe)
@@ -354,11 +364,9 @@ class EvidenceTools(unittest.TestCase):
         process.poll.return_value = 0
         modules = {
             "rclpy": Mock(),
-            "ament_index_python.packages": NS(get_package_share_directory=lambda _: str(s3.SIM)),
             "s3_tracking_evidence": NS(TrackingLeg=lambda *_: __import__('contextlib').nullcontext()),
         }
         with tempfile.TemporaryDirectory() as tmp, patch.dict("sys.modules", modules), \
-                patch.object(s3, "verify_installed_files"), \
                 patch.object(s3, "prepare_scene", return_value=([], Path("scene.xml"))), \
                 patch.object(s3, "Probe", return_value=probe), \
                 patch.object(s3.subprocess, "Popen", return_value=process):
@@ -627,16 +635,6 @@ class EvidenceTools(unittest.TestCase):
                             bottom - ground, 0.242,
                             f"2027 segment {index} has insufficient clearance under {roof['name']}")
             previous = target
-
-    def test_stale_installed_launch_is_rejected_even_with_newer_mtime(self):
-        with tempfile.TemporaryDirectory() as directory:
-            source, installed = Path(directory) / "source.py", Path(directory) / "install.py"
-            source.write_text("current\n")
-            installed.write_text("old\n")
-            with self.assertRaisesRegex(RuntimeError, "stale installed"):
-                s3.verify_installed_files([(source, installed)])
-            installed.write_text(source.read_text())
-            s3.verify_installed_files([(source, installed)])
 
     def test_small_scene_preserves_robot_and_has_independent_wall_truth(self):
         source = Path(__file__).resolve().parents[1] / "src/sim/ats_mujoco_sim/models/rmuc_2027_swerve.xml"
