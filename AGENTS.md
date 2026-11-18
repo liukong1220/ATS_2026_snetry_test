@@ -229,7 +229,7 @@ P3 标记条件为同时满足以下各项：
 
 11月16日另一主机的d103/d107启动失败与空场d108传感器/执行器结果继续归档。11月17日本机已修复初始锁存，原首目标d16正常退出0、真值0.005460892m且q1/q2通过；T1、V1和独立unreachable仍失败，其他四项P2故障通过，完整2027套件尚未通过。最新局部证据见报告9.8.10，不能据此清零历史全场失败或宣称完整A–K通过。
 
-- 定位：建图期间 Point-LIO 持续提供位姿，并累积扫描形成地图。“无先验”只表示不加载先验 PCD，不表示没有定位。
+- 所有无先验运行与测试统一使用建图模式 `slam:=true`。从空地图开始，先验 PGM 和 PCD 输入留空，Point-LIO 持续提供位姿并累积在线扫描。
 - 漂移校正：采用地图匹配（方式 3）。当前扫描与增长中的全局点云地图配准，修正写入 `map->odom`，经 `localization_fusion` 门控接受或拒绝。本阶段不做回环检测、位姿图和关键帧存储。
 - 全局静态层：固定大数组，建图模式 40×30 m、0.1 m 分辨率，原点为建图起点，留出外延和漂移余量。超出范围的观测计数并记录。
 - 计算窗口：12×12 m，跟随机器人，只服务 ESDF、JPS、MINCO。窗口移出时全局层保留，不随窗口丢弃。
@@ -237,7 +237,7 @@ P3 标记条件为同时满足以下各项：
 - unknown：参数 `allow_unknown_goal`，只在建图模式生效，默认 `false`。开启时，目标和引导段可以穿过 unknown；已提交段必须 known-free。比赛模式保持 6.1 的 unknown 规则。
 - 保存：只写静态层中未被射线清除、且观测占比达到阈值的格，输出 PGM+YAML（符合 map_server 契约）和 PCD。动态层不保存。
 - 比赛（定位）模式：加载建图保存的 PCD 与静态层，`small_gicp_relocalization` 做先验重定位，输出 `map->odom`。比赛起点固定，重定位初值为建图起点。当前比赛入口仍保留 `use_static_map_obstacles=true` 和缺图 fail closed；“先验静态层只作引导/边界、局部障碍由实时观测决定”是 O1 的目标设计，不能写成全部模式已完成。
-- 测试：无先验测试必须使用显式的 TEST_PROFILE。不得改变现有 profile 对 PGM 和 PCD 的要求。
+- 无先验测试须显式选择建图 profile。S3 runner 使用 `--profile`，省略 `--prior` 和 `--reload`。有先验定位使用对应 profile 所要求的 PGM 和 PCD。
 - 验收（MuJoCo `lio` 模式，无 PGM、无 PCD）：
   - 建图中导航到目标（2026-11-06 用户授权放宽，数值为 `scripts/s3_mujoco_acceptance.py` 的默认参数，旧值可用参数复现）：中间路线点真值误差 ≤ 0.15 m（`--waypoint-tolerance-m`），终点与重载首目标 ≤ 0.08 m（`--final-tolerance-m`）；离散 footprint 冲突只统计被提交并由 MPC 执行（goal manager 下发 EXECUTE 且 `reference_stamp` 匹配）的 reference，必须为 0，READY 瞬态冲突只记录在 `summary.json` 的 `footprint_gate_collisions_transient_ready`。物理接触单独记为未验证，除非有独立接触评估；
   - `/rog_map_adapter/planning_snapshot` 发布者数为 1，owner 为 adapter；
