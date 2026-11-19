@@ -860,6 +860,7 @@ ats_rog_map:
     odom_layer.top_margin: 0.007
     odom_layer.max_ground_slope: 0.6
     odom_layer.base_ground_offset: 0.07
+    projection_follow_measured_ground: true
     odom_layer.window_x: 12.0
     odom_layer.window_y: 12.0
 
@@ -975,12 +976,13 @@ minco_planner:
     obstacle_value_threshold: 50
     unknown_is_obstacle: true
     allow_diagonal: true
-    # 离墙代价是软约束,JPS 只支持均匀代价,所以用 A*。硬净空 0.54 会让搜索绕开所有
+    # 离墙代价是软约束，均匀区跳跃，近墙带用加权 A*。硬净空 0.54 会让搜索绕开所有
     # 0.48~0.54 m 的通道(minco_sandbox 实测:sparse seed 1730726772 路径 11.12 m -> 9.90 m);
     # 改为硬下限取全 yaw 半径、居中交给离墙代价后,机器人尺寸随机图 50 张平均路径 -10%、
     # 时长 -8%,成功率 45 -> 46。MuJoCo 配置 rmuc_2025_navigation.yaml 同一做法但取 4.0/1.0,
     # 在上面的 sparse 场景仍绕到 11.40 m,所以实车取 2.0/0.8。
-    search_algorithm: astar
+    search_algorithm: hybrid
+    prior_guide_map_topic: /map
     search_clearance_cost_weight: 2.0
     search_clearance_cost_distance: 0.8
     astar_fallback: true
