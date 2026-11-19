@@ -1,0 +1,638 @@
+{
+  "date": "2026-11-19",
+  "scope": "All-workspace repository synchronization, static source/document review and updated next-task prompts; no behavior implementation or runtime tests.",
+  "workspace": "/home/kongliu/文档/27",
+  "host": "kongliu-B760M-H-DDR4",
+  "repositories": [
+    {
+      "path": ".",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "a8dcbd1d05ab2d33456d4913724e10d3b328b1a4",
+      "head_after_pull": "6264844b0f6b45c7b4f45cbf98918ba34780eeef",
+      "remote_head_at_fetch": "6264844b0f6b45c7b4f45cbf98918ba34780eeef",
+      "ahead_behind_before": "0\t12",
+      "sync_result": "fast_forwarded",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop\n M README.md\n?? scripts/install_build_dependencies.sh"
+    },
+    {
+      "path": "src/ats_sentry_nav",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "8a6733c9be1fa88c65c41c986d78854cb28d572c",
+      "head_after_pull": "88994ca3aac17e6c1d304ad0853fd3071ab0a86e",
+      "remote_head_at_fetch": "88994ca3aac17e6c1d304ad0853fd3071ab0a86e",
+      "ahead_behind_before": "0\t9",
+      "sync_result": "fast_forwarded",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/sim/ats_mujoco_sim",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "bdb022ec08b0d6b5e3e4fa71b8f7fa7bcdbe8c0c",
+      "head_after_pull": "9d30878650dccec4807855cd41cca888745140b8",
+      "remote_head_at_fetch": "9d30878650dccec4807855cd41cca888745140b8",
+      "ahead_behind_before": "0\t3",
+      "sync_result": "fast_forwarded",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop\n?? models/.ats_mujoco_no_walls_r9bi8608.xml"
+    },
+    {
+      "path": "src/ats_robot_description",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "347662ddfc89474bec663c99cc9425ce1dd04661",
+      "head_after_pull": "347662ddfc89474bec663c99cc9425ce1dd04661",
+      "remote_head_at_fetch": "347662ddfc89474bec663c99cc9425ce1dd04661",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/ats_sentry_behavior",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "36b7015845ef36599c34bcda6263c68c244329fb",
+      "head_after_pull": "36b7015845ef36599c34bcda6263c68c244329fb",
+      "remote_head_at_fetch": "36b7015845ef36599c34bcda6263c68c244329fb",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/ats_sentry_nav/sentry_chassis_vel_transform",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "486d02afce2be6c00fa3f604a7bfb4e0aadb98f0",
+      "head_after_pull": "486d02afce2be6c00fa3f604a7bfb4e0aadb98f0",
+      "remote_head_at_fetch": "486d02afce2be6c00fa3f604a7bfb4e0aadb98f0",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/dependencies/BehaviorTree.ROS2",
+      "branch": "humble",
+      "upstream": "origin/humble",
+      "head_before": "bd5b4700e911ba0fd1ec2d0270ae5c1eebad43da",
+      "head_after_pull": "bd5b4700e911ba0fd1ec2d0270ae5c1eebad43da",
+      "remote_head_at_fetch": "bd5b4700e911ba0fd1ec2d0270ae5c1eebad43da",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## humble...origin/humble"
+    },
+    {
+      "path": "src/dependencies/joint_state_publisher",
+      "branch": "feat-offset-timestamp",
+      "upstream": "origin/feat-offset-timestamp",
+      "head_before": "ecf1e49822b85ad6d642ad78f911855e1289913d",
+      "head_after_pull": "ecf1e49822b85ad6d642ad78f911855e1289913d",
+      "remote_head_at_fetch": "ecf1e49822b85ad6d642ad78f911855e1289913d",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## feat-offset-timestamp...origin/feat-offset-timestamp"
+    },
+    {
+      "path": "src/dependencies/rmoss_core",
+      "branch": "humble",
+      "upstream": "origin/humble",
+      "head_before": "fba1eeba3de30aead7e946f5ff52e9f39afa60d2",
+      "head_after_pull": "fba1eeba3de30aead7e946f5ff52e9f39afa60d2",
+      "remote_head_at_fetch": "fba1eeba3de30aead7e946f5ff52e9f39afa60d2",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## humble...origin/humble"
+    },
+    {
+      "path": "src/dependencies/rmoss_gazebo",
+      "branch": "humble",
+      "upstream": "origin/humble",
+      "head_before": "7443ff06c345752d0e23172c479d99b27207e2c7",
+      "head_after_pull": "7443ff06c345752d0e23172c479d99b27207e2c7",
+      "remote_head_at_fetch": "7443ff06c345752d0e23172c479d99b27207e2c7",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## humble...origin/humble"
+    },
+    {
+      "path": "src/dependencies/rmoss_gz_resources",
+      "branch": "humble",
+      "upstream": "origin/humble",
+      "head_before": "b5c759f08844dfda19c79aa870866ace8d4c7b3a",
+      "head_after_pull": "b5c759f08844dfda19c79aa870866ace8d4c7b3a",
+      "remote_head_at_fetch": "b5c759f08844dfda19c79aa870866ace8d4c7b3a",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## humble...origin/humble"
+    },
+    {
+      "path": "src/dependencies/rmoss_interfaces",
+      "branch": "humble",
+      "upstream": "origin/humble",
+      "head_before": "486bd0feb63ca559ed267512afef582604d5a1cf",
+      "head_after_pull": "486bd0feb63ca559ed267512afef582604d5a1cf",
+      "remote_head_at_fetch": "486bd0feb63ca559ed267512afef582604d5a1cf",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## humble...origin/humble"
+    },
+    {
+      "path": "src/dependencies/sdformat_tools",
+      "branch": "galactic",
+      "upstream": "origin/galactic",
+      "head_before": "7f3f5a6c37c7e89077912bdd11c2561408d40722",
+      "head_after_pull": "7f3f5a6c37c7e89077912bdd11c2561408d40722",
+      "remote_head_at_fetch": "7f3f5a6c37c7e89077912bdd11c2561408d40722",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## galactic...origin/galactic"
+    },
+    {
+      "path": "src/interfaces",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "b1a1f1a6e7bcc72043c03ec8b68ddf1cf7733db4",
+      "head_after_pull": "b1a1f1a6e7bcc72043c03ec8b68ddf1cf7733db4",
+      "remote_head_at_fetch": "b1a1f1a6e7bcc72043c03ec8b68ddf1cf7733db4",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/interfaces/carstatemsgs",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "5078cfc56ead12d5e07d52981c07a15ab20884c4",
+      "head_after_pull": "5078cfc56ead12d5e07d52981c07a15ab20884c4",
+      "remote_head_at_fetch": "5078cfc56ead12d5e07d52981c07a15ab20884c4",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/interfaces/manda_can_control",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "91e1a415cc8e8195664f78c959e09389285ced89",
+      "head_after_pull": "91e1a415cc8e8195664f78c959e09389285ced89",
+      "remote_head_at_fetch": "91e1a415cc8e8195664f78c959e09389285ced89",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/sim/ats_livox_adapter",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "50226fa7c32a4cab11a6ba16a19cd83001a266f9",
+      "head_after_pull": "50226fa7c32a4cab11a6ba16a19cd83001a266f9",
+      "remote_head_at_fetch": "50226fa7c32a4cab11a6ba16a19cd83001a266f9",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "src/sim/gazebo_simulator",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "609ba8d733e35adb13c4aa7c66295677de1d27d1",
+      "head_after_pull": "609ba8d733e35adb13c4aa7c66295677de1d27d1",
+      "remote_head_at_fetch": "609ba8d733e35adb13c4aa7c66295677de1d27d1",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "src/sim/loopback_sim",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "70a371acda38fd91b8f7d60a0186bde51a3e5cf9",
+      "head_after_pull": "70a371acda38fd91b8f7d60a0186bde51a3e5cf9",
+      "remote_head_at_fetch": "70a371acda38fd91b8f7d60a0186bde51a3e5cf9",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/sp_vision25",
+      "branch": "de",
+      "upstream": "origin/de",
+      "head_before": "de6e2bf8945abcdf91823da55ff5002d46bebe34",
+      "head_after_pull": "de6e2bf8945abcdf91823da55ff5002d46bebe34",
+      "remote_head_at_fetch": "de6e2bf8945abcdf91823da55ff5002d46bebe34",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## de...origin/de"
+    },
+    {
+      "path": "src/standard_robot_pp_ros2",
+      "branch": "develop",
+      "upstream": "origin/develop",
+      "head_before": "efabcdcdb00e8830765f35e45119276ba1cdc429",
+      "head_after_pull": "efabcdcdb00e8830765f35e45119276ba1cdc429",
+      "remote_head_at_fetch": "efabcdcdb00e8830765f35e45119276ba1cdc429",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## develop...origin/develop"
+    },
+    {
+      "path": "src/tools/pcd2pgm",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "30ad57a0cd2248483a7c45684bdb4857a388f11b",
+      "head_after_pull": "30ad57a0cd2248483a7c45684bdb4857a388f11b",
+      "remote_head_at_fetch": "30ad57a0cd2248483a7c45684bdb4857a388f11b",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "src/tools/rosbag2_composable_recorder",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "2668cb4e62c57c7c57747931832f67d7d5e79d80",
+      "head_after_pull": "2668cb4e62c57c7c57747931832f67d7d5e79d80",
+      "remote_head_at_fetch": "2668cb4e62c57c7c57747931832f67d7d5e79d80",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "src/tools/teleop_gimbal_keyboard",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "3cdbb084cee27d659cdeaf5cd909dfdfddaa5a2a",
+      "head_after_pull": "3cdbb084cee27d659cdeaf5cd909dfdfddaa5a2a",
+      "remote_head_at_fetch": "3cdbb084cee27d659cdeaf5cd909dfdfddaa5a2a",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "参考/webfound/HWSentryNav26",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "f5f941288197e14c867d711a4c4cd85bfd7a3194",
+      "head_after_pull": "f5f941288197e14c867d711a4c4cd85bfd7a3194",
+      "remote_head_at_fetch": "f5f941288197e14c867d711a4c4cd85bfd7a3194",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "参考/webfound/navi_minco_bit",
+      "branch": "master",
+      "upstream": "origin/master",
+      "head_before": "8288b7520ecb635bb27f16b0d49e3cf304f37a72",
+      "head_after_pull": "8288b7520ecb635bb27f16b0d49e3cf304f37a72",
+      "remote_head_at_fetch": "8288b7520ecb635bb27f16b0d49e3cf304f37a72",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## master...origin/master"
+    },
+    {
+      "path": "参考/webfound/rose_navigation",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "c979eb8e36d1621b31a04884af66ee3e3f5e8afd",
+      "head_after_pull": "c979eb8e36d1621b31a04884af66ee3e3f5e8afd",
+      "remote_head_at_fetch": "c979eb8e36d1621b31a04884af66ee3e3f5e8afd",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "参考/webfound_ext/src/Batch-LIO",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "3ac09203640593d8512595dd80cbd3b05a430bdd",
+      "head_after_pull": "3ac09203640593d8512595dd80cbd3b05a430bdd",
+      "remote_head_at_fetch": "3ac09203640593d8512595dd80cbd3b05a430bdd",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "参考/webfound_ext/src/GCOPTER",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "e0444f6d47b84f972ced91746b05feb36ce1fd4f",
+      "head_after_pull": "e0444f6d47b84f972ced91746b05feb36ce1fd4f",
+      "remote_head_at_fetch": "e0444f6d47b84f972ced91746b05feb36ce1fd4f",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "参考/webfound_ext/src/Implicit-SVSDF-Planner",
+      "branch": "main",
+      "upstream": "origin/main",
+      "head_before": "f18fd9104c8126adfb07878f4a719fad9d63d4c3",
+      "head_after_pull": "f18fd9104c8126adfb07878f4a719fad9d63d4c3",
+      "remote_head_at_fetch": "f18fd9104c8126adfb07878f4a719fad9d63d4c3",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## main...origin/main"
+    },
+    {
+      "path": "参考/webfound_ext/src/SUPER",
+      "branch": "master",
+      "upstream": "origin/master",
+      "head_before": "2ad3419c127a617c6d7df6925e81a14175a9c096",
+      "head_after_pull": "2ad3419c127a617c6d7df6925e81a14175a9c096",
+      "remote_head_at_fetch": "2ad3419c127a617c6d7df6925e81a14175a9c096",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## master...origin/master"
+    },
+    {
+      "path": "参考/webfound_ext/src/small_point_lio",
+      "branch": "ros2",
+      "upstream": "origin/ros2",
+      "head_before": "131fb586dc609521e7acf11a9c833121b2d49141",
+      "head_after_pull": "131fb586dc609521e7acf11a9c833121b2d49141",
+      "remote_head_at_fetch": "131fb586dc609521e7acf11a9c833121b2d49141",
+      "ahead_behind_before": "0\t0",
+      "sync_result": "already_current",
+      "fetch_success": true,
+      "status_after_pull": "## ros2...origin/ros2"
+    }
+  ],
+  "sync_summary": {
+    "total": 32,
+    "fast_forwarded": 3,
+    "already_current": 29,
+    "all_fetches_succeeded": true,
+    "all_tracking_branches_equal_after_pull": true
+  },
+  "checkpoint_note": "Repository IDs are the completed-pull checkpoint; a subsequent documentation commit is recorded separately by Git.",
+  "preserved_user_file_hashes": {
+    "README.md": "c41d3e32374d7c9affb63751282c487413d6e80aaa2a6f4896d5bae132884c0c",
+    "scripts/install_build_dependencies.sh": "cf573746baba97502145905d1ef265b91df56c2b596f75a8b4c64719fed8839a",
+    "src/sim/ats_mujoco_sim/models/.ats_mujoco_no_walls_r9bi8608.xml": "a934c6e186f25a8e53257c05d5da3cf6b5ef033ca6dbc95a1230e6b74c356afc"
+  },
+  "modified_documents": [
+    "AGENTS.md",
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md"
+  ],
+  "new_index": "docs/nav_acceptance/20261119_repository_sync_and_stage_review.json",
+  "current_stage": "S3/O1-A regression closure, first T1 candidate/footprint/known-free/support fusion and liveness, then current-version V1 and full F; not S4/O2.",
+  "next_order": [
+    "T1 owner/root-cause and safe liveness",
+    "Current-version V1 and all five isolated P2 faults",
+    "O0 synchronized speed-chain diagnosis and qualified high-speed handoff evidence",
+    "O1-B full 64-point S3/A-K after safety/liveness gates; new O3/O2/O4/O5 algorithms separately scoped"
+  ],
+  "reported_acceptance_facts": [
+    {
+      "item": "O1-A startup and no-prior first goal/map save",
+      "state": "Reported local gate passed on validation host, not reproduced here",
+      "run": "d40",
+      "truth_error_m": 0.004659477,
+      "full_s3_passed": false
+    },
+    {
+      "item": "V1 navigation and executed-footprint safety",
+      "state": "Reported route/safety gate passed, high-speed ability unverified",
+      "run": "d34",
+      "truth_error_m": 0.029575,
+      "reference_peak_mps": 2.148274,
+      "command_peak_mps": 1.067871,
+      "truth_peak_mps": 0.892115
+    },
+    {
+      "item": "F unreachable",
+      "state": "Reported isolated pass; full final-version F matrix still pending",
+      "run": "d35",
+      "bounded_no_path_result_code": 5
+    },
+    {
+      "item": "T1",
+      "state": "Failed; actual B not entered",
+      "runs": [
+        "d31 reached 6/13",
+        "d36 first-goal bounded failure"
+      ],
+      "actual_b_passes": 0
+    },
+    {
+      "item": "O1b incremental EDT",
+      "state": "Implementation verified in current source; numeric/performance results only reported by validation-host document"
+    },
+    {
+      "item": "O0",
+      "state": "One reported low-speed handoff window passed; high-speed handoffs unverified"
+    },
+    {
+      "item": "O2/O4/O5",
+      "state": "Not accepted; complete O2 rolling planner and later upgrades remain future work"
+    }
+  ],
+  "reported_fact_source": "docs/nav_acceptance/20261117_o1_o0_completion.md",
+  "reported_facts_confidence": "Medium: Git-tracked documentation and current implementation are available; original validation-host runtime artifacts are absent locally.",
+  "original_runtime_artifacts_available_locally": false,
+  "missing_runtime_links": [
+    {
+      "from": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/v1_tolerance_d34/o0/summary.json",
+      "available_locally": false
+    },
+    {
+      "from": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/t1_d31_leg7_corridor_audit.json",
+      "available_locally": false
+    },
+    {
+      "from": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/t1_d31_leg7_layer_correlation.json",
+      "available_locally": false
+    },
+    {
+      "from": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/t1_audited_collision_geometry.json",
+      "available_locally": false
+    },
+    {
+      "from": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/v1_viewer_simple_d39/rviz.png",
+      "available_locally": false
+    },
+    {
+      "from": "docs/调研/无先验地图钻洞高速导航优化调研报告.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/edt_replay/summary.json",
+      "available_locally": false
+    },
+    {
+      "from": "docs/nav_acceptance/20261116_2027_final_test_plan.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/t1_incremental_edt_d36/run/summary.json",
+      "available_locally": false
+    },
+    {
+      "from": "docs/nav_acceptance/20261116_2027_final_test_plan.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/v1_tolerance_d34/o0/speeds.png",
+      "available_locally": false
+    },
+    {
+      "from": "docs/nav_acceptance/20261116_2027_final_test_plan.md",
+      "target": "../../log/nav_acceptance/20261117_o1_o0_completion/v1_viewer_simple_d39/rviz.png",
+      "available_locally": false
+    }
+  ],
+  "changes_to_guidance": [
+    "Retire historical d7/d0 from the top implementation priorities while preserving their failures.",
+    "Keep d34/d35/d40 partial evidence and final-version regression limits distinct.",
+    "Resolve active prompt/workspace ambiguity across hosts.",
+    "Keep slam=true no-prior mapping and slam=false prior V1 separate.",
+    "Do not inherit historical round-limited domain-reuse authorization.",
+    "Do not relax 0.249m clearance, footprint or known-free to force T1 success."
+  ],
+  "profile_static_overlay_check": {
+    "real": {
+      "minco": {
+        "footprint_length": 0.581,
+        "footprint_width": 0.571,
+        "footprint_safety_margin": 0.02,
+        "jps_safe_distance": 0.36,
+        "reference_speed": 5.0,
+        "max_velocity": 5.0,
+        "spin_enabled": true,
+        "yaw_tunnel_enabled": true
+      },
+      "mpc": {
+        "max_vx": 5.0,
+        "max_vy": 5.0,
+        "max_wz": 3.0,
+        "max_wheel_speed": 5.0
+      },
+      "scope": "Static YAML overlay check; not runtime parameter evidence."
+    },
+    "rmuc_2025": {
+      "minco": {
+        "footprint_length": 0.581,
+        "footprint_width": 0.571,
+        "footprint_safety_margin": 0.02,
+        "jps_safe_distance": 0.36,
+        "reference_speed": 5.0,
+        "max_velocity": 5.0,
+        "spin_enabled": true,
+        "yaw_tunnel_enabled": true
+      },
+      "mpc": {
+        "max_vx": 5.0,
+        "max_vy": 5.0,
+        "max_wz": 3.0,
+        "max_wheel_speed": 5.0
+      },
+      "scope": "Static YAML overlay check; not runtime parameter evidence."
+    },
+    "rmuc_2027": {
+      "minco": {
+        "footprint_length": 0.581,
+        "footprint_width": 0.571,
+        "footprint_safety_margin": 0.02,
+        "jps_safe_distance": 0.36,
+        "reference_speed": 5.0,
+        "max_velocity": 5.0,
+        "spin_enabled": true,
+        "yaw_tunnel_enabled": true
+      },
+      "mpc": {
+        "max_vx": 5.0,
+        "max_vy": 5.0,
+        "max_wz": 3.0,
+        "max_wheel_speed": 5.0
+      },
+      "scope": "Static YAML overlay check; not runtime parameter evidence."
+    }
+  },
+  "validation": {
+    "module_prompts_checked": 11,
+    "valid_local_document_source_links": 76,
+    "unavailable_validation_host_runtime_links": 9,
+    "bash_syntax_blocks": 7,
+    "example_placeholder_blocks_normalized": 1,
+    "historical_json_files_checked_and_unchanged": 11,
+    "original_20261022_report_unchanged": true,
+    "source_input_count": 17,
+    "user_files_unchanged": true,
+    "three_repository_diff_checks_passed": true,
+    "method": "Static links, strict JSON, source/AST/YAML inspection, bash -n (example placeholders substituted), Git and SHA-256 checks. No shell templates or ROS nodes executed."
+  },
+  "document_hashes_before": {
+    "AGENTS.md": "522f885c014bcfc8cd72028f58e2c0f0e6366def22b92c4876ca2285b016a13a",
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md": "9ce68a67bba5f0b548027110302e9d7d6353fc3046fd68f3ff6d2fee435e126f",
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md": "37f2199c7d60ece48b793edd89433beb8182783482740c1150e72ec59bf17898"
+  },
+  "document_hashes_after": {
+    "AGENTS.md": "e2beb3660da50a04fa273ae3ffe694f9afe28769e364f8c47db143c2cdb4b488",
+    "docs/调研/无先验地图钻洞高速导航优化调研报告.md": "caf5a7b6246aed3bbc403c7375815495ed57b22c61022b97436ddeae11095755",
+    "docs/nav_acceptance/20261116_2027_final_test_plan.md": "f4acb2abedeef54c07f3c676decfdd8df75b26f0589b7896bd38faa9731d165b"
+  },
+  "source_input_hashes": {
+    "src/ats_sentry_nav/ats_rc_esdf/src/rc_traversability_esdf_provider.cpp": "9dab16f0176241326507a4acdfaa1ac31b721c92ea5eed92792c7769b723bb41",
+    "src/ats_sentry_nav/ats_rc_esdf/include/ats_rc_esdf/esdf/rc_traversability_esdf_provider.hpp": "e1228224ffb159a53e07f2a2704dd1ac36b2a00025c958f0f8c289e2a1761eb5",
+    "src/ats_sentry_nav/ats_rog_map/src/planning/planning_map_publisher.cpp": "0de5e27a386dcaa31ed8d8be7710244d8f697193e2b51deb6430e2184b1e52c9",
+    "src/ats_sentry_nav/ats_navigation_interfaces/action/NavigateToPose.action": "06e2237c2ca76dc7d952d136ed84d6e19e2837504376583091412388fb23bc43",
+    "src/ats_sentry_nav/ats_navigation_interfaces/msg/ExecutionCommand.msg": "b9e85f14d8f91de3ca0178c6aeb323f880a7724a7a9f39411a3feff4b431a766",
+    "src/ats_sentry_nav/minco_planner/src/trajectory/minco_joint_optimizer.cpp": "e86c6576d143247b7efe2768a88f7fae732dd325edd16d0230610e9f114114ac",
+    "src/ats_sentry_nav/minco_planner/src/nodes/minco_planner_node.cpp": "e178d7f8ce1438a3f70bbc7bb1bb8c5dc329320aa796ee14aa0b448329e0de40",
+    "src/ats_sentry_nav/ats_goal_manager/src/ats_goal_manager_node.cpp": "0455a9cecedec7cf9e49fbc9159ac497be3eae55ef973b7045e1087c09466154",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/parallel_lidar.py": "7a18697f2f7cf5ea96d8048fe6424520411f7a2eaa7baaeaf1589b227e63681f",
+    "src/sim/ats_mujoco_sim/ats_mujoco_sim/livox_scan.py": "a7f7744a3b6b62b0834ca55b147b87d186569c75b54a3acff0d5332961974629",
+    "scripts/s3_mujoco_acceptance.py": "9823933bb4115de0001c4c5554f413231b1935cd417957ec5691bbccdd764969",
+    "scripts/nav_tracking_recorder.py": "91461310b61629a9f30ba4b02490720c1f80f675050f40eebc03ad4fded8ab1c",
+    "scripts/analyze_nav_tracking.py": "b0b8f9ccbb5c3762ce3b6cf46a3be34f87db72797fd7fd627ab6f774268976ee",
+    "scripts/nav_domain_guard.py": "f25ba1d5f043a93561cc26fb4c9d21dbfa8c4ad867e8f3ff001ca815930dd348",
+    "src/ats_sentry_bringup/params/node_params.yaml": "6ec08fe96c2d4505a790d645784400b81027ce4ddd5985050d959df1a0d89e40",
+    "src/sim/ats_mujoco_sim/config/rmuc_2025_navigation.yaml": "c69b04dd0c7aa75f51386885df5b2a57065a887e12b44b2d1058c31e54f4e59f",
+    "src/sim/ats_mujoco_sim/config/rmuc_2027_navigation.yaml": "134413f36511aacbc37c8019ff95aa0ef7049d06c35ad76df30bb56133b5547b"
+  },
+  "evidence_document_hashes": {
+    "docs/nav_acceptance/20261117_o1_o0_completion.md": "de26ce377e0d2ffee8a15f323fd989d78bc60b06b01c62069ace81b9da905142",
+    "docs/nav_acceptance/20261117_o1a_o0.json": "2f3e917e0b20ad96ff5d7f0f2e887936ea57d86dff1ac52d5613e128c7bc9208"
+  },
+  "not_run": [
+    "Build or unit tests",
+    "MuJoCo/ROS navigation or fault injection",
+    "RViz/viewer observation",
+    "Real hardware"
+  ],
+  "limitations": [
+    "Code pull does not rebuild installed binaries/interfaces.",
+    "No overall S3, T1/T2/T3, high-speed or full final-suite acceptance inferred.",
+    "The reported B minimum upright clearance 0.24889m is below candidate 0.249m and omits pitch/suspension/dynamics; it is a risk to verify, not proof of traversability or impossibility.",
+    "Future ROS execution requires a valid domain allocation under applicable authorization; none was requested or consumed for this review."
+  ]
+}
