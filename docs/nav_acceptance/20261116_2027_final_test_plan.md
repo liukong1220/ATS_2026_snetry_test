@@ -1,6 +1,6 @@
 # 2027 导航验证方案：无先验基地到基地、隧道与对称点速度
 
-2026-11-20 文档更新将无先验基地到基地设为下一次实际导航的主场景。目标由场地几何和起始位姿计算，沿途在线建图和重规划。T1/T2/T3、V1、F 保留各自的专项判定，按实际要验证的问题选用。2025 和 2027 红框归档。11 月 17 日及后续运行来自另一验证主机。 [验证主机说明](20261117_o1a_o0.md) · [证据索引](20261117_o1a_o0.json) · [续接账本](20261117_o1_o0_completion.md)
+2026-11-20 起，所有仿真导航测试统一使用 `slam:=true` 的无先验建图模式。PGM 和 PCD 输入为空。先验证传感器与在线地图，再做基地到基地 B1、局部避障 B2 和独立全堵停车。历史模式与结果见第 5 节。
 
 本文件维护任务坐标、运行入口和验收结果。统一搜索和先验避障接回已接入，本轮实际结果见第 5 节。同一 action 的无先验远目标接续仍待接入。d34、d35、d40 及其他历史批次保留原判定与来源。 [实施顺序](../调研/无先验地图钻洞高速导航优化调研报告.md#51-执行顺序与当前停点) · [实施入口](../调研/无先验地图钻洞高速导航优化调研报告.md#97-提示词选择)
 
@@ -31,7 +31,8 @@ $$
 
 | ID | 用例 | 入口 | 必须报告 |
 | --- | --- | --- | --- |
-| 主场景 | 无先验基地到基地 | `rmuc_2027`，`lio`、`slam:=true`，单一 ATS action 到 `map (24.63, 6.97)` | 终点真值、实际里程、局部重规划、经过地形及静态地图保存 |
+| B1 | 无先验基地到基地 | `rmuc_2027`、`lio`、`slam:=true`，单一 ATS action 到 `map (24.63, 6.97)` | 终点真值、实际里程、执行足迹与地图更新 |
+| B2 | 无先验局部避障 | 同 B1，从在线已知空闲区域选择障碍位置 | 障碍可见、重搜、EXECUTE、绕行、几何与实际接回、终点；独立全堵停车 |
 | T1 | 真实`tunnel_B`往返 | `rmuc_2027_tunnels / tunnel_b_roundtrip` | 所有13个目标、B正反向穿越次数、入口/出口yaw及横向误差、真值终点和执行足迹 |
 | T2 | 南坡/南侧通道往返 | `rmuc_2027_tunnels / ramp_south` | 坡道支撑、顶板净空、正反向通过、失败点 |
 | T3 | 六隧道完整路线 | `rmuc_2027_tunnels / six_tunnels` | 全部配置目标与每个声明通道的穿越计数；运行前声明重复次数N并逐次报告 |
@@ -42,7 +43,7 @@ T1中的第7个前置`ramp_bridge`不算B通过；真正B位于第10–13个目�
 
 本方案没有给定重复稳定性门的N；运行前记录所选N和依据，不能事后按成功次数选N。探索阶段N=1只代表单次结果，不能宣称重复稳定性。O1-A允许的原64点路线首目标截断仅作启动诊断，不计入T1/T2/T3完整路线通过。
 
-主场景只按实际遇到的地形记录结果，是每次导航行为改动后的默认实际测试。需要单独判定指定通道、速度或故障时，再选择相应的 T1/T2/T3、V1 或 F，不作为每次改动的固定回归。无先验用例使用显式建图模式，有先验复验使用经核验的同源 2027 PGM/PCD 或本场保存地图，通过 `--prior PREFIX` 单独启动。
+主场景只按实际遇到的地形记录结果，是每次导航行为改动后的默认实际测试。需要单独判定指定通道、速度或故障时，再选择相应的 T1/T2/T3、V1 或 F，不作为每次改动的固定回归。所有现场用例从空图启动，仅使用在线扫描与增长地图匹配。
 
 ## 3. 速度验收的含义
 
@@ -62,11 +63,17 @@ T1中的第7个前置`ramp_bridge`不算B通过；真正B位于第10–13个目�
 
 ### 4.0 无先验基地到基地
 
-1. 用 `rmuc_2027_mujoco.launch.py`，设置 `localization_source:=lio`、`slam:=true`、`start_x:=3.37 start_y:=9.03 start_z:=0.465 start_yaw:=0.0`。`map_yaml_file` 和 `prior_pcd_file` 按现有无先验 runner 指向本次输出目录下不存在的文件。保留 MID360 `10 Hz` 与 IMU `200 Hz` 口径。 [2027 launch](../../src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py) · [无先验参数](../../scripts/s3_mujoco_acceptance.py#L762)
+1. 用 `rmuc_2027_mujoco.launch.py`，设置 `localization_source:=lio`、`slam:=true`、`start_x:=3.37 start_y:=9.03 start_z:=0.465 start_yaw:=0.0`。`map_yaml_file` 和 `prior_pcd_file` 在 2027 建图入口向子 launch 传入空字符串。保留 MID360 `10 Hz` 与 IMU `200 Hz` 口径。 [2027 launch](../../src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py) · [无先验参数](../../scripts/s3_mujoco_acceptance.py#L762)
 2. 向 `/ats_navigate_to_pose` 下发一个 `map` 目标 `(24.63, 6.97)`，`position_tolerance=0` 使用现行服务端默认。仅核验平移到达时可沿用终点 `yaw=0`。远目标在随车规划窗口外时，由统一 JPS/A* 搜索返回窗口内朝远目标推进最多的可达部分路径，随着地图增长继续同一 action（待实现）。局部规划输入来自在线扫描及地图。路径上通道净宽小于带余量车体对角线 `0.871 m` 时视为与洞口相近，在洞外对齐车体 `+x`，随后正向通过。现有 `rmuc_2027` 多点 runner 保留原路线，单目标滚动验收在接通对应行为后执行。 [局部规划设计](../调研/无先验地图钻洞高速导航优化调研报告.md#无先验基地到基地与局部重规划)
 3. 核对最终 action 状态、真值误差 `≤0.08 m`、实际里程与末端停车。报告实时绕障和地形引起的重规划、求解墙钟耗时、已执行参考与地图身份。遇到窄通道时记录入口前的实际 yaw、通过方向及整车驶出，未遇到则记未触发。保存 PGM/YAML/PCD 并记录观测范围，沿用现有足迹和执行判定。
 
-有先验时加载建图产物并使用 `slam:=false`。现有全局路径提供引导，局部规划根据实时地图绕过受阻段并接回，独立报告本次选定任务的实际结果。
+### 4.0.1 B1/B2 无先验建图运行入口
+
+B1 使用 4.2 的单 action runner，将起点改为 `(3.37, 9.03, 0.465, 0)`、目标改为 `map (24.63, 6.97, yaw=0)`。使用 `EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim"`。两个先验参数由 2027 入口在建图模式下置空。双窗口启动后用俯视图和独立真值核对起点。
+
+RViz 打开「局部规划窗口」中的 `/rog_map/odom_layer` 与 `/rog_map_adapter/viz/planning_grid`，叠加 `/registered_scan`。在线建图以消息的时间、内容变化与实际画面取证。PGM 是显式保存时输出的静态地图。
+
+B2 复用实体夹具，以本次 B1 实际几何引导和投放前的在线空闲格选址。分别记录可见、局部重搜、授权参考、几何接回和底盘实际接回。全堵停车另开批次，核对三路持续零速。
 
 ### 4.1 隧道
 
@@ -86,7 +93,7 @@ python3 -s scripts/nav_domain_guard.py run \
   --launch-arg lidar_threads:=0 --launch-arg lidar_downsample:=0
 ```
 
-T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起domain和证据目录。无先验入口不加载PGM/PCD；有先验入口添加已核验的`--prior "${ATS_2027_PRIOR_PREFIX:?同源地图前缀}"`，不要编造不存在的路线或CLI选项。
+T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起domain和证据目录。无先验入口不加载PGM/PCD；所有本轮运行均省略 `--prior` 和 `--reload`。
 
 无先验建图显示和保存使用 `--profile rmuc_2027 --case route --max-goals 1`，省略 `--prior` 与 `--reload`，runner 会启动 `slam:=true`。两窗口参数与上方相同。RViz 的「距离场」组显示 `/rog_map_adapter/viz/esdf_cloud`，「局部规划窗口」组可打开 `/rog_map/odom_layer`。正常完成后调用 `/rog_map/save_map`，在输出目录生成 `map.pgm`、`map.yaml`、`map.pcd`。 [首段建图与保存过程](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存)
 
@@ -108,7 +115,7 @@ SCENE=rmuc_2027 TEST_PROFILE=single \
   NAV_TRACKING_PROFILE_YAML="$PWD/src/ats_sentry_bringup/params/node_params.yaml" \
   USE_RVIZ=true USE_MUJOCO_VIEWER=true \
   LOG_DIR="${ATS_OUT:?全新的runner日志目录}" \
-  EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=false lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim prior_pcd_file:=$PWD/src/ats_sentry_bringup/pcd/rmuc_2027.pcd" \
+  EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim" \
   python3 -s scripts/nav_domain_guard.py run \
     --domain "${ATS_DOMAIN:?先核验本轮复用domain}" \
     --run-dir "${ATS_GUARD_OUT:?独立guard批次目录}" --reuse-authorized -- \
@@ -147,7 +154,7 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 
 主场景和各专项按实际运行状态记录。保留 domain、三仓 commit、参数、原始日志、轨迹、q1/q2、接触评估及终点真值。基地到基地额外记录直线基准与实走里程，以及在线重规划和建图覆盖。未触发的地形只记录当次路线事实。
 
-### 本轮统一搜索与 2027 有先验实测
+### 历史记录：统一搜索与 2027 有先验实测
 
 **已验证。** 三仓 Release 构建和直接相关单测通过。静态图上的统一搜索、按目标缓存及受阻段接回已接入。关闭跳点时路径的浮点位表示与旧 A* 一致，开启时 480 张栅格中最大代价差为 `6.82e-13`。单测覆盖搜索端可停车的部分路径。 [主报告 5.5.1](../调研/无先验地图钻洞高速导航优化调研报告.md#551-统一-jpsa-搜索当前主任务的一部分)
 
@@ -163,7 +170,7 @@ B2 沿用 B1 runner，通过既有 `model_file` 和 `enable_test_obstacle_fixtur
 
 **已实现未运行。** 窄通道入口方向的参考判定通过单测，实际窄通道通过及顶板下动态净空仍待验证。
 
-**未实现。** 当前换轨从旧参考进度前推并继承起点状态，MINCO 仍重解剩余定时参考。定时参考的局部拼接和非零段尾衔接待实现。无先验模式的滚动部分路径尚未接入 Goal Manager，阶段 C 的单一 map 远目标、全程建图和保存未执行。当前停点为有先验 B1/B2 路线未通过。阶段 C 由用户另行安排。 [d27 换轨比较](../../log/nav_acceptance/20261119_hybrid/b2_bypass_d27/execution_reference_comparison.json)
+**未实现。** 当前换轨从旧参考进度前推并继承起点状态，MINCO 仍重解剩余定时参考。定时参考的局部拼接和非零段尾衔接待实现。无先验模式的滚动部分路径尚未接入 Goal Manager，阶段 C 的单一 map 远目标、全程建图和保存未执行。当时有先验 B1/B2 路线未通过。当前测试统一采用第 4 节的无先验建图入口。 [d27 换轨比较](../../log/nav_acceptance/20261119_hybrid/b2_bypass_d27/execution_reference_comparison.json)
 
 本轮使用工作区 WLAN DDS 和获准复用的历史 domain。d26/d27/d28 未带窗口。d30/d31/d32 带 RViz 与 MuJoCo，d31 起点由俯视图和独立真值交叉核对。d31 有两条 RViz `2D Goal Pose` 输入，该批没有试验 action 或投放。d32 改用观察专用 RViz 配置，射线计算用 6 个线程，保留 `10 Hz` 和全密度。物理接触缺独立评估，判定为未验证。 [出生点俯视图](../../log/nav_acceptance/20261119_hybrid/b2_bypass_gui_d31/spawn_check_mujoco.png) · [d32 窗口记录](../../log/nav_acceptance/20261119_hybrid/b2_bypass_gui_d32/tracking_windows.json) · [下一阶段提示词](../调研/无先验地图钻洞高速导航优化调研报告.md#下一阶段提示词)
 

@@ -276,11 +276,11 @@ export ROS_DOMAIN_ID="${ATS_DOMAIN:?先核验账本和宿主占用，选择新do
 
 # 当前RMUC 2027入口；需要图形桌面时显式打开viewer
 ros2 launch ats_mujoco_sim rmuc_2027_mujoco.launch.py \
-  localization_source:=lio lidar_threads:=0 lidar_downsample:=0 \
+  localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_downsample:=0 \
   use_viewer:=true show_viewer:=true use_rviz:=false
 ```
 
-2027入口默认出生点为`map (13.40,2.00,z=0.550)`、yaw 0，加载同源`rmuc_2027.yaml/.pcd`。LIO启用Point-LIO与地图匹配；truth默认仅用于隔离诊断，不作为最终导航验收。雷达按仿真时间10 Hz、IMU 200 Hz，自动射线密度和CPU预算见[MuJoCo说明](src/sim/ats_mujoco_sim/README.md)。
+2027入口默认出生点为`map (13.40,2.00,z=0.550)`、yaw 0，默认启用无先验建图。PGM/PCD 输入为空，LIO 使用 Point-LIO 与在线增长地图匹配；truth默认仅用于隔离诊断，不作为最终导航验收。雷达按仿真时间10 Hz、IMU 200 Hz，自动射线密度和CPU预算见[MuJoCo说明](src/sim/ats_mujoco_sim/README.md)。
 
 另开终端加载同一环境、使用相同domain后，可手工发当前对称点目标：
 
@@ -292,7 +292,7 @@ ros2 action send_goal --feedback /ats_navigate_to_pose \
 
 这只是手工操作示例。正式测试按[2027最终方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)录制曲线并以真值误差0.08 m判定；action成功不能代替真值通过。5 m/s是暂定上限，路径长度、制动、曲率和逐轮约束仍限制实际速度。
 
-旧`rmuc_2026_mujoco.launch.py`转发2027，但把起点改为`(3.37,9.03,0.465,0)`；`mujoco_navigation.launch.py`仍转发2025。这些兼容入口不替代本次对称点速度的明确起终点。当前2027入口默认不打开窗口；RViz默认显示车体、当前点云和传感器轴，体素/滑窗/距离场/路径调试组关闭。
+旧`rmuc_2026_mujoco.launch.py`转发2027，但把起点改为`(3.37,9.03,0.465,0)`；`mujoco_navigation.launch.py`仍转发2025。这些兼容入口不替代本次对称点速度的明确起终点。当前2027入口默认不打开窗口；RViz 默认显示车体、当前扫描、传感器轴、累计 odom 地图与局部规划栅格。体素、距离场与路径调试组默认关闭。
 
 ### 小陀螺：为什么只启动后车和雷达不旋转？
 

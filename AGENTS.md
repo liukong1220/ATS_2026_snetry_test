@@ -17,7 +17,7 @@
 
 ### 1.1 当前状态与文档维护
 
-当前模块进度以 `docs/调研/无先验地图钻洞高速导航优化调研报告.md` 第 5 节为准，顺序见 5.1，实施入口见 9.7。下一次实施优先接通 **无先验基地到基地的在线建图与局部重规划**：先把 JPS 与 A* 合成一个搜索并支持窗口内部分路径，遇到净宽与洞口相近的窄通道时在洞外将车头对向入口。有图后沿用现有全局规划，局部规划绕障并接回路线。行为改动后的默认实际测试是基地到基地导航，T1/T2/T3、V1、F 只在需要判定对应问题时选用。d40 无先验首段与保存、d34 V1 路线与足迹、d35 unreachable 局部结果继续按 9.8.11–9.8.12 和原始来源记账，当前主场景尚未运行。
+当前模块进度见主报告第 5 节，实施入口见 9.7。2026-11-20 起，所有仿真导航测试统一使用无先验建图模式 `slam:=true`，PGM 和 PCD 输入为空。统一搜索、按目标缓存及先验模式的几何接回已实现。先验证传感器发布和接收时序、在线建图和地图显示，再验基地到基地及局部避障。遇到净宽与洞口相近的窄通道，在洞外将车头对向入口。d40 首段保存、d34 V1 和 d35 unreachable 继续按原批次记账。
 
 O1-A全部门、S3和2027最终套件仍未通过。O1-B完整S3/A–K与O3新增算法分别选任务，不因回归失败自动扩大实现范围；本修复引入的失败须处理，历史或独立欠账继续记未通过。历史两场见9.5，11月16日专项/文档审查见9.8.6–9.8.9。S0/S1/S2a/S2b已有阶段交付，S3主干、O1b及部分O3已有实现；完整O2/O4、O5数值优化、方向后端、描述子恢复与前端A/B未完成。实车未验证，不按提交数或函数数估算总体完成百分比。
 
@@ -198,13 +198,13 @@ P2 回归使用 `ats_rog_map` 进程内的规划地图所有者，并验证；Mu
 
 ### 6.2 2027 实际导航任务与专项验收
 
-下一次实际导航以无先验基地到基地为主，使用场地中心对称和当前起点确定一个远目标。T1/T2/T3、V1、F 按需要判断的具体问题选用，原结果继续保留，2025/2027 红框归档。 [2027 导航验证方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)
+实际导航以无先验基地到基地为主。B1、B2 及按需选择的 T1/T2/T3、V1、F 均从空图启动，使用 `rmuc_2027`、`localization_source:=lio`、`slam:=true`。历史有先验 B1/B2 的配置、输入和判定继续归档。 [2027 导航验证方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)
 
-- 基地到基地使用 `rmuc_2027`、`lio`、`slam:=true` 和空先验，从 `(3.37, 9.03, 0.465, 0)` 向 `map (24.63, 6.97)` 导航。直线距离 `21.36 m`，实际里程从轨迹测量。窗口内局部目标随在线建图更新，远目标接续和洞口正向对齐待实现。
+- B1 基地到基地使用 `rmuc_2027`、`lio`、`slam:=true` 和空先验，从 `(3.37, 9.03, 0.465, 0)` 向 `map (24.63, 6.97)` 导航。直线距离 `21.36 m`，实际里程从轨迹测量。窗口内局部目标随在线建图更新，远目标接续和洞口正向对齐待实现。
 - 隧道专项使用 `scripts/s3_mujoco_acceptance.py --profile rmuc_2027_tunnels --route tunnel_b_roundtrip` 或相应的 `ramp_south`、`six_tunnels`。T1 第 7 点为 `ramp_bridge`，真实 B 位于第 10–13 点。运行前声明完整尝试次数 N。
 - 速度：`SCENE=rmuc_2027 TEST_PROFILE=single`，起点采用当前2027 launch默认`(13.40,2.00,0.550,0)`，以当前模型28×16m中心`(14,8)`得到目标`map (14.60,14.00)`，`GOAL_YAW=0`、`GOAL_TOLERANCE=0.08`。不依赖runner的默认2025起点，也不使用`red_box_2027`别名。
 - 速度必须经ATS导航action到达；记录参考、MPC/仲裁/底盘命令和独立真值速度曲线。5m/s只是暂定上限，实际受距离、制动、曲率和净空约束；没有高速请求段时记未触发，不以直接发底盘命令或空场d108代替导航速度通过。
-- 实际测试使用新domain、`lio`、工作区WLAN；有先验使用同源2027 PGM/PCD，无先验使用显式建图profile。2025缺先验不作为当前2027套件的前置条件。
+- B2 使用无先验 B1 实际记录的引导与在线已知空闲格选择夹具位置。与 B1 分批运行，分别验证绕行接回和全堵停车。全部批次使用工作区 WLAN 与获授权的隔离 domain。
 - 最后行为修改后运行与改动直接相关的实际导航任务。选择 P2 故障专项时逐项核对真实注入锚点和前置等待。
 
 旧`scripts/test_mujoco_nav_chain.sh`已删除，不执行不存在的入口。正式runner使用`/ats_navigate_to_pose`、`ats_navigation_interfaces/action/NavigateToPose`，断言没有Nav2进程和`/plan`。`PLANNING_GRID_OWNER=rog_map`仅是兼容取值，实际核验进程内adapter和唯一快照发布者；不能以变量取值或topic存在代替闭环通过。
@@ -230,7 +230,7 @@ P3 标记条件为同时满足以下各项：
 
 11月16日另一主机的d103/d107启动失败与空场d108传感器/执行器结果继续归档。11月17日本机已修复初始锁存，原首目标d16正常退出0、真值0.005460892m且q1/q2通过；T1、V1和独立unreachable仍失败，其他四项P2故障通过，完整2027套件尚未通过。最新局部证据见报告9.8.10，不能据此清零历史全场失败或宣称完整A–K通过。
 
-- 所有无先验运行与测试统一使用建图模式 `slam:=true`。从空地图开始，先验 PGM 和 PCD 输入留空，Point-LIO 持续提供位姿并累积在线扫描。
+- 所有仿真导航运行和验收统一使用无先验建图模式 `slam:=true`。从空地图开始，先验 PGM 和 PCD 输入留空，Point-LIO 持续提供位姿并累积在线扫描。
 - 漂移校正：采用地图匹配（方式 3）。当前扫描与增长中的全局点云地图配准，修正写入 `map->odom`，经 `localization_fusion` 门控接受或拒绝。本阶段不做回环检测、位姿图和关键帧存储。
 - 全局静态层：固定大数组，建图模式 40×30 m、0.1 m 分辨率，原点为建图起点，留出外延和漂移余量。超出范围的观测计数并记录。
 - 计算窗口：12×12 m，跟随机器人，只服务 ESDF、JPS、MINCO。窗口移出时全局层保留，不随窗口丢弃。
@@ -238,7 +238,7 @@ P3 标记条件为同时满足以下各项：
 - 建图任务的远目标可以位于尚未观测区域，局部推进使用实时观测到的连通可通行区域。已提交段保持 known-free，超出窗口时的局部目标接续待实现。定位模式继续按 6.1 的 unknown 规则执行。
 - 保存：只写静态层中未被射线清除、且观测占比达到阈值的格，输出 PGM+YAML（符合 map_server 契约）和 PCD。动态层不保存。
 - 比赛（定位）模式：加载建图保存的 PCD 与静态层，`small_gicp_relocalization` 做先验重定位，输出 `map->odom`。比赛起点固定，重定位初值为建图起点。当前比赛入口仍保留 `use_static_map_obstacles=true` 和缺图 fail closed；“先验静态层只作引导/边界、局部障碍由实时观测决定”是 O1 的目标设计，不能写成全部模式已完成。
-- 无先验测试须显式选择建图 profile。S3 runner 使用 `--profile`，省略 `--prior` 和 `--reload`。有先验定位使用对应 profile 所要求的 PGM 和 PCD。
+- 测试显式选择建图 profile。S3 runner 使用 `--profile`，省略 `--prior` 和 `--reload`。历史比赛定位和重载记录保留原模式。
 - 验收（MuJoCo `lio` 模式，无 PGM、无 PCD）：
   - 建图中导航到目标（2026-11-06 用户授权放宽，数值为 `scripts/s3_mujoco_acceptance.py` 的默认参数，旧值可用参数复现）：中间路线点真值误差 ≤ 0.15 m（`--waypoint-tolerance-m`），终点与重载首目标 ≤ 0.08 m（`--final-tolerance-m`）；离散 footprint 冲突只统计被提交并由 MPC 执行（goal manager 下发 EXECUTE 且 `reference_stamp` 匹配）的 reference，必须为 0，READY 瞬态冲突只记录在 `summary.json` 的 `footprint_gate_collisions_transient_ready`。物理接触单独记为未验证，除非有独立接触评估；
   - `/rog_map_adapter/planning_snapshot` 发布者数为 1，owner 为 adapter；
@@ -314,7 +314,7 @@ git diff --check
 - `USE_RVIZ=true` 时 runner 同时打开 MuJoCo 自带的 3D 窗口（`USE_MUJOCO_VIEWER` 默认等于 `USE_RVIZ`，可显式设为 `false`）。
   关闭这个窗口会让仿真停止；Wayland 会话里它是原生 Wayland 窗口，`xwd` 抓不到，runner 只在 X11 窗口存在时才保存
   `/tmp/ats_minco_mpc_<profile>_<domain>_mujoco.png`，否则打印 NOTE。`mujoco_navigation.rviz` 现在还显示车辆模型（RobotModel，
-  由 `ats_robot_description/urdf/ats_sentry.urdf.xacro` 生成，只在 `/tf_static` 发布 `gimbal_yaw_odom -> part_*` 恒等边）；ROGMap原生occ/inf_occ/unk/esdf体素默认关闭，当前点云采用Points、Decay Time=0，不能再描述为默认显示灰色体素。
+  由 `ats_robot_description/urdf/ats_sentry.urdf.xacro` 生成，只在 `/tf_static` 发布 `gimbal_yaw_odom -> part_*` 恒等边）；ROGMap原生occ/inf_occ/unk/esdf体素默认关闭，「局部规划窗口」默认显示累计 odom 地图与二维规划栅格，当前点云采用Points、Decay Time=0，不能再描述为默认显示灰色体素。
 - 桌面锁屏（`loginctl` 的 `LockedHint=yes`）时 MuJoCo 的原生 Wayland 窗口出不来（窗口线程一直在等合成器，日志只有"正在后台打开窗口"，没有"已启动"），RViz 的 X11 窗口虽然还能被 `xwd` 截图，但没有人能现场观察；
   这样的运行要在报告里写明"无人现场观察"，窗口的画面和稳定性记为未验证。runner 的"当前位姿"（终点判据、故障注入的起点查询）在 `lio` 模式读 map 系的 `/simulation/ground_truth/odometry`，
   不读 `/localization`（`lio` 下它是 Point-LIO 的 odom 系直通，原点在出生点下方的地面）；truth 模式仍读 `/localization`。
