@@ -303,14 +303,14 @@ git diff --check
 
 ### 7.1 RViz 与 MuJoCo 窗口
 
-2026-10-29 起用户允许闭环测试不开 RViz 和 MuJoCo 窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`），由代理在后台看日志、话题和录制器；
+2026-11-20 起本轮默认无窗口运行，所有仿真验收全程使用 `slam:=true`，关闭 RViz 和 MuJoCo 窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`），由代理在后台看日志、话题和录制器；
 报告里写明"未带 RViz"，车模颜色、画面这类只能看屏幕的项仍记为未验证，不用日志代替。启动前仍告诉用户命令、`ROS_DOMAIN_ID` 和预计时长。
 用户要现场观察时按下面的方式带 RViz：
 
 - 用 `USE_RVIZ=true`（`RVIZ_DELAY_SEC` 默认 18 s）运行 `scripts/test_mujoco_minco_mpc_chain.sh`；runner 会拉起
   `src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz` 并把窗口截图存到 `/tmp/ats_minco_mpc_<profile>_<domain>_rviz.png`。
   需要可用的`DISPLAY`，启动前读取当前桌面环境，不沿用旧宿主的固定值。该配置显示`/localization`（红箭头）、`/odometry`（Point-LIO，绿箭头）、
-  `/simulation/ground_truth/odometry`（仿真真值，蓝箭头）、`/registered_scan`、车辆、传感器坐标轴和TF；静态图、规划栅格、ESDF、ROGMap范围、路径及安全调试组默认关闭，可手动打开。新增话题时同步维护该`.rviz`。
+  `/simulation/ground_truth/odometry`（仿真真值，蓝箭头）、`/registered_scan`、车辆、传感器坐标轴和TF；累计地图、局部规划栅格和 ROGMap 范围随「局部规划窗口」显示。静态先验图、ESDF、路径及安全调试组默认关闭。新增话题时同步维护该`.rviz`。
 - `USE_RVIZ=true` 时 runner 同时打开 MuJoCo 自带的 3D 窗口（`USE_MUJOCO_VIEWER` 默认等于 `USE_RVIZ`，可显式设为 `false`）。
   关闭这个窗口会让仿真停止；Wayland 会话里它是原生 Wayland 窗口，`xwd` 抓不到，runner 只在 X11 窗口存在时才保存
   `/tmp/ats_minco_mpc_<profile>_<domain>_mujoco.png`，否则打印 NOTE。`mujoco_navigation.rviz` 现在还显示车辆模型（RobotModel，

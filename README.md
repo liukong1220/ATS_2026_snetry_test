@@ -274,10 +274,10 @@ source install/setup.bash
 source log/nav_acceptance/dds/wlan_env.sh
 export ROS_DOMAIN_ID="${ATS_DOMAIN:?先核验账本和宿主占用，选择新domain}"
 
-# 当前RMUC 2027入口；需要图形桌面时显式打开viewer
+# 当前 RMUC 2027 无先验建图入口，默认无窗口
 ros2 launch ats_mujoco_sim rmuc_2027_mujoco.launch.py \
   localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_downsample:=0 \
-  use_viewer:=true show_viewer:=true use_rviz:=false
+  use_viewer:=false show_viewer:=false use_rviz:=false
 ```
 
 2027入口默认出生点为`map (13.40,2.00,z=0.550)`、yaw 0，默认启用无先验建图。PGM/PCD 输入为空，LIO 使用 Point-LIO 与在线增长地图匹配；truth默认仅用于隔离诊断，不作为最终导航验收。雷达按仿真时间10 Hz、IMU 200 Hz，自动射线密度和CPU预算见[MuJoCo说明](src/sim/ats_mujoco_sim/README.md)。

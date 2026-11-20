@@ -13,7 +13,7 @@
 | 场地中心 | `map (14, 8)` | 场地原点 `(0, 0)` 加场地长宽的一半 |
 | 无先验基地起点 | `(3.37, 9.03, 0.465, 0)` | `rmuc_2027`、`rmuc_2027_tunnels` 的显式起点，最后两项为高度和 yaw |
 | 无先验对面基地对应点 | `map (24.63, 6.97)` | XY 位移 `(21.26, −2.06) m`，直线距离 `21.36 m` |
-| odom 全局层覆盖 | 原点 `(-8, -15)`，`40 × 30 m`，odom $x\in[-8,32]$、$y\in[-15,15]$ | 起始 yaw 为 0 时场地在 odom 为 $x\in[-3.37,24.63]$、$y\in[-9.03,6.97]$，远目标 odom `(21.26, −2.06)`，均在层内 |
+| S3 多点路线 profile 的 odom 全局层覆盖 | 原点 `(-8, -15)`，`40 × 30 m`，odom $x\in[-8,32]$、$y\in[-15,15]$ | 起始 yaw 为 0 时场地在 odom 为 $x\in[-3.37,24.63]$、$y\in[-9.03,6.97]$，远目标 odom `(21.26, −2.06)`，均在层内 |
 | V1 速度起点 | `(13.40, 2.00, 0.550, 0)` | 当前 2027 launch 默认起点 |
 | V1 速度目标 | `map (14.60, 14.00)` | 原对称点专项，末端 yaw 为 `0` |
 
@@ -69,9 +69,9 @@ T1中的第7个前置`ramp_bridge`不算B通过；真正B位于第10–13个目�
 
 ### 4.0.1 B1/B2 无先验建图运行入口
 
-B1 使用 4.2 的单 action runner，将起点改为 `(3.37, 9.03, 0.465, 0)`、目标改为 `map (24.63, 6.97, yaw=0)`。使用 `EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim"`。两个先验参数由 2027 入口在建图模式下置空。双窗口启动后用俯视图和独立真值核对起点。
+B1 使用 4.2 的单 action runner，将起点改为 `(3.37, 9.03, 0.465, 0)`、目标改为 `map (24.63, 6.97, yaw=0)`。使用 `EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim"`。两个先验参数由 2027 入口在建图模式下置空。默认关闭 RViz 与 MuJoCo 窗口，发目标前用独立真值核对初始位姿。专门观察画面时可显式开窗。
 
-RViz 打开「局部规划窗口」中的 `/rog_map/odom_layer` 与 `/rog_map_adapter/viz/planning_grid`，叠加 `/registered_scan`。在线建图以消息的时间、内容变化与实际画面取证。PGM 是显式保存时输出的静态地图。
+需要看实时建图画面时，在 RViz 打开「局部规划窗口」中的 `/rog_map/odom_layer` 与 `/rog_map_adapter/viz/planning_grid`，叠加 `/registered_scan`。在线建图以消息的时间、内容变化与实际画面取证。PGM 是显式保存时输出的静态地图。
 
 B2 复用实体夹具，以本次 B1 实际几何引导和投放前的在线空闲格选址。分别记录可见、局部重搜、授权参考、几何接回和底盘实际接回。全堵停车另开批次，核对三路持续零速。
 
@@ -89,13 +89,13 @@ python3 -s scripts/nav_domain_guard.py run \
   --case route --output "${ATS_OUT:?全新的证据目录}" \
   --waypoint-control-tolerance-m 0.08 \
   --record-column-inputs --registration-details \
-  --launch-arg use_rviz:=true --launch-arg show_viewer:=true \
+  --launch-arg use_rviz:=false --launch-arg show_viewer:=false \
   --launch-arg lidar_threads:=0 --launch-arg lidar_downsample:=0
 ```
 
 T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起domain和证据目录。无先验入口不加载PGM/PCD；所有本轮运行均省略 `--prior` 和 `--reload`。
 
-无先验建图显示和保存使用 `--profile rmuc_2027 --case route --max-goals 1`，省略 `--prior` 与 `--reload`，runner 会启动 `slam:=true`。两窗口参数与上方相同。RViz 的「距离场」组显示 `/rog_map_adapter/viz/esdf_cloud`，「局部规划窗口」组可打开 `/rog_map/odom_layer`。正常完成后调用 `/rog_map/save_map`，在输出目录生成 `map.pgm`、`map.yaml`、`map.pcd`。 [首段建图与保存过程](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存)
+无先验建图显示和保存使用 `--profile rmuc_2027 --case route --max-goals 1`，省略 `--prior` 与 `--reload`，runner 会启动 `slam:=true`。仅在专门观察画面时显式打开窗口。RViz 的「距离场」组显示 `/rog_map_adapter/viz/esdf_cloud`，「局部规划窗口」组可打开 `/rog_map/odom_layer`。正常完成后调用 `/rog_map/save_map`，在输出目录生成 `map.pgm`、`map.yaml`、`map.pcd`。 [首段建图与保存过程](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存)
 
 本轮中间目标显式请求0.08m的控制/准入半径，最后目标及重载首目标仍请求0、使用服务器原默认；独立真值验收仍为中间≤0.15m、最后/重载≤0.08m。该请求随同目标重规划传递，不改坐标或unknown/footprint规则。为复现历史默认收敛契约，可省略`--waypoint-control-tolerance-m`或传0。d29已验证非法/越界拒绝、默认不变及抢占后不串用。
 
@@ -113,7 +113,7 @@ SCENE=rmuc_2027 TEST_PROFILE=single \
   LIDAR_DOWNSAMPLE=0 NAV_TRACKING_MAX_SNAPSHOT_PAYLOADS=-1 \
   NAV_TRACKING_MAX_LAYER_PAYLOADS=-1 O0_CHAIN_RECORDER=1 \
   NAV_TRACKING_PROFILE_YAML="$PWD/src/ats_sentry_bringup/params/node_params.yaml" \
-  USE_RVIZ=true USE_MUJOCO_VIEWER=true \
+  USE_RVIZ=false USE_MUJOCO_VIEWER=false \
   LOG_DIR="${ATS_OUT:?全新的runner日志目录}" \
   EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim" \
   python3 -s scripts/nav_domain_guard.py run \
@@ -153,6 +153,15 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 ## 5. 报告与当前状态
 
 主场景和各专项按实际运行状态记录。保留 domain、三仓 commit、参数、原始日志、轨迹、q1/q2、接触评估及终点真值。基地到基地额外记录直线基准与实走里程，以及在线重规划和建图覆盖。未触发的地形只记录当次路线事实。
+
+### 11 月 20 日本机无先验结果
+
+| 项目 | 实测 |
+| --- | --- |
+| 在线地图 | 双窗口 B1 记录到 183 种累计栅格和 234 种局部栅格。已核对 RViz 实际画面。独立无窗口批次从空图显式导出 400×300 PGM，1 个占据像素，PCD 有 507 个点。 [RViz](../../log/nav_acceptance/20261120_mapping/b1_action_d33/live_map_rviz.png) · [PGM](../../log/nav_acceptance/20261120_mapping/map_headless_d33/map_sample_1.pgm) · [PCD](../../log/nav_acceptance/20261120_mapping/map_headless_d33/map_sample_1.pcd) |
+| 传感器 | 双窗口实时因子 0.121，点云 0.100 仿真秒一帧，195 帧转换逐帧配对。定位接收间隔墙钟中位数 0.805 s、p95 1.138 s。 [时序](../../log/nav_acceptance/20261120_mapping/b1_action_d33/sensor_summary.json) |
+| B1 | **未通过**。单 action 返回 `ABORTED / 5`，首请求的目标在局部栅格外。终点真值误差 21.36228 m，action 期间实走 0.00443 m。无 EXECUTE，q1/q2 无执行样本，三路命令为零。窄通道未触发，物理接触未验证。 [动作与独立真值](../../log/nav_acceptance/20261120_mapping/b1_action_d33/action_summary.json) |
+| B2 绕行、独立全堵停车 | **未运行**。本轮 B1 没有生成可用于选址的几何引导。d28 保留历史判定。 |
 
 ### 历史记录：统一搜索与 2027 有先验实测
 

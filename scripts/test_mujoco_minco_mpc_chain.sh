@@ -2914,14 +2914,17 @@ wait_for_command "fusion map->odom enabled" 30 \
 # mujoco_navigation.rviz shows /odometry (Point-LIO, green arrow). RViz starts ~18 s after launch and
 # was racing this check: a run where it connected first failed with a second /odometry subscriber
 # (2026-10-25). It is a named, read-only observer, so the check allows exactly it.
-if [[ "${USE_RVIZ}" == "true" ]]; then
+if ros2 param get --no-daemon /localization_fusion use_identified_odometry |
+    grep -q 'Boolean value is: True'; then
+  assert_topic_ownership /odometry_identified "${ODOMETRY_OWNER}" localization_fusion
+elif [[ "${USE_RVIZ}" == "true" ]]; then
   assert_topic_ownership /odometry "${ODOMETRY_OWNER}" localization_fusion mujoco_navigation_rviz2
 else
   assert_topic_ownership /odometry "${ODOMETRY_OWNER}" localization_fusion
 fi
 assert_topic_ownership /localization localization_fusion
 assert_topic_ownership /localization/status localization_fusion
-echo "OK: /odometry -> fusion -> /localization contract is active"
+echo "OK: odometry -> fusion -> /localization contract is active"
 wait_for_topic_once /traversability_grid 120
 wait_for_topic_once /rog_map_adapter/planning_snapshot 120
 assert_p3_process_graph

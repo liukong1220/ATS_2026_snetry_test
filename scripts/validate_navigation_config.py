@@ -355,7 +355,7 @@ def assert_robot_model_display(document, description_topic: str, context: str):
 
 def assert_mujoco_sensor_view(document):
     """Default view must not obscure chassis/sensor rotation with voxel boxes."""
-    for group in ("局部规划窗口", "距离场", "路径", "安全", "ROG-Map native voxels (local box)"):
+    for group in ("距离场", "路径", "安全", "ROG-Map native voxels (local box)"):
         assert named_display(document, group)["Enabled"] is False, f"{group} debug group must be disabled"
     scan = single_display_for_topic(document, "/registered_scan", "MuJoCo sensor view")
     assert scan["Enabled"] is True and scan["Style"] == "Points"
