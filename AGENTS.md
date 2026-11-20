@@ -17,7 +17,7 @@
 
 ### 1.1 当前状态与文档维护
 
-当前模块进度见主报告第 5 节，实施入口见 9.7。2026-11-20 起，所有仿真导航测试统一使用无先验建图模式 `slam:=true`，PGM 和 PCD 输入为空。统一搜索、按目标缓存及先验模式的几何接回已实现。先验证传感器发布和接收时序、在线建图和地图显示，再验基地到基地及局部避障。遇到净宽与洞口相近的窄通道，在洞外将车头对向入口。d40 首段保存、d34 V1 和 d35 unreachable 继续按原批次记账。
+当前模块进度见主报告第 5 节，实施入口见 9.7。2026-11-20 起，仿真默认使用有图模式：`rmuc_2027` 地图，`slam:=false`，加载 `rmuc_2027` PGM/PCD。测试无先验时显式传 `slam:=true`（S3 runner 用 `--mapless`），PGM 和 PCD 输入为空。统一搜索、按目标缓存及先验模式的几何接回已实现。先验证传感器发布和接收时序、定位和地图显示，再验基地到基地及局部避障。遇到净宽与洞口相近的窄通道，在洞外将车头对向入口。d40 首段保存、d34 V1 和 d35 unreachable 继续按原批次记账。
 
 O1-A全部门、S3和2027最终套件仍未通过。O1-B完整S3/A–K与O3新增算法分别选任务，不因回归失败自动扩大实现范围；本修复引入的失败须处理，历史或独立欠账继续记未通过。历史两场见9.5，11月16日专项/文档审查见9.8.6–9.8.9。S0/S1/S2a/S2b已有阶段交付，S3主干、O1b及部分O3已有实现；完整O2/O4、O5数值优化、方向后端、描述子恢复与前端A/B未完成。实车未验证，不按提交数或函数数估算总体完成百分比。
 
@@ -89,7 +89,7 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 | 导航仓库 | `src/ats_sentry_nav` | ROGMap、adapter、RC-ESDF、JPS/MINCO、MPC、导航 launch |
 | MuJoCo 仓库 | `src/sim/ats_mujoco_sim` | 仿真模型、传感器桥、MuJoCo launch |
 
-双主机区分：11月17–19日行为验证记录来自 `/home/ats/ATS_2026_snetry_test`（`ats-OMEN-by-HP-Gaming-Laptop-16-wf0xxx`）；11月19日同步/文档审查实际在 `/home/kongliu/文档/27`（`kongliu-B760M-H-DDR4`）。两个路径按日期和主机记录，不能把其中一个硬编码为另一主机的当前路径。进入主机后先核验实际总工作区、HEAD、安装与在线WLAN，不跨主机套用依赖或运行结论。整仓行为构建使用实际总工作区的 `./build.sh` 做 Release；本轮纯同步/文档审查不启动构建或仿真。
+双主机区分：11月17–19日行为验证记录来自 `/home/ats/ATS_2026_snetry_test`（`ats-OMEN-by-HP-Gaming-Laptop-16-wf0xxx`）；11月19日同步/文档审查实际在 `/home/kongliu/文档/27`（`kongliu-B760M-H-DDR4`）。两个路径按日期和主机记录，不能把其中一个硬编码为另一主机的当前路径。进入主机后先核验实际总工作区、HEAD 与安装，不跨主机套用依赖或运行结论。整仓行为构建使用实际总工作区的 `./build.sh` 做 Release；本轮纯同步/文档审查不启动构建或仿真。
 
 修改前后均运行三个仓库各自的 `git status --short --branch`。未知修改和未跟踪文件默认属于用户：
 
@@ -114,8 +114,7 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 `参考/` 仅用于算法与许可证溯源，不是活动构建输入。仓库存在参考项目与活动源码同名 ROS 包，所有 colcon 命令建议显式使用：
 
 ```bash
-colcon build --base-paths src ...
-colcon test --base-paths src ...
+colcon build --base-paths src ... --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 ```
 
 ### 4.2 闭环接口账本
@@ -198,16 +197,16 @@ P2 回归使用 `ats_rog_map` 进程内的规划地图所有者，并验证；Mu
 
 ### 6.2 2027 实际导航任务与专项验收
 
-实际导航以无先验基地到基地为主。B1、B2 及按需选择的 T1/T2/T3、V1、F 均从空图启动，使用 `rmuc_2027`、`localization_source:=lio`、`slam:=true`。历史有先验 B1/B2 的配置、输入和判定继续归档。 [2027 导航验证方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)
+实际导航以基地到基地为主。B1、B2 及按需选择的 T1/T2/T3、V1、F 默认使用 `rmuc_2027`、`localization_source:=lio` 和有图模式 `slam:=false`；无先验变体显式 `slam:=true` 从空图启动，两种模式分开记录。历史批次的配置、输入和判定继续归档。 [2027 导航验证方案](docs/nav_acceptance/20261116_2027_final_test_plan.md)
 
-- B1 基地到基地使用 `rmuc_2027`、`lio`、`slam:=true` 和空先验，从 `(3.37, 9.03, 0.465, 0)` 向 `map (24.63, 6.97)` 导航。直线距离 `21.36 m`，实际里程从轨迹测量。窗口内局部目标随在线建图更新，远目标接续和洞口正向对齐待实现。
+- B1 基地到基地使用 `rmuc_2027`、`lio`，默认加载 rmuc_2027 先验（无先验变体为 `slam:=true` 和空先验），从 `(3.37, 9.03, 0.465, 0)` 向 `map (24.63, 6.97)` 导航。直线距离 `21.36 m`，实际里程从轨迹测量。窗口内局部目标随在线建图更新，远目标接续和洞口正向对齐待实现。
 - 隧道专项使用 `scripts/s3_mujoco_acceptance.py --profile rmuc_2027_tunnels --route tunnel_b_roundtrip` 或相应的 `ramp_south`、`six_tunnels`。T1 第 7 点为 `ramp_bridge`，真实 B 位于第 10–13 点。运行前声明完整尝试次数 N。
 - 速度：`SCENE=rmuc_2027 TEST_PROFILE=single`，起点采用当前2027 launch默认`(13.40,2.00,0.550,0)`，以当前模型28×16m中心`(14,8)`得到目标`map (14.60,14.00)`，`GOAL_YAW=0`、`GOAL_TOLERANCE=0.08`。不依赖runner的默认2025起点，也不使用`red_box_2027`别名。
 - 速度必须经ATS导航action到达；记录参考、MPC/仲裁/底盘命令和独立真值速度曲线。5m/s只是暂定上限，实际受距离、制动、曲率和净空约束；没有高速请求段时记未触发，不以直接发底盘命令或空场d108代替导航速度通过。
-- B2 使用无先验 B1 实际记录的引导与在线已知空闲格选择夹具位置。与 B1 分批运行，分别验证绕行接回和全堵停车。全部批次使用工作区 WLAN 与获授权的隔离 domain。
+- B2 使用同模式 B1 实际记录的引导与在线已知空闲格选择夹具位置。与 B1 分批运行，分别验证绕行接回和全堵停车。
 - 最后行为修改后运行与改动直接相关的实际导航任务。选择 P2 故障专项时逐项核对真实注入锚点和前置等待。
 
-旧`scripts/test_mujoco_nav_chain.sh`已删除，不执行不存在的入口。正式runner使用`/ats_navigate_to_pose`、`ats_navigation_interfaces/action/NavigateToPose`，断言没有Nav2进程和`/plan`。`PLANNING_GRID_OWNER=rog_map`仅是兼容取值，实际核验进程内adapter和唯一快照发布者；不能以变量取值或topic存在代替闭环通过。
+旧`scripts/test_mujoco_nav_chain.sh`与项目内 `scripts/test_*` 脚本已清理移除，不执行不存在的入口。正式入口为 `rmuc_2027_mujoco.launch.py`、`scripts/s3_mujoco_acceptance.py` 与 `/ats_navigate_to_pose`（`ats_navigation_interfaces/action/NavigateToPose`），断言没有 Nav2 进程和 `/plan`。`PLANNING_GRID_OWNER=rog_map` 仅是兼容取值，实际核验进程内 adapter 和唯一快照发布者；不能以变量取值或 topic 存在代替闭环通过。
 
 历史Nav2隔离入口及d57原默认真值失败、d15严格0.05m变体通过继续归档，变体不替代原基线。2025 q2、2027 south及旧两场A–K未通过事实保留，不能因切换最终场景而标为已修复；历史兼容不自动加入当前2027最终套件。
 
@@ -230,7 +229,7 @@ P3 标记条件为同时满足以下各项：
 
 11月16日另一主机的d103/d107启动失败与空场d108传感器/执行器结果继续归档。11月17日本机已修复初始锁存，原首目标d16正常退出0、真值0.005460892m且q1/q2通过；T1、V1和独立unreachable仍失败，其他四项P2故障通过，完整2027套件尚未通过。最新局部证据见报告9.8.10，不能据此清零历史全场失败或宣称完整A–K通过。
 
-- 所有仿真导航运行和验收统一使用无先验建图模式 `slam:=true`。从空地图开始，先验 PGM 和 PCD 输入留空，Point-LIO 持续提供位姿并累积在线扫描。
+- 无先验测试显式使用建图模式 `slam:=true`（仿真默认是有图模式）。从空地图开始，先验 PGM 和 PCD 输入留空，Point-LIO 持续提供位姿并累积在线扫描。
 - 漂移校正：采用地图匹配（方式 3）。当前扫描与增长中的全局点云地图配准，修正写入 `map->odom`，经 `localization_fusion` 门控接受或拒绝。本阶段不做回环检测、位姿图和关键帧存储。
 - 全局静态层：固定大数组，建图模式 40×30 m、0.1 m 分辨率，原点为建图起点，留出外延和漂移余量。超出范围的观测计数并记录。
 - 计算窗口：12×12 m，跟随机器人，只服务 ESDF、JPS、MINCO。窗口移出时全局层保留，不随窗口丢弃。
@@ -262,23 +261,16 @@ H2 的 0.249 m 候选车高门尚未获充分净空证据；TUNNEL_FREE 未实�
 
 本专项的后续滚动规划、Point-LIO 数值优化、方向观测后端、机械升级不自动纳入当前任务。用户只要求审查/文档时，以完成审查/文档为交付；恢复优化时以当次授权范围推进，保留现有安全门与失败证据。
 
-domain 已用编号见 `docs/nav_acceptance/20261115_domain_ledger.md`；分配前同时核验宿主占用。使用工作区 `log/nav_acceptance/dds/wlan_env.sh` / `wlan.xml` 和 `ROS_LOCALHOST_ONLY=0`。11月17日本机实际接口为 `wlo1`；另一台主机11月16日使用 `wlx500ff5500d30`，两者分开记录；每次启动前核验实际在线 WLAN、XML 与环境一致，不把本机接口名硬编码为其他机器的要求。配置缺失按 `20261114_runtime_inputs.json` 在工作区恢复并记录路径/接口差异，不改全局 DDS，不退回 lo。每次新 domain / 新 launch，范围 0..232，排除 5、77、91/92 及已尝试编号。
-
-截至11月17日d16收尾，账本与排除项已覆盖全部0..232编号，核验见`log/nav_acceptance/20261117_o1a_o0/domain_allocation_final_audit.json`。后续ROS运行须先明确满足本段规则的隔离分配安排；端口空闲不能替代“未使用”条件。不擅自复用历史编号或越界分配，源码与已有证据的只读审查可以继续。
-
-11月17日当前O1/O1b/O0轮次，用户已明确授权“允许本轮复用历史编号”，并要求制定清场规则。本轮按[历史domain复用规则](docs/nav_acceptance/20261117_domain_reuse_rules.md)执行：仍排除5、77、91/92，使用工作区WLAN，启动前核验同域进程和端口、持有本机锁；仅清理本轮记录且PID/start-time/domain匹配的进程，退出后再次核验。每次仿真/故障建立独立批次，不将历史编号标成首次使用，不删除旧证据。此授权不自动扩展到后续其他轮次。
+`ROS_DOMAIN_ID` 与 DDS 配置由使用者按本机网络设置；md 文档不固定 domain 编号或 DDS 配置文件。运行前核验同域没有残留进程，launch、录制器和 action 客户端使用同一环境；只清理本轮自己启动的进程。历史 domain 账本只作证据归档。
 
 ## 7. 测试与结果报告
 
 推荐次序：
 
 ```bash
-# 并发按当前机器计算：总任务数 = min(nproc, MemAvailable / 1.5 GiB)；整仓构建用 ./build.sh（自动计算）
-JOBS=$(awk -v n="$(nproc)" '/^MemAvailable:/ {j=int($2/1024/1536); if (j>n) j=n; if (j<1) j=1; print j}' /proc/meminfo)
-# 单包构建必须带 Release；未显式设置可能生成 -O0 节点（历史实测），当前验证口径见报告第 6 节；./build.sh 已带。
-MAKEFLAGS=-j${JOBS} colcon build --base-paths src --packages-select <targets> --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=Release
-colcon test --base-paths src --packages-select <targets>
-colcon test-result --test-result-base build/<package> --verbose
+# 并发按当前机器计算：总任务数 = min(nproc, MemAvailable / 1.5 GiB)；整仓构建用 ./build.sh（自动计算，带 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF）
+./build.sh --packages-select <targets>
+python3 scripts/validate_navigation_config.py
 python3 -m py_compile <changed_launch_files>
 git diff --check
 ```
@@ -303,12 +295,12 @@ git diff --check
 
 ### 7.1 RViz 与 MuJoCo 窗口
 
-2026-11-20 起本轮默认无窗口运行，所有仿真验收全程使用 `slam:=true`，关闭 RViz 和 MuJoCo 窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`），由代理在后台看日志、话题和录制器；
-报告里写明"未带 RViz"，车模颜色、画面这类只能看屏幕的项仍记为未验证，不用日志代替。启动前仍告诉用户命令、`ROS_DOMAIN_ID` 和预计时长。
+2026-11-20 起本轮默认无窗口运行，仿真默认有图模式（无先验专项显式 `slam:=true`），关闭 RViz 和 MuJoCo 窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`），由代理在后台看日志、话题和录制器；
+报告里写明"未带 RViz"，车模颜色、画面这类只能看屏幕的项仍记为未验证，不用日志代替。启动前仍告诉用户命令和预计时长。
 用户要现场观察时按下面的方式带 RViz：
 
-- 用 `USE_RVIZ=true`（`RVIZ_DELAY_SEC` 默认 18 s）运行 `scripts/test_mujoco_minco_mpc_chain.sh`；runner 会拉起
-  `src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz` 并把窗口截图存到 `/tmp/ats_minco_mpc_<profile>_<domain>_rviz.png`。
+- 直接启动 `ros2 launch ats_mujoco_sim rmuc_2027_mujoco.launch.py localization_source:=lio use_identified_odometry:=true use_viewer:=true show_viewer:=true use_rviz:=true`（无先验建图追加 `slam:=true`）；launch 会拉起
+  `src/sim/ats_mujoco_sim/rviz/mujoco_navigation.rviz`。
   需要可用的`DISPLAY`，启动前读取当前桌面环境，不沿用旧宿主的固定值。该配置显示`/localization`（红箭头）、`/odometry`（Point-LIO，绿箭头）、
   `/simulation/ground_truth/odometry`（仿真真值，蓝箭头）、`/registered_scan`、车辆、传感器坐标轴和TF；累计地图、局部规划栅格和 ROGMap 范围随「局部规划窗口」显示。静态先验图、ESDF、路径及安全调试组默认关闭。新增话题时同步维护该`.rviz`。
 - `USE_RVIZ=true` 时 runner 同时打开 MuJoCo 自带的 3D 窗口（`USE_MUJOCO_VIEWER` 默认等于 `USE_RVIZ`，可显式设为 `false`）。
@@ -318,7 +310,7 @@ git diff --check
 - 桌面锁屏（`loginctl` 的 `LockedHint=yes`）时 MuJoCo 的原生 Wayland 窗口出不来（窗口线程一直在等合成器，日志只有"正在后台打开窗口"，没有"已启动"），RViz 的 X11 窗口虽然还能被 `xwd` 截图，但没有人能现场观察；
   这样的运行要在报告里写明"无人现场观察"，窗口的画面和稳定性记为未验证。runner 的"当前位姿"（终点判据、故障注入的起点查询）在 `lio` 模式读 map 系的 `/simulation/ground_truth/odometry`，
   不读 `/localization`（`lio` 下它是 Point-LIO 的 odom 系直通，原点在出生点下方的地面）；truth 模式仍读 `/localization`。
-- 启动前先告诉用户命令、`ROS_DOMAIN_ID` 和预计时长；实时率须按本机、场景和本次射线预算测量，旧硬件的 0.06–0.4 倍实时记录不能作为当前 MID360 配置的性能承诺。测试进行时不修改正在被脚本读取的文件。
+- 启动前先告诉用户命令和预计时长；实时率须按本机、场景和本次射线预算测量，旧硬件的 0.06–0.4 倍实时记录不能作为当前 MID360 配置的性能承诺。测试进行时不修改正在被脚本读取的文件。
 - 结束后读取截图，在报告里分开写「RViz 上应该看到什么」和「实际看到什么」；截图只是单帧，不能替代终点测量与话题证据。
 - 用户已允许无头闭环；每次均在报告里写明哪些结果没有经过 RViz 观察，画面项保持未验证。
 

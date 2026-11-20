@@ -1,6 +1,6 @@
-# 2027 导航验证方案：无先验基地到基地、隧道与对称点速度
+# 2027 导航验证方案：基地到基地、隧道与对称点速度
 
-2026-11-20 起，无先验仿真导航验收统一使用 `slam:=true` 的无先验建图模式。PGM 和 PCD 输入为空。先验证传感器与在线地图，再做基地到基地 B1、局部避障 B2 和独立全堵停车。单独指定的有图短程检查及历史结果见第 5 节。
+2026-11-20 起，仿真默认使用有图模式：`rmuc_2027_mujoco.launch.py` 默认 `slam:=false`，加载 `src/ats_sentry_bringup/map/rmuc_2027.yaml` 与 `pcd/rmuc_2027.pcd`。测试无先验时显式传 `slam:=true`（S3 runner 用 `--mapless`），PGM 和 PCD 输入置空。先验证传感器与定位/地图，再做基地到基地 B1、局部避障 B2 和独立全堵停车。历史无先验结果见第 5 节，保留原判定。
 
 本文件维护任务坐标、运行入口和验收结果。统一搜索和先验避障接回已接入，本轮实际结果见第 5 节。同一 action 的无先验远目标接续仍待接入。d34、d35、d40 及其他历史批次保留原判定与来源。 [实施顺序](../调研/无先验地图钻洞高速导航优化调研报告.md#51-执行顺序与当前停点) · [实施入口](../调研/无先验地图钻洞高速导航优化调研报告.md#97-提示词选择)
 
@@ -11,8 +11,8 @@
 | 场景 | `rmuc_2027`，`localization_source:=lio` | 不用truth定位替代Point-LIO |
 | 实际模型范围 | $x\in[0,28]$、$y\in[0,16]$ m | MJCF注释与560×320、0.05m的PGM交叉核对；不套用28×15m比赛概念尺寸 |
 | 场地中心 | `map (14, 8)` | 场地原点 `(0, 0)` 加场地长宽的一半 |
-| 无先验基地起点 | `(3.37, 9.03, 0.465, 0)` | `rmuc_2027`、`rmuc_2027_tunnels` 的显式起点，最后两项为高度和 yaw |
-| 无先验对面基地对应点 | `map (24.63, 6.97)` | XY 位移 `(21.26, −2.06) m`，直线距离 `21.36 m` |
+| 基地起点 | `(3.37, 9.03, 0.465, 0)` | `rmuc_2027`、`rmuc_2027_tunnels` 的显式起点，最后两项为高度和 yaw |
+| 对面基地对应点 | `map (24.63, 6.97)` | XY 位移 `(21.26, −2.06) m`，直线距离 `21.36 m` |
 | S3 多点路线 profile 的 odom 全局层覆盖 | 原点 `(-8, -15)`，`40 × 30 m`，odom $x\in[-8,32]$、$y\in[-15,15]$ | 起始 yaw 为 0 时场地在 odom 为 $x\in[-3.37,24.63]$、$y\in[-9.03,6.97]$，远目标 odom `(21.26, −2.06)`，均在层内 |
 | V1 速度起点 | `(13.40, 2.00, 0.550, 0)` | 当前 2027 launch 默认起点 |
 | V1 速度目标 | `map (14.60, 14.00)` | 原对称点专项，末端 yaw 为 `0` |
@@ -31,19 +31,19 @@ $$
 
 | ID | 用例 | 入口 | 必须报告 |
 | --- | --- | --- | --- |
-| B1 | 无先验基地到基地 | `rmuc_2027`、`lio`、`slam:=true`，单一 ATS action 到 `map (24.63, 6.97)` | 终点真值、实际里程、执行足迹与地图更新 |
-| B2 | 无先验局部避障 | 同 B1，从在线已知空闲区域选择障碍位置 | 障碍可见、重搜、EXECUTE、绕行、几何与实际接回、终点；独立全堵停车 |
+| B1 | 基地到基地 | `rmuc_2027`、`lio`、默认有图 `slam:=false`；无先验变体显式 `slam:=true`。单一 ATS action 到 `map (24.63, 6.97)` | 终点真值、实际里程、执行足迹与地图更新 |
+| B2 | 局部避障 | 同 B1，从在线已知空闲区域选择障碍位置 | 障碍可见、重搜、EXECUTE、绕行、几何与实际接回、终点；独立全堵停车 |
 | T1 | 真实`tunnel_B`往返 | `rmuc_2027_tunnels / tunnel_b_roundtrip` | 所有13个目标、B正反向穿越次数、入口/出口yaw及横向误差、真值终点和执行足迹 |
 | T2 | 南坡/南侧通道往返 | `rmuc_2027_tunnels / ramp_south` | 坡道支撑、顶板净空、正反向通过、失败点 |
 | T3 | 六隧道完整路线 | `rmuc_2027_tunnels / six_tunnels` | 全部配置目标与每个声明通道的穿越计数；运行前声明重复次数N并逐次报告 |
 | V1 | 初始点到中心对称点导航速度 | `SCENE=rmuc_2027 TEST_PROFILE=single` | `(13.40,2.00)→(14.60,14.00)`，参考/指令/实际速度、终点真值及停车 |
-| F | 2027独立安全故障 | 同一2027基线，逐项新domain/launch | ready失效→急停→控制零速→底盘零速；恢复后旧参考不复活 |
+| F | 2027独立安全故障 | 同一2027基线，逐项新launch | ready失效→急停→控制零速→底盘零速；恢复后旧参考不复活 |
 
 T1中的第7个前置`ramp_bridge`不算B通过；真正B位于第10–13个目标。不得使用`--max-goals`片段替代完整T1/T2/T3。现有路线和几何评估输入只给评估器，不回流成导航真值。
 
 本方案没有给定重复稳定性门的N；运行前记录所选N和依据，不能事后按成功次数选N。探索阶段N=1只代表单次结果，不能宣称重复稳定性。O1-A允许的原64点路线首目标截断仅作启动诊断，不计入T1/T2/T3完整路线通过。
 
-主场景只按实际遇到的地形记录结果，是每次导航行为改动后的默认实际测试。需要单独判定指定通道、速度或故障时，再选择相应的 T1/T2/T3、V1 或 F，不作为每次改动的固定回归。所有现场用例从空图启动，仅使用在线扫描与增长地图匹配。
+主场景只按实际遇到的地形记录结果，是每次导航行为改动后的默认实际测试。需要单独判定指定通道、速度或故障时，再选择相应的 T1/T2/T3、V1 或 F，不作为每次改动的固定回归。默认加载 rmuc_2027 先验 PGM/PCD；无先验变体从空图启动，仅使用在线扫描与增长地图匹配，两种模式分开记录。
 
 ## 3. 速度验收的含义
 
@@ -57,19 +57,17 @@ T1中的第7个前置`ramp_bridge`不算B通过；真正B位于第10–13个目�
 
 ## 4. 执行模板：先完成前置检查再运行
 
-每次选择一个未使用且宿主端口空闲的0..232 domain，排除5、77、91/92和[账本](20261115_domain_ledger.md)已尝试编号。使用工作区WLAN配置，保持`ROS_LOCALHOST_ONLY=0`，不退回lo。先核验Release构建、安装一致性、2027资产和健康。d103/d107来自另一主机，本机d110复现初始无odom超时卡死，当前修复与首目标证据见11月17日索引；不能放宽定位/地图安全超时绕过。
+每次运行前核验 Release 构建、安装一致性、2027 资产和健康。launch、录制器和 action 客户端使用同一组 ROS 环境；本文不规定固定的 `ROS_DOMAIN_ID` 或 DDS 配置文件。不能放宽定位/地图安全超时绕过启动失败。
 
-截至 d16 收尾，账本和排除项已覆盖全部 `0..232` 编号。以下带 `--reuse-authorized` 的专项模板源自此前获授权的 O1/O1b/O0 批次。后续运行按本次实际授权分配 domain，并按工作区规则核验进程和端口。 [历史清场规则](20261117_domain_reuse_rules.md)
+### 4.0 基地到基地
 
-### 4.0 无先验基地到基地
-
-1. 用 `rmuc_2027_mujoco.launch.py`，设置 `localization_source:=lio`、`slam:=true`、`start_x:=3.37 start_y:=9.03 start_z:=0.465 start_yaw:=0.0`。`map_yaml_file` 和 `prior_pcd_file` 在 2027 建图入口向子 launch 传入空字符串。保留 MID360 `10 Hz` 与 IMU `200 Hz` 口径。 [2027 launch](../../src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py) · [无先验参数](../../scripts/s3_mujoco_acceptance.py#L762)
+1. 用 `rmuc_2027_mujoco.launch.py`，设置 `localization_source:=lio`、`start_x:=3.37 start_y:=9.03 start_z:=0.465 start_yaw:=0.0`。默认 `slam:=false` 加载 rmuc_2027 PGM/PCD；无先验变体加 `slam:=true`，此时 `map_yaml_file` 和 `prior_pcd_file` 向子 launch 传入空字符串。保留 MID360 `10 Hz` 与 IMU `200 Hz` 口径。 [2027 launch](../../src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py) · [无先验参数](../../scripts/s3_mujoco_acceptance.py#L762)
 2. 向 `/ats_navigate_to_pose` 下发一个 `map` 目标 `(24.63, 6.97)`，`position_tolerance=0` 使用现行服务端默认。仅核验平移到达时可沿用终点 `yaw=0`。远目标在随车规划窗口外时，由统一 JPS/A* 搜索返回窗口内朝远目标推进最多的可达部分路径，随着地图增长继续同一 action（待实现）。局部规划输入来自在线扫描及地图。路径上通道净宽小于带余量车体对角线 `0.871 m` 时视为与洞口相近，在洞外对齐车体 `+x`，随后正向通过。现有 `rmuc_2027` 多点 runner 保留原路线，单目标滚动验收在接通对应行为后执行。 [局部规划设计](../调研/无先验地图钻洞高速导航优化调研报告.md#无先验基地到基地与局部重规划)
 3. 核对最终 action 状态、真值误差 `≤0.08 m`、实际里程与末端停车。报告实时绕障和地形引起的重规划、求解墙钟耗时、已执行参考与地图身份。遇到窄通道时记录入口前的实际 yaw、通过方向及整车驶出，未遇到则记未触发。保存 PGM/YAML/PCD 并记录观测范围，沿用现有足迹和执行判定。
 
-### 4.0.1 B1/B2 无先验建图运行入口
+### 4.0.1 B1/B2 运行入口
 
-B1 使用 4.2 的单 action runner，将起点改为 `(3.37, 9.03, 0.465, 0)`、目标改为 `map (24.63, 6.97, yaw=0)`。使用 `EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim"`。两个先验参数由 2027 入口在建图模式下置空。默认关闭 RViz 与 MuJoCo 窗口，发目标前用独立真值核对初始位姿。专门观察画面时可显式开窗。
+B1 直接启动 `rmuc_2027_mujoco.launch.py`（`localization_source:=lio use_identified_odometry:=true start_x:=3.37 start_y:=9.03 start_z:=0.465 start_yaw:=0.0`，默认 `slam:=false` 有图；无先验变体追加 `slam:=true`），向 `/ats_navigate_to_pose` 发送单次 `map (24.63, 6.97, yaw=0)` 目标，并用 `scripts/nav_tracking_recorder.py` 与 `scripts/analyze_nav_tracking.py` 采集并核验 q1/q2。默认关闭 RViz 与 MuJoCo 窗口，发目标前用独立真值核对初始位姿；专门观察画面时显式设置 `use_viewer:=true show_viewer:=true use_rviz:=true`。
 
 需要看实时建图画面时，在 RViz 打开「局部规划窗口」中的 `/rog_map/odom_layer` 与 `/rog_map_adapter/viz/planning_grid`，叠加 `/registered_scan`。在线建图以消息的时间、内容变化与实际画面取证。PGM 是显式保存时输出的静态地图。
 
@@ -80,11 +78,7 @@ B2 复用实体夹具，以本次 B1 实际几何引导和投放前的在线空�
 ```bash
 cd "${ATS_WORKSPACE:?先设置并核验实际总工作区路径}"
 source install/setup.bash
-source log/nav_acceptance/dds/wlan_env.sh
-python3 -s scripts/nav_domain_guard.py run \
-  --domain "${ATS_DOMAIN:?先核验本轮复用domain}" \
-  --run-dir "${ATS_GUARD_OUT:?独立guard批次目录}" --reuse-authorized -- \
-  python3 -s scripts/s3_mujoco_acceptance.py \
+python3 -s scripts/s3_mujoco_acceptance.py \
   --profile rmuc_2027_tunnels --route tunnel_b_roundtrip \
   --case route --output "${ATS_OUT:?全新的证据目录}" \
   --waypoint-control-tolerance-m 0.08 \
@@ -93,36 +87,15 @@ python3 -s scripts/nav_domain_guard.py run \
   --launch-arg lidar_threads:=0 --launch-arg lidar_downsample:=0
 ```
 
-T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起domain和证据目录。无先验入口不加载PGM/PCD；所有本轮运行均省略 `--prior` 和 `--reload`。
+T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起证据目录。2027 路线默认加载 `src/ats_sentry_bringup/map/rmuc_2027` 先验（等价于 `--prior`）；无先验隧道加 `--mapless`，不加载 PGM/PCD。
 
-无先验建图显示和保存使用 `--profile rmuc_2027 --case route --max-goals 1`，省略 `--prior` 与 `--reload`，runner 会启动 `slam:=true`。仅在专门观察画面时显式打开窗口。RViz 的「距离场」组显示 `/rog_map_adapter/viz/esdf_cloud`，「局部规划窗口」组可打开 `/rog_map/odom_layer`。正常完成后调用 `/rog_map/save_map`，在输出目录生成 `map.pgm`、`map.yaml`、`map.pcd`。 [首段建图与保存过程](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存)
+无先验建图显示和保存使用 `--profile rmuc_2027 --case route --max-goals 1 --mapless`，runner 会启动 `slam:=true`。仅在专门观察画面时显式打开窗口。RViz 的「距离场」组显示 `/rog_map_adapter/viz/esdf_cloud`，「局部规划窗口」组可打开 `/rog_map/odom_layer`。正常完成后调用 `/rog_map/save_map`，在输出目录生成 `map.pgm`、`map.yaml`、`map.pcd`。 [首段建图与保存过程](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存)
 
 本轮中间目标显式请求0.08m的控制/准入半径，最后目标及重载首目标仍请求0、使用服务器原默认；独立真值验收仍为中间≤0.15m、最后/重载≤0.08m。该请求随同目标重规划传递，不改坐标或unknown/footprint规则。为复现历史默认收敛契约，可省略`--waypoint-control-tolerance-m`或传0。d29已验证非法/越界拒绝、默认不变及抢占后不串用。
 
 ### 4.2 对称点速度
 
-```bash
-cd "${ATS_WORKSPACE:?先设置并核验实际总工作区路径}"
-source install/setup.bash
-source log/nav_acceptance/dds/wlan_env.sh
-SCENE=rmuc_2027 TEST_PROFILE=single \
-  START_X=13.40 START_Y=2.00 START_Z=0.550 START_YAW=0.0 \
-  GOAL_X=14.60 GOAL_Y=14.00 GOAL_YAW=0.0 P3_GOAL_FRAME=map \
-  GOAL_TOLERANCE=0.08 GOAL_TIMEOUT=300 GOAL_WALL_PER_SIM=20 \
-  PLANNING_GRID_OWNER=rog_map P2_FAULT_CASE=none \
-  LIDAR_DOWNSAMPLE=0 NAV_TRACKING_MAX_SNAPSHOT_PAYLOADS=-1 \
-  NAV_TRACKING_MAX_LAYER_PAYLOADS=-1 O0_CHAIN_RECORDER=1 \
-  NAV_TRACKING_PROFILE_YAML="$PWD/src/ats_sentry_bringup/params/node_params.yaml" \
-  USE_RVIZ=false USE_MUJOCO_VIEWER=false \
-  LOG_DIR="${ATS_OUT:?全新的runner日志目录}" \
-  EXTRA_LAUNCH_ARGS="localization_source:=lio slam:=true use_identified_odometry:=true lidar_threads:=0 lidar_rate_hz:=10.0 lidar_rate_clock:=sim" \
-  python3 -s scripts/nav_domain_guard.py run \
-    --domain "${ATS_DOMAIN:?先核验本轮复用domain}" \
-    --run-dir "${ATS_GUARD_OUT:?独立guard批次目录}" --reuse-authorized -- \
-    bash scripts/test_mujoco_minco_mpc_chain.sh
-```
-
-命令显式指定`single`和2027场景，不依赖runner的默认2025值。记录器只从`NAV_TRACKING_PROFILE_YAML`取足迹长/宽/margin；三套已同步，因此这里用含完整字段的根参数，不能直接指向缺这些键的2027稀疏overlay。其余运行参数仍按正式2027覆盖链加载。
+对称点速度（`rmuc_2027`，默认起点 `(13.40, 2.00, 0.550, 0)` 到目标 `map (14.60, 14.00, yaw=0)`，`position_tolerance=0.08`）通过正式 `rmuc_2027_mujoco.launch.py` 与 `/ats_navigate_to_pose` action 执行，并配合 `scripts/nav_tracking_recorder.py` 与 `scripts/analyze_nav_tracking.py`（从根 `src/ats_sentry_bringup/params/node_params.yaml` 读取足迹长/宽/margin）核验；原 `scripts/test_mujoco_minco_mpc_chain.sh` 已随项目测试脚本清理移除。无先验变体在 launch 参数中追加 `slam:=true`。
 
 **本轮已修复记录完整性链。** runner分别传入两种载荷预算，默认`-1`全程保留，`0`关闭、正数显式限额仍记录缺证；分析器按LRU只缓存8份解压载荷。记录器保存完整SE3及几何/距离场身份，EXECUTE单独绑定最终验证快照与TF。d22的892个快照、1161个来源层载荷未截断，16条执行参考q1通过；q2仍失败。d7的历史失败和缺证保留，不回写为通过。
 
@@ -130,7 +103,7 @@ SCENE=rmuc_2027 TEST_PROFILE=single \
 
 本机11月17日实测实时率约0.08–0.10，客户端墙钟兜底用20倍；32逻辑核默认6倍的历史速度假设不适用。该值只防止客户端早于ATS目标的300s仿真时间截止，不改变目标本身、odom/证据/地图租约或失效零速门。长任务使用独立后台进程并保存PID/退出码，避免执行工具约15分钟会话中断；不能把进程仍在运行当作验收成功。
 
-若需要留存 ROS 原始消息，可在 runner 完成所有权检查后用同一 ROS、WLAN 及 domain 另录 bag：
+若需要留存 ROS 原始消息，可在 runner 完成所有权检查后用同一 ROS 环境另录 bag：
 
 ```bash
 ros2 bag record --use-sim-time -o "${ATS_BAG_OUT:?独立新目录}" \
@@ -140,11 +113,11 @@ ros2 bag record --use-sim-time -o "${ATS_BAG_OUT:?独立新目录}" \
   /rog_map_adapter/planning_snapshot
 ```
 
-用 `scripts/analyze_o0_handoffs.py` 分析 runner 自动保存的记录，按运行值传入 `--mpc-dt`、`--terminal-radius` 和 `--odometry-timeout`。保存对齐的速度 CSV、曲线与各窗分类。两个窗口用于现场观察，锁屏会延迟原生 Wayland 窗口出现，截图按实际结果记载。
+用 `scripts/analyze_nav_tracking.py` 分析 runner 自动保存的记录，保存对齐的速度曲线与各窗分类。两个窗口用于现场观察，锁屏会延迟原生 Wayland 窗口出现，截图按实际结果记载。
 
 ### 4.3 故障及建图能力
 
-P2故障用`adapter_lease/service_timeout/input_stale/unknown/unreachable`，在同一2027基线上每项新domain、新launch；替换V1的`P2_FAULT_CASE`，并先核对注入锚点/前置等待适配2027。不能仅凭`SCENE`可切换就声称每项已经通过。
+P2故障用`adapter_lease/service_timeout/input_stale/unknown/unreachable`，在同一2027基线上每项新launch；替换V1的`P2_FAULT_CASE`，并先核对注入锚点/前置等待适配2027。不能仅凭`SCENE`可切换就声称每项已经通过。
 
 11月17日F首次前置采用 `(13.40,2.00)→map (13.40,3.00,0)`、真值门0.08m；d6因真值0.159192m及q1/q2失败而未注入。后续独立F改用原路线起点 `(3.37,9.03,0.465,0)→map (4.00,9.03,0)`，经静态PGM足迹检查，prior资产/profile/场景不变，在线门继续保持；两个配置与结果分别保留，均不冒充V1。故障在飞目标从实际快照和估计 `/localization` 选取；frame不同时显式用一条父子frame一致且与odom/快照均≤0.5s差的完整TF转换，不把map真值标为odom。未到在飞运动门或未实际注入须记“未注入”。
 
@@ -152,7 +125,7 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 
 ## 5. 报告与当前状态
 
-主场景和各专项按实际运行状态记录。保留 domain、三仓 commit、参数、原始日志、轨迹、q1/q2、接触评估及终点真值。基地到基地额外记录直线基准与实走里程，以及在线重规划和建图覆盖。未触发的地形只记录当次路线事实。
+主场景和各专项按实际运行状态记录。保留三仓 commit、参数、原始日志、轨迹、q1/q2、接触评估及终点真值。基地到基地额外记录直线基准与实走里程，以及在线重规划和建图覆盖。未触发的地形只记录当次路线事实。
 
 ### 11 月 20 日本机无先验结果
 
@@ -170,6 +143,24 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 ### 11 月 20 日有图定位、规划和跟随专项
 
 按用户指定另起有图批次，`slam:=false` 加载同源 PGM/PCD，关闭窗口。独立首点 1/1 到达、真值误差 0.0362 m；独立连续三点 3/3 到达，实走 7.963 m、末点真值误差 0.0166 m。连续三点的定位平面误差 p95 为 0.0347 m，底盘距已授权参考曲线 p95 为 0.0706 m，距原参考同刻位置 p95 为 0.1969 m。五条授权参考的 q1、420 个有效位姿的 q2 均无冲突。本次为普通短程检查，局部障碍绕行未触发，无图隧道暂停。 [首点](../../log/nav_acceptance/20261120_prior_check/short_d33/route/summary.json) · [三点](../../log/nav_acceptance/20261120_prior_check/three_d33/route/summary.json) · [跟随误差](../../log/nav_acceptance/20261120_prior_check/three_d33/audit.json) · [主报告 9.8.18](../调研/无先验地图钻洞高速导航优化调研报告.md#9818-11-月-20-日有图定位规划与跟随专项)
+
+### 11 月 20 日 50 Hz 解耦积分、全链修正与无窗口 2027 实测
+
+完成全链生产代码修正与 `rmuc_2027` 默认世界统一：
+
+1. **消除 50 ms / 20 Hz 积分与控制步长硬编码**：`ats_swerve_mpc` 升级为精确 SE(2) 指数映射积分与解析雅可比（`Se2Model` 支持显式 `step_dt`），将实时控制步长（`control_rate_hz: 50.0`、按实测时钟 `actual_step_dt` 计算首步执行器约束与 warm-start 前移）与预测离散步长（`dt: 0.05`、`horizon: 60`）解耦；同步更新 `cmd_vel_arbiter` 至 `50 Hz`、`minco_planner` `SpinYawParams::sample_period` 参数化与 `small_gicp_relocalization` `transform_publish_rate_hz`（默认 `50 Hz`）。
+2. **窄通道与执行稳健性加固**：`TrajectoryTracker` 增加原地旋转与角速度刹停保护门（防提前横扫）；`minco_planner` 新增贴墙大角度终端转向的 ESDF 侧移掉头与角加速度约束；`PlannerGoal.preserve_active_reference` 在无停车终点重规划失败时保留运行参考；`tunnel_yaw_alignment` 消除 `ramp_bridge` 误拒；参考轨迹发布与录制订阅切为 `RELIABLE(10)`；`ats_rog_map` 建图模式盲区未知清理按当前 profile 尺寸并增加视线遮挡检查（不穿透占据墙体）；`node_params.yaml` 删除 `projection_follow_measured_ground: true` 并配置 `clearance_detour_ratio: 1.5`。
+3. **工程清理与构建**：统一默认世界/地图至 `rmuc_2027`，移除项目内测试代码与 `scripts/test_*` 脚本（不触动第三方依赖树），重写 `.sh` 入口脚本；Release 全量构建、增量构建与 `validate_navigation_config.py` 通过。
+
+最终源码构建后的无窗口（未带 RViz 与 MuJoCo 窗口，画面项与独立物理接触验收均记为未验证）`rmuc_2027` 实测结果如下：
+
+| 批次 | 模式与入口 | 结果 | 关键实测指标 |
+| --- | --- | --- | --- |
+| 有图 T1 `tunnel_b_roundtrip`（`v7`） | `s3_mujoco_acceptance.py --profile rmuc_2027_tunnels --route tunnel_b_roundtrip`，`slam:=false`，加载 `rmuc_2027` PGM/PCD | **通过**（`passed=true`） | 13/13 点到达，里程 `22.576 m`，终点真值误差 `0.0549 m <= 0.08 m`；离散足迹冲突 `0`，MuJoCo 接触计数增量 `0`（`max_force=0.0 N`）；`tunnel_ramp_bridge`（正向 1 次，轴向侧偏最大 `0.0184 m`）与 `tunnel_B`（正向 1、反向 1，轴向侧偏最大 `0.0328 m`）均通过；13/13 段 `nav_tracking`（q1/q2）全过；MPC 实测 `50.0 Hz / 20.000 ms`（285 条遥测）；单一发布者所有权与零 Nav2 断言通过 |
+| 无先验首目标与保存（`v2`） | `s3_mujoco_acceptance.py --profile rmuc_2027 --mapless --max-goals 1`，`slam:=true`，空先验 | **通过**（`passed=true`） | 1/1 点到达，里程 `5.237 m`，终点真值误差 `0.0087 m <= 0.08 m`；离散足迹冲突 `0`，接触计数增量 `0`；`nav_tracking`（q1/q2）通过；显式保存 PGM/YAML/PCD 成功（`persistent_cells=91`、`persistent_voxels=3221`）；MPC 实测 `50.0 Hz / 20.000 ms`（88 条遥测） |
+| 有图单 action B1 基地到基地（`v2`） | `rmuc_2027_mujoco.launch.py`（`slam:=false`）+ `/ats_navigate_to_pose` `(3.37,9.03)->map(24.63,6.97)` | **到达但 q2 未全过** | 单 action `result_code=0`，里程 `34.469 m`，终点真值误差 `0.0338 m <= 0.08 m`，真值峰值 `1.637 m/s`，接触计数增量 `0`，MPC 实测 `50.0 Hz / 20.000 ms`（239 条遥测）；30/30 发布参考 `q1` 通过；`q2` 在 `(21.9255, 6.7303)` 记录 1 段持续冲突（26 tick 跨 2 快照，伴 `q3=yes`），故 B1 完整跟踪门仍记未通过 |
+
+本轮未运行 T2（`ramp_south`）、T3（`six_tunnels`）、B2 动态绕行/全堵停车、V1 对称点高速、独立故障矩阵 F 与无先验全场路线；上述未运行项、独立物理接触评估与实车验证继续保持未验证/未通过。 [主报告 9.8.19](../调研/无先验地图钻洞高速导航优化调研报告.md#9819-11-月-20-日负向优化回退50-hz-解耦积分与-2027-无窗口实测)
 
 ### 历史记录：统一搜索与 2027 有先验实测
 
