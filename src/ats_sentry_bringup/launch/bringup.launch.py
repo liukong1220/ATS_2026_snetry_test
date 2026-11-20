@@ -59,7 +59,7 @@ def generate_launch_description():
     declarations = [
         DeclareLaunchArgument("use_identified_odometry", default_value="false"),
         DeclareLaunchArgument("robot_name", default_value="ats_sentry_robot"),
-        DeclareLaunchArgument("world", default_value="rmuc_2025"),
+        DeclareLaunchArgument("world", default_value="rmuc_2027"),
         DeclareLaunchArgument(
             "map",
             default_value=[TextSubstitution(text=os.path.join(bringup_dir, "map", "")), world, TextSubstitution(text=".yaml")],

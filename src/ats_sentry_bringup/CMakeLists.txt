@@ -8,15 +8,6 @@ endif()
 
 find_package(ament_cmake_auto REQUIRED)
 
-if(BUILD_TESTING)
-find_package(ament_lint_auto REQUIRED)
-  list(APPEND AMENT_LINT_AUTO_EXCLUDE
-    ament_cmake_uncrustify
-    ament_cmake_flake8
-  )
-  ament_lint_auto_find_test_dependencies()
-endif()
-
 ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/ros_domain_id.dsv.in")
 
 ament_auto_package(

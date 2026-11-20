@@ -29,7 +29,7 @@ def generate_launch_description():
     log_level = LaunchConfiguration("log_level")
 
     declarations = [
-        DeclareLaunchArgument("world", default_value="rmuc_2026"),
+        DeclareLaunchArgument("world", default_value="rmuc_2027"),
         DeclareLaunchArgument(
             "prior_pcd_file",
             default_value=[TextSubstitution(text=os.path.join(bringup_dir, "pcd", "")), world, TextSubstitution(text=".pcd")],

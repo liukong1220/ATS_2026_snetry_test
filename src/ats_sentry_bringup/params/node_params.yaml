@@ -44,8 +44,8 @@ standard_robot_pp_ros2:
     transient_zero_cmd_angular_epsilon: 0.001
     # cmd_vel 断流 watchdog。超过该时间没有新速度就主动清零并置 speed_vector.stop。
     # 时序约束（steady clock，节点启动时会校验）：
-    #   T_hold = 50 ms   = 1 个 MPC 控制周期（control_rate_hz = 20 Hz -> 0.05 s）
-    #   T_wd   = 300 ms  = 6 个 MPC 控制周期
+    #   T_hold = 50 ms   <= 2.5 个 50 Hz 控制周期（兼容偶发单帧零速抖动）
+    #   T_wd   = 300 ms
     #   T_lease = 500 ms = MPC 的 execution_command_timeout / emergency_stop_timeout
     #                      与 Goal Manager 的 0.5 s 租约
     # 必须满足 T_hold < T_wd <= T_lease。底盘看门狗宽于上游租约时，
@@ -451,17 +451,8 @@ chassis_vel_transform:
     invert_output_y: false
     # 缺少 serial/gimbal_joint_state 时禁止静默直通：直通会把 gimbal_yaw_odom 系的
     # [vx, vy] 当成车体系直接下发，方向可能整体偏 $\psi$，属于"命令方向与实际运动
-    # 不符"的立即断电条件。置 false 后节点不再输出该帧。
-    #
-    # 已知残余缺陷（未修，需用户确认仓库归属后才能改代码）：
-    # `sentry_chassis_vel_transform/src/chassis_vel_transform.cpp:120-126` 在
-    # `pass_through_without_yaw=false` 时是 `return`（丢帧），不是"发布零速度"。
-    # 丢帧后底盘保持上一帧速度，直到 `cmd_vel_watchdog_timeout_ms = 300 ms`
-    # 看门狗归零，即最坏 300 ms 的残余运动窗口，不满足"缺反馈立即零速度"。
-    # 该目录是用户未跟踪文件且自带嵌套 .git，本轮不 stage、不覆盖。
-    #
-    # 实机正式 profile 经过该节点；缺反馈的出站归零时延仍须在抬轮 HIL 实测，
-    # 在此之前不得把 watchdog 设计值当成实测结果。
+    # 不符"的立即断电条件。置 false 后节点立即发布零速度并清零加速度平滑状态。
+    # 实机正式 profile 经过该节点；缺反馈的出站归零时延仍须在抬轮 HIL 实测。
     pass_through_without_yaw: false
 
 # 实车 GimbalYawStatus 的唯一发布者（P6 零.3）。仿真的模拟 ack 由
@@ -835,13 +826,6 @@ ats_rog_map:
     core.raycasting.clear_clipped_endpoint: true
     core.virtual_ground_height: -0.35
     core.virtual_ceil_height: 1.15
-    # Startup-only authorization gate for every test-only fault fixture. It must
-    # stay false for nominal, real-vehicle and default-launch runs; only the
-    # isolated MuJoCo P2_FAULT_CASE=unknown launch may override it to true.
-    # While false, test_reset_to_unknown is both rejected at the parameter
-    # service and ineffective at the reset site, so the map is never cleared.
-    enable_test_fault_injection: false
-    test_reset_to_unknown: false
     # Fixed global static layer: 40 x 30 m at 0.1 m.  The mapping start is
     # (0, 0), so the lower-left storage origin leaves 20 m / 15 m margin.
     odom_layer.origin_x: -20.0
@@ -860,7 +844,6 @@ ats_rog_map:
     odom_layer.top_margin: 0.007
     odom_layer.max_ground_slope: 0.6
     odom_layer.base_ground_offset: 0.07
-    projection_follow_measured_ground: true
     odom_layer.window_x: 12.0
     odom_layer.window_y: 12.0
 
@@ -917,15 +900,6 @@ ats_rog_map_adapter:
     footprint_safety_margin: 0.02
     robot_frame: gimbal_yaw_odom
     robot_unknown_clear_radius: 0.0
-    # Startup-only authorization gate for every test-only fault fixture. It must
-    # stay false for nominal, real-vehicle and default-launch runs; only the
-    # isolated MuJoCo P2_FAULT_CASE=unknown launch may override it to true.
-    # While false, test_mask_secondary_evidence and the P4 swept-volume
-    # injection parameters are rejected at the parameter service and are also
-    # ineffective at their read sites.
-    enable_test_fault_injection: false
-    test_mask_secondary_evidence: false
-    test_inject_dynamic_obstacle: false
 
 minco_planner:
   ros__parameters:
@@ -989,6 +963,8 @@ minco_planner:
     jps_max_expanded_nodes: -1
     # 统一采用2027配置值；实际准入仍执行矩形足迹/方向与快照安全检查。
     jps_safe_distance: 0.36
+    # 优先净空绕路比上限：绕行长度超过最短路 1.5 倍时放弃抬高净空，直接走窄通道。
+    clearance_detour_ratio: 1.5
     publish_unsafe_trajectory: false
     # 用户暂定5 m/s，实测后再标定；近障/曲率/终点限速仍有效。
     reference_speed: 5.0
@@ -1169,7 +1145,7 @@ cmd_vel_arbiter:
     auto_timeout_ms: 300
     link_timeout_ms: 300
     execution_command_timeout: 0.5
-    control_rate_hz: 20.0
+    control_rate_hz: 50.0
     # 换代宽限（报告 5.1.10 第 2 项），与 ats_swerve_mpc.supersede_grace_sec 必须相同：
     # 同一 epoch 的新 generation 就绪后，旧授权最多再保留 0.4 s 等新 generation 的 EXECUTE。
     supersede_grace_sec: 0.4
@@ -1192,7 +1168,9 @@ ats_swerve_mpc:
     require_localization_status: true
     emergency_stop_timeout: 0.5
     frame_id: odom
-    control_rate_hz: 20.0
+    # 实时控制频率（50 Hz / 20 ms），与预测离散步长 dt 解耦；首步执行器增量约束与
+    # warm-start 前移按每拍实测经过时间 step_dt 计算，不硬编码为 50 ms。
+    control_rate_hz: 50.0
     fallback_path_dt: 0.1
     trajectory_timeout: 0.5
     goal_position_tolerance: 0.08

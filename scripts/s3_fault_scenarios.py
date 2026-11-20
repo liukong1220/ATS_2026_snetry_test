@@ -625,15 +625,14 @@ def safety_case(case, probe, launch):
     status_begin = len(probe.planner_statuses)
     try:
         if case == "service_timeout":
-            # The projection runs in-process now. Stopping ats_rog_map_node would
-            # also stop the planning publisher (that is the adapter-lease fault);
-            # this stalls only the projection so the request deadline fires.
-            set_parameters(probe, "/ats_rog_map_adapter", {"test_stall_projection": True})
-            stalled = True
-            probe.event("stall_projection", {"node": "/ats_rog_map_adapter"})
+            raise RuntimeError(
+                "service_timeout parameter-stall hook has been removed from production nodes; "
+                "use OS-level process pause (adapter_lease) instead"
+            )
         elif case == "unknown":
-            set_parameters(probe, "/ats_rog_map_adapter", {"test_mask_secondary_evidence": True})
-            set_parameters(probe, "/ats_rog_map", {"test_reset_to_unknown": True})
+            set_parameters(probe, "/ats_mujoco_sim", {"lidar_occlusion_enabled": True})
+            stalled = True
+            probe.event("lidar_occlusion", {"node": "/ats_mujoco_sim", "enabled": True})
         elif case == "unsafe":
             from s3_fixture_scene import fixture_position_for_pose
             from s3_mujoco_acceptance import yaw
@@ -671,7 +670,7 @@ def safety_case(case, probe, launch):
         cancel = handle.cancel_goal_async()
         require(probe, cancel.done, 5, "cancel faulted goal")
         if stalled:
-            set_parameters(probe, "/ats_rog_map_adapter", {"test_stall_projection": False})
+            set_parameters(probe, "/ats_mujoco_sim", {"lidar_occlusion_enabled": False})
 
 
 def belongs_to(pid, ancestor):

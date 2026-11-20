@@ -2,20 +2,22 @@
 set -Eeuo pipefail
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROS_DISTRO_NAME="${ROS_DISTRO:-humble}"
+ROS_SETUP="/opt/ros/${ROS_DISTRO_NAME}/setup.bash"
 SETUP_SCRIPT="${SETUP_SCRIPT:-$WORKSPACE_DIR/install/setup.bash}"
 if [[ ! -f "$SETUP_SCRIPT" ]]; then
   SETUP_SCRIPT="$WORKSPACE_DIR/install/setup.sh"
 fi
 
-WORLD_NAME="${WORLD_NAME:-${1:-rmuc}}"
+WORLD_NAME="${WORLD_NAME:-${1:-rmuc_2027}}"
 VISION_CONFIG="${VISION_CONFIG:-$WORKSPACE_DIR/src/sp_vision25/configs/sentry.yaml}"
 NAV_PARAMS_FILE="${NAV_PARAMS_FILE:-$WORKSPACE_DIR/src/ats_sentry_bringup/params/node_params.yaml}"
 
-USE_RVIZ="${USE_RVIZ:-True}"
+USE_RVIZ="${USE_RVIZ:-False}"
 RVIZ_FORCE_SOFTWARE="${RVIZ_FORCE_SOFTWARE:-0}"
 NAV_LOG_LEVEL="${NAV_LOG_LEVEL:-warn}"
 LAUNCH_ROSBAG_RECORDER="${LAUNCH_ROSBAG_RECORDER:-False}"
-LAUNCH_SMALL_GICP_RELOCALIZATION="${LAUNCH_SMALL_GICP_RELOCALIZATION:-False}"
+LAUNCH_SMALL_GICP_RELOCALIZATION="${LAUNCH_SMALL_GICP_RELOCALIZATION:-True}"
 USE_RESPAWN="${USE_RESPAWN:-True}"
 
 RESTART_DELAY="${RESTART_DELAY:-2}"
@@ -58,8 +60,20 @@ else
   exec >>"$WATCHDOG_LOG_FILE" 2>&1
 fi
 
+if [[ ! -f "$ROS_SETUP" ]]; then
+  echo "[$(date '+%F %T')] ERROR: ROS base setup script not found: $ROS_SETUP"
+  exit 1
+fi
 if [[ ! -f "$SETUP_SCRIPT" ]]; then
-  echo "[$(date '+%F %T')] ERROR: ROS setup script not found: $SETUP_SCRIPT"
+  echo "[$(date '+%F %T')] ERROR: Workspace setup script not found: $SETUP_SCRIPT"
+  exit 1
+fi
+if [[ ! -f "$NAV_PARAMS_FILE" ]]; then
+  echo "[$(date '+%F %T')] ERROR: Navigation params file not found: $NAV_PARAMS_FILE"
+  exit 1
+fi
+if [[ ! -f "$VISION_CONFIG" ]]; then
+  echo "[$(date '+%F %T')] ERROR: Vision config file not found: $VISION_CONFIG"
   exit 1
 fi
 
@@ -85,12 +99,12 @@ terminate_process() {
   local pid="$2"
   if is_running "$pid"; then
     echo "[$(date '+%H:%M:%S')] 停止 ${name} (pid=${pid})"
-    kill "$pid" 2>/dev/null || true
-    for _ in {1..20}; do
+    kill -TERM "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
+    for _ in {1..30}; do
       is_running "$pid" || return 0
       sleep 0.1
     done
-    kill -9 "$pid" 2>/dev/null || true
+    kill -KILL "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
   fi
 }
 
@@ -113,10 +127,18 @@ command_prefix() {
   if [[ -n "$cpuset" ]] && command -v taskset >/dev/null 2>&1; then
     out_ref+=(taskset -c "$cpuset")
   fi
-
   if [[ "$nice_value" != "0" ]] && command -v nice >/dev/null 2>&1; then
     out_ref+=(nice -n "$nice_value")
   fi
+}
+
+source_ros_env() {
+  set +u
+  # shellcheck disable=SC1090
+  source "$ROS_SETUP"
+  # shellcheck disable=SC1090
+  source "$SETUP_SCRIPT"
+  set -u
 }
 
 start_navigation() {
@@ -124,25 +146,30 @@ start_navigation() {
   command_prefix "$NAV_CPUSET" "$NAV_NICE" prefix
 
   echo "[$(date '+%H:%M:%S')] 启动 ATS 导航: world=${WORLD_NAME}, cpuset=${NAV_CPUSET:-all}, nice=${NAV_NICE}"
-  (
-    # shellcheck disable=SC1090
+  setsid bash -c '
+    set -Eeuo pipefail
     set +u
-    source "$SETUP_SCRIPT"
+    source "$1"
+    source "$2"
     set -u
-    cd "$WORKSPACE_DIR"
-    export OMP_NUM_THREADS="$NAV_OMP_NUM_THREADS"
-    export OPENBLAS_NUM_THREADS="$NAV_OMP_NUM_THREADS"
-    export MKL_NUM_THREADS="$NAV_OMP_NUM_THREADS"
-    exec "${prefix[@]}" ros2 launch ats_sentry_bringup bringup.launch.py\
-      world:="$WORLD_NAME" \
-      params_file:="$NAV_PARAMS_FILE" \
-      use_rviz:="$USE_RVIZ" \
-      rviz_force_software:="$RVIZ_FORCE_SOFTWARE" \
-      use_respawn:="$USE_RESPAWN" \
-      launch_rosbag_recorder:="$LAUNCH_ROSBAG_RECORDER" \
-      launch_small_gicp_relocalization:="$LAUNCH_SMALL_GICP_RELOCALIZATION" \
-      log_level:="$NAV_LOG_LEVEL"
-  ) >>"$ROS_LOG_DIR/navigation.log" 2>&1 &
+    cd "$3"
+    shift 3
+    exec "$@"
+  ' _ \
+    "$ROS_SETUP" "$SETUP_SCRIPT" "$WORKSPACE_DIR" \
+    env OMP_NUM_THREADS="$NAV_OMP_NUM_THREADS" \
+        OPENBLAS_NUM_THREADS="$NAV_OMP_NUM_THREADS" \
+        MKL_NUM_THREADS="$NAV_OMP_NUM_THREADS" \
+    "${prefix[@]}" ros2 launch ats_sentry_bringup bringup.launch.py \
+      "world:=${WORLD_NAME}" \
+      "params_file:=${NAV_PARAMS_FILE}" \
+      "use_rviz:=${USE_RVIZ}" \
+      "rviz_force_software:=${RVIZ_FORCE_SOFTWARE}" \
+      "use_respawn:=${USE_RESPAWN}" \
+      "launch_rosbag_recorder:=${LAUNCH_ROSBAG_RECORDER}" \
+      "launch_small_gicp_relocalization:=${LAUNCH_SMALL_GICP_RELOCALIZATION}" \
+      "log_level:=${NAV_LOG_LEVEL}" \
+    >>"$ROS_LOG_DIR/navigation.log" 2>&1 &
   NAV_PID="$!"
   echo "$NAV_PID" >"$ROS_HOME/navigation_watchdog.pid"
 }
@@ -152,18 +179,23 @@ start_vision() {
   command_prefix "$VISION_CPUSET" "$VISION_NICE" prefix
 
   echo "[$(date '+%H:%M:%S')] 启动视觉: config=${VISION_CONFIG}, cpuset=${VISION_CPUSET:-all}, nice=${VISION_NICE}"
-  (
-    # shellcheck disable=SC1090
+  setsid bash -c '
+    set -Eeuo pipefail
     set +u
-    source "$SETUP_SCRIPT"
+    source "$1"
+    source "$2"
     set -u
-    cd "$WORKSPACE_DIR"
-    export SP_VISION_OPENCV_THREADS="$VISION_OPENCV_THREADS"
-    export OMP_NUM_THREADS="$VISION_OMP_NUM_THREADS"
-    export OPENBLAS_NUM_THREADS="$VISION_OMP_NUM_THREADS"
-    export MKL_NUM_THREADS="$VISION_OMP_NUM_THREADS"
-    exec "${prefix[@]}" ros2 run sp_vision25 sentry "$VISION_CONFIG"
-  ) >>"$ROS_LOG_DIR/vision.log" 2>&1 &
+    cd "$3"
+    shift 3
+    exec "$@"
+  ' _ \
+    "$ROS_SETUP" "$SETUP_SCRIPT" "$WORKSPACE_DIR" \
+    env SP_VISION_OPENCV_THREADS="$VISION_OPENCV_THREADS" \
+        OMP_NUM_THREADS="$VISION_OMP_NUM_THREADS" \
+        OPENBLAS_NUM_THREADS="$VISION_OMP_NUM_THREADS" \
+        MKL_NUM_THREADS="$VISION_OMP_NUM_THREADS" \
+    "${prefix[@]}" ros2 run sp_vision25 sentry "$VISION_CONFIG" \
+    >>"$ROS_LOG_DIR/vision.log" 2>&1 &
   VISION_PID="$!"
   echo "$VISION_PID" >"$ROS_HOME/vision_watchdog.pid"
 }
@@ -175,9 +207,8 @@ echo "ATS navigation params: ${NAV_PARAMS_FILE}"
 echo "Vision config: ${VISION_CONFIG}"
 echo "Logs: ${ROS_LOG_DIR}"
 echo "Watchdog log: ${WATCHDOG_LOG_FILE}"
-echo "ATS navigation: cpuset=${NAV_CPUSET:-all}, nice=${NAV_NICE}, OMP=${NAV_OMP_NUM_THREADS}"
-echo "ATS navigation options: small_gicp=${LAUNCH_SMALL_GICP_RELOCALIZATION}, rviz=${USE_RVIZ}"
-echo "Vision: cpuset=${VISION_CPUSET:-all}, nice=${VISION_NICE}, OpenCV=${VISION_OPENCV_THREADS}, OMP=${VISION_OMP_NUM_THREADS}"
+echo "ATS navigation: cpuset=${NAV_CPUSET:-all}, nice=${NAV_NICE}, threads=${NAV_OMP_NUM_THREADS}"
+echo "Vision: cpuset=${VISION_CPUSET:-all}, nice=${VISION_NICE}, opencv=${VISION_OPENCV_THREADS}, omp=${VISION_OMP_NUM_THREADS}"
 echo "=========================================="
 
 start_navigation
@@ -186,16 +217,14 @@ start_vision
 
 while true; do
   if ! is_running "$NAV_PID"; then
-    echo "[$(date '+%H:%M:%S')] ATS 导航已退出，${RESTART_DELAY}s 后重启"
+    echo "[$(date '+%H:%M:%S')] ATS 导航进程已退出，${RESTART_DELAY} 秒后重启..."
     sleep "$RESTART_DELAY"
     start_navigation
   fi
-
   if ! is_running "$VISION_PID"; then
-    echo "[$(date '+%H:%M:%S')] 视觉已退出，${RESTART_DELAY}s 后重启"
+    echo "[$(date '+%H:%M:%S')] 视觉进程已退出，${RESTART_DELAY} 秒后重启..."
     sleep "$RESTART_DELAY"
     start_vision
   fi
-
   sleep "$WATCH_INTERVAL"
 done

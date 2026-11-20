@@ -727,6 +727,10 @@ def run(args):
     if map_prefix:
         prefix = Path(map_prefix).resolve()
         yaml_path, pcd_path = Path(str(prefix) + ".yaml"), Path(str(prefix) + ".pcd")
+        if not pcd_path.exists():
+            alt_pcd = yaml_path.parent.parent / "pcd" / f"{prefix.name}.pcd"
+            if alt_pcd.exists():
+                pcd_path = alt_pcd
         metadata = yaml.safe_load(yaml_path.read_text())
         image_path = yaml_path.parent / metadata["image"]
         map_inputs = {str(path.resolve()): {"bytes": path.stat().st_size,
@@ -745,10 +749,6 @@ def run(args):
         parameters["minco_planner"]["ros__parameters"]["map_commit_trace_enabled"] = True
         parameters["ats_rog_map"]["ros__parameters"]["map_update_trace_enabled"] = True
     extra, scene = prepare_scene(profile, directory, fixture=fixture_case, barrier=args.case == "no_path")
-    # service_timeout stalls the in-process projection through a guarded test
-    # parameter, so it needs the same startup authorization as unknown.
-    if args.case in ("unknown", "service_timeout"):
-        extra.append("enable_test_fault_injection:=true")
     parameter_path = directory / "params.yaml"
     parameter_path.write_text(yaml.safe_dump(parameters, sort_keys=False))
     start = profile["start"]
@@ -762,8 +762,7 @@ def run(args):
                *[f"{key}:={val}" for key, val in zip(("start_x", "start_y", "start_z", "start_yaw"), start)],
                *extra]
     if map_prefix:
-        prefix = Path(map_prefix).resolve()
-        command += [f"map_yaml_file:={prefix}.yaml", f"prior_pcd_file:={prefix}.pcd"]
+        command += [f"map_yaml_file:={yaml_path}", f"prior_pcd_file:={pcd_path}"]
     else:
         command += [f"map_yaml_file:={directory}/absent.yaml", f"prior_pcd_file:={directory}/absent.pcd"]
     command += args.launch_arg
@@ -896,6 +895,8 @@ def main():
     maps = parser.add_mutually_exclusive_group()
     maps.add_argument("--reload", help="saved map prefix; verify TRACKING and the first goal only")
     maps.add_argument("--prior", help="map YAML/PCD prefix; run the complete selected route in localization mode")
+    maps.add_argument("--mapless", action="store_true",
+                      help="start from an empty map (slam:=true); 2027 routes otherwise load the rmuc_2027 prior")
     parser.add_argument("--max-goals", type=int, default=0)
     parser.add_argument("--post-route-case", choices=("obstacle_latency", "dynamic_save", "obstacle_and_dynamic"),
                         help="run physical fixture evidence after completing the selected route")
@@ -917,6 +918,12 @@ def main():
     args = parser.parse_args()
     if args.post_route_case and (args.case != "route" or args.reload or args.prior):
         parser.error("post-route fixtures require a mapping route")
+    # Simulation defaults to prior-map mode on the 2027 map; mapping-only cases stay mapless.
+    if (args.case == "route" and not args.post_route_case and not args.mapless and
+            not args.reload and not args.prior and
+            load_profile(SIM / "config/s3_mapping_routes.yaml", args.profile,
+                         args.route)["launch"] == "rmuc_2027_mujoco.launch.py"):
+        args.prior = str(ROOT / "src/ats_sentry_bringup/map/rmuc_2027")
     domain = int(os.environ.get("ROS_DOMAIN_ID", "-1"))
     if domain < 0 or domain > 232 or domain == 77:
         parser.error("choose an isolated ROS_DOMAIN_ID in 0..232, excluding 77")

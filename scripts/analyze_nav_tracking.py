@@ -5,9 +5,8 @@
 reference next to the pose that was actually driven, the command that was
 selected, the emergency-stop state, and the immutable snapshot identity that was
 in force at that instant.  This module joins those records to
-``scripts/footprint_evaluator.py`` -- the port that
-``scripts/test_footprint_evaluator_parity.sh`` cross-validates against the
-planner's own C++ checker -- and answers the three questions that a run log
+``scripts/footprint_evaluator.py`` (a port of the planner's C++ footprint
+checker) and answers the three questions that a run log
 cannot separate:
 
 Q1  Was the committed reference collision-free *at publish*, judged against the

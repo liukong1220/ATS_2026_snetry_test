@@ -17,7 +17,7 @@ for a conflict are indistinguishable:
 This node subscribes only.  It publishes nothing, calls no service, and holds no
 lease, so adding it cannot change what the navigation stack decides.
 
-Clock discipline (same rules as scripts/p2_fault_observer.py)
+Clock discipline (monotonic steady-clock durations, ROS clock only for message stamps)
 ------------------------------------------------------------
 * Every duration and age is computed from ``time.monotonic()`` on receipt.
   A steady-clock receive-time age is a *local transport+scheduling* measure and
@@ -107,6 +107,20 @@ def latched_qos(depth=10):
         history=HistoryPolicy.KEEP_LAST,
         reliability=ReliabilityPolicy.RELIABLE,
         durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    )
+
+
+def reliable_stream_qos(depth=10):
+    """Reliable + volatile for large discrete events like committed reference Paths.
+
+    A BEST_EFFORT reader silently drops fragmented multi-KB Path messages over UDP
+    when a single datagram is lost, causing missing-reference gaps on short legs.
+    """
+    return QoSProfile(
+        depth=depth,
+        history=HistoryPolicy.KEEP_LAST,
+        reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.VOLATILE,
     )
 
 
@@ -405,14 +419,14 @@ class NavTrackingRecorder(Node):
         self.create_subscription(
             SwerveTelemetry, args.telemetry_topic, self._on_telemetry, stream_qos())
         self.create_subscription(
-            Path, args.reference_topic, self._on_reference, stream_qos(depth=10))
+            Path, args.reference_topic, self._on_reference, reliable_stream_qos(depth=10))
         if args.candidate_reference_topic:
             self.create_subscription(
                 Path, args.candidate_reference_topic, self._on_candidate_reference,
-                stream_qos(depth=10))
+                reliable_stream_qos(depth=10))
         self.create_subscription(
             PlannerStatus, args.planner_status_topic, self._on_planner_status,
-            stream_qos())
+            latched_qos())
         self.create_subscription(
             ExecutionCommand, args.execution_command_topic, self._on_execution,
             latched_qos())
@@ -835,6 +849,8 @@ class NavTrackingRecorder(Node):
                 snapshot["info"]["resolution"] <= 0 or
                 not self._snapshot_payload_by_digest.get(snapshot["payload_key"])):
             missing.append("ready_snapshot")
+        if self._args.reference_topic and self.count_publishers(self._args.reference_topic) <= 0:
+            missing.append("reference_publisher")
         return missing
 
     def _on_tick(self):

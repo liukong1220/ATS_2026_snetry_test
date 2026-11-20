@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -19,6 +20,7 @@ def generate_launch_description():
 
     # Create the launch configuration variables
     namespace = LaunchConfiguration("namespace")
+    use_sim_time = LaunchConfiguration("use_sim_time")
     rviz_config_file = LaunchConfiguration("rviz_config")
     rviz_force_software = LaunchConfiguration("rviz_force_software")
 
@@ -30,6 +32,12 @@ def generate_launch_description():
             "Top-level namespace. The value will be used to replace the "
             "<robot_namespace> keyword on the RViz config file."
         ),
+    )
+
+    declare_use_sim_time_cmd = DeclareLaunchArgument(
+        "use_sim_time",
+        default_value="False",
+        description="Use simulation (Gazebo/MuJoCo) clock if true",
     )
 
     declare_rviz_config_file_cmd = DeclareLaunchArgument(
@@ -57,6 +65,7 @@ def generate_launch_description():
         package="rviz2",
         executable="rviz2",
         namespace=namespace,
+        parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
         arguments=["-d", rviz_config_file],
         output="screen",
         remappings=[
@@ -70,6 +79,7 @@ def generate_launch_description():
 
     # Declare the launch options
     ld.add_action(declare_namespace_cmd)
+    ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_rviz_config_file_cmd)
     ld.add_action(declare_rviz_force_software_cmd)
 

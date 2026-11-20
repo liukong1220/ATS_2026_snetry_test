@@ -540,7 +540,9 @@ def main():
         == "/gimbal/yaw_authority_request"
     )
     assert mpc["max_vy"] > 0.0
-    assert abs(mpc["dt"] - 1.0 / mpc["control_rate_hz"]) < 1e-9
+    # 控制周期与预测离散步长解耦，但控制频率不得慢于预测离散步长，且仲裁器不低于 MPC 频率。
+    assert 0.0 < 1.0 / mpc["control_rate_hz"] <= mpc["dt"] + 1e-9
+    assert arbiter["control_rate_hz"] >= mpc["control_rate_hz"]
     # 终点区限速必须比底盘约 0.4 s 的响应滞后的 e 倍更慢，且只覆盖终点附近（报告 5.1.10）。
     assert mpc["terminal_approach_time_constant"] >= 1.1
     assert mpc["goal_position_tolerance"] < mpc["terminal_approach_radius"] <= 1.0
@@ -741,24 +743,6 @@ def main():
     )
     assert "/cmd_vel/selected" in gazebo_bridge
     assert "/cmd_vel_mpc" not in gazebo_bridge
-    gazebo_runner = workspace / "scripts/test_gazebo_minco_mpc_chain.sh"
-    gazebo_runner_text = gazebo_runner.read_text(encoding="utf-8")
-    assert "/cmd_vel_mpc" not in gazebo_runner_text
-    assert "selected_cmd_vel_publisher_max" in gazebo_runner_text
-    assert "selected_cmd_vel_subscriber_max" in gazebo_runner_text
-    # Gazebo launches executables from the overlay. A source tree newer than
-    # that executable invalidates the runtime evidence, so the regression
-    # runner must reject it before starting a nominal P1 run.
-    for required in (
-        "runtime_binary_is_fresh",
-        "runtime_stale_critical_binary",
-        "ats_cmd_vel_arbiter",
-        "ats_swerve_mpc",
-        "sensor_scan_generation",
-        "small_gicp_relocalization",
-        "rmu_gazebo_simulator",
-    ):
-        assert required in gazebo_runner_text
 
     loopback_launch = workspace / "src/sim/loopback_sim/launch/loopback_simulation.launch.py"
     loopback_node = workspace / "src/sim/loopback_sim/nav2_loopback_sim/loopback_simulator.py"

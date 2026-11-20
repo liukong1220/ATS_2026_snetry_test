@@ -27,7 +27,6 @@ def generate_launch_description():
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
     launch_joy_teleop = LaunchConfiguration("launch_joy_teleop")
-    use_composition = LaunchConfiguration("use_composition")
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
 
@@ -90,7 +89,6 @@ def generate_launch_description():
             "use_robot_state_pub": use_robot_state_pub,
             "use_rviz": use_rviz,
             "launch_joy_teleop": launch_joy_teleop,
-            "use_composition": use_composition,
             "use_respawn": use_respawn,
             "log_level": log_level,
         }.items(),
@@ -173,7 +171,7 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "world",
-            default_value="rmul",
+            default_value="rmuc_2027",
             description="Map/PCD basename used by navigation mode.",
         )
     )
@@ -255,13 +253,6 @@ def generate_launch_description():
             "launch_joy_teleop",
             default_value="False",
             description="Whether to start joystick teleop.",
-        )
-    )
-    ld.add_action(
-        DeclareLaunchArgument(
-            "use_composition",
-            default_value="True",
-            description="Whether to use composed Nav2 bringup.",
         )
     )
     ld.add_action(
