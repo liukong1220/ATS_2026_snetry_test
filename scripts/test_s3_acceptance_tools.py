@@ -358,8 +358,9 @@ class EvidenceTools(unittest.TestCase):
         probe = Mock()
         probe.graph.return_value = {"/rog_map_adapter/planning_snapshot": {"publishers": ["ats_rog_map_adapter"]}}
         probe.truth_samples, probe.truth_contact_counts, probe.endpoint_results = [], [], []
+        probe.path = [(0.0, 0.0), (0.6, 0.8)]
         probe.health_summary.return_value = {"ready": True}
-        probe.navigate.side_effect = RuntimeError("goal is occupied")
+        probe.navigate.side_effect = [None, RuntimeError("goal is occupied")]
         process = Mock()
         process.poll.return_value = 0
         modules = {
@@ -377,6 +378,10 @@ class EvidenceTools(unittest.TestCase):
                 s3.run(args)
             summary = json.loads((Path(tmp) / "summary.json").read_text())
             self.assertFalse(summary['passed'])
+            self.assertEqual(summary['waypoints_planned'], 13)
+            self.assertEqual(summary['waypoints_reached'], 1)
+            self.assertAlmostEqual(summary['route_completed_ratio'], 1 / 13)
+            self.assertAlmostEqual(summary['path_length_m'], 1.0)
             self.assertTrue(summary['tunnels'])
             for tunnel in summary['tunnels'].values():
                 self.assertFalse(tunnel['passed'])

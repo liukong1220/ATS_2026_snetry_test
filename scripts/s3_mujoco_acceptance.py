@@ -28,8 +28,12 @@ FINAL_TOLERANCE_M = 0.08
 WAYPOINT_TOLERANCE_M = 0.15
 
 
+def truth_path_length(path):
+    return sum(math.dist(a, b) for a, b in zip(path, path[1:]))
+
+
 def route_metrics(path, endpoints, minimum_displacement, final_tolerance=FINAL_TOLERANCE_M):
-    length = sum(math.dist(a, b) for a, b in zip(path, path[1:]))
+    length = truth_path_length(path)
     errors = [math.dist(path[-1], endpoint) for endpoint in endpoints[-1:]] if path else []
     return {
         "path_length_m": length,
@@ -650,7 +654,9 @@ class Probe:
         self.event("goal_result", record)
         print(json.dumps(record), flush=True)
         self.save_grid(f"goal_{len(self.endpoint_results)}")
-        if response.result_code != NavigateToPose.Result.RESULT_SUCCEEDED or error > tolerance:
+        if response.result_code != NavigateToPose.Result.RESULT_SUCCEEDED:
+            raise RuntimeError(f"navigation action failed: {record}")
+        if error > tolerance:
             raise RuntimeError(f"goal failed independent truth gate: {record}")
 
     def save_grid(self, name, topics=("/rog_map_adapter/planning_snapshot", "/rog_map/odom_layer")):
@@ -801,6 +807,8 @@ def run(args):
         waypoints = profile["waypoints"][:args.max_goals or None]
         if args.reload:
             waypoints = waypoints[:1]
+        summary["waypoints_planned"] = len(waypoints)
+        summary["waypoints_reached"] = 0
         probe.waypoint_tolerance_m = getattr(args, "waypoint_tolerance_m", WAYPOINT_TOLERANCE_M)
         probe.final_tolerance_m = getattr(args, "final_tolerance_m", FINAL_TOLERANCE_M)
         probe.waypoint_control_tolerance_m = getattr(args, "waypoint_control_tolerance_m", 0.0)
@@ -808,6 +816,7 @@ def run(args):
         for index, point in enumerate(waypoints):
             with TrackingLeg(probe, index):
                 probe.navigate(point, profile["goal_timeout_sim_s"], final=index == len(waypoints) - 1)
+                summary["waypoints_reached"] += 1
         if not map_prefix:
             summary["save"] = probe.save_map()
         minimum = 0.2 if args.reload or args.max_goals else profile["minimum_displacement_m"]
@@ -817,7 +826,6 @@ def run(args):
         summary["endpoints"] = probe.endpoint_results
         summary["route_deviation"] = route_deviation(probe.path, [profile["start"][:2]] +
                                                      [p[:2] for p in waypoints])
-        summary["route_completed_ratio"] = len(probe.endpoint_results) / len(waypoints)
         summary["topic_counts"] = probe.counts
         executed, transient = split_gate_collisions(probe.planner_statuses,
                                                     probe.executed_references)
@@ -859,6 +867,10 @@ def run(args):
     finally:
         with cleanup:
             if probe is not None:
+                if summary.get("waypoints_planned"):
+                    summary["route_completed_ratio"] = summary["waypoints_reached"] / summary["waypoints_planned"]
+                    if "path_length_m" not in summary and probe.path:
+                        summary["path_length_m"] = truth_path_length(probe.path)
                 if profile.get("tunnels"):
                     summary["route"] = profile.get("route")
                     if "tunnels" not in summary:
