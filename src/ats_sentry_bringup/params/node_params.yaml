@@ -61,8 +61,23 @@ standard_robot_pp_ros2:
     # 授权样本可接受的最大时间戳年龄（s），与 MPC 的 execution_command_timeout 一致。
     # transient_local 会把重启前的旧样本重投给新订阅者，超龄样本必须拒绝。
     execution_command_timeout: 0.5
+    # 跨节点时钟/仿真时钟微小抖动的未来戳容差（s），避免偶发 1~50 ms 领先戳误判停机。
+    execution_command_future_tolerance_sec: 0.05
+    # 串口重连、保护及发送线程参数化周期。
+    usb_not_ok_sleep_ms: 1000
+    usb_protect_sleep_ms: 1000
+    link_up_publish_rate_hz: 20.0
+    send_loop_period_ms: 5
+    service_retry_sleep_ms: 500
     # 行为树姿态模式输入话题。需与行为树配置一致。
     robot_mode_topic: decision/robot_mode
+
+gimbal_manager:
+  ros__parameters:
+    use_sim_time: false
+    update_rate_hz: 100.0
+    cmd_gimbal_topic: "cmd_gimbal"
+    cmd_gimbal_joint_topic: "cmd_gimbal_joint"
 
 ats_sentry_behavior_server:
   ros__parameters:
@@ -315,8 +330,11 @@ loam_interface:
     # 雷达已改装到底盘（报告 2.1.8）：gimbal_yaw_odom 现在表示底盘系，原点取底盘底面中心，
     # 离地 0.07 m [解读，待上车确认]。odom 原点锚定在其正下方地面，
     # 保证 odom z=0 即地面，ROGMap 投影高度带与规划轨迹都以地面为基准。
-    # 旧云台构型为 0.15（chassis_height 0.11 + gimbal_yaw_height 0.04）。
+    # 旧云台构型为 0.15（chassis_height 0.11 + gimbal_yaw_height 0.04）；
+    # 实机启动由 lidar_mount_mode 在 navigation_launch.py 自动覆盖（gimbal=0.15, chassis=0.07）。
     base_frame_height: 0.07
+    tf_lookup_timeout_sec: 0.2
+    max_odom_buffer_size: 4096
 
 # TF 权威（P6 零.5 / 三.2）：本节点是实车 `odom->gimbal_yaw_odom` 与
 # `odom->base_footprint` 的唯一发布者，但它的 `odometryHandler` 在
@@ -334,6 +352,17 @@ sensor_scan_generation:
     lidar_frame: "front_mid360"
     base_frame: "base_footprint"
     robot_base_frame: "gimbal_yaw_odom"
+    # 空串默认输出 robot_base_frame；lidar_mount_mode:=gimbal 且 gimbal_use_base_footprint_odom:=True 时
+    # 由 navigation_launch.py 覆盖为 base_footprint 且关闭 publish_robot_base_tf 以消除双父 TF 冲突。
+    odometry_output_frame: ""
+    publish_tf: true
+    publish_robot_base_tf: true
+    publish_base_frame_tf: true
+    cache_lidar_to_base_tf: false
+    tf_lookup_timeout_sec: 0.05
+    allow_latest_base_tf_fallback: true
+    latest_base_tf_max_age_sec: 0.2
+    sync_queue_size: 100
 
 terrain_analysis:
   ros__parameters:
@@ -403,6 +432,7 @@ terrain_analysis_ext:
     slopeSteepDegThre: 25.0              # steep 坡度分级阈值。
     useSlopeAsObstacle: false            # true 后，超过坡度阈值的格子直接进 traversability 障碍。
     slopeObstacleDegThre: 30.0           # 坡度障碍阈值；建议先从 25~30 deg 试起。
+    loop_rate_hz: 100.0                  # 主处理循环频率（Hz）。
 
 fake_vel_transform:
   ros__parameters:
@@ -424,14 +454,19 @@ fake_vel_transform:
     # 正式链同样经过本节点；它不订阅 cmd_spin，wz 只来自 MPC。
     enable_cmd_spin: false
     init_spin_speed: 0.0
+    tf_publish_rate_hz: 50.0
+    zero_vel_epsilon: 0.000001
 
 chassis_vel_transform:
   ros__parameters:
     use_sim_time: false
     joint_state_topic: "serial/gimbal_joint_state"
+    odom_topic: "/localization"
     input_cmd_vel_topic: "/cmd_vel/autonomy_gimbal"
     output_cmd_vel_topic: "/cmd_vel/autonomy"
     big_yaw_joint_name: "gimbal_yaw_odom_joint"
+    # 速度输入系："body"（默认，MPC 车体系/云台系）或 "world"（按 odom yaw 旋转到车体系）。
+    input_velocity_frame: "body"
     # 出口节点只做坐标转换和保护，禁止任何放大：增益恒为 1.0。
     linear_gain: 1.0
     angular_gain: 1.0
@@ -443,8 +478,13 @@ chassis_vel_transform:
     max_angular_accel: 2.0
     # 限制大 yaw 反馈进入速度坐标变换的变化率，避免关节角抖动直接变成底盘速度矢量跳变。
     max_yaw_transform_rate: 3.5
-    # 若现场下位机在“都涵盖/底盘跟随云台”模式里已经做了大 yaw 解耦，
-    # 可临时置 false 验证是否存在双重补偿。
+    # 旋转前馈延时补偿：大 yaw 旋转时按 theta_comp = theta + omega * delay 补偿串口/执行滞后。
+    yaw_delay_compensation_sec: 0.02
+    yaw_rate_filter_alpha: 0.4
+    max_yaw_rate_for_compensation: 15.0
+    # 若 gimbal_use_base_footprint_odom:=True（gimbal 模式默认），navigation_launch.py 会将其置 false，
+    # 避免对已在 base_footprint（底盘系）产出的速度做二次大 yaw 旋转；
+    # gimbal_use_base_footprint_odom:=False 时置 true 启用大 yaw 旋转解耦与前馈补偿。
     transform_linear_with_big_yaw: true
     invert_big_yaw: false
     invert_output_x: false
@@ -452,8 +492,13 @@ chassis_vel_transform:
     # 缺少 serial/gimbal_joint_state 时禁止静默直通：直通会把 gimbal_yaw_odom 系的
     # [vx, vy] 当成车体系直接下发，方向可能整体偏 $\psi$，属于"命令方向与实际运动
     # 不符"的立即断电条件。置 false 后节点立即发布零速度并清零加速度平滑状态。
-    # 实机正式 profile 经过该节点；缺反馈的出站归零时延仍须在抬轮 HIL 实测。
+    # 当 transform_linear_with_big_yaw=false 时仅作限幅/平滑，不受缺 big_yaw 阻断。
     pass_through_without_yaw: false
+    missing_yaw_policy: "zero"
+    yaw_timeout_sec: 0.5
+    qos_depth: 10
+    warn_throttle_ms: 1000
+    min_dt_sec: 0.000001
 
 # 实车 GimbalYawStatus 的唯一发布者（P6 零.3）。仿真的模拟 ack 由
 # `src/sim/ats_mujoco_sim/ats_mujoco_sim/sim_node.py` 发布，两者互斥：
@@ -479,20 +524,22 @@ gimbal_yaw_status_bridge:
     # 时序关系必须满足
     # $T_{\mathrm{pub}} < T_{\mathrm{joint}} \le T_{\mathrm{tf}} < T_{\mathrm{lease}}$：
     #   $T_{\mathrm{pub}} = 1/50 = 0.02\ \mathrm{s}$（本节点发布周期）
-    #   $T_{\mathrm{joint}} = 0.1\ \mathrm{s}$（云台关节反馈新鲜度上界）
-    #   $T_{\mathrm{tf}} = 0.2\ \mathrm{s}$（TF 新鲜度上界）
-    #   $T_{\mathrm{lease}} = 0.5\ \mathrm{s}$（上游 gimbal_status_timeout）
+    #   $T_{\mathrm{joint}} = 0.25\ \mathrm{s}$（云台关节反馈新鲜度上界，抗串口偶发抖动）
+    #   $T_{\mathrm{tf}} = 0.30\ \mathrm{s}$（TF 新鲜度上界）
+    #   $T_{\mathrm{lease}} = 0.50\ \mathrm{s}$（上游 gimbal_status_timeout）
     # 本节点判"不新鲜"必须早于上游租约超时，否则上游会先看到一帧"仍然有效"的旧 ack。
-    joint_state_timeout_ms: 100
-    tf_timeout_ms: 200
+    joint_state_timeout_ms: 250
+    tf_timeout_ms: 300
     publish_rate_hz: 50.0
-    # locked 只能来自实测角速度：$|\dot{\psi}| \le 0.05\ \mathrm{rad/s}$
-    # 且连续保持 100 ms 才置 true，单帧静止不算锁定。
-    lock_rate_threshold: 0.05
-    lock_dwell_ms: 100
-    # 实车没有车体 yaw 交接机构：BODY_YAW_FOLLOW 结构性拒绝，恒为 false。
-    # 置 true 只允许出现在明确标注的仿真/对照 profile。
-    allow_body_yaw_follow: false
+    # locked 只能来自实测角速度：$|\dot{\psi}| \le 0.15\ \mathrm{rad/s}$
+    # 且连续保持 50 ms 才置 true，单帧静止不算锁定。
+    lock_rate_threshold: 0.15
+    lock_dwell_ms: 50
+    # 方案 A（下位机直接消费车体系 [vx, vy, wz]）下底盘可独立执行窄通道航向对齐（BODY_YAW_FOLLOW）与小陀螺（SPIN）。
+    allow_body_yaw_follow: true
+    # 双 yaw 独立自瞄期间云台自由转动，不因未锁定阻断底盘导航执行；需严格锁云台时可显式置 true。
+    enforce_gimbal_lock: false
+    warn_throttle_ms: 2000
 
 small_gicp_relocalization:
   ros__parameters:
@@ -656,6 +703,9 @@ localization_fusion:
     min_observation_quality: 0.02
     min_observation_inliers: 200
     max_registration_error: 5.0
+    status_publish_rate_hz: 20.0
+    # 偶发单帧乱序里程计丢弃即可，不因此将 TRACKING 强行降级为 DEGRADED。
+    degrade_on_out_of_order_odom: false
 
 pointcloud_to_laserscan:
   ros__parameters:
@@ -761,6 +811,8 @@ ats_rog_map:
     cloud_timeout_sec: 2.0
     odom_timeout_sec: 2.0
     tf_timeout_sec: 0.1
+    health_publish_rate_hz: 10.0
+    cloud_pending_poll_ms: 1
     debug_rate_hz: 2.0
     esdf_visualization_height: 0.15
     # RViz-only local voxel diagnostics. This publisher is inactive without a subscriber and
@@ -894,6 +946,9 @@ ats_rog_map_adapter:
     output_in_projection_frame: false
     allow_missing_static_map: false
     input_timeout_sec: 2.0
+    future_stamp_tolerance_sec: 0.10
+    tf_lookup_timeout_sec: 0.10
+    tf_latest_fallback_max_skew_sec: 0.10
     signed_distance_max_m: 2.0
     footprint_length: 0.581
     footprint_width: 0.571
@@ -921,6 +976,11 @@ minco_planner:
     # Projection publication jitter reaches 3.55 s in the measured CPU
     # profile; keep the lease fail-safe while allowing that bounded gap.
     map_ready_timeout_sec: 5.0
+    tf_lookup_timeout_sec: 0.10
+    runtime_tf_lookup_timeout_sec: 0.05
+    local_route_anchor_offset: 1.0
+    local_route_bypass_padding: 2.0
+    local_route_max_local_length: 7.0
     # 规划失败/地图刷新日志的最短输出间隔，关键字仍用于自动化证据解析。
     log_throttle_ms: 2000
     emergency_stop_heartbeat_period_sec: 0.1
@@ -974,6 +1034,9 @@ minco_planner:
     max_acceleration: 2.5
     max_jerk: 12.0
     max_lateral_acceleration: 1.5
+    corner_turn_threshold_rad: 0.35
+    corner_inscribed_ratio: 0.45
+    min_corner_radius: 0.20
     max_time_scaling_iterations: 5
     time_scaling_factor: 1.25
     esdf_obstacle_optimization_enabled: true
@@ -1048,6 +1111,20 @@ minco_planner:
     yaw_tunnel_axis_min_coherence: 0.80
     yaw_tunnel_pre_align_distance: 0.53
     yaw_tunnel_post_release_distance: 0.31
+    yaw_tunnel_axis_tolerance: 0.20
+    yaw_tunnel_side_wall_gradient_min: 0.35
+    yaw_tunnel_side_wall_cos2_min: 0.85
+    terminal_rotation_comfortable_clearance_m: 0.06
+    terminal_rotation_tight_yaw_span_rad: 0.35
+    sidestep_min_duration: 0.25
+    sidestep_max_speed: 0.6
+    sidestep_max_accel: 1.2
+    sidestep_min_esdf_margin_m: 0.04
+    sidestep_desired_esdf_margin_m: 0.10
+    sidestep_max_radius_m: 0.45
+    sidestep_max_tries: 8
+    sidestep_accept_clearance_m: 0.08
+    sidestep_min_improvement_m: 0.03
     footprint_length: 0.581
     footprint_width: 0.571
     footprint_safety_margin: 0.02
@@ -1078,6 +1155,7 @@ ats_goal_manager:
     yaw_authority_request_topic: /gimbal/yaw_authority_request
     gimbal_status_topic: /gimbal/yaw_status
     require_gimbal_status: true
+    enforce_gimbal_lock_on_execution: false
     gimbal_status_timeout_sec: 0.5
     map_ready_topic: /rog_map_adapter/ready
     map_status_topic: /rog_map_adapter/status
@@ -1099,10 +1177,13 @@ ats_goal_manager:
     planner_start_in_planning_frame: true
     retarget_threshold: 0.03
     map_transform_timeout_sec: 1.0
+    tf_future_tolerance_sec: 0.2
     # 进度按"沿已提交参考的剩余弧长"计。绕墙路线直线距离先增后减，旧判据会在车正常跟随时判停滞。
     progress_along_reference: true
     require_map_status: true
     emergency_stop_heartbeat_period_sec: 0.1
+    # 状态机主循环与急停心跳解耦（0 = 跟随心跳周期）。
+    tick_rate_hz: 20.0
     # Producer lease is conservatively backdated to absorb independent /clock
     # delivery jitter; MPC/arbiter still reject genuinely future samples.
     execution_command_stamp_backdate_sec: 0.02
@@ -1145,6 +1226,7 @@ cmd_vel_arbiter:
     auto_timeout_ms: 300
     link_timeout_ms: 300
     execution_command_timeout: 0.5
+    execution_command_future_tolerance_sec: 0.05
     control_rate_hz: 50.0
     # 换代宽限（报告 5.1.10 第 2 项），与 ats_swerve_mpc.supersede_grace_sec 必须相同：
     # 同一 epoch 的新 generation 就绪后，旧授权最多再保留 0.4 s 等新 generation 的 EXECUTE。
@@ -1159,8 +1241,10 @@ ats_swerve_mpc:
     # MPC 与 arbiter 双侧校验 producer header.stamp；未来或超过该 lease 的旧授权
     # 不得装载 reference，transient-local 重投只能保持零速。
     execution_command_timeout: 0.5
+    execution_command_future_tolerance_sec: 0.05
     gimbal_status_topic: /gimbal/yaw_status
     require_gimbal_status: true
+    enforce_gimbal_lock_on_execution: false
     gimbal_status_timeout: 0.5
     command_topic: /cmd_vel/autonomy_raw
     emergency_stop_topic: /planner/emergency_stop
@@ -1228,6 +1312,14 @@ ats_swerve_mpc:
     max_wheel_speed: 5.0
     max_wheel_acceleration: 2.0
     max_steer_rate: 10.4719755
+    clamp_bisection_iterations: 20
+    warm_start_blend_ratio: 0.5
+    terminal_stop_speed_threshold: 0.05
+    terminal_speed_window_sec: 0.2
+    stationary_yaw_tolerance: 0.15
+    intermediate_rotation_handoff_tolerance: 0.03
+    intermediate_rotation_stop_wz_threshold: 0.35
+    min_rotation_span_rad: 0.05
 
 ats_teleop_twist_joy_node:
   ros__parameters:

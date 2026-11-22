@@ -790,16 +790,43 @@ def main():
         assert forbidden not in real_robot_text.lower(), (
             f"neutral real-robot entry retains {forbidden}"
         )
+    assert '"lidar_mount_mode": lidar_mount_mode' in real_robot_text
+    assert '"gimbal_use_base_footprint_odom": gimbal_use_base_footprint_odom' in real_robot_text
     assert '"launch_fake_vel_transform": launch_fake_vel_transform' in real_robot_text
     assert (
         '"launch_chassis_vel_transform": launch_chassis_vel_transform' in real_robot_text
     )
     assert '"require_serial_link": "True"' in real_robot_text
     real_robot_defaults = launch_defaults(real_robot_navigation)
+    assert isinstance(real_robot_defaults["lidar_mount_mode"], ast.Constant)
+    assert real_robot_defaults["lidar_mount_mode"].value == "gimbal"
+    assert isinstance(real_robot_defaults["gimbal_use_base_footprint_odom"], ast.Constant)
+    assert real_robot_defaults["gimbal_use_base_footprint_odom"].value == "True"
     assert isinstance(real_robot_defaults["launch_fake_vel_transform"], ast.Constant)
-    assert real_robot_defaults["launch_fake_vel_transform"].value == "True"
-    assert isinstance(real_robot_defaults["launch_chassis_vel_transform"], ast.Constant)
-    assert real_robot_defaults["launch_chassis_vel_transform"].value == "True"
+    assert real_robot_defaults["launch_fake_vel_transform"].value == "False"
+    chassis_vel_mode_default = (
+        "PythonExpression([\"'True' if '\", lidar_mount_mode, "
+        "\"'.lower() == 'gimbal' else 'False'\"])"
+    )
+    for launch_path in (real_robot_navigation, root_launch, nav_real, nav_bringup, nav_launch):
+        assert_default_expression(
+            launch_path, "launch_chassis_vel_transform", chassis_vel_mode_default
+        )
+    root_defaults = launch_defaults(root_launch)
+    assert isinstance(root_defaults["lidar_mount_mode"], ast.Constant)
+    assert root_defaults["lidar_mount_mode"].value == "chassis"
+    assert isinstance(root_defaults["gimbal_use_base_footprint_odom"], ast.Constant)
+    assert root_defaults["gimbal_use_base_footprint_odom"].value == "True"
+    assert isinstance(root_defaults["launch_fake_vel_transform"], ast.Constant)
+    assert root_defaults["launch_fake_vel_transform"].value == "False"
+    # Gimbal status timing hierarchy: T_pub < T_joint <= T_tf < T_lease.
+    gimbal_pub_sec = 1.0 / float(gimbal_yaw_status_bridge["publish_rate_hz"])
+    gimbal_joint_sec = float(gimbal_yaw_status_bridge["joint_state_timeout_ms"]) / 1000.0
+    gimbal_tf_sec = float(gimbal_yaw_status_bridge["tf_timeout_ms"]) / 1000.0
+    assert gimbal_pub_sec < gimbal_joint_sec <= gimbal_tf_sec < float(
+        goal_manager["gimbal_status_timeout_sec"]
+    )
+    assert gimbal_tf_sec < float(mpc["gimbal_status_timeout"])
 
     behavior_text = behavior_example.read_text(encoding="utf-8")
     assert "nav2_action_server" not in behavior_text

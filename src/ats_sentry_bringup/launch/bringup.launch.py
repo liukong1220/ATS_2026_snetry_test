@@ -30,6 +30,8 @@ def generate_launch_description():
     launch_rosbag_recorder = LaunchConfiguration("launch_rosbag_recorder")
     launch_small_gicp_relocalization = LaunchConfiguration("launch_small_gicp_relocalization")
     launch_localization_fusion = LaunchConfiguration("launch_localization_fusion")
+    lidar_mount_mode = LaunchConfiguration("lidar_mount_mode")
+    gimbal_use_base_footprint_odom = LaunchConfiguration("gimbal_use_base_footprint_odom")
     launch_fake_vel_transform = LaunchConfiguration("launch_fake_vel_transform")
     launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
     fake_vel_output_topic = LaunchConfiguration("fake_vel_output_topic")
@@ -84,18 +86,25 @@ def generate_launch_description():
         DeclareLaunchArgument("launch_rosbag_recorder", default_value="False"),
         DeclareLaunchArgument("launch_small_gicp_relocalization", default_value="True"),
         DeclareLaunchArgument("launch_localization_fusion", default_value="True"),
-        # Lidar moved onto the chassis (report 2.1.8, AGENTS.md 2.3): navigation now runs
-        # in the chassis frame, so both velocity compatibility layers default off while the
-        # topic, TF and velocity-frame contracts stay intact (zero-rotation compat TF kept).
-        DeclareLaunchArgument("launch_fake_vel_transform", default_value="False"),
-        DeclareLaunchArgument("launch_chassis_vel_transform", default_value="False"),
         DeclareLaunchArgument(
-            "fake_vel_output_topic",
-            default_value=IfElseSubstitution(launch_chassis_vel_transform, "/cmd_vel/autonomy_gimbal", "/cmd_vel/autonomy"),
+            "lidar_mount_mode",
+            default_value="chassis",
+            description="LiDAR mount mode: 'chassis' (fixed on chassis) or 'gimbal' (mounted on big yaw).",
         ),
         DeclareLaunchArgument(
-            "chassis_vel_input_topic",
-            default_value=IfElseSubstitution(launch_fake_vel_transform, "/cmd_vel/autonomy_gimbal", mpc_cmd_vel_topic),
+            "gimbal_use_base_footprint_odom",
+            default_value="True",
+            description="In gimbal mode, output odometry/localization in base_footprint (chassis frame) and disable linear big_yaw rotation.",
+        ),
+        # Unified Plan A chassis-frame velocity (no fake_vel_transform by default; zero-rotation compat TF kept).
+        # Under lidar_mount_mode:=gimbal, chassis_vel_transform stays active as the velocity guard/limiter
+        # (and optional big_yaw linear compensator when gimbal_use_base_footprint_odom:=False).
+        DeclareLaunchArgument("launch_fake_vel_transform", default_value="False"),
+        DeclareLaunchArgument(
+            "launch_chassis_vel_transform",
+            default_value=PythonExpression([
+                "'True' if '", lidar_mount_mode, "'.lower() == 'gimbal' else 'False'",
+            ]),
         ),
         DeclareLaunchArgument(
             "mpc_cmd_vel_topic",
@@ -104,6 +113,14 @@ def generate_launch_description():
                 "/cmd_vel/autonomy_raw",
                 IfElseSubstitution(launch_chassis_vel_transform, "/cmd_vel/autonomy_gimbal", "/cmd_vel/autonomy"),
             ),
+        ),
+        DeclareLaunchArgument(
+            "fake_vel_output_topic",
+            default_value=IfElseSubstitution(launch_chassis_vel_transform, "/cmd_vel/autonomy_gimbal", "/cmd_vel/autonomy"),
+        ),
+        DeclareLaunchArgument(
+            "chassis_vel_input_topic",
+            default_value=IfElseSubstitution(launch_fake_vel_transform, "/cmd_vel/autonomy_gimbal", mpc_cmd_vel_topic),
         ),
         DeclareLaunchArgument("chassis_vel_output_topic", default_value="/cmd_vel/autonomy"),
         DeclareLaunchArgument("launch_cmd_vel_arbiter", default_value="True"),
@@ -114,17 +131,33 @@ def generate_launch_description():
         DeclareLaunchArgument("require_gimbal_status", default_value="True"),
         DeclareLaunchArgument("launch_behavior", default_value="True"),
         DeclareLaunchArgument("launch_lidar_static_tf", default_value="True"),
-        # Chassis-mounted Mid360 (report 2.1.8, 2026-10-23): 0.05 m inside the middle of the
-        # 0.571 m front edge, optical centre 0.20 m above ground, pitched 30 deg towards the
-        # front. gimbal_yaw_odom is now the chassis frame, origin at the chassis bottom centre
-        # 0.07 m above ground [interpretation to confirm on the vehicle], so z = 0.20 - 0.07.
-        # The old gimbal pose was "-0.1 0.245 0.325 75deg 0 -161deg".
-        DeclareLaunchArgument("lidar_static_tf_x", default_value="0.2405"),
-        DeclareLaunchArgument("lidar_static_tf_y", default_value="0.0"),
-        DeclareLaunchArgument("lidar_static_tf_z", default_value="0.13"),
-        DeclareLaunchArgument("lidar_static_tf_roll", default_value="0.0"),
-        DeclareLaunchArgument("lidar_static_tf_pitch", default_value="0.5235987755982988"),
-        DeclareLaunchArgument("lidar_static_tf_yaw", default_value="0.0"),
+        # Mid360 static extrinsic relative to gimbal_yaw_odom, keyed by lidar_mount_mode:
+        # - chassis: (0.2405, 0.0, 0.13), rpy (0.0, +30deg, 0.0)
+        # - gimbal:  (-0.1, 0.245, 0.325), rpy (+75deg, 0.0, -161deg)
+        DeclareLaunchArgument(
+            "lidar_static_tf_x",
+            default_value=PythonExpression(["'-0.1' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.2405'"]),
+        ),
+        DeclareLaunchArgument(
+            "lidar_static_tf_y",
+            default_value=PythonExpression(["'0.245' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.0'"]),
+        ),
+        DeclareLaunchArgument(
+            "lidar_static_tf_z",
+            default_value=PythonExpression(["'0.325' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.13'"]),
+        ),
+        DeclareLaunchArgument(
+            "lidar_static_tf_roll",
+            default_value=PythonExpression(["'1.3089969389957472' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.0'"]),
+        ),
+        DeclareLaunchArgument(
+            "lidar_static_tf_pitch",
+            default_value=PythonExpression(["'0.0' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.5235987755982988'"]),
+        ),
+        DeclareLaunchArgument(
+            "lidar_static_tf_yaw",
+            default_value=PythonExpression(["'-2.8099800957108707' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.0'"]),
+        ),
         DeclareLaunchArgument("use_respawn", default_value="True"),
         DeclareLaunchArgument("log_level", default_value="info"),
         DeclareLaunchArgument("slam", default_value="False"),
@@ -162,6 +195,18 @@ def generate_launch_description():
         condition=IfCondition(require_gimbal_status), output="screen", respawn=use_respawn, respawn_delay=2.0,
         parameters=[params_file, {"use_sim_time": use_sim_time}], arguments=["--ros-args", "--log-level", log_level],
     )
+    active_nav_frame = PythonExpression([
+        "'base_footprint' if ('", lidar_mount_mode, "'.lower() == 'gimbal' and '",
+        gimbal_use_base_footprint_odom, "'.lower() == 'true') else 'gimbal_yaw_odom'",
+    ])
+    rog_map_base_ground_offset = ParameterValue(
+        PythonExpression([
+            "0.0 if ('", lidar_mount_mode, "'.lower() == 'gimbal' and '",
+            gimbal_use_base_footprint_odom, "'.lower() == 'true') else (0.15 if '",
+            lidar_mount_mode, "'.lower() == 'gimbal' else 0.07)",
+        ]),
+        value_type=float,
+    )
     # One process runs /ats_rog_map and the planning-map owner /ats_rog_map_adapter
     # (in-process projection). Without `name=` the override dict lands under '/**'
     # so both nodes receive it; the shared key require_odom_identity means the same
@@ -171,6 +216,9 @@ def generate_launch_description():
         output="screen", respawn=use_respawn, respawn_delay=2.0,
         parameters=[params_file, {
             "use_sim_time": use_sim_time,
+            "base_frame": active_nav_frame,
+            "robot_frame": active_nav_frame,
+            "odom_layer.base_ground_offset": rog_map_base_ground_offset,
             "require_odom_identity": ParameterValue(use_identified_odometry, value_type=bool),
             "require_localization_status": launch_localization_fusion,
             "mapping_mode": ParameterValue(slam, value_type=bool),
@@ -193,6 +241,8 @@ def generate_launch_description():
             "slam": slam,
             "use_identified_odometry": use_identified_odometry,
             "launch_localization_fusion": launch_localization_fusion,
+            "lidar_mount_mode": lidar_mount_mode,
+            "gimbal_use_base_footprint_odom": gimbal_use_base_footprint_odom,
             "launch_fake_vel_transform": launch_fake_vel_transform,
             "launch_chassis_vel_transform": launch_chassis_vel_transform,
             "fake_vel_output_topic": fake_vel_output_topic,

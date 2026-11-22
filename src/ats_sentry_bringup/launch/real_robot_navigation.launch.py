@@ -12,7 +12,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch.substitutions import LaunchConfiguration, PythonExpression, TextSubstitution
 
 
 def generate_launch_description():
@@ -24,6 +24,8 @@ def generate_launch_description():
     require_gimbal_status = LaunchConfiguration("require_gimbal_status")
     launch_behavior = LaunchConfiguration("launch_behavior")
     use_rviz = LaunchConfiguration("use_rviz")
+    lidar_mount_mode = LaunchConfiguration("lidar_mount_mode")
+    gimbal_use_base_footprint_odom = LaunchConfiguration("gimbal_use_base_footprint_odom")
     launch_fake_vel_transform = LaunchConfiguration("launch_fake_vel_transform")
     launch_chassis_vel_transform = LaunchConfiguration("launch_chassis_vel_transform")
     log_level = LaunchConfiguration("log_level")
@@ -43,8 +45,23 @@ def generate_launch_description():
         DeclareLaunchArgument("require_gimbal_status", default_value="True"),
         DeclareLaunchArgument("launch_behavior", default_value="True"),
         DeclareLaunchArgument("use_rviz", default_value="False"),
-        DeclareLaunchArgument("launch_fake_vel_transform", default_value="True"),
-        DeclareLaunchArgument("launch_chassis_vel_transform", default_value="True"),
+        DeclareLaunchArgument(
+            "lidar_mount_mode",
+            default_value="gimbal",
+            description="Real-robot LiDAR mount mode: 'gimbal' (dual-yaw big-yaw mount, default) or 'chassis' (fixed on chassis).",
+        ),
+        DeclareLaunchArgument(
+            "gimbal_use_base_footprint_odom",
+            default_value="True",
+            description="In gimbal mode, output odometry/localization in base_footprint (chassis frame) and disable linear big_yaw rotation.",
+        ),
+        DeclareLaunchArgument("launch_fake_vel_transform", default_value="False"),
+        DeclareLaunchArgument(
+            "launch_chassis_vel_transform",
+            default_value=PythonExpression([
+                "'True' if '", lidar_mount_mode, "'.lower() == 'gimbal' else 'False'",
+            ]),
+        ),
         DeclareLaunchArgument("log_level", default_value="info"),
     ]
     bringup = IncludeLaunchDescription(
@@ -55,6 +72,8 @@ def generate_launch_description():
             "namespace": namespace,
             "params_file": params_file,
             "use_sim_time": "False",
+            "lidar_mount_mode": lidar_mount_mode,
+            "gimbal_use_base_footprint_odom": gimbal_use_base_footprint_odom,
             "launch_fake_vel_transform": launch_fake_vel_transform,
             "launch_chassis_vel_transform": launch_chassis_vel_transform,
             "require_serial_link": "True",
