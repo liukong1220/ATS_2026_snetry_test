@@ -66,16 +66,16 @@ P3 完成前建议避免声称 Nav2-free。未在目标机测量前建议避免�
 
 ### 2.3 雷达安装与速度链
 
-2026-10-23 起雷达固定在底盘上（报告 2.1.8）：`gimbal_yaw_odom` 保留名字，语义是底盘系（原点取底盘底面中心）。导航不再依赖云台 yaw，因此：
+2026-11-22 起统一通过 `lidar_mount_mode`（`chassis` / `gimbal`）管理雷达安装与速度链契约，MCU 采用方案 A（`SendRobotCmdData.data.speed_vector.{vx, vy, wz}` 直接消费底盘系速度）：
 
-- 两个速度兼容层的默认值按入口不同：
-  - `ats_sentry_bringup/launch/bringup.launch.py` 默认 `launch_fake_vel_transform:=False`、`launch_chassis_vel_transform:=False`；
-  - `ats_sentry_bringup/launch/real_robot_navigation.launch.py` 默认两个都是 `True`，`scripts/validate_navigation_config.py` 锁定这一默认。小陀螺继续用 fake yaw 稳定导航（用户 2026-10-30），所以这个入口没有关掉它们。
-- 云台仍然存在（自瞄用）；需要云台坐标系速度的旧链路可以显式把两个参数设回 `True`。
-- fake-yaw 关闭时保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF。
-- 建议避免引入重复的 `base_footprint -> base_link` TF 发布者。
-- 下游仍要求底盘坐标速度时，建议避免只关闭 chassis transform。
-- 固定雷达迁移优先通过启动参数关闭兼容层，同时保持 topic、TF 和速度 frame 契约完整。
+- 两个顶层入口的默认模式与兼容层契约（由 `scripts/validate_navigation_config.py` 锁定）：
+  - `ats_sentry_bringup/launch/real_robot_navigation.launch.py` 默认 `lidar_mount_mode:="gimbal"`、`gimbal_use_base_footprint_odom:="True"`、`launch_fake_vel_transform:="False"`、`launch_chassis_vel_transform` 随模式自动联动（`gimbal` 默认 `True`、`chassis` 默认 `False`，均保留显式覆盖）。双 yaw 云台大 yaw 上装雷达时，默认启用 `base_footprint` 里程计解耦（`active_nav_frame:=base_footprint`、`sensor_scan_generation` 仅发 `odom -> base_footprint` 且关闭 `publish_robot_base_tf`、`ats_rog_map` `base_ground_offset:=0.0`、`loam_interface` `base_frame_height:=0.15`、`point_lio` 同步雷达安装倾角重力向量、`sentry_chassis_vel_transform` 保持启用且 `transform_linear_with_big_yaw:=False`）；显式设 `gimbal_use_base_footprint_odom:=False` 可回退至 `gimbal_yaw_odom` + `transform_linear_with_big_yaw:=True`（含大 yaw 前馈延迟补偿）；
+  - `ats_sentry_bringup/launch/bringup.launch.py` 默认 `lidar_mount_mode:="chassis"`、`launch_fake_vel_transform:="False"`、`launch_chassis_vel_transform` 联动为 `False`（`gimbal_yaw_odom` 语义为底盘系，原点取底盘底面中心）。
+- 云台仍然存在（自瞄用）；需要旧 `fake_vel_transform` 链路时可显式设 `launch_fake_vel_transform:=True`；`fake_vel_transform` 关闭时保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF。
+- 实机与仿真均已参数化全链周期/阈值并收敛至 `src/ats_sentry_bringup/params/node_params.yaml`；小陀螺平移不再依赖强制锁死云台（`allow_body_yaw_follow:=true`、`enforce_gimbal_lock:=false`），MPC 与速度变换模块均已加入旋转系速度搬运（$R(-\omega_z \Delta t)$）消除高速自旋侧偏。
+- 建议避免引入重复的 `base_footprint -> base_link` 或双父 `odom -> gimbal_yaw_odom` TF 发布者。
+- 下游仍要求底盘坐标速度且未启用 `base_footprint` 解耦时，建议避免在 `gimbal` 模式下关闭 `sentry_chassis_vel_transform`。
+- 实车硬件联调与双 yaw 云台现场标定仍未执行，配置与仿真通过不代表实车验证通过。
 
 2026-11-16 用户要求三套 profile 统一为实车长宽 `0.581 x 0.571 m`、2027 仿真余量 `0.02 m`、ROG/terrain 车高门 `0.249 m`、`jps_safe_distance=0.36`、隧道 yaw/自旋启用；暂定平移上限 `5 m/s`、yaw `3 rad/s`、角加速度 `2 rad/s²`，MINCO 起点保护与 MuJoCo 轮速范围同步。此条取代旧的实车余量/车高配置保留要求；同步配置不代表 H2/M/H3 或实车验证通过。
 
