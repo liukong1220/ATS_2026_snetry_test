@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Isolated S3 fault experiments. Process mutations require exact domain ownership."""
+from contextlib import nullcontext
 from copy import deepcopy
 import hashlib
 import json
@@ -623,54 +624,59 @@ def safety_case(case, probe, launch):
         fault_at = time.monotonic()
     stalled = False
     status_begin = len(probe.planner_statuses)
-    try:
-        if case == "service_timeout":
-            raise RuntimeError(
-                "service_timeout parameter-stall hook has been removed from production nodes; "
-                "use OS-level process pause (adapter_lease) instead"
-            )
-        elif case == "unknown":
-            set_parameters(probe, "/ats_mujoco_sim", {"lidar_occlusion_enabled": True})
-            stalled = True
-            probe.event("lidar_occlusion", {"node": "/ats_mujoco_sim", "enabled": True})
-        elif case == "unsafe":
-            from s3_fixture_scene import fixture_position_for_pose
-            from s3_mujoco_acceptance import yaw
-            pose = probe.latest["/simulation/ground_truth/odometry"][0].pose.pose
-            velocity = probe.latest["/cmd_vel/selected"][0].linear
-            direction = yaw(pose.orientation) + math.atan2(velocity.y, velocity.x)
-            fixture_position(probe, fixture_position_for_pose(probe.scene_model,
-                [pose.position.x, pose.position.y, direction], distance=0.80))
-        elif case != "no_path":
-            raise ValueError(case)
-        require(probe, lambda: "/planner/emergency_stop" in probe.latest and
-                probe.latest["/planner/emergency_stop"][1] >= fault_at and
-                probe.latest["/planner/emergency_stop"][0].data and all_zero(probe, fault_at),
-                12, "fresh emergency stop and sustained zero after safety fault")
-        failures = [probe.message_dict(s) for s in probe.planner_statuses[status_begin:]
-                    if s.state == s.STATE_FAILED]
-        if case == "no_path":
-            require(probe, lambda: any(s.failure_reason == s.FAILURE_NO_PATH for s in
-                    probe.planner_statuses[status_begin:]), 10, "free unreachable classified NO_PATH")
-        if case == "unsafe":
-            require(probe, lambda: any(s.failure_reason in (s.FAILURE_RUNTIME_UNSAFE,
-                    s.FAILURE_FOOTPRINT, s.FAILURE_START_ENCLOSED, s.FAILURE_SNAPSHOT_CHANGED)
-                    for s in probe.planner_statuses[status_begin:]), 10,
-                    "unsafe map invalidates the committed reference")
-        # A stopped simulation step cannot count as evidence of continued zeros.
-        observed_sim = probe.sim_time()
-        require(probe, lambda: probe.sim_time() > observed_sim + 0.6 and all_zero(probe, fault_at),
-                10, "simulation progresses while all velocity owners remain stopped")
-        probe.save_grid(case)
-        result = {"passed": True, "fault": case, "stop_wall_s": time.monotonic() - fault_at,
-                  "failure_statuses": failures, "zero_topics": list(VELOCITY_TOPICS)}
-        probe.event("safety_result", result)
-        return result
-    finally:
-        cancel = handle.cancel_goal_async()
-        require(probe, cancel.done, 5, "cancel faulted goal")
-        if stalled:
-            set_parameters(probe, "/ats_mujoco_sim", {"lidar_occlusion_enabled": False})
+    # Full LiDAR occlusion starves Point-LIO odometry too; allow expected
+    # localization LOST only during the bounded occlusion window while keeping
+    # emergency-stop and zero-velocity gates strictly enforced.
+    loss_ctx = probe.expect_localization_loss(25.0) if case == "unknown" else nullcontext()
+    with loss_ctx:
+        try:
+            if case == "service_timeout":
+                raise RuntimeError(
+                    "service_timeout parameter-stall hook has been removed from production nodes; "
+                    "use OS-level process pause (adapter_lease) instead"
+                )
+            elif case == "unknown":
+                set_parameters(probe, "/ats_mujoco_sim", {"lidar_occlusion_enabled": True})
+                stalled = True
+                probe.event("lidar_occlusion", {"node": "/ats_mujoco_sim", "enabled": True})
+            elif case == "unsafe":
+                from s3_fixture_scene import fixture_position_for_pose
+                from s3_mujoco_acceptance import yaw
+                pose = probe.latest["/simulation/ground_truth/odometry"][0].pose.pose
+                velocity = probe.latest["/cmd_vel/selected"][0].linear
+                direction = yaw(pose.orientation) + math.atan2(velocity.y, velocity.x)
+                fixture_position(probe, fixture_position_for_pose(probe.scene_model,
+                    [pose.position.x, pose.position.y, direction], distance=0.80))
+            elif case != "no_path":
+                raise ValueError(case)
+            require(probe, lambda: "/planner/emergency_stop" in probe.latest and
+                    probe.latest["/planner/emergency_stop"][1] >= fault_at and
+                    probe.latest["/planner/emergency_stop"][0].data and all_zero(probe, fault_at),
+                    12, "fresh emergency stop and sustained zero after safety fault")
+            failures = [probe.message_dict(s) for s in probe.planner_statuses[status_begin:]
+                        if s.state == s.STATE_FAILED]
+            if case == "no_path":
+                require(probe, lambda: any(s.failure_reason == s.FAILURE_NO_PATH for s in
+                        probe.planner_statuses[status_begin:]), 10, "free unreachable classified NO_PATH")
+            if case == "unsafe":
+                require(probe, lambda: any(s.failure_reason in (s.FAILURE_RUNTIME_UNSAFE,
+                        s.FAILURE_FOOTPRINT, s.FAILURE_START_ENCLOSED, s.FAILURE_SNAPSHOT_CHANGED)
+                        for s in probe.planner_statuses[status_begin:]), 10,
+                        "unsafe map invalidates the committed reference")
+            # A stopped simulation step cannot count as evidence of continued zeros.
+            observed_sim = probe.sim_time()
+            require(probe, lambda: probe.sim_time() > observed_sim + 0.6 and all_zero(probe, fault_at),
+                    10, "simulation progresses while all velocity owners remain stopped")
+            probe.save_grid(case)
+            result = {"passed": True, "fault": case, "stop_wall_s": time.monotonic() - fault_at,
+                      "failure_statuses": failures, "zero_topics": list(VELOCITY_TOPICS)}
+            probe.event("safety_result", result)
+            return result
+        finally:
+            cancel = handle.cancel_goal_async()
+            require(probe, cancel.done, 5, "cancel faulted goal")
+            if stalled:
+                set_parameters(probe, "/ats_mujoco_sim", {"lidar_occlusion_enabled": False})
 
 
 def belongs_to(pid, ancestor):
