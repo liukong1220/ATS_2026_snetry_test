@@ -295,6 +295,14 @@ point_lio:
       plane_thr: 0.1                                    # 0.05, the threshold for plane criteria, the smaller, the flatter a plane
       match_s: 81.0
       ivox_grid_resolution: 0.5
+      batch_update_size: 8
+      batch_max_dt_sec: 0.0025
+      max_iter: 1
+      adaptive_downsample_en: true
+      max_surf_points: 1200
+      satu_soft_degrade_en: true
+      satu_soft_ratio: 0.80
+      satu_inflate_scale: 25.0
       # Chassis-mounted Mid360 pitched 30 deg towards the front (report 2.1.8): a stationary
       # IMU sees gravity (g sin30, 0, -g cos30). Computed from the mount, not measured:
       # replace with the static IMU mean once the vehicle is available.
@@ -306,6 +314,9 @@ point_lio:
 
     odometry:
       publish_odometry_without_downsample: False
+      imu_odom_en: true
+      imu_odom_rate_hz: 100.0
+      imu_odom_blend_tau_s: 0.025
 
     publish:
       scan_publish_en: True                             # False: close all the point cloud output
@@ -571,7 +582,7 @@ small_gicp_relocalization:
     fine_alignment.coarse_first_window_only: true
     fine_alignment.max_correspondence_distance: 0.45
     coarse_max_iterations: 10
-    fine_max_iterations: 16
+    fine_max_iterations: 30
     # 质量门（0 关闭）。借鉴 odom_localizer：重叠率/信息矩阵病态拒绝。
     min_overlap_ratio: 0.30
     min_information_eigenvalue: 0.0
@@ -616,6 +627,17 @@ small_gicp_relocalization:
     height_filter.enable: true
     height_filter.min_z: -0.5
     height_filter.max_z: 2.5
+    local_submap.enable: true
+    local_submap.radius_m: 16.0
+    local_submap.recenter_distance_m: 4.0
+    local_submap.min_points: 600
+    degeneracy.weak_translation_eigenvalue: 25.0
+    degeneracy.weak_yaw_eigenvalue: 15.0
+    scan_context.enable: true
+    scan_context.grid_step_xy: 2.0
+    scan_context.max_radius_m: 15.0
+    scan_context.top_k: 4
+    scan_context.max_distance: 0.42
     # 输入质量与时序门：无效/过期帧不会进入 GICP 累积窗口。
     # max_scan_age_s 使用节点 ROS/sim clock；设为 0 仅在离线回放中关闭年龄门。
     max_scan_age_s: 1.0
@@ -706,6 +728,10 @@ localization_fusion:
     status_publish_rate_hz: 20.0
     # 偶发单帧乱序里程计丢弃即可，不因此将 TRACKING 强行降级为 DEGRADED。
     degrade_on_out_of_order_odom: false
+    directional_fusion.enable: true
+    directional_fusion.weak_axis_damping: 0.0
+    directional_fusion.weak_yaw_damping: 0.2
+    directional_fusion.max_strong_nis: 36.0
 
 pointcloud_to_laserscan:
   ros__parameters:
@@ -898,6 +924,8 @@ ats_rog_map:
     odom_layer.base_ground_offset: 0.07
     odom_layer.window_x: 12.0
     odom_layer.window_y: 12.0
+    odom_layer.tunnel_free_enabled: true
+    odom_layer.tunnel_free_confirm_frames: 2
 
 ats_rog_map_adapter:
   ros__parameters:
@@ -906,7 +934,7 @@ ats_rog_map_adapter:
     # MuJoCo CPU profile.  Do not queue another request while its immutable
     # snapshot is still being built; the service's own 2.0 s input-health
     # gate remains the source-data freshness authority.
-    projection_rate_hz: 0.5
+    projection_rate_hz: 1.0
     projection_request_timeout_sec: 4.0
     projection_snapshot_timeout_sec: 4.0
     # The CPU profile shows up to 1.94 s between projection and terrain/slope
@@ -940,6 +968,8 @@ ats_rog_map_adapter:
     # global layer feeds the planning grid (S3).  A missing PGM fails closed
     # unless allow_missing_static_map is true (mapping mode only).
     use_static_map_obstacles: true
+    use_static_map_geofence_only: false
+    static_map_geofence_border_m: 0.35
     # 比赛模式：规划栅格沿用静态图的范围与坐标系，覆盖全场。设为 true 会把栅格缩到
     # ROGMap 投影窗口（10x10 m），全场目标落在栅格外（domain 154 红框 "goal is outside
     # grid"）。建图模式由 adapter 强制为 true（odom 全局层就是规划范围）。
@@ -955,6 +985,7 @@ ats_rog_map_adapter:
     footprint_safety_margin: 0.02
     robot_frame: gimbal_yaw_odom
     robot_unknown_clear_radius: 0.0
+    tunnel_free_suppresses_terrain: true
 
 minco_planner:
   ros__parameters:
@@ -1019,7 +1050,6 @@ minco_planner:
     prior_guide_map_topic: /map
     search_clearance_cost_weight: 2.0
     search_clearance_cost_distance: 0.8
-    astar_fallback: true
     jps_max_expanded_nodes: -1
     # 统一采用2027配置值；实际准入仍执行矩形足迹/方向与快照安全检查。
     jps_safe_distance: 0.36
@@ -1079,7 +1109,19 @@ minco_planner:
     joint_footprint_edge_samples: 1
     joint_g_epsilon: 0.00001
     joint_max_iterations: 200
-    joint_time_budget_ms: 15.0
+    joint_time_budget_ms: 12.0
+    # O2 局部滚动窗口与 C2 拼接 + Release 墙钟预算参数。
+    rolling_horizon_enabled: true
+    rolling_horizon_length_m: 8.0
+    rolling_min_tail_length_m: 2.0
+    partial_subgoal_continuation_enabled: true
+    partial_subgoal_only_without_prior: true
+    partial_subgoal_min_advance_m: 0.30
+    footprint_refinement_skip_clearance_m: 0.04
+    minco_stage_budget_ms: 20.0
+    plan_wall_budget_ms: 30.0
+    rolling_replan_wall_budget_ms: 35.0
+    plan_hard_wall_budget_ms: 0.0
     # 联合优化的距离场：legacy 的距离取原始场、梯度取平滑场，两者不是同一个函数，线搜索失败率约 40%；
     # bicubic 拷出原始场做 Catmull-Rom 插值，值与梯度同源（线搜索失败 0%，每次求解 14 -> 9 ms）。
     joint_distance_field: bicubic
@@ -1114,6 +1156,12 @@ minco_planner:
     yaw_tunnel_axis_tolerance: 0.20
     yaw_tunnel_side_wall_gradient_min: 0.35
     yaw_tunnel_side_wall_cos2_min: 0.85
+    yaw_tunnel_sidewall_pca_enabled: true
+    yaw_tunnel_dynamic_pre_align_enabled: true
+    yaw_tunnel_terminal_goal_axial_override_enabled: true
+    yaw_tunnel_armed_distance: 0.20
+    yaw_tunnel_pre_align_time_margin: 0.15
+    yaw_tunnel_lock_gimbal: true
     terminal_rotation_comfortable_clearance_m: 0.06
     terminal_rotation_tight_yaw_span_rad: 0.35
     sidestep_min_duration: 0.25
@@ -1129,6 +1177,8 @@ minco_planner:
     footprint_width: 0.571
     footprint_safety_margin: 0.02
     swept_max_corner_step_cells: 0.5
+    adaptive_lipschitz_swept_enabled: true
+    swept_min_corner_step_m: 0.01
     body_yaw_follow_clearance: 0.55
     force_body_yaw_follow: false
     # 小陀螺参数；实车默认关闭，台架/空旷场地验证并确认后再置 true。
@@ -1136,6 +1186,7 @@ minco_planner:
     spin_rate: 3.0
     spin_min_clearance: 0.30
     spin_align_lookahead: 3.0
+    spin_resume_after: 0.45
     spin_blend_rate_limit: 2.0
     spin_angular_accel: 1.5
     local_repair_enabled: false
@@ -1173,6 +1224,10 @@ ats_goal_manager:
     # 与 minco_planner.replan_advisory_enabled 成对（调研报告 9.4 第 1 项）：收到建议重规划时不急停，
     # 旧参考继续执行到新参考替换；替换失败或旧参考近端失效时照原路径急停挂起。
     replan_without_stop_enabled: true
+    rolling_replan_enabled: true
+    rolling_replan_hz: 10.0
+    rolling_replan_advance_m: 2.0
+    rolling_replan_stop_distance_m: 1.5
     require_accepted_localization: true
     planner_start_in_planning_frame: true
     retarget_threshold: 0.03
@@ -1191,7 +1246,7 @@ ats_goal_manager:
     # Align with evaluator recover wait / no_executable_plan budget.
     map_wait_timeout_sec: 30.0
     default_goal_timeout_sec: 120.0
-    goal_position_tolerance: 0.08
+    goal_position_tolerance: 0.05
     goal_yaw_tolerance: 0.15
     terminal_linear_velocity_tolerance: 0.05
     terminal_angular_velocity_tolerance: 0.10
@@ -1250,6 +1305,14 @@ ats_swerve_mpc:
     emergency_stop_topic: /planner/emergency_stop
     localization_status_topic: /localization/status
     require_localization_status: true
+    map_ready_topic: /rog_map_adapter/ready
+    map_ready_timeout_sec: 5.0
+    planning_snapshot_topic: /rog_map_adapter/planning_snapshot
+    require_planning_snapshot: true
+    planning_snapshot_timeout_sec: 5.0
+    footprint_length: 0.581
+    footprint_width: 0.571
+    footprint_safety_margin: 0.02
     emergency_stop_timeout: 0.5
     frame_id: odom
     # 实时控制频率（50 Hz / 20 ms），与预测离散步长 dt 解耦；首步执行器增量约束与
@@ -1257,7 +1320,7 @@ ats_swerve_mpc:
     control_rate_hz: 50.0
     fallback_path_dt: 0.1
     trajectory_timeout: 0.5
-    goal_position_tolerance: 0.08
+    goal_position_tolerance: 0.05
     goal_yaw_tolerance: 0.15
     # 终点区限速 |v| <= d / tau（报告 5.1.10 第 1 项）：底盘对指令的响应滞后约 0.4 s（MuJoCo
     # 2025 红框 171/172 指令与真值速度互相关），容差圆内单靠降速出口仍会冲出 0.3-0.4 m 再拉回；
@@ -1272,6 +1335,28 @@ ats_swerve_mpc:
     # epoch 变化照旧立即停车。0 = 旧行为。必须小于 execution_command_timeout。
     supersede_grace_sec: 0.4
     publish_debug_paths: true
+    solver_mode: qp
+    qp_max_iterations: 400
+    qp_time_limit_ms: 12.0
+    qp_max_primal_residual: 2.0e-3
+    qp_max_dual_residual: 5.0e-3
+    qp_max_tracking_slack: 0.35
+    qp_max_hard_constraint_violation: 2.0e-3
+    qp_rti_iterations: 1
+    qp_rti_second_pass_delta_threshold: 0.15
+    qp_esdf_corridor_enabled: true
+    qp_esdf_corridor_clearance: 0.44
+    qp_esdf_reference_margin: 0.015
+    qp_esdf_min_corridor_clearance: 0.3055
+    qp_esdf_slack_linear_weight: 80.0
+    qp_esdf_slack_quadratic_weight: 400.0
+    rollout_safety_enabled: true
+    rollout_immediate_stop_horizon_sec: 0.20
+    rollout_brake_horizon_sec: 0.70
+    rollout_slowdown_horizon_sec: 1.20
+    rollout_slowdown_clearance_m: 0.05
+    rollout_min_slowdown_scale: 0.45
+    rollout_hard_stop_penetration_m: 0.06
     # 默认滚动诊断；QP profile 仅通过 launch 显式设为固定采样窗口。
     telemetry_sampling_window_cycles: 0
     projection_backward_window: 0.20
@@ -1280,19 +1365,21 @@ ats_swerve_mpc:
     cross_track_slowdown_end: 0.60
     min_reference_progress_scale: 0.10
     command_latency_compensation: 0.01
-    # 60*0.05=3 s，覆盖5 m/s在2 m/s²下2.5 s制动时间；需运行测量求解开销。
-    horizon: 60
-    dt: 0.05
-    max_iterations: 6
-    regularization: 1.0e-5
-    line_search_decay: 0.5
-    min_line_search_step: 0.05
-    convergence_tolerance: 1.0e-3
+    use_derivative_feedforward: true
+    feedforward_accel_lead_sec: 0.025
+    # 26*0.10=2.6 s，覆盖5 m/s在2 m/s²下2.5 s完整制动时间；首步固定按50 Hz实测step_dt(0.02 s)执行，
+    # 兼顾2.6 s前瞻视野与OSQP <2 ms实时求解收敛性。
+    horizon: 26
+    dt: 0.10
     state_weight: [18.0, 18.0, 10.0]
+    lag_weight: 15.0
+    contour_weight: 24.0
     terminal_weight: [28.0, 28.0, 8.0]
     control_weight: [0.12, 0.12, 0.08]
     # 转角段提高 wz 增量惩罚，抑制相邻周期角速度突变；与 yaw_acceleration_limit 同步为 2.0。
     control_delta_weight: [0.70, 0.70, 0.60]
+    actuator_lag_tau_sec: 0.025
+    actuator_delay_sec: 0.010
     max_vx: 5.0
     max_vy: 5.0
     max_wz: 3.0

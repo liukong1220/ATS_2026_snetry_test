@@ -50,6 +50,24 @@ def make_fixture_scene(source, target):
             "fixture_sha256": hashlib.sha256(target.read_bytes()).hexdigest()}
 
 
+_MODEL_CACHE = {}
+
+
+def preload_fixture_model(model_path):
+    """Load and cache MuJoCo model/data once so runtime fixture placement is <1 ms."""
+    import mujoco
+
+    key = str(Path(model_path).resolve())
+    cached = _MODEL_CACHE.get(key)
+    if cached is None:
+        model = mujoco.MjModel.from_xml_path(key)
+        data = mujoco.MjData(model)
+        mujoco.mj_forward(model, data)
+        cached = (model, data)
+        _MODEL_CACHE[key] = cached
+    return cached
+
+
 def fixture_position_for_pose(model_path, pose, distance=2.0, half_size=0.3):
     """Place the evaluator's box ahead of truth pose, on the real ground.
 
@@ -60,9 +78,7 @@ def fixture_position_for_pose(model_path, pose, distance=2.0, half_size=0.3):
 
     x = float(pose[0] + distance * math.cos(pose[2]))
     y = float(pose[1] + distance * math.sin(pose[2]))
-    model = mujoco.MjModel.from_xml_path(str(Path(model_path).resolve()))
-    data = mujoco.MjData(model)
-    mujoco.mj_forward(model, data)
+    model, data = preload_fixture_model(model_path)
     heights = []
     for geom in range(model.ngeom):
         if model.geom_type[geom] == mujoco.mjtGeom.mjGEOM_HFIELD:

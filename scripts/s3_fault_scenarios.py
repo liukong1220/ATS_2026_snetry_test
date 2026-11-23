@@ -587,9 +587,22 @@ def safety_case(case, probe, launch):
         selected = {}
         def visible_unreachable():
             grid = probe.latest["/rog_map_adapter/planning_snapshot"][0]
-            position = probe.latest["/localization"][0].pose.pose.position
+            odom_msg = probe.latest["/localization"][0]
+            position = odom_msg.pose.pose.position
+            start_x, start_y = position.x, position.y
+            if odom_msg.header.frame_id and grid.header.frame_id and odom_msg.header.frame_id != grid.header.frame_id:
+                from rclpy.time import Time
+                try:
+                    tf_grid_from_odom = probe.buffer.lookup_transform(
+                        grid.header.frame_id, odom_msg.header.frame_id, Time())
+                except Exception:
+                    return False
+                mapped, _ = map_observation_pose(
+                    [start_x, start_y, 0.0], [0.0, 0.0, 0.0, 1.0],
+                    probe.message_dict(tf_grid_from_odom.transform))
+                start_x, start_y = mapped[:2]
             clearance = effective_search_floor(semantics, grid.info.resolution)
-            index = find_unreachable(grid, position.x, position.y,
+            index = find_unreachable(grid, start_x, start_y,
                                      semantics["obstacle_value_threshold"], clearance,
                                      assume_start_traversable=True)
             if index is None:
@@ -615,11 +628,14 @@ def safety_case(case, probe, launch):
         fault_at = time.monotonic()
         handle = start_goal(probe, x=x, y=y)
     else:
+        if case == "unsafe":
+            from s3_fixture_scene import preload_fixture_model
+            preload_fixture_model(probe.scene_model)
         handle = start_goal(probe)
         require(probe, lambda: probe.last_execute is not None and
                 "/cmd_vel/selected" in probe.latest and
                 math.hypot(probe.latest["/cmd_vel/selected"][0].linear.x,
-                           probe.latest["/cmd_vel/selected"][0].linear.y) > 0.05,
+                           probe.latest["/cmd_vel/selected"][0].linear.y) > 0.15,
                 25, "active execution before safety injection")
         fault_at = time.monotonic()
     stalled = False
@@ -645,8 +661,16 @@ def safety_case(case, probe, launch):
                 pose = probe.latest["/simulation/ground_truth/odometry"][0].pose.pose
                 velocity = probe.latest["/cmd_vel/selected"][0].linear
                 direction = yaw(pose.orientation) + math.atan2(velocity.y, velocity.x)
-                fixture_position(probe, fixture_position_for_pose(probe.scene_model,
-                    [pose.position.x, pose.position.y, direction], distance=0.80))
+                goal = recorded_fault_goal(probe)
+                dist_to_goal = math.hypot(goal[0] - pose.position.x, goal[1] - pose.position.y)
+                if dist_to_goal <= 2.5:
+                    # Place box directly on the nearby goal so it BOTH invalidates the committed
+                    # trajectory AND prevents immediate open-field detour bypass.
+                    fixture_position(probe, fixture_position_for_pose(probe.scene_model,
+                        [goal[0], goal[1], 0.0], distance=0.0))
+                else:
+                    fixture_position(probe, fixture_position_for_pose(probe.scene_model,
+                        [pose.position.x, pose.position.y, direction], distance=0.80))
             elif case != "no_path":
                 raise ValueError(case)
             require(probe, lambda: "/planner/emergency_stop" in probe.latest and
@@ -833,11 +857,142 @@ def restart_frontend(probe, launch):
             log.close()
 
 
+def owned_binary_process(launch_pid, binary_name):
+    domain = int(os.environ["ROS_DOMAIN_ID"])
+    matches = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = [x.decode() for x in (entry / "cmdline").read_bytes().split(b"\0") if x]
+            if not command or Path(command[0]).name != binary_name:
+                continue
+            environment = dict(x.decode().split("=", 1) for x in
+                               (entry / "environ").read_bytes().split(b"\0") if b"=" in x)
+            pid = int(entry.name)
+            if belongs_to(pid, launch_pid) and environment.get("ROS_DOMAIN_ID") == str(domain) and domain != 77:
+                matches.append((pid, command, environment, os.readlink(entry / "cwd")))
+        except (OSError, UnicodeDecodeError):
+            continue
+    if len(matches) != 1:
+        raise RuntimeError(f"expected exactly one owned {binary_name}, found {len(matches)}")
+    return matches[0]
+
+
+def adapter_lease_fault(probe, launch):
+    """OS-level SIGSTOP/SIGCONT on ats_rog_map_node to verify lease expiry fail-stop and clean recovery."""
+    from ats_navigation_interfaces.msg import ExecutionCommand
+    from rclpy.qos import QoSProfile, DurabilityPolicy
+    handle = start_goal(probe)
+    require(probe, lambda: probe.last_execute is not None and "/cmd_vel/selected" in probe.latest and
+            math.hypot(probe.latest["/cmd_vel/selected"][0].linear.x,
+                       probe.latest["/cmd_vel/selected"][0].linear.y) > 0.15,
+            25, "motion and committed execution before adapter pause")
+    old_execution = deepcopy(probe.last_execute)
+    old_pub_seq = probe.latest["/rog_map_adapter/status"][0].publication_sequence
+    pid, _, _, _ = owned_binary_process(launch.pid, "ats_rog_map_node")
+    fault_at = time.monotonic()
+    probe.event("sigstop_ats_rog_map", {"pid": pid, "old_publication_sequence": old_pub_seq})
+    paused = False
+    try:
+        os.kill(pid, signal.SIGSTOP)
+        paused = True
+        require(probe, lambda: probe.latest["/planner/emergency_stop"][1] >= fault_at and
+                probe.latest["/planner/emergency_stop"][0].data and all_zero(probe, fault_at),
+                10, "adapter lease expiry emergency stop and sustained zero velocity")
+        stopped_at = time.monotonic()
+        observed_sim = probe.sim_time()
+        require(probe, lambda: probe.sim_time() > observed_sim + 0.6 and all_zero(probe, fault_at),
+                10, "simulation progresses while paused adapter keeps zero velocity")
+        cancel = handle.cancel_goal_async()
+        require(probe, cancel.done, 5, "cancel goal during adapter pause")
+        os.kill(pid, signal.SIGCONT)
+        paused = False
+        resumed_at = time.monotonic()
+        probe.event("sigcont_ats_rog_map", {"pid": pid})
+        require(probe, lambda: probe.ready() and
+                probe.latest["/rog_map_adapter/status"][0].publication_sequence > old_pub_seq + 3,
+                15, "adapter heartbeat and publication_sequence recovery after SIGCONT")
+        recovery_at = time.monotonic()
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        publisher = probe.node.create_publisher(ExecutionCommand, "/planner/execution_command", qos)
+        spin_for(probe, 0.2)
+        for _ in range(10):
+            publisher.publish(old_execution)
+            spin_for(probe, 0.05)
+        spin_for(probe, 0.5)
+        probe.node.destroy_publisher(publisher)
+        for topic in VELOCITY_TOPICS:
+            samples = [(t, v) for t, v in probe.history[topic] if t >= recovery_at]
+            if not samples or any(any(abs(a) > 1e-6 for a in values) for _, values in samples):
+                raise RuntimeError(f"pre-stop execution revived after adapter recovery on {topic}")
+        new_pub_seq = probe.latest["/rog_map_adapter/status"][0].publication_sequence
+        result = {"passed": True, "fault": "adapter_lease", "pid": pid,
+                  "old_publication_sequence": old_pub_seq, "new_publication_sequence": new_pub_seq,
+                  "stop_wall_s": stopped_at - fault_at, "recovery_wall_s": recovery_at - resumed_at,
+                  "old_execution_rejected": True, "zero_topics": list(VELOCITY_TOPICS)}
+        probe.event("adapter_lease_result", result)
+        return result
+    finally:
+        if paused:
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except OSError:
+                pass
+
+
+def b2_detour_case(probe):
+    """Drop physical obstacle ahead on route, verify online replanning bypass and safe goal arrival."""
+    from s3_fixture_scene import fixture_position_for_pose, preload_fixture_model
+    from s3_mujoco_acceptance import yaw
+    preload_fixture_model(probe.scene_model)
+    goal = recorded_fault_goal(probe)
+    # Use a 4.5 m target along the base_to_base corridor if full goal is > 8 m, or the route waypoint itself.
+    start_pose = probe.latest["/simulation/ground_truth/odometry"][0].pose.pose
+    if math.hypot(goal[0] - start_pose.position.x, goal[1] - start_pose.position.y) > 8.0:
+        goal = [6.725, 5.875, -0.6904]
+    handle = start_goal(probe, x=goal[0], y=goal[1], heading=goal[2])
+    require(probe, lambda: probe.last_execute is not None and "/cmd_vel/selected" in probe.latest and
+            math.hypot(probe.latest["/cmd_vel/selected"][0].linear.x,
+                       probe.latest["/cmd_vel/selected"][0].linear.y) > 0.20,
+            25, "active motion before B2 obstacle insertion")
+    pose = probe.latest["/simulation/ground_truth/odometry"][0].pose.pose
+    velocity = probe.latest["/cmd_vel/selected"][0].linear
+    direction = yaw(pose.orientation) + math.atan2(velocity.y, velocity.x)
+    box_pos = fixture_position_for_pose(probe.scene_model,
+                                        [pose.position.x, pose.position.y, direction], distance=1.20)
+    inject_at = time.monotonic()
+    fixture_position(probe, box_pos)
+    probe.finish_goal(handle, goal, timeout=180.0, final=True)
+    ep = probe.endpoint_results[-1]
+    min_box_dist = min(
+        (math.hypot(x - box_pos[0], y - box_pos[1]) for x, y in probe.path),
+        default=float("inf"),
+    )
+    result = {
+        "passed": True,
+        "fault": "b2_detour",
+        "box_position": box_pos,
+        "goal": goal,
+        "truth_error_m": ep["truth_error_m"],
+        "estimated_error_m": ep["estimated_error_m"],
+        "min_center_to_box_m": min_box_dist,
+        "detour_wall_s": time.monotonic() - inject_at,
+        "endpoints": probe.endpoint_results,
+    }
+    probe.event("b2_detour_result", result)
+    return result
+
+
 def run_case(case, probe, launch):
     if case.startswith("correction_"):
         return correction_case(probe, launch, float(case.split("_")[1]))
     if case == "point_lio_restart":
         return restart_frontend(probe, launch)
+    if case == "adapter_lease":
+        return adapter_lease_fault(probe, launch)
+    if case == "b2_detour":
+        return b2_detour_case(probe)
     if case == "obstacle_latency":
         return obstacle_latency(probe)
     if case == "dynamic_save":

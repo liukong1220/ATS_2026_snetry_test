@@ -376,7 +376,7 @@ def assert_shared_profile_contract(workspace, base):
             override = load_yaml(workspace / "src/sim/ats_mujoco_sim/config" / profile)
             for name, value in override.items():
                 current.setdefault(name, {}).update(value.get("ros__parameters", {}))
-        for name in ("ats_rog_map_adapter", "minco_planner", "ats_goal_manager"):
+        for name in ("ats_rog_map_adapter", "minco_planner", "ats_goal_manager", "ats_swerve_mpc"):
             for key, value in canonical.items():
                 assert current[name][key] == value, f"{profile or 'real'} {name}.{key} mismatch"
         planner = current["minco_planner"]
@@ -437,6 +437,9 @@ def main():
     gimbal_yaw_status_bridge = parameters(document, "gimbal_yaw_status_bridge")
     behavior_server = parameters(document, "ats_sentry_behavior_server")
     behavior_client = parameters(document, "ats_sentry_behavior_client")
+    point_lio = parameters(document, "point_lio")
+    gicp = parameters(document, "small_gicp_relocalization")
+    loc_fusion = parameters(document, "localization_fusion")
 
     assert rog_map["map_frame"] == "odom"
     assert rog_map["debug_bounds_topic"] == "/rog_map/bounds"
@@ -550,6 +553,57 @@ def main():
     assert mpc["supersede_grace_sec"] == arbiter["supersede_grace_sec"]
     assert 0.0 <= mpc["supersede_grace_sec"] < mpc["execution_command_timeout"]
     assert arbiter["supersede_grace_sec"] < arbiter["execution_command_timeout"]
+    assert mpc["solver_mode"] == "qp"
+    assert mpc["planning_snapshot_topic"] == adapter["planning_snapshot_topic"]
+    assert mpc["require_planning_snapshot"] is True
+    assert float(mpc["planning_snapshot_timeout_sec"]) == float(
+        mpc["map_ready_timeout_sec"]
+    ) == float(goal_manager["planning_snapshot_timeout_sec"])
+    assert float(mpc["qp_time_limit_ms"]) < 1000.0 / float(mpc["control_rate_hz"])
+    assert float(mpc["lag_weight"]) > 0.0 and float(mpc["contour_weight"]) >= float(mpc["lag_weight"])
+    assert mpc["rollout_safety_enabled"] is True and mpc["qp_esdf_corridor_enabled"] is True
+    assert mpc["use_derivative_feedforward"] is True
+    assert 0.0 <= float(mpc["feedforward_accel_lead_sec"]) <= 0.10
+    assert minco["rolling_horizon_enabled"] is True
+    assert float(minco["rolling_horizon_length_m"]) >= 4.0
+    assert float(minco["rolling_min_tail_length_m"]) >= 0.5
+    assert float(minco["joint_time_budget_ms"]) <= float(minco["minco_stage_budget_ms"]) <= 20.0
+    assert float(minco["plan_wall_budget_ms"]) <= 30.0
+    assert goal_manager["rolling_replan_enabled"] is True
+    assert 5.0 <= float(goal_manager["rolling_replan_hz"]) <= 15.0
+    assert float(goal_manager["rolling_replan_advance_m"]) >= 0.5
+    assert isinstance(rog_map["odom_layer.tunnel_free_enabled"], bool)
+    assert int(rog_map["odom_layer.tunnel_free_confirm_frames"]) >= 1
+    assert isinstance(adapter["tunnel_free_suppresses_terrain"], bool)
+    assert isinstance(minco["yaw_tunnel_sidewall_pca_enabled"], bool)
+    assert isinstance(minco["yaw_tunnel_dynamic_pre_align_enabled"], bool)
+    assert isinstance(minco["yaw_tunnel_terminal_goal_axial_override_enabled"], bool)
+    assert isinstance(minco["yaw_tunnel_lock_gimbal"], bool)
+    assert isinstance(minco["adaptive_lipschitz_swept_enabled"], bool)
+    assert 0.005 <= float(minco["swept_min_corner_step_m"]) <= 0.5 * float(
+        minco["footprint_safety_margin"]
+    ) + 1e-9
+    assert float(minco["spin_resume_after"]) >= 0.30
+    assert adapter["use_static_map_obstacles"] is True
+    assert isinstance(adapter["use_static_map_geofence_only"], bool)
+    assert float(adapter["static_map_geofence_border_m"]) >= 0.0
+    assert minco["partial_subgoal_continuation_enabled"] is True
+    assert minco["partial_subgoal_only_without_prior"] is True
+    assert float(minco["partial_subgoal_min_advance_m"]) >= 0.15
+    assert 1 <= int(point_lio["mapping"]["batch_update_size"]) <= 64
+    assert point_lio["mapping"]["adaptive_downsample_en"] is True
+    assert int(point_lio["mapping"]["max_surf_points"]) >= 200
+    assert point_lio["mapping"]["satu_soft_degrade_en"] is True
+    assert point_lio["odometry"]["imu_odom_en"] is True
+    assert 50.0 <= float(point_lio["odometry"]["imu_odom_rate_hz"]) <= 400.0
+    assert isinstance(gicp["local_submap.enable"], bool)
+    assert float(gicp["local_submap.radius_m"]) >= 8.0
+    assert float(gicp["degeneracy.weak_translation_eigenvalue"]) >= 0.0
+    assert isinstance(gicp["scan_context.enable"], bool)
+    assert int(gicp["scan_context.top_k"]) >= 1
+    assert isinstance(loc_fusion["directional_fusion.enable"], bool)
+    assert 0.0 <= float(loc_fusion["directional_fusion.weak_axis_damping"]) <= 1.0
+    assert float(loc_fusion["directional_fusion.max_strong_nis"]) >= 0.0
     assert behavior_server["action_name"] == "ats_sentry_behavior"
     assert "planning_grid" not in behavior_server["decision"]["inputs"]
     assert behavior_server["decision"]["inputs"]["planning_snapshot"]["topic"] == (

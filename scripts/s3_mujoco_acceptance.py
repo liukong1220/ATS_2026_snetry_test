@@ -744,7 +744,7 @@ def run(args):
         registration = parameters["small_gicp_relocalization"]["ros__parameters"]
         registration["log_registration_details"] = True
         registration["log_throttle_ms"] = 250
-    fixture_case = args.case in ("obstacle_latency", "dynamic_save", "unsafe") or bool(args.post_route_case)
+    fixture_case = args.case in ("obstacle_latency", "dynamic_save", "unsafe", "b2_detour") or bool(args.post_route_case)
     if fixture_case:
         parameters["minco_planner"]["ros__parameters"]["map_commit_trace_enabled"] = True
         parameters["ats_rog_map"]["ros__parameters"]["map_update_trace_enabled"] = True
@@ -812,15 +812,20 @@ def run(args):
         probe.final_tolerance_m = getattr(args, "final_tolerance_m", FINAL_TOLERANCE_M)
         probe.waypoint_control_tolerance_m = getattr(args, "waypoint_control_tolerance_m", 0.0)
         from s3_tracking_evidence import TrackingLeg
+        route_path_end = 0
         for index, point in enumerate(waypoints):
             with TrackingLeg(probe, index):
                 probe.navigate(point, profile["goal_timeout_sim_s"], final=index == len(waypoints) - 1)
                 summary["waypoints_reached"] += 1
+                route_path_end = len(probe.path)
         if not map_prefix:
             summary["save"] = probe.save_map()
         minimum = 0.2 if args.reload or args.max_goals else profile["minimum_displacement_m"]
-        summary.update(route_metrics(probe.path, [waypoints[-1][:2]], minimum,
+        route_path = probe.path[:route_path_end] if route_path_end > 0 else probe.path
+        summary.update(route_metrics(route_path, [waypoints[-1][:2]], minimum,
                                      probe.final_tolerance_m))
+        if probe.path:
+            summary["post_stop_final_error_m"] = math.dist(probe.path[-1], waypoints[-1][:2])
         summary["J"] = bool(probe.goals) and all(accepted for _, accepted in probe.goals)
         summary["endpoints"] = probe.endpoint_results
         summary["route_deviation"] = route_deviation(probe.path, [profile["start"][:2]] +
@@ -900,7 +905,8 @@ def main():
     parser.add_argument("--max-goals", type=int, default=0)
     parser.add_argument("--post-route-case", choices=("obstacle_latency", "dynamic_save", "obstacle_and_dynamic"),
                         help="run physical fixture evidence after completing the selected route")
-    parser.add_argument("--case", choices=("route", "point_lio_restart", "obstacle_latency",
+    parser.add_argument("--case", choices=("route", "point_lio_restart", "adapter_lease",
+                                          "b2_detour", "obstacle_latency",
                                           "dynamic_save", "unsafe", "service_timeout", "unknown",
                                           "no_path", "correction_0.05", "correction_0.15",
                                           "correction_0.30"), default="route")

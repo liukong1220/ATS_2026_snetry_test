@@ -35,19 +35,19 @@ PROJECTION_STAGES = (
     "unaccounted_ms",
 )
 
-#: MPC control-cycle stages. The iLQR sub-stages are contained inside
-#: ilqr_solve_ms; ilqr_jacobian_ms is itself inside ilqr_backward_pass_ms.
+#: MPC control-cycle stages (OSQP v1.0.0 SQP-RTI).
 MPC_STAGES = (
     "state_trajectory_snapshot_ms",
     "reference_extraction_ms",
-    "ilqr_solve_ms",
-    "ilqr_warm_start_ms",
-    "ilqr_rollout_ms",
-    "ilqr_backward_pass_ms",
-    "ilqr_jacobian_ms",
-    "ilqr_line_search_ms",
-    "ilqr_command_publish_ms",
+    "active_solve_ms",
+    "qp_problem_build_ms",
+    "osqp_numeric_update_ms",
+    "qp_backend_phase_ms",
+    "qp_complete_phase_ms",
+    "osqp_solve_ms",
+    "primal_reconstruction_rollout_ms",
     "candidate_hard_check_ms",
+    "command_publish_ms",
     "telemetry_ring_write_ms",
     "percentile_aggregation_ms",
     "logging_publish_ms",
