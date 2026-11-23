@@ -144,6 +144,28 @@ S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正�
 
 按用户指定另起有图批次，`slam:=false` 加载同源 PGM/PCD，关闭窗口。独立首点 1/1 到达、真值误差 0.0362 m；独立连续三点 3/3 到达，实走 7.963 m、末点真值误差 0.0166 m。连续三点的定位平面误差 p95 为 0.0347 m，底盘距已授权参考曲线 p95 为 0.0706 m，距原参考同刻位置 p95 为 0.1969 m。五条授权参考的 q1、420 个有效位姿的 q2 均无冲突。本次为普通短程检查，局部障碍绕行未触发，无图隧道暂停。 [首点](../../log/nav_acceptance/20261120_prior_check/short_d33/route/summary.json) · [三点](../../log/nav_acceptance/20261120_prior_check/three_d33/route/summary.json) · [跟随误差](../../log/nav_acceptance/20261120_prior_check/three_d33/audit.json) · [主报告 9.8.18](../调研/无先验地图钻洞高速导航优化调研报告.md#9818-11-月-20-日有图定位规划与跟随专项)
 
+### 11 月 23 日 Waves 0–5 全栈升级、唯一 OSQP SQP-RTI 收口与 2027 双阶段无窗口复验
+
+完成 Waves 0–5 全栈正向优化（Wave 0 仿真/可视解耦与解析 CPU 雷达、Wave 1 A3 无先验前沿推进与先验/实时规则解耦、Wave 2 O2 非零尾状态/带导数参考/滚动拼接与 `bicubic` 距离场默认、Wave 3 O4 唯一 `OSQP v1.0.0 SQP-RTI` 求解器移除 `ilqr`/`qp_shadow` 并集成延迟增广/沿迹横迹/rollout 安全及窄道重启修复、Wave 4 O3 `TUNNEL_FREE`/自适应连续扫掠/侧壁 PCA/隧道状态机、Wave 5 O5a Point-LIO 批量更新与 `projectSO3()` 修复 / O5b Schur SE(2) 方向信息与 `STATE_DEGRADED` 误升 `coarse+fine` 修复 / O5c `LOST`-only Scan Context 召回 / O5d 离线 `evaluate_lio_frontend_ab.py`），并将终端位置容差收紧至 `0.05 m`。全部改动通过 Release 构建、`scripts/validate_navigation_config.py`、Python/launch 语法检查与三仓 `git diff --check`。
+
+所有仿真批次均在独立隔离域下无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`，未带 RViz 与 MuJoCo 窗口；画面项、独立物理接触验收 `physical_contact_acceptance: unverified` 及实车硬件均记为未验证），全部通过批次均满足单一发布者所有权、零 Nav2 断言与 `0` QP 告警：
+
+| 阶段与批次 | 模式与入口 | 结果 | 关键实测指标与边界 |
+| --- | --- | --- | --- |
+| Stage A · T1 `tunnel_b_roundtrip`（`stageA_T1_d205`） | `rmuc_2027_tunnels`（`slam:=false`） | **通过**（`passed=true`） | `13/13` 到达，里程 `21.03 m`，末点真值误差 `0.0792 m <= 0.08 m`，执行足迹冲突 `0`，`13/13` 段 q1/q2 全过，接触增量 `0`；`tunnel_ramp_bridge`（正向 1、侧偏 `0.0131 m`）与 `tunnel_B`（正/反各 1、侧偏 `0.0336 m`）全过；`qp_backend p50/p95/p99=0.662/1.482/1.759 ms`，`callback p95=2.089 ms`，MINCO `p50/p95=3.62/8.31 ms` |
+| Stage A · T2 `ramp_south`（`stageA_T2_d192`） | `rmuc_2027_tunnels`（`slam:=false`） | **通过**（`passed=true`） | `13/13` 到达，里程 `21.58 m`，末点真值误差 `0.0756 m <= 0.08 m`，执行足迹冲突 `0`，`13/13` 段 q1/q2 全过；`tunnel_ramp_bridge`（正向 1、侧偏 `0.0190 m`）与 `tunnel_south_plate`（正/反各 1、侧偏 `0.0412 m`）全过；`qp_backend p50/p95=0.679/1.436 ms`；南侧顶板几何接触诊断增量 `46940`（独立接触未验证） |
+| Stage A · T3 `six_tunnels`（`stageA_T3_d212`） | `rmuc_2027_tunnels`（`slam:=false`） | **未通过**（部分 `16/42`） | 通过 `tunnel_ramp_bridge`（正 1）、`tunnel_B`（正/反各 1）、`tunnel_south_plate`（正 1），里程 `29.71 m`；第 17 点 `[16.0, 1.08, 3.1416]` action 成功（估计误差 `0.009 m`）但真值误差 `0.181 m > 0.15 m`，根因为南侧退化区 GICP Y 漂移（同期 Point-LIO odom Y 漂移仅 `+0.005 m`） |
+| Stage A · B1 基地到基地（`stageA_B1_d208`） | `rmuc_2027_tunnels --route base_to_base`（`slam:=false`） | **通过**（`passed=true`） | 单 action `1/1` 到达，里程 `28.26 m`，末点真值误差 `0.0206 m <= 0.08 m`，执行足迹冲突 `0`，q1/q2 通过；峰值参考/指令/真值 `1.751 / 1.392 / 1.389 m/s`，峰值自旋 `2.504 / 2.469 rad/s`；`qp_backend p50/p95=0.881/1.826 ms`；接触诊断增量 `267`（独立接触未验证）；长段 MINCO `p50/p95=34.01/184.43 ms` |
+| Stage A · V1 对称点速度（`stageA_V1_d207`） | `rmuc_2027_tunnels --route symmetry_speed`（`slam:=false`） | **通过**（`passed=true`） | 单 action `1/1` 到达，里程 `16.41 m`，末点真值误差 `0.0358 m <= 0.08 m`，执行足迹冲突 `0`，q1/q2 通过，接触增量 `0`；峰值参考/指令/真值 `2.549 / 2.236 / 2.223 m/s`（`5 m/s` 高速段未触发）；`qp_backend p50/p95=0.586/1.245 ms` |
+| Stage A · B2 动态绕行（`stageA_B2_detour_d209`） | `rmuc_2027_tunnels --case b2_detour`（`slam:=false`） | **通过**（`passed=true`） | 在线实体箱投放后触发 `local_rejoin` 绕行安全到达，真值误差 `0.0130 m`，接触增量 `0`，`qp_backend p50/p95=0.499/1.099 ms` |
+| Stage A · 独立故障矩阵（5 项） | `unknown` / `no_path` / `unsafe` / `adapter_lease` / `point_lio_restart`（`slam:=false`） | **5/5 通过** | `unknown`（`stop_wall_s=3.50 s`）、`no_path`（`2.11 s`）、`unsafe`（目标阻断，`7.02 s`）、OS `SIGSTOP`/`SIGCONT` `adapter_lease`（`stop=4.75 s`、`recovery=2.95 s`、`pub_seq 503->508`、旧执行拒绝）与最终二进制 `point_lio_restart`（`death_to_stop=2.02 s`、`recovery=7.92 s`、`epoch 1->2`、旧执行拒绝）全过且接触增量 `0` |
+| Stage B · 无先验 3 点建图与保存（`stageB_rmuc2027_save_d215`） | `rmuc_2027 --mapless --max-goals 3 --post-route-case obstacle_and_dynamic`（`slam:=true`） | **3/3 路点与保存通过；后置延迟超时** | 3/3 路点到达（真值误差 `0.0213 / 0.0352 / 0.0270 m`，里程 `8.04 m`、`3/3` q1/q2 通过、足迹冲突 `0`、接触增量 `0`、`qp_backend p50/p95=0.718/1.461 ms`），显式保存成功（`167` 占据格 / `3858` 持久体素）；后置实体箱射线清除超时导致整脚本失败 |
+| Stage B · 无先验 B2 与两项故障 | `b2_detour` / `unknown` / `point_lio_restart`（`slam:=true`） | **3/3 通过** | `b2_detour` 真值误差 `0.0143 m`（`qp_backend p95=0.887 ms`）；`unknown` `stop_wall_s=3.36 s`；`point_lio_restart` `death_to_stop=1.90 s`、`recovery=6.08 s`、`epoch 1->2`、旧执行拒绝；三项接触增量均为 `0` |
+| Stage B · 其余 S3 开放门（6 项） | `reload` / `B1_mapless` / `obstacle_latency` / `dynamic_save` / `no_path` / `route_save`（`slam:=true`） | **未通过**（如实记账） | `reload`（锁定 `TRACKING`/`ready` 但局部图无路）、`B1_mapless`（前沿探索前进 `11.39 m`、定位误差 `1.8 cm`，北侧凹槽看门狗 `code=5`）、`obstacle_latency`（墙钟 `476–910 ms`，第 7 样本射线清除超时）、`dynamic_save`（持久化静态证据 `0`）、`no_path`（建图部分前沿推进）、`route_save`（孤立 `2×2` 未知格卡滞） |
+| 离线 Point-LIO A/B 评估 | `scripts/evaluate_lio_frontend_ab.py`（两组对照） | **已产出基准** | 跨 `T1`/`B1`/`V1`/`StageB` 测得 `APE RMSE=0.0202–0.0784 m`、`RPE-1m=0.0088–0.0718 m`、`Spin p95=0.0294–0.1068 m`、`LIO p95=6.32–7.05 ms` |
+
+T3 `six_tunnels`、完整 S3 `A–K`（重载/射线清除延迟/动态不保存/无先验 B1 全程）、O1-A 全部门、`5 m/s` 高速段、独立物理接触验收、开窗 RViz/MuJoCo 画面观察与实车硬件联调继续记为未通过/未验证。 [主报告 9.8.21](../调研/无先验地图钻洞高速导航优化调研报告.md#9821-11-月-23-日-waves-05-全栈升级唯一-osqp-sqp-rti-收口与-2027-有图无先验双阶段无窗口验收)
+
 ### 11 月 22 日双模式雷达安装解耦、全链参数化与无窗口 2027 综合复验
 
 完成四项架构与工程优化并通过全链 Release 增量构建（14 个改动包）、`validate_navigation_config.py`、launch 语法/参数解析（含 3 组 `lidar_mount_mode` 组合）及 4 仓 `git diff --check`：
