@@ -4,7 +4,7 @@
 
 - 默认仿真入口为有图模式：`rmuc_2027_mujoco.launch.py` 默认 `slam:=false`，加载 `src/ats_sentry_bringup/map/rmuc_2027.yaml` 与 `pcd/rmuc_2027.pcd`；唯一 MPC 求解器为 `OSQP v1.0.0 SQP-RTI`（`solver_mode:=qp`）。
 - 无先验建图测试显式传 `slam:=true`（`scripts/s3_mujoco_acceptance.py` 加 `--mapless`），PGM 和 PCD 输入置空，两种模式分开记录。
-- 当前默认无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`）；未带窗口时画面项记为未验证，无独立接触评估器时 `physical_contact_acceptance` 记为 `unverified`。
+- 当前默认无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`）；未带窗口时画面项记为未验证。自 Wave 6A 起已落地独立 MuJoCo `mujoco_geom_normal_v1` geom-pair 物理接触评估器，按轮地/桥面合法接触与车体/轮侧/顶板/障碍非法碰撞精确判定 `physical_contact_acceptance`。
 - 后续优化路线与新会话提示词见 [主报告第 5 节](../调研/无先验地图钻洞高速导航优化调研报告.md#51-执行顺序与当前停点) 与 [提示词选择](../调研/无先验地图钻洞高速导航优化调研报告.md#97-提示词选择新会话可直接复制)。
 
 ---
@@ -87,21 +87,22 @@ python3 scripts/s3_mujoco_acceptance.py \
 
 ---
 
-## 5. 当前验收状态（2026-11-23 Waves 0–5 无窗口实测）
+## 5. 当前验收状态（2026-11-24 Wave 6A 最终二进制无窗口实测）
 
-全部批次基于三仓最终提交（根仓 `241dc08`、导航仓 `db1b4e2`、MuJoCo 仓 `47b9194`），在独立隔离域下无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`；画面项、独立物理接触评估 `physical_contact_acceptance: unverified` 及实车硬件均记为未验证）。全部通过批次均满足单一发布者所有权、零 Nav2 断言与 `0` QP 告警。
+Stage A 全套 11 项（5 条路线 + B2 绕行 + 5 项独立故障）与 `small_10x10` S3 连续修正 3 项回归均基于 Wave 6A 最终二进制与唯一参数源，在独立隔离 `ROS_DOMAIN_ID` 下无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`；因本机桌面锁屏，开窗 RViz/MuJoCo 画面项记为未验证；实车硬件记为未验证）。全部通过批次均满足单一发布者所有权、零 Nav2 断言与 `footprint_gate_collisions = 0`。Stage B 无先验基线沿用 2026-11-23 Waves 0–5 实测并将在 Wave 6B 集中收口。
 
-### 5.1 Stage A：有图定位模式（`slam:=false`，`rmuc_2027`）
+### 5.1 Stage A：有图定位模式（`slam:=false`，`rmuc_2027`）— 11/11 全过
 
 | 批次 | 入口与路线 | 结果 | 关键实测指标与边界 |
 | --- | --- | --- | --- |
-| **T1** (`stageA_T1_d205`) | `rmuc_2027_tunnels / tunnel_b_roundtrip` | **通过** | `13/13` 到达，里程 `21.03 m`，末点真值误差 `0.0792 m`，足迹冲突 `0`，`13/13` q1/q2 全过，接触增量 `0`；`tunnel_ramp_bridge`（正 1、侧偏 `0.0131 m`）与 `tunnel_B`（正/反各 1、侧偏 `0.0336 m`）全过；`qp_backend p50/p95/p99=0.662/1.482/1.759 ms`，MINCO `p50/p95=3.62/8.31 ms` |
-| **T2** (`stageA_T2_d192`) | `rmuc_2027_tunnels / ramp_south` | **通过** | `13/13` 到达，里程 `21.58 m`，末点真值误差 `0.0756 m`，足迹冲突 `0`，`13/13` q1/q2 全过；`tunnel_ramp_bridge`（正 1、侧偏 `0.0190 m`）与 `tunnel_south_plate`（正/反各 1、侧偏 `0.0412 m`）全过；`qp_backend p50/p95=0.679/1.436 ms`；注：南侧顶板几何接触诊断增量 `46940`（独立接触待归因） |
-| **T3** (`stageA_T3_d212`) | `rmuc_2027_tunnels / six_tunnels` | **未通过**（`16/42`） | 通过 `tunnel_ramp_bridge`（正 1）、`tunnel_B`（正/反各 1）、`tunnel_south_plate`（正 1），里程 `29.71 m`；第 17 点 `[16.0, 1.08, 3.1416]` action 成功（估计误差 `0.009 m`）但独立真值误差 `0.181 m > 0.15 m`，根因为南侧退化区 GICP Y 漂移（同期 Point-LIO odom Y 漂移仅 `+0.005 m`，且 `weak_translation_eigenvalue=25.0` 未触发退化抑制） |
-| **B1** (`stageA_B1_d208`) | `rmuc_2027_tunnels / base_to_base` | **通过** | 单 action `1/1` 到达，里程 `28.26 m`，末点真值误差 `0.0206 m`，足迹冲突 `0`，q1/q2 通过；峰值参考/指令/真值 `1.751 / 1.392 / 1.389 m/s`，峰值自旋 `2.504 / 2.469 rad/s`；`qp_backend p50/p95=0.881/1.826 ms`；接触诊断增量 `267`（独立接触待归因）；长段 MINCO `p50/p95=34.01/184.43 ms`（超 `20 ms` 预算，待 P0-2 滚动裁剪） |
-| **V1** (`stageA_V1_d207`) | `rmuc_2027_tunnels / symmetry_speed` | **通过** | 单 action `1/1` 到达，里程 `16.41 m`，末点真值误差 `0.0358 m`，足迹冲突 `0`，q1/q2 通过，接触增量 `0`；峰值参考/指令/真值 `2.549 / 2.236 / 2.223 m/s`（`5 m/s` 高速段未触发）；`qp_backend p50/p95=0.586/1.245 ms` |
-| **B2** (`stageA_B2_detour_d209`) | `rmuc_2027_tunnels --case b2_detour` | **通过** | 在线投放实体箱触发 `local_rejoin` 绕行到达，真值误差 `0.0130 m`，接触增量 `0`，`qp_backend p50/p95=0.499/1.099 ms` |
-| **F（5 项）** | `unknown` / `no_path` / `unsafe` / `adapter_lease` / `point_lio_restart` | **5/5 通过** | `unknown`（`stop=3.50 s`）、`no_path`（`2.11 s`）、`unsafe`（目标阻断，`7.02 s`）、OS `SIGSTOP`/`SIGCONT` `adapter_lease`（`stop=4.75 s`、`recovery=2.95 s`、`pub_seq 503->508`、旧授权拒绝）与最终二进制 `point_lio_restart`（`death_to_stop=2.02 s`、`recovery=7.92 s`、`epoch 1->2`、旧授权拒绝）全过且接触增量 `0` |
+| **T1** (`stageA_T1_d151`) | `rmuc_2027_tunnels / tunnel_b_roundtrip` | **通过** | `13/13` 到达，里程 `20.85 m`，末点真值误差 `0.0423 m`，足迹冲突 `0`，`13/13` q1/q2 全过；`tunnel_ramp_bridge`（正 1、侧偏 `0.0103 m`、`yaw_err=0.0345 rad`）与 `tunnel_B`（正/反各 1、侧偏 `0.0296 m`、`yaw_err=0.0252 rad`）全过；`physical_contact_acceptance=passed`（`illegal=0`）；`qp_backend p50/p95=0.311/0.998 ms`，MINCO `p50/p95=0.39/0.99 ms`，`retarget=0`（注：1 拍调度抖动 `time_limit` 确定性零速后恢复，`0` 硬约束拒绝） |
+| **T2** (`stageA_T2_d152`) | `rmuc_2027_tunnels / ramp_south` | **通过** | `13/13` 到达，里程 `21.02 m`，末点真值误差 `0.0262 m`，足迹冲突 `0`，`13/13` q1/q2 全过；`tunnel_ramp_bridge`（正 1、侧偏 `0.0108 m`、`yaw_err=0.0283 rad`）与 `tunnel_south_plate`（正/反各 1、侧偏 `0.0327 m`、`yaw_err=0.0041 rad`）全过；`physical_contact_acceptance=passed`（`illegal=0`，原 `46940` 接触归因为 `legal_wheel_drivable_deck=23425` 与 `legal_wheel_ground=420145`）；`0` QP 告警，`qp_backend p50/p95=0.321/0.965 ms`，MINCO `p50/p95=0.42/0.86 ms`，`retarget=0` |
+| **T3** (`stageA_T3_d150`) | `rmuc_2027_tunnels / six_tunnels` | **通过**（`42/42`） | `42/42` 到达，里程 `74.04 m`，末点真值误差 `0.0025 m`（`post_stop=0.0053 m`），足迹冲突 `0`，`42/42` q1/q2 全过；**6/6 隧道全过**（`tunnel_ramp_bridge` 侧偏 `0.0162 m`、`tunnel_B` `0.0336 m`、`tunnel_south_plate` `0.0363 m`、`tunnel_south_plate_mirror` `0.0624 m`、`tunnel_B_mirror` `0.0295 m`、`tunnel_ramp_bridge_mirror` `0.0180 m`，全部接触增量 `0`）；`physical_contact_acceptance=passed`（`illegal=0`）；`0` QP 告警，`qp_backend p50/p95=0.285/0.801 ms`，MINCO `p50/p95/max=0.32/6.48/8.58 ms`，全程仅 `3` 次 retarget |
+| **B1** (`stageA_B1_d153`) | `rmuc_2027_tunnels / base_to_base` | **通过** | 单 action `1/1` 到达，里程 `27.21 m`，末点真值误差 `0.0225 m`，足迹冲突 `0`，q1/q2 通过；峰值指令/真值速度 **`3.423 / 3.404 m/s`**（较 Wave 5 `1.389 m/s` 提升 `+145%`；`5 m/s` 上限未触发），峰值自旋 `1.556 / 1.515 rad/s`；`physical_contact_acceptance=passed`（`illegal=0`，消除原 `267` 未归因接触）；`0` QP 告警，`qp_backend p50/p95=0.336/0.709 ms`；**长段 MINCO `p50/p95/max=5.72/6.48/7.84 ms`**（原 `34.01/184.43 ms`，远低于 `< 20 ms` 预算），`retarget=0` |
+| **V1** (`stageA_V1_d154`) | `rmuc_2027_tunnels / symmetry_speed` | **通过** | 单 action `1/1` 到达，里程 `15.91 m`，末点真值误差 `0.0294 m`，足迹冲突 `0`，q1/q2 通过；峰值指令/真值速度 **`3.164 / 3.053 m/s`**（较 Wave 5 `2.223 m/s` 提升 `+37%`；`5 m/s` 高速段未触发）；`physical_contact_acceptance=passed`（`illegal=0`）；`0` QP 告警，`qp_backend p50/p95=0.427/1.613 ms`，MINCO `p50/p95/max=5.06/5.06/6.89 ms` |
+| **B2** (`stageA_B2_d156`) | `rmuc_2027_tunnels --prior rmuc_2027 --case b2_detour` | **通过** | 在线投放实体箱触发 `local_rejoin` 绕行到达，真值误差 `0.0058 m`，`physical_contact_acceptance=passed`（`illegal=0`），`qp_backend p50/p95=0.297/0.577 ms` |
+| **F（5 项）** (`d157`/`d158`/`d169`/`d160`/`d161`) | `unknown` / `no_path` / `unsafe` / `adapter_lease` / `point_lio_restart` | **5/5 通过** | `unknown`（`stop=3.25 s`）、`no_path`（`2.13 s`）、`unsafe`（目标阻断，`3.57 s`）、OS `SIGSTOP`/`SIGCONT` `adapter_lease`（`stop=4.67 s`、`recovery=2.38 s`、`pub_seq 871->876`、旧授权拒绝）与 `point_lio_restart`（`death_to_stop=2.06 s`、`recovery=6.73 s`、`epoch 1->2`、旧授权拒绝）全过，且 5 项均 `physical_contact_acceptance=passed`（`illegal=0`） |
+| **S3 连续修正回归** (`d175`/`d176`/`d177`) | `small_10x10 --case correction_0.05 / 0.15 / 0.30` | **3/3 通过** | `0.05 m`（`epoch 1->1`、`err=0.0137 m`）、`0.15 m`（`epoch 1->1`、`err=0.0020 m`）与 `0.30 m`（`epoch 2->3`、`err=0.0011 m`）均在 `10 s` 内 `< 0.002 m` 收敛并保持 `S3 endpoint retarget` 与 `odom` 连续性契约（注：`small_10x10` 合成地板名 `s3_floor` 未纳入 `rmuc_2027` 地面白名单，物理接触门以 2027 全套 11/11 实测为准） |
 
 ### 5.2 Stage B：无先验建图模式（`slam:=true`，`--mapless`，空先验）
 
@@ -117,6 +118,6 @@ python3 scripts/s3_mujoco_acceptance.py \
 
 ### 5.4 未通过与未验证总界
 
-- **未通过**：有图 **T3 `six_tunnels`**、B1 长段 MINCO `< 20 ms` 墙钟门、Stage B 无先验 6 项 S3 开放门及完整 64 点 S3 `A–K`。
-- **未验证**：`5 m/s` 高速段与高速换轨、独立物理接触评估（`physical_contact_acceptance: unverified`）、开窗 RViz/MuJoCo 视觉画面、P3 行为树全链集成及实车硬件（含 H2/H3 钻洞）。
-- 历史基线保留原则：2025 场景 `q2`、早期 2027 `south` 漂移与未复验的历史兼容项不因场景切换或局部通过自动标为已修复。
+- **未通过**：Stage B 无先验 6 项 S3 开放门（障碍可见延迟/射线清除、`dynamic_save`、孤立未知格、A3 凹槽超时、部分图重载、无先验 `no_path`）及完整 64 点 S3 `A–K`。
+- **未验证**：`5 m/s` 高速段与高速换轨（当前 B1/V1 真值峰值已达 `3.404 / 3.053 m/s`，`5 m/s` 上限未触发）、开窗 RViz/MuJoCo 视觉画面（桌面锁屏未带窗口）、P3 行为树全链集成及实车硬件（含 H2/H3 钻洞）。
+- 历史基线保留原则：2025 场景 `q2`、早期 2027 `south` 漂移与未复验的历史兼容项不因场景切换或局部通过自动标为已修复；2027 Stage A `T1/T2/T3/B1/V1/B2/5 项故障` 已基于 Wave 6A 最终二进制全部实测通过并附独立物理接触评估 `illegal_contact_count = 0`。
