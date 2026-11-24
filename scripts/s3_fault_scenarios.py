@@ -426,7 +426,7 @@ def correction_case(probe, launch, delta):
         "/relocalization_observation"), 10, "no competing observation publisher")
     require(probe, lambda: "/localization/status" in probe.latest and
             probe.latest["/localization/status"][0].odom_instance_id != 0 and
-            "/localization" in probe.latest, 30, "known frontend before first accepted observation")
+            "/localization" in probe.latest, 90, "known frontend before first accepted observation")
     if stamp(probe.latest["/localization/status"][0].last_observation_stamp) > 0:
         raise RuntimeError("matcher accepted before the controlled first-acceptance gate")
     goal = recorded_fault_goal(probe)

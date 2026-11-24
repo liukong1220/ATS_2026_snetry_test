@@ -47,7 +47,7 @@ NAVIGATION_PATH_DISPLAY_CONTRACTS = {
         "offset_z": 0.08,
     },
     "/ats_swerve_mpc/predicted_path": {
-        "name": "MPC Prediction / iLQR Follow Rollout",
+        "name": "MPC Prediction / OSQP SQP-RTI Rollout",
         "color": "255; 80; 255",
         "line_style": "Billboards",
         "line_width": 0.075,
@@ -293,7 +293,7 @@ def assert_navigation_rviz_contract(
 
 
 def assert_esdf_cloud_display(document, context: str):
-    """Lock the display-only signed-distance cloud of the planning snapshot."""
+    """Lock the display-only unix_global_esdf style signed-distance cloud."""
     display = single_display_for_topic(document, ESDF_CLOUD_VIZ_TOPIC, context)
     assert display["Class"] == "rviz_default_plugins/PointCloud2", (
         f"{context} {ESDF_CLOUD_VIZ_TOPIC} must be a PointCloud2 display"
@@ -309,6 +309,23 @@ def assert_esdf_cloud_display(document, context: str):
     )
     assert display["Topic"]["Depth"] == 1, f"{context} ESDF cloud depth must be one"
     assert display["Enabled"] is True, f"{context} ESDF cloud must be enabled"
+    assert display["Color Transformer"] == "Intensity", (
+        f"{context} ESDF cloud must use Intensity color transformer"
+    )
+    assert display["Channel Name"] == "intensity", (
+        f"{context} ESDF cloud must color by 'intensity' channel"
+    )
+    assert display["Style"] == "Flat Squares", (
+        f"{context} ESDF cloud must render as Flat Squares instead of opaque Boxes"
+    )
+    assert display["Use rainbow"] is True, f"{context} ESDF cloud must enable rainbow palette"
+    assert display["Invert Rainbow"] is False, f"{context} ESDF cloud must not invert rainbow"
+    assert display["Autocompute Intensity Bounds"] is False, (
+        f"{context} ESDF cloud must use fixed intensity bounds"
+    )
+    assert display["Min Intensity"] == 0 and display["Max Intensity"] == 2, (
+        f"{context} ESDF cloud intensity bounds must be [0, 2]"
+    )
 
 
 def assert_no_removed_rc_esdf_topics(document, context: str):
@@ -354,9 +371,14 @@ def assert_robot_model_display(document, description_topic: str, context: str):
 
 
 def assert_mujoco_sensor_view(document):
-    """Default view must not obscure chassis/sensor rotation with voxel boxes."""
-    for group in ("距离场", "路径", "安全", "ROG-Map native voxels (local box)"):
-        assert named_display(document, group)["Enabled"] is False, f"{group} debug group must be disabled"
+    """Default view shows clean rainbow ESDF + local planning + footprint without voxel box clutter."""
+    for group in ("距离场", "路径", "安全"):
+        assert named_display(document, group)["Enabled"] is True, (
+            f"{group} navigation group must be enabled by default"
+        )
+    assert named_display(document, "ROG-Map native voxels (local box)")["Enabled"] is False, (
+        "ROG-Map native voxels (local box) must stay disabled by default"
+    )
     scan = single_display_for_topic(document, "/registered_scan", "MuJoCo sensor view")
     assert scan["Enabled"] is True and scan["Style"] == "Points"
     assert scan["Decay Time"] == 0, "sensor view must not accumulate ghost clouds"
@@ -425,7 +447,11 @@ def main():
         "local_costmap",
         "global_costmap",
     )
-    for node_name in navigation_root_nodes:
+    for node_name in navigation_root_nodes + (
+        "terrain_analysis",
+        "pointcloud_to_laserscan",
+        "slam_toolbox",
+    ):
         assert node_name not in document, f"root YAML retains {node_name}"
 
     rog_map = parameters(document, "ats_rog_map")
@@ -569,9 +595,13 @@ def main():
     assert float(minco["rolling_min_tail_length_m"]) >= 0.5
     assert float(minco["joint_time_budget_ms"]) <= float(minco["minco_stage_budget_ms"]) <= 20.0
     assert float(minco["plan_wall_budget_ms"]) <= 30.0
+    assert float(minco["max_acceleration"]) == float(mpc["max_ax"])
+    assert int(minco["far_conflict_confirm_snapshots"]) >= 1
     assert goal_manager["rolling_replan_enabled"] is True
     assert 5.0 <= float(goal_manager["rolling_replan_hz"]) <= 15.0
     assert float(goal_manager["rolling_replan_advance_m"]) >= 0.5
+    assert float(goal_manager["retarget_cruise_threshold"]) >= float(goal_manager["retarget_threshold"])
+    assert float(goal_manager["replan_advised_cooldown_sec"]) >= 0.0
     assert isinstance(rog_map["odom_layer.tunnel_free_enabled"], bool)
     assert int(rog_map["odom_layer.tunnel_free_confirm_frames"]) >= 1
     assert isinstance(adapter["tunnel_free_suppresses_terrain"], bool)
@@ -599,11 +629,16 @@ def main():
     assert isinstance(gicp["local_submap.enable"], bool)
     assert float(gicp["local_submap.radius_m"]) >= 8.0
     assert float(gicp["degeneracy.weak_translation_eigenvalue"]) >= 0.0
+    assert float(gicp["degeneracy.max_translation_condition_ratio"]) > 1.0
+    assert float(gicp["degeneracy.weak_translation_per_inlier"]) >= 0.0
     assert isinstance(gicp["scan_context.enable"], bool)
     assert int(gicp["scan_context.top_k"]) >= 1
     assert isinstance(loc_fusion["directional_fusion.enable"], bool)
     assert 0.0 <= float(loc_fusion["directional_fusion.weak_axis_damping"]) <= 1.0
     assert float(loc_fusion["directional_fusion.max_strong_nis"]) >= 0.0
+    assert loc_fusion["tracking_filter.enable"] is True
+    assert float(loc_fusion["tracking_filter.deadband_translation"]) >= 0.0
+    assert int(loc_fusion["tracking_filter.motion_jump_confirm_count"]) >= 1
     assert behavior_server["action_name"] == "ats_sentry_behavior"
     assert "planning_grid" not in behavior_server["decision"]["inputs"]
     assert behavior_server["decision"]["inputs"]["planning_snapshot"]["topic"] == (
@@ -984,8 +1019,15 @@ def main():
     # the four path displays use the white-background MuJoCo palette. Gazebo
     # additionally exposes the namespaced robot_description published by
     # spawn_robots.launch.py.
+    gazebo_path_style = {
+        **MUJOCO_PATH_DISPLAY_STYLE,
+        "/ats_swerve_mpc/predicted_path": {
+            **MUJOCO_PATH_DISPLAY_STYLE["/ats_swerve_mpc/predicted_path"],
+            "name": "MPC Prediction / iLQR Follow Rollout",
+        },
+    }
     assert_navigation_rviz_contract(
-        gazebo_rviz, rog_map["map_frame"], "Gazebo RViz", MUJOCO_PATH_DISPLAY_STYLE
+        gazebo_rviz, rog_map["map_frame"], "Gazebo RViz", gazebo_path_style
     )
     # The Gazebo repository is not migrated to the M4 topics yet (follow-up);
     # its ESDF displays are not checked here.

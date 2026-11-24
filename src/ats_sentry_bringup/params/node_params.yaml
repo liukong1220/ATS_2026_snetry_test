@@ -263,7 +263,9 @@ point_lio:
     prop_at_freq_of_imu: True
     check_satu: True
     init_map_size: 10
-    point_filter_num: 8                                 # Options: 4, 3
+    # 配合下方 adaptive_downsample_en + max_surf_points=1200：降低前置等距抽稀（8->2）以在窄隧道/斜坡洞口保留纵向特征点，
+    # 同时开阔区域仍由 0.05 m 体素滤波与 1200 点上限兜底实时性。
+    point_filter_num: 2                                 # Options: 4, 3, 2
     space_down_sample: True
     filter_size_surf: 0.05                               # Options: 0.5, 0.3, 0.2, 0.15, 0.1
     filter_size_map: 0.15                                # Options: 0.5, 0.3, 0.15, 0.1
@@ -374,35 +376,6 @@ sensor_scan_generation:
     allow_latest_base_tf_fallback: true
     latest_base_tf_max_age_sec: 0.2
     sync_queue_size: 100
-
-terrain_analysis:
-  ros__parameters:
-    scanVoxelSize: 0.020                # 给 30cm 小障碍保留足够点数，同时别把坡面侧方稀疏噪声放大得太厉害。
-    decayTime: 0.30                     # 4m/s 下旧点 0.35s 会拖出约 1.4m 影子，继续缩短可减少障碍拖影。
-    noDecayDis: 0.0                     # 点云距离阈值 小于该阈值不考虑时间差
-    clearingDis: 15.0                    # 该距离外的点会被清除
-    useSorting: True                    # 这个参数开起来就能上坡了；如果 use_sorting,那么就以周围点中的分位点作为地面点，否则以最低点作为地面点；周围其余点相对于地面点的高度作为通过代价，所以对于坡面，有的点的代价是正，有的是负，就相互抵消了；不要与 consider_drop 同时开启，计算上会有冲突
-    quantileZ: 0.16                     # 下视点云地面占比更高，略取低分位可减少墙脚/斜边抬高地面估计。
-    considerDrop: False                 # 考虑凹下去的地面,开启则将相对于地面点的高度取绝对值
-    limitGroundLift: False
-    maxGroundLift: 0.3
-    clearDyObs: True                    # 清除动态物体的话，有动态物体走过的地方就走不了了
-    minDyObsDis: 0.45                   # 以下参数都是在 clear_dy_obs 的情况下才有用的
-    minDyObsAngle: 0.0
-    minDyObsRelZ: -0.3
-    absDyObsRelZThre: 0.2
-    minDyObsVFOV: -64.0
-    maxDyObsVFOV: 6.0
-    minDyObsPointNum: 3
-    noDataObstacle: False               # treat no data as obstacle
-    noDataBlockSkipNum: 0
-    minBlockPointNum: 8                 # 保留对小障碍的敏感度，但别像 6 那样把坡面侧缘过多打成障碍。
-    vehicleHeight: 0.23                 # 实车总高约 23cm；高于车体的近场点按障碍候选处理。
-    voxelPointUpdateThre: 100
-    voxelTimeUpdateThre: 0.45
-    minRelZ: -0.65                      # min_rel_z 以及 max_rel_z 限制了有效点云点的Z值范围，用于对天花板和地板进行处理
-    maxRelZ: 0.36                       # 略回收远侧高度窗口，减少坡面侧方高点混入近场障碍层。
-    disRatioZ: 0.10                     # 下视安装减少远距离高度窗口膨胀，避免天花板/远处高点混入障碍层。
 
 terrain_analysis_ext:
   ros__parameters:
@@ -633,6 +606,14 @@ small_gicp_relocalization:
     local_submap.min_points: 600
     degeneracy.weak_translation_eigenvalue: 25.0
     degeneracy.weak_yaw_eigenvalue: 15.0
+    # O5b 双条件退化门禁：2x2 Schur 平移信息块条件数 > 8.0 或单内点弱特征值 < 0.35 时判为退化方向。
+    # 仅在明显各向异性（长走廊/隧道单向缺几何约束，cond_xy>=16）或单位内点信息不足（<0.35）时抑制弱轴，
+    # 避免贴墙/进洞口仍有 >1000 弱轴信息（cond_xy≈8-10, per_inlier>1.3）的精准 GICP 观测被误判退化。
+    degeneracy.max_translation_condition_ratio: 16.0
+    degeneracy.weak_translation_per_inlier: 0.35
+    # TRACKING 期细配准抗假跳：允许拉回斜坡/窄洞口 0.25–0.45 m 级瞬态 LIO 滑移，同时拒绝 >0.5 m 异墙误匹配。
+    tracking_max_motion_residual: 0.40
+    tracking_max_prior_deviation: 0.50
     scan_context.enable: true
     scan_context.grid_step_xy: 2.0
     scan_context.max_radius_m: 15.0
@@ -717,6 +698,8 @@ localization_fusion:
     max_consecutive_rejections: 3
     epoch_translation_threshold: 0.05
     epoch_yaw_threshold: 0.05
+    continuous_correction_max_translation: 0.20
+    continuous_correction_max_yaw: 0.10
     max_correction_translation: 2.0
     max_correction_yaw: 1.0
     # TRACKING 保持 2.0/1.0 fail-closed；仅 LOST 放宽以接纳全局搜观测。
@@ -732,97 +715,23 @@ localization_fusion:
     directional_fusion.weak_axis_damping: 0.0
     directional_fusion.weak_yaw_damping: 0.2
     directional_fusion.max_strong_nis: 36.0
-
-pointcloud_to_laserscan:
-  ros__parameters:
-    use_sim_time: false
-    target_frame: base_footprint
-    min_height: -0.3
-    max_height: 4.0
-    min_intensity: 0.1
-    max_intensity: 2.0
-    angle_min: -3.1415926                   # -M_PI/2
-    angle_max: 3.1415926                    # M_PI/2
-    angle_increment: 0.00872665             # M_PI/360.0
-    scan_time: 0.05
-    range_min: 0.15
-    range_max: 10.0
-    use_inf: true
-
-slam_toolbox:
-  ros__parameters:
-    # https://github.com/SteveMacenski/slam_toolbox/tree/humble?#configuration
-    solver_plugin: solver_plugins::CeresSolver
-    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
-    ceres_preconditioner: SCHUR_JACOBI
-    ceres_trust_strategy: LEVENBERG_MARQUARDT
-    ceres_dogleg_type: TRADITIONAL_DOGLEG
-    ceres_loss_function: None
-
-    odom_frame: odom
-    map_frame: map
-    base_frame: base_footprint
-    scan_topic: obstacle_scan
-    use_map_saver: true
-    mode: mapping
-
-    # if you'd like to immediately start continuing a map at a given pose
-    # or at the dock, but they are mutually exclusive, if pose is given
-    # will use pose
-    # map_file_name: test_steve
-    # map_start_pose: [0.0, 0.0, 0.0]
-    # map_start_at_dock: true
-
-    debug_logging: false
-    throttle_scans: 1
-    scan_queue_size: 10
-    transform_publish_period: 0.0                # if 0 never publishes odometry
-    map_update_interval: 0.5
-    resolution: 0.05
-    min_laser_range: 0.3                         # for rastering images
-    max_laser_range: 10.0                         # for rastering images
-    minimum_time_interval: 0.2
-    transform_timeout: 0.2
-    tf_buffer_duration: 10.
-    stack_size_to_use: 40000000                   # program needs a larger stack size to serialize large maps
-    enable_interactive_mode: true
-
-    # General Parameters
-    use_scan_matching: false
-    use_scan_barycenter: true
-    minimum_travel_distance: 0.1
-    minimum_travel_heading: 0.1
-    scan_buffer_size: 10
-    scan_buffer_maximum_scan_distance: 10.0
-    link_match_minimum_response_fine: 0.1
-    link_scan_maximum_distance: 1.5
-    loop_search_maximum_distance: 3.0
-    do_loop_closing: false
-    loop_match_minimum_chain_size: 10
-    loop_match_maximum_variance_coarse: 3.0
-    loop_match_minimum_response_coarse: 0.35
-    loop_match_minimum_response_fine: 0.45
-
-    # Correlation Parameters - Correlation Parameters
-    correlation_search_space_dimension: 0.5
-    correlation_search_space_resolution: 0.01
-    correlation_search_space_smear_deviation: 0.1
-
-    # Correlation Parameters - Loop Closure Parameters
-    loop_search_space_dimension: 8.0
-    loop_search_space_resolution: 0.05
-    loop_search_space_smear_deviation: 0.03
-
-    # Scan Matcher Parameters
-    distance_variance_penalty: 5.5
-    angle_variance_penalty: 5.0
-
-    fine_search_angle_offset: 0.00349
-    coarse_search_angle_offset: 0.349
-    coarse_angle_resolution: 0.0349
-    minimum_angle_penalty: 0.9
-    minimum_distance_penalty: 0.5
-    use_response_expansion: true
+    # 跟踪期 map->odom 死区 + 一阶低通平滑滤波 + 帧间 Point-LIO 运动一致性门禁：
+    # 消除厘米级 GICP 抖动触发反复重规划；<=0.22 m（覆盖 continuous_correction_max_translation=0.20 m
+    # 的斜坡/桥面真实 LIO 滑移）经 LPF 平滑吸收，超过阈值的大跳变需连续 2 帧一致（叠加 GICP confirmation_count=2
+    # 共 4 次扫描一致）才放行，防止单帧异常跳变同时避免斜坡漂移被门控锁死。
+    tracking_filter.enable: true
+    tracking_filter.deadband_translation: 0.025
+    tracking_filter.deadband_yaw: 0.03
+    tracking_filter.lpf_alpha_translation: 0.35
+    tracking_filter.lpf_alpha_yaw: 0.25
+    tracking_filter.settle_translation_tolerance: 0.001
+    tracking_filter.settle_yaw_tolerance: 0.002
+    tracking_filter.motion_consistency_base_m: 0.22
+    tracking_filter.motion_consistency_ratio: 0.10
+    tracking_filter.motion_consistency_base_yaw: 0.12
+    tracking_filter.motion_jump_confirm_count: 2
+    tracking_filter.motion_jump_confirm_tolerance_m: 0.08
+    tracking_filter.motion_jump_confirm_tolerance_yaw: 0.06
 
 # ATS 自研导航的唯一正式参数源。MuJoCo 仅覆盖 use_sim_time 与受控仿真开关；
 # 实机不再从包内私有 YAML 读取这些节点参数。
@@ -950,8 +859,10 @@ ats_rog_map_adapter:
     traversability_slope_grid_topic: /traversability_slope_grid
     # 只给 RViz 的 snapshot 占据视图，有订阅者时才编码；规划与安全链只读 planning_snapshot。
     planning_grid_viz_topic: /rog_map_adapter/viz/planning_grid
-    # 同一快照的彩色距离点云（RViz），同样只在有订阅者时编码。
+    # 同一快照的 5-field ESDF 距离点云（RViz Intensity Rainbow Flat Squares），只在有订阅者时编码。
     esdf_cloud_topic: /rog_map_adapter/viz/esdf_cloud
+    esdf_viz_max_distance: 2.0
+    esdf_viz_max_points: 250000
     ready_topic: /rog_map_adapter/ready
     generation_topic: /rog_map_adapter/generation
     map_status_topic: /rog_map_adapter/status
@@ -1030,6 +941,8 @@ minco_planner:
     # 由 GoalManager 无停车重规划；近端冲突仍 RUNTIME_UNSAFE 急停。必须与 ats_goal_manager 的
     # replan_without_stop_enabled 成对打开，单开一边会退回"建议重规划即急停"。
     replan_advisory_enabled: true
+    # 远端 1-3 格弱冲突或全局引导冲突需连续确认 2 个不同快照，避免单帧噪声触发重规划；近端仍零延迟急停。
+    far_conflict_confirm_snapshots: 2
     # 无停车重规划的新参考起点取旧参考上"车的推进位置 + plan_lead"处的 p/v/a/yaw（调研报告 A.3），
     # 不再用请求时的实测位姿；只对 replan_advisory_enabled 触发的重规划生效。plan_lead [s] 要覆盖
     # 规划耗时与提交链路，偏小则新起点仍落在车后面。
@@ -1056,14 +969,14 @@ minco_planner:
     # 优先净空绕路比上限：绕行长度超过最短路 1.5 倍时放弃抬高净空，直接走窄通道。
     clearance_detour_ratio: 1.5
     publish_unsafe_trajectory: false
-    # 用户暂定5 m/s，实测后再标定；近障/曲率/终点限速仍有效。
+    # 用户暂定5 m/s，加速度与 MPC / 底盘执行器统一为 2.0 m/s²，消除前馈加速度过冲。
     reference_speed: 5.0
     min_segment_time: 0.05
     sample_spacing: 0.12
     max_velocity: 5.0
-    max_acceleration: 2.5
+    max_acceleration: 2.0
     max_jerk: 12.0
-    max_lateral_acceleration: 1.5
+    max_lateral_acceleration: 2.0
     corner_turn_threshold_rad: 0.35
     corner_inscribed_ratio: 0.45
     min_corner_radius: 0.20
@@ -1073,9 +986,14 @@ minco_planner:
     esdf_obstacle_clearance: 0.45
     esdf_obstacle_trigger_clearance: 0.40
     esdf_obstacle_target_clearance: 0.45
-    esdf_obstacle_max_iterations: 6
+    esdf_obstacle_max_iterations: 3
     esdf_obstacle_control_point_spacing: 0.30
     guide_control_point_spacing: 0.30
+    guide_smoothing_iterations: 80
+    guide_smoothing_alpha: 0.5
+    guide_smoothing_fidelity: 0.02
+    guide_smoothing_max_deviation: 0.50
+    guide_smoothing_min_clearance: 0.44
     esdf_obstacle_max_step: 0.10
     esdf_obstacle_max_deviation: 0.35
     esdf_obstacle_trust_region: 0.10
@@ -1086,15 +1004,13 @@ minco_planner:
     esdf_footprint_trigger_clearance: 0.12
     esdf_footprint_target_clearance: 0.14
     esdf_footprint_sample_spacing: 0.10
-    # 整条轨迹 MINCO 联合优化（唯一的最终轨迹生成器）：在 ESDF 修正后的加密引导上按弧长
-    # 每 1.0 m 取一个内点，以全部内点 q 与全部段时长 T=exp(τ) 为变量一次 L-BFGS 最小化
-    # jerk 能量 + ρ_T·ΣT + 中心/足迹 ESDF + 速度/加速度/横向加速度三次铰链罚（每段 K=16 梯形采样）。
-    # 数值失败 fail-closed；残差交给时间缩放与矩形足迹门禁，门禁阈值不因此放宽。
+    # 整条轨迹 MINCO 联合优化（唯一的最终轨迹生成器）：配合上游 C1 净空速度约束与 O2 局部滚动地平线，
+    # 10 m 窗口内约 10 段、每段 K=10、边采样 2 点，10 ms 预算内收敛且轨迹顺滑。
     joint_waypoint_spacing: 1.0
-    joint_samples_per_piece: 16
+    joint_samples_per_piece: 10
     joint_max_piece_time: 3.0
     joint_energy_weight: 1.0
-    joint_time_weight: 20.0
+    joint_time_weight: 50.0
     # 1e4 在 L 形内角留 ~0.07 m 净空残差，1e6 压到 ~0.01 m。
     joint_obstacle_weight: 1000000.0
     joint_velocity_weight: 1000.0
@@ -1103,16 +1019,18 @@ minco_planner:
     # 仅无 ESDF（如 JPS 无 ESDF 候选）时启用的引导管道：偏离加密引导 > 0.10 m 按三次铰链罚。
     joint_guide_weight: 1000000.0
     joint_guide_max_deviation: 0.10
-    # 中心净空目标 0.54（原与 jps_safe_distance 对齐；降到 0.45 时成功率下降，保留）；足迹采样点（已含 safety_margin）净空目标 0.03 m。
+    # 中心净空目标 0.54（在 45° 对角半宽 0.436 m 之上留出 ~0.10 m 弯角余量，避免出洞转角擦碰静态格）；
+    # 足迹采样点（已含 safety_margin）净空目标 0.06 m。
     joint_center_clearance: 0.54
-    joint_footprint_clearance: 0.03
-    joint_footprint_edge_samples: 1
+    joint_footprint_clearance: 0.06
+    joint_footprint_edge_samples: 2
     joint_g_epsilon: 0.00001
     joint_max_iterations: 200
-    joint_time_budget_ms: 12.0
-    # O2 局部滚动窗口与 C2 拼接 + Release 墙钟预算参数。
+    joint_time_budget_ms: 8.0
+    footprint_yaw_refinement_rounds: 1
+    # O2 真局部滚动地平线 + Release 墙钟预算参数。
     rolling_horizon_enabled: true
-    rolling_horizon_length_m: 8.0
+    rolling_horizon_length_m: 10.0
     rolling_min_tail_length_m: 2.0
     partial_subgoal_continuation_enabled: true
     partial_subgoal_only_without_prior: true
@@ -1122,8 +1040,7 @@ minco_planner:
     plan_wall_budget_ms: 30.0
     rolling_replan_wall_budget_ms: 35.0
     plan_hard_wall_budget_ms: 0.0
-    # 联合优化的距离场：legacy 的距离取原始场、梯度取平滑场，两者不是同一个函数，线搜索失败率约 40%；
-    # bicubic 拷出原始场做 Catmull-Rom 插值，值与梯度同源（线搜索失败 0%，每次求解 14 -> 9 ms）。
+    # 联合优化的距离场：bicubic 拷出原始场做 Catmull-Rom 插值，值与梯度同源。
     joint_distance_field: bicubic
     # 障碍罚用 C1 平滑 L1（调研报告 A.22.1）：4000 代价/m，mu=0.01 m。
     joint_obstacle_smooth_l1_weight: 4000.0
@@ -1133,6 +1050,7 @@ minco_planner:
     path_short_segment_length: 0.05
     path_corner_angle_threshold_rad: 0.20
     path_footprint_aware_shortcut_enabled: true
+    path_shortcut_min_clearance: 0.50
     path_fillet_radius: 0.35
     path_fillet_arc_samples: 3
     yaw_mode: clearance_aware
@@ -1140,9 +1058,20 @@ minco_planner:
     # 5 m/s平移与3 rad/s自旋不能同时任意取满；组合命令继续受逐轮向量限速。
     yaw_rate_limit: 3.0
     yaw_acceleration_limit: 2.0
-    # 单轮线速度时间缩放（wheel_speed_*）不启用：用户 2026-10-30 决定，速度曲线优先平滑（启用时 TV 0.50 -> 0.77，报告 5.1.6 F）。
-    narrow_clearance_enter: 1.20
-    narrow_clearance_exit: 1.40
+    yaw_tangent_symmetry_order: 2
+    yaw_narrow_gap_bridge_time: 1.0
+    yaw_open_area_mode: minimal_rotation
+    yaw_narrow_start_hold_length: 0.3
+    # 上游与后置同源 C1 净空速度曲线 + 曲率感知窄弯限速：既保持高速顺滑又保护窄口拐角。
+    wheel_speed_time_scaling_change_rate: 1.0
+    narrow_turn_speed_limit: 1.2
+    narrow_turn_clearance: 0.55
+    narrow_turn_yaw_rate_threshold: 0.2
+    clearance_speed_min: 0.80
+    clearance_speed_low: 0.38
+    clearance_speed_high: 0.75
+    narrow_clearance_enter: 0.65
+    narrow_clearance_exit: 0.80
     terminal_yaw_sample_period: 0.10
     yaw_tunnel_enabled: true
     yaw_tunnel_yaw_offset: 0.0
@@ -1230,7 +1159,13 @@ ats_goal_manager:
     rolling_replan_stop_distance_m: 1.5
     require_accepted_localization: true
     planner_start_in_planning_frame: true
+    # 分段目标重投影阈值：终点近区 <=1.5 m 保持 0.03 m 高精度，远场 >=2.0 m 放宽至 0.20 m + 1.5 s 冷却，消除重规划风暴。
     retarget_threshold: 0.03
+    retarget_cruise_threshold: 0.20
+    retarget_terminal_distance_m: 1.5
+    retarget_cruise_distance_m: 2.0
+    replan_advised_cooldown_sec: 1.5
+    terminal_velocity_window_sec: 0.5
     map_transform_timeout_sec: 1.0
     tf_future_tolerance_sec: 0.2
     # 进度按"沿已提交参考的剩余弧长"计。绕墙路线直线距离先增后减，旧判据会在车正常跟随时判停滞。
@@ -1320,8 +1255,10 @@ ats_swerve_mpc:
     control_rate_hz: 50.0
     fallback_path_dt: 0.1
     trajectory_timeout: 0.5
-    goal_position_tolerance: 0.05
-    goal_yaw_tolerance: 0.15
+    # MINCO 目标准入最多可偏移 0.75*pos_tol 与 0.60*yaw_tol(0.09 rad)，MPC 停止容差必须更严，
+    # 确保准入偏移 + MPC 停止误差严格落入 ats_goal_manager 的 0.05 m / 0.15 rad 成功域内。
+    goal_position_tolerance: 0.015
+    goal_yaw_tolerance: 0.05
     # 终点区限速 |v| <= d / tau（报告 5.1.10 第 1 项）：底盘对指令的响应滞后约 0.4 s（MuJoCo
     # 2025 红框 171/172 指令与真值速度互相关），容差圆内单靠降速出口仍会冲出 0.3-0.4 m 再拉回；
     # 一阶趋近在 tau > e * 滞后（约 1.1 s）时不过冲。只在终点区内、reference 终点速度为零时生效。
@@ -1336,7 +1273,7 @@ ats_swerve_mpc:
     supersede_grace_sec: 0.4
     publish_debug_paths: true
     solver_mode: qp
-    qp_max_iterations: 400
+    qp_max_iterations: 800
     qp_time_limit_ms: 12.0
     qp_max_primal_residual: 2.0e-3
     qp_max_dual_residual: 5.0e-3
@@ -1345,11 +1282,13 @@ ats_swerve_mpc:
     qp_rti_iterations: 1
     qp_rti_second_pass_delta_threshold: 0.15
     qp_esdf_corridor_enabled: true
-    qp_esdf_corridor_clearance: 0.44
+    qp_esdf_corridor_clearance: 0.50
     qp_esdf_reference_margin: 0.015
     qp_esdf_min_corridor_clearance: 0.3055
-    qp_esdf_slack_linear_weight: 80.0
-    qp_esdf_slack_quadratic_weight: 400.0
+    # 代价权重按 O(1) 尺度统一归一化（与 state/control 权重同比例缩放，最优控制解数学等价），
+    # 避免 ||q||_inf 过大放大 OSQP 未缩放对偶残差与 ADMM 迭代次数；ESDF 松弛惩罚高于多步横迹权重，防止高速切凸角擦墙。
+    qp_esdf_slack_linear_weight: 12.0
+    qp_esdf_slack_quadratic_weight: 60.0
     rollout_safety_enabled: true
     rollout_immediate_stop_horizon_sec: 0.20
     rollout_brake_horizon_sec: 0.70
@@ -1361,23 +1300,23 @@ ats_swerve_mpc:
     telemetry_sampling_window_cycles: 0
     projection_backward_window: 0.20
     projection_forward_window: 2.00
-    cross_track_slowdown_start: 0.15
-    cross_track_slowdown_end: 0.60
+    cross_track_slowdown_start: 0.08
+    cross_track_slowdown_end: 0.30
     min_reference_progress_scale: 0.10
     command_latency_compensation: 0.01
     use_derivative_feedforward: true
     feedforward_accel_lead_sec: 0.025
-    # 26*0.10=2.6 s，覆盖5 m/s在2 m/s²下2.5 s完整制动时间；首步固定按50 Hz实测step_dt(0.02 s)执行，
-    # 兼顾2.6 s前瞻视野与OSQP <2 ms实时求解收敛性。
-    horizon: 26
-    dt: 0.10
-    state_weight: [18.0, 18.0, 10.0]
-    lag_weight: 15.0
-    contour_weight: 24.0
-    terminal_weight: [28.0, 28.0, 8.0]
-    control_weight: [0.12, 0.12, 0.08]
+    # 20*0.13=2.60 s，覆盖 5 m/s 在 2 m/s² 下 2.5 s 完整制动时间；首步固定按 50 Hz 实测 step_dt(0.02 s) 执行，
+    # 缩短加速度耦合链长度以将 OSQP 实时求解压至 ~1-2 ms。
+    horizon: 20
+    dt: 0.13
+    state_weight: [1.8, 1.8, 1.0]
+    lag_weight: 1.5
+    contour_weight: 3.0
+    terminal_weight: [2.8, 2.8, 0.8]
+    control_weight: [0.012, 0.012, 0.008]
     # 转角段提高 wz 增量惩罚，抑制相邻周期角速度突变；与 yaw_acceleration_limit 同步为 2.0。
-    control_delta_weight: [0.70, 0.70, 0.60]
+    control_delta_weight: [0.070, 0.070, 0.060]
     actuator_lag_tau_sec: 0.025
     actuator_delay_sec: 0.010
     max_vx: 5.0

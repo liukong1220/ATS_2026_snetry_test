@@ -851,6 +851,16 @@ class NavTrackingRecorder(Node):
             missing.append("ready_snapshot")
         if self._args.reference_topic and self.count_publishers(self._args.reference_topic) <= 0:
             missing.append("reference_publisher")
+        # Require at least one delivered heartbeat from ats_goal_manager before
+        # emitting RECORDER_READY so FastDDS SEDP matching with the manager
+        # (including its VOLATILE /minco/reference_path publisher) is complete
+        # before the runner dispatches a fast-planning goal.
+        if self._emergency_stop is None:
+            missing.append("emergency_stop")
+        if self._execution is None:
+            missing.append("execution_command")
+        elif self._execution_mono is not None and (time.monotonic() - self._execution_mono) < 0.15:
+            missing.append("execution_match_settle")
         return missing
 
     def _on_tick(self):

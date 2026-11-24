@@ -107,19 +107,23 @@ Visualization Manager:
       Value: true
     - Class: rviz_common/Group
       Displays:
-        - Alpha: 1
-          Autocompute Intensity Bounds: true
+        - Alpha: 0.55
+          Autocompute Intensity Bounds: false
+          Channel Name: intensity
           Class: rviz_default_plugins/PointCloud2
-          Color Transformer: RGB8
+          Color Transformer: Intensity
           Decay Time: 0
           Enabled: true
-          Name: 'ESDF Cloud: Black Obstacle / Red Inside Circumscribed Radius / Yellow-Green Clearance / Grey Unknown'
-          # Signed distance of the planning snapshot that JPS/MINCO use; encoded only while subscribed.
+          Invert Rainbow: false
+          Max Intensity: 2
+          Min Intensity: 0
+          Name: 'ESDF Distance Field (0..2 m Rainbow, Flat Squares)'
+          # unix_global_esdf style 5-field XYZ+distance+intensity cloud; encoded only while subscribed.
           Position Transformer: XYZ
           Selectable: false
           Size (Pixels): 3
-          Size (m): 0.1
-          Style: Boxes
+          Size (m): 0.08
+          Style: Flat Squares
           Topic:
             Depth: 1
             Durability Policy: Transient Local
@@ -127,7 +131,7 @@ Visualization Manager:
             Reliability Policy: Reliable
             Value: /rog_map_adapter/viz/esdf_cloud
           Use Fixed Frame: true
-          Use rainbow: false
+          Use rainbow: true
           Value: true
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
@@ -215,7 +219,7 @@ Visualization Manager:
           Enabled: true
           Line Style: Billboards
           Line Width: 0.075
-          Name: MPC Prediction / iLQR Follow Rollout
+          Name: MPC Prediction / OSQP SQP-RTI Rollout
           Offset:
             X: 0
             Y: 0

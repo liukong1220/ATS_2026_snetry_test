@@ -109,7 +109,7 @@ def load_tunnel_truth(config_dir, names):
     return [known[name] for name in names]
 
 
-def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
+def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None, evaluator_active=False):
     """Per-tunnel passes and axis lateral error from independent truth samples.
 
     samples are (x, y, yaw). A pass is a full traversal of the entry-exit axis in
@@ -158,6 +158,11 @@ def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
         ordered = sorted(lateral)
         contact_complete = (bool(contacts) and all(c is not None for c in contacts)
                             and all(b >= a for a, b in zip(contacts, contacts[1:])))
+        contact_delta = contacts[-1] - contacts[0] if contact_complete else None
+        if evaluator_active and contact_complete:
+            tunnel_contact_status = "passed" if contact_delta == 0 else "failed"
+        else:
+            tunnel_contact_status = "unverified"
         report[tunnel["name"]] = {
             "forward_passes": passes["forward"], "reverse_passes": passes["reverse"],
             "counted_axis_interval_m": [corridor_start, corridor_end],
@@ -168,17 +173,21 @@ def tunnel_report(samples, tunnels, robot_width=0.571, contact_counts=None):
             "axis_lateral_limit_m": limit,
             "yaw_error_max_rad": max(yaw_errors) if yaw_errors else None,
             "within_walls": bool(lateral) and max(lateral) <= limit,
-            "contact_counter_delta": contacts[-1] - contacts[0] if contact_complete else None,
+            "contact_counter_delta": contact_delta,
             "contact_diagnostic_samples": sum(c is not None for c in contacts),
-            "contact_diagnostic_scope": "latest received counter at each truth callback; not atomic",
-            "physical_contact_acceptance": "unverified"}
+            "contact_diagnostic_scope": (
+                "mujoco_geom_normal_v1 illegal-contact delta across tunnel corridor"
+                if evaluator_active
+                else "latest received counter at each truth callback; not atomic"
+            ),
+            "physical_contact_acceptance": tunnel_contact_status}
     return report
 
 
-def required_tunnel_report(profile, samples, config_dir, contact_counts=None):
+def required_tunnel_report(profile, samples, config_dir, contact_counts=None, evaluator_active=False):
     requirements = profile.get("tunnels", [])
     report = tunnel_report(samples, load_tunnel_truth(config_dir, [t["name"] for t in requirements]),
-                           contact_counts=contact_counts)
+                           contact_counts=contact_counts, evaluator_active=evaluator_active)
     for want in requirements:
         got = report[want["name"]]
         got["required_passes"] = {k: want.get(k, 0) for k in ("forward_passes", "reverse_passes")}
@@ -304,7 +313,7 @@ class Probe:
         from nav_msgs.msg import Odometry, OccupancyGrid, Path as PathMessage
         from geometry_msgs.msg import Twist
         from manda_can_control.msg import MotionCtrl
-        from std_msgs.msg import Bool
+        from std_msgs.msg import Bool, String
         from tf2_ros import Buffer, TransformListener
 
         self.rclpy = rclpy
@@ -318,6 +327,7 @@ class Probe:
         self.truth_samples = []
         self.truth_contact_counts = []
         self.contact_seen = {"max_violation_count": 0, "max_force": 0.0}
+        self.contact_evaluation = None
         self.endpoint_results = []
         self.history = {}
         self.execution_events = []
@@ -342,6 +352,7 @@ class Probe:
         topics = [
             (Odometry, "/simulation/ground_truth/odometry", qos_profile_sensor_data, self.on_truth),
             (SwerveTelemetry, "/swerve/telemetry", 10, self.on_telemetry),
+            (String, "/simulation/contact_evaluation", durable, self.on_contact_evaluation),
             (Odometry, "/localization", qos_profile_sensor_data, None),
             (LocalizationStatus, "/localization/status", durable, None),
             (RelocalizationObservation, "/relocalization_observation", 10, None),
@@ -484,8 +495,24 @@ class Probe:
                                     if not seen["counter_resets"] else None)
         seen["max_violation_count"] = max(seen["max_violation_count"], msg.contact_violation_count)
         seen["max_force"] = max(seen["max_force"], msg.max_contact_force)
-        # Contact counters are diagnostic under the current acceptance contract.
-        # Executed footprint conflicts and localization loss remain hard gates.
+
+    def on_contact_evaluation(self, msg):
+        try:
+            payload = json.loads(msg.data)
+        except (TypeError, ValueError):
+            return
+        if isinstance(payload, dict) and "illegal_contact_count" in payload:
+            self.contact_evaluation = payload
+            self.event("contact_evaluation", {
+                "illegal_contact_count": payload.get("illegal_contact_count", 0),
+                "illegal_chassis_count": payload.get("illegal_chassis_count", 0),
+                "illegal_wheel_side_count": payload.get("illegal_wheel_side_count", 0),
+                "illegal_wheel_ceiling_count": payload.get("illegal_wheel_ceiling_count", 0),
+                "illegal_obstacle_count": payload.get("illegal_obstacle_count", 0),
+                "illegal_max_force_n": payload.get("illegal_max_force_n", 0.0),
+                "legal_wheel_drivable_deck_count": payload.get("legal_wheel_drivable_deck_count", 0),
+                "speculative_margin_count": payload.get("speculative_margin_count", 0),
+            })
 
     @contextmanager
     def expect_localization_loss(self, timeout):
@@ -838,16 +865,29 @@ def run(args):
         summary["footprint_gate_collisions_transient_ready"] = transient
         summary["tolerances_m"] = {"waypoint": probe.waypoint_tolerance_m,
                                    "final": probe.final_tolerance_m}
+        contact_eval = probe.contact_evaluation
+        evaluator_active = isinstance(contact_eval, dict) and "illegal_contact_count" in contact_eval
+        contact_acceptance = (
+            ("passed" if int(contact_eval["illegal_contact_count"]) == 0 else "failed")
+            if evaluator_active
+            else "unverified"
+        )
         if profile.get("tunnels") and not args.max_goals:
             summary["route"] = profile.get("route")
             summary["tunnels"] = required_tunnel_report(
-                profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts)
+                profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts,
+                evaluator_active=evaluator_active)
             summary["contact_diagnostic"] = dict(probe.contact_seen,
-                                                 physical_contact_acceptance="unverified")
+                                                 physical_contact_acceptance=contact_acceptance)
+        if evaluator_active:
+            summary["physical_contact_evaluation"] = contact_eval
+        summary["physical_contact_acceptance"] = contact_acceptance
         tunnels_ok = all(t["passed"] for t in summary.get("tunnels", {}).values())
         tracking_ok = all(leg["passed"] for leg in probe.__dict__.get("tracking_results", []))
+        contact_ok = (contact_acceptance != "failed")
         summary["passed"] = bool(summary["passed"] and summary["A"] and summary["J"] and
-                                  tunnels_ok and tracking_ok and summary["footprint_gate_collisions"] == 0)
+                                  tunnels_ok and tracking_ok and contact_ok and
+                                  summary["footprint_gate_collisions"] == 0)
         if not summary["passed"]:
             raise RuntimeError("route evidence gates failed")
         if args.post_route_case:
@@ -875,15 +915,26 @@ def run(args):
                     summary["route_completed_ratio"] = summary["waypoints_reached"] / summary["waypoints_planned"]
                     if "path_length_m" not in summary and probe.path:
                         summary["path_length_m"] = truth_path_length(probe.path)
+                contact_eval = probe.__dict__.get("contact_evaluation")
+                evaluator_active = isinstance(contact_eval, dict) and "illegal_contact_count" in contact_eval
+                contact_acceptance = (
+                    ("passed" if int(contact_eval["illegal_contact_count"]) == 0 else "failed")
+                    if evaluator_active
+                    else "unverified"
+                )
                 if profile.get("tunnels"):
                     summary["route"] = profile.get("route")
                     if "tunnels" not in summary:
                         summary["tunnels"] = required_tunnel_report(
-                            profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts)
+                            profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts,
+                            evaluator_active=evaluator_active)
                     summary["tunnel_evidence_scope"] = "all received truth, including an incomplete failed route"
                 summary["nav_tracking"] = probe.__dict__.get("tracking_results", [])
-                summary["contact_diagnostic"] = probe.__dict__.get("contact_seen", {})
-                summary["physical_contact_acceptance"] = "unverified"
+                summary["contact_diagnostic"] = dict(probe.__dict__.get("contact_seen", {}),
+                                                     physical_contact_acceptance=contact_acceptance)
+                if evaluator_active:
+                    summary["physical_contact_evaluation"] = contact_eval
+                summary["physical_contact_acceptance"] = contact_acceptance
             (directory / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2), flush=True)
 
