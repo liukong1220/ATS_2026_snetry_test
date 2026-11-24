@@ -2,9 +2,9 @@
 
 ## 适用状态
 
-2026-11-16审查：Gazebo自用户2026-10-31决定起暂不启用。现存`ats_gazebo_nav.launch.py`尚引用已删除的独立adapter、`get_ground_projection`服务和`/rc_esdf/planning_grid`。旧入口不能直接作为当前导航启动步骤；本文移除过期操作命令，保留历史证据与恢复要求。
+2026-11-24 审查：Gazebo 自用户 2026-10-31 决定起冻结未启用。现存 `ats_gazebo_nav.launch.py` 尚引用已删除的独立 adapter、`get_ground_projection` 服务和 `/rc_esdf/planning_grid`。旧入口不能直接作为当前导航启动步骤；本文仅保留恢复迁移契约与边界。
 
-当前活动链见[导航定位与轨迹链路](导航定位与轨迹链路.md)，最终验收使用[MuJoCo 2027方案](../nav_acceptance/20261116_2027_final_test_plan.md)。本轮没有修改Gazebo源码或启动它。
+当前活动链见 [导航定位与轨迹链路](导航定位与轨迹链路.md)，最终验收使用 [MuJoCo 2027 方案](../nav_acceptance/20261116_2027_final_test_plan.md)。本阶段不修改或启动 Gazebo。
 
 ## 重新启用前的接口迁移
 
@@ -26,4 +26,4 @@
 
 旧d220无GUI、关闭planning/GICP的启动仅证明world、机器人、传感器bridge和relay曾启动，20 s后超时退出。旧d232的2027 GT/direct-LiDAR运行曾记录持续`/registered_scan`及GICP accepted/CONFIRMED。这些不证明当前revision的完整导航兼容，也不证明隧道或对称点速度通过。
 
-P3还需无Nav2服务进程、MINCO不订阅`/plan`、目标入口不调用`nav2_msgs/action/NavigateToPose`、自研action生命周期与当前最终套件共同通过。物理接触、实车和连续swept footprint仍未验证。
+P3 还需无 Nav2 服务进程、MINCO 不订阅 `/plan`、目标入口不调用 `nav2_msgs/action/NavigateToPose`、自研 action 生命周期与行为树全链共同通过。物理接触（独立评估器）与实车硬件联调目前仍未验证（自适应连续扫掠足迹门已在 Wave 3 落地）。

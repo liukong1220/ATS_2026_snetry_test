@@ -1,259 +1,122 @@
 # 2027 导航验证方案：基地到基地、隧道与对称点速度
 
-2026-11-20 起，仿真默认使用有图模式：`rmuc_2027_mujoco.launch.py` 默认 `slam:=false`，加载 `src/ats_sentry_bringup/map/rmuc_2027.yaml` 与 `pcd/rmuc_2027.pcd`。测试无先验时显式传 `slam:=true`（S3 runner 用 `--mapless`），PGM 和 PCD 输入置空。先验证传感器与定位/地图，再做基地到基地 B1、局部避障 B2 和独立全堵停车。历史无先验结果见第 5 节，保留原判定。
+更新日期：2026-11-24。本文件是 RMUC 2027 仿真导航验收的唯一任务坐标、执行入口与当前状态账本。
 
-本文件维护任务坐标、运行入口和验收结果。统一搜索和先验避障接回已接入，本轮实际结果见第 5 节。同一 action 的无先验远目标接续仍待接入。d34、d35、d40 及其他历史批次保留原判定与来源。 [实施顺序](../调研/无先验地图钻洞高速导航优化调研报告.md#51-执行顺序与当前停点) · [实施入口](../调研/无先验地图钻洞高速导航优化调研报告.md#97-提示词选择)
+- 默认仿真入口为有图模式：`rmuc_2027_mujoco.launch.py` 默认 `slam:=false`，加载 `src/ats_sentry_bringup/map/rmuc_2027.yaml` 与 `pcd/rmuc_2027.pcd`；唯一 MPC 求解器为 `OSQP v1.0.0 SQP-RTI`（`solver_mode:=qp`）。
+- 无先验建图测试显式传 `slam:=true`（`scripts/s3_mujoco_acceptance.py` 加 `--mapless`），PGM 和 PCD 输入置空，两种模式分开记录。
+- 当前默认无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`）；未带窗口时画面项记为未验证，无独立接触评估器时 `physical_contact_acceptance` 记为 `unverified`。
+- 后续优化路线与新会话提示词见 [主报告第 5 节](../调研/无先验地图钻洞高速导航优化调研报告.md#51-执行顺序与当前停点) 与 [提示词选择](../调研/无先验地图钻洞高速导航优化调研报告.md#97-提示词选择新会话可直接复制)。
+
+---
 
 ## 1. 固定场景与坐标
 
-| 项 | 当前约定 | 来源/限制 |
+| 项 | 现行约定 | 说明 |
 | --- | --- | --- |
-| 场景 | `rmuc_2027`，`localization_source:=lio` | 不用truth定位替代Point-LIO |
-| 实际模型范围 | $x\in[0,28]$、$y\in[0,16]$ m | MJCF注释与560×320、0.05m的PGM交叉核对；不套用28×15m比赛概念尺寸 |
-| 场地中心 | `map (14, 8)` | 场地原点 `(0, 0)` 加场地长宽的一半 |
-| 基地起点 | `(3.37, 9.03, 0.465, 0)` | `rmuc_2027`、`rmuc_2027_tunnels` 的显式起点，最后两项为高度和 yaw |
-| 对面基地对应点 | `map (24.63, 6.97)` | XY 位移 `(21.26, −2.06) m`，直线距离 `21.36 m` |
-| S3 多点路线 profile 的 odom 全局层覆盖 | 原点 `(-8, -15)`，`40 × 30 m`，odom $x\in[-8,32]$、$y\in[-15,15]$ | 起始 yaw 为 0 时场地在 odom 为 $x\in[-3.37,24.63]$、$y\in[-9.03,6.97]$，远目标 odom `(21.26, −2.06)`，均在层内 |
-| V1 速度起点 | `(13.40, 2.00, 0.550, 0)` | 当前 2027 launch 默认起点 |
-| V1 速度目标 | `map (14.60, 14.00)` | 原对称点专项，末端 yaw 为 `0` |
+| 场景与定位 | `rmuc_2027`，`localization_source:=lio`，`use_identified_odometry:=true` | 不用真值定位替代 Point-LIO |
+| 实际模型范围 | $x \in [0, 28]$、$y \in [0, 16]\ \mathrm{m}$，场地中心 `map (14, 8)` | 与 560×320、0.05 m PGM 同框（不套用 28×15 m 概念尺寸） |
+| 基地起点（B1/T1–T3） | `(3.37, 9.03, 0.465, 0)` | [s3_mapping_routes.yaml](../../src/sim/ats_mujoco_sim/config/s3_mapping_routes.yaml) 显式起点 |
+| 对面基地目标（B1） | `map (24.63, 6.97, yaw=0)` | 中心对称点，XY 位移 `(21.26, -2.06) m`，直线距离 `21.36 m` |
+| S3 `odom` 全局层覆盖 | `40 × 30 m`（`0.1 m`），2027 偏置原点 `(-8, -15)` | `odom` 覆盖 $x \in [-8, 32]$、$y \in [-15, 15]\ \mathrm{m}$，包含整场与远目标 |
+| V1 对称点速度起点/目标 | `(13.40, 2.00, 0.550, 0)` -> `map (14.60, 14.00, yaw=0)` | 直线距离 `12.060 m`，静止到静止 `2 m/s²` 理想峰值约 `4.911 m/s` |
 
-场地关于中心对称且 `map` XY 与场地轴对齐时，设场地原点为 $(x_0,y_0)$、尺寸为 $(W,H)$、起始 XY 为 $S=(x_s,y_s)$。对面对应点和直线距离按下式计算。
+中心对称目标公式（场地原点 $(x_0, y_0)$、尺寸 $(W, H)$、起点 $S=(x_s, y_s)$）：
 
 $$
-C=(x_0+W/2,\,y_0+H/2),\qquad G=2C-S,\qquad D=\lVert G-S\rVert_2.
+C = \left(x_0 + \frac{W}{2},\; y_0 + \frac{H}{2}\right), \qquad G = 2C - S, \qquad D = \lVert G - S \rVert_2.
 $$
 
-2027 的场地尺寸由模型与 PGM 头交叉核对，基地起始位姿取自现有路线配置。无先验运行只输入场地几何和起始位姿，Point-LIO 与在线地图提供行进中的定位和障碍证据。场地尺寸、原点或出生点变化时重算目标。非中心对称场地使用实测对应点。实际里程按仿真真值轨迹累加，单独报告绕行增加的距离。 [基地起点](../../src/sim/ats_mujoco_sim/config/s3_mapping_routes.yaml#L82) · [地图分辨率与原点](../../src/ats_sentry_bringup/map/rmuc_2027.yaml)
+---
 
-文档预检：速度两端在当前PGM上，yaw=0、`0.581×0.571 m + 每边0.02 m`的保守覆盖单元均为free，中心单元所在原始free连通域相同。圆形膨胀连通诊断没有通过；它含圆形/栅格取整近似，不能单独证明矩形SE2有路或无路。完整路径、转弯足迹、三维净空、落地、动态障碍与定位仍需实际导航验证，不由端点预检推导通过。原始计算及hash见[计划检查索引](20261116_2027_final_test_plan.json)。
+## 2. 验收任务矩阵
 
-## 2. 实际任务与专项矩阵
-
-| ID | 用例 | 入口 | 必须报告 |
+| ID | 任务 | 正式入口（`scripts/s3_mujoco_acceptance.py`） | 必报指标 |
 | --- | --- | --- | --- |
-| B1 | 基地到基地 | `rmuc_2027`、`lio`、默认有图 `slam:=false`；无先验变体显式 `slam:=true`。单一 ATS action 到 `map (24.63, 6.97)` | 终点真值、实际里程、执行足迹与地图更新 |
-| B2 | 局部避障 | 同 B1，从在线已知空闲区域选择障碍位置 | 障碍可见、重搜、EXECUTE、绕行、几何与实际接回、终点；独立全堵停车 |
-| T1 | 真实`tunnel_B`往返 | `rmuc_2027_tunnels / tunnel_b_roundtrip` | 所有13个目标、B正反向穿越次数、入口/出口yaw及横向误差、真值终点和执行足迹 |
-| T2 | 南坡/南侧通道往返 | `rmuc_2027_tunnels / ramp_south` | 坡道支撑、顶板净空、正反向通过、失败点 |
-| T3 | 六隧道完整路线 | `rmuc_2027_tunnels / six_tunnels` | 全部配置目标与每个声明通道的穿越计数；运行前声明重复次数N并逐次报告 |
-| V1 | 初始点到中心对称点导航速度 | `SCENE=rmuc_2027 TEST_PROFILE=single` | `(13.40,2.00)→(14.60,14.00)`，参考/指令/实际速度、终点真值及停车 |
-| F | 2027独立安全故障 | 同一2027基线，逐项新launch | ready失效→急停→控制零速→底盘零速；恢复后旧参考不复活 |
+| **B1** | 基地到基地 | `--profile rmuc_2027_tunnels --route base_to_base --case route`（无先验加 `--mapless`） | 单 action 终点真值（$\le 0.08\ \mathrm{m}$）、实走里程、q1/q2、MINCO/OSQP 墙钟、`0` QP 告警 |
+| **B2** | 动态障碍绕行接回 | `--profile rmuc_2027_tunnels --route base_to_base --case b2_detour`（无先验加 `--mapless`） | 在线实体箱投放、触发 `local_rejoin` 绕行、终点真值与 `0` 碰撞；独立全堵目标验证有界失败与三路零速 |
+| **T1** | 真实 `tunnel_B` 往返 | `--profile rmuc_2027_tunnels --route tunnel_b_roundtrip --case route --waypoint-control-tolerance-m 0.08` | 全部 13 点到达、`tunnel_ramp_bridge`（正 1）与 `tunnel_B`（正/反各 1）侧偏/航向误差、末点 $\le 0.08\ \mathrm{m}$、q1/q2 |
+| **T2** | 南坡/南侧通道往返 | `--profile rmuc_2027_tunnels --route ramp_south --case route --waypoint-control-tolerance-m 0.08` | 全部 13 点、`tunnel_south_plate` 正/反各 1、坡道支撑与顶板净空、独立物理接触归因 |
+| **T3** | 六隧道完整路线 | `--profile rmuc_2027_tunnels --route six_tunnels --case route --waypoint-control-tolerance-m 0.08` | 全部 42 点与 6 声明通道正反向计数；运行前声明重复次数 $N$ |
+| **V1** | 对称点导航速度 | `--profile rmuc_2027_tunnels --route symmetry_speed --case route` | 经 `/ats_navigate_to_pose` 到达，记录参考/MPC/仲裁/底盘/真值速度曲线与终点 $\le 0.08\ \mathrm{m}$ |
+| **F** | 独立安全故障矩阵 | `--case {unknown,no_path,unsafe,adapter_lease,point_lio_restart}`（一项一独立 domain、一新 launch） | 故障触发急停、三路持续零速、恢复后 epoch/seq 递增且旧 `ExecutionCommand` 拒绝不复活 |
+| **S3** | 无先验建图与保存/重载 | `--profile rmuc_2027 --mapless --case route --post-route-case obstacle_and_dynamic` 及 `--reload <prefix>` | 建图到达精度、障碍可见延迟（`p95 < 250 ms`）与射线清除、保存漏检/误检、动态不保存、重载 `TRACKING` 与首目标 $\le 0.08\ \mathrm{m}$ |
 
-T1中的第7个前置`ramp_bridge`不算B通过；真正B位于第10–13个目标。不得使用`--max-goals`片段替代完整T1/T2/T3。现有路线和几何评估输入只给评估器，不回流成导航真值。
+> T1 第 7 点为前置 `ramp_bridge`，不计作 `tunnel_B` 通过（真实 B 位于第 10–13 点）；禁止用 `--max-goals` 片段替代完整 T1/T2/T3 通过。
 
-本方案没有给定重复稳定性门的N；运行前记录所选N和依据，不能事后按成功次数选N。探索阶段N=1只代表单次结果，不能宣称重复稳定性。O1-A允许的原64点路线首目标截断仅作启动诊断，不计入T1/T2/T3完整路线通过。
+---
 
-主场景只按实际遇到的地形记录结果，是每次导航行为改动后的默认实际测试。需要单独判定指定通道、速度或故障时，再选择相应的 T1/T2/T3、V1 或 F，不作为每次改动的固定回归。默认加载 rmuc_2027 先验 PGM/PCD；无先验变体从空图启动，仅使用在线扫描与增长地图匹配，两种模式分开记录。
+## 3. 速度与安全门口径
 
-## 3. 速度验收的含义
+- 暂定平移上限 `5.0 m/s`、加速度 `2.0 m/s²`、yaw 上限 `3.0 rad/s`、角加速度 `2.0 rad/s²`；`5 m/s` 为允许上限，未在当前几何下触发高速段时如实标注“未触发”，严禁直接给 `/motion_control` 发速度替代导航 action。
+- 终点独立真值门：中间点 $\le 0.15\ \mathrm{m}$，终点与重载首目标 $\le 0.08\ \mathrm{m}$；当前规划/控制终端容差收紧为 `0.05 m` 以留足裕量。
+- 跟踪门：`q1`（参考发布无冲突）必过；`q2`（实际足迹进入后续占据格）持续 $\ge 3$ tick 且跨 $\ge 2$ 快照判失败；`q3` 仅诊断。所有批次断言单一发布者所有权与零 Nav2（无 `bt_navigator`/`planner_server`/`controller_server`/`/plan`）。
 
-暂定平移上限5m/s，yaw上限3rad/s、角加速度2rad/s²；保留逐轮速度/加速度、曲率、近障、终点和失效零速门。V1使用导航action，不能直接给`/motion_control`发5m/s来代替导航测试。
+---
 
-逐段记录同一仿真时间下的参考速度、MPC出口、仲裁出口、`/motion_control`及独立真值平面速度；报告峰值、持续时间、速度曲线、加减速、路程、目标误差、停车时间，以及每次限速的来源。只有安全参考实际请求高速时，才能判定下游是否仍有固定2/1.5m/s截断；未触发高速段标“未触发”，不伪报5m/s导航能力已验证。
+## 4. 正式执行模板
 
-本对称点直线距离约12.060m。在从静止到静止、加减速度均为2m/s²的理想条件下，达到5m/s所需最短距离为12.5m，短于该距离的理论峰值约4.911m/s。实际绕路、转弯、近障和净空会改变可达速度。因此V1必须报告实测结果，不能要求每次强行到5m/s，也不能用路径受限为理由隐瞒软件额外限幅。完整5m/s平台段未触发时，该能力项继续未验证。
-
-终点独立真值误差采用现有最终门≤0.08m；路径/执行足迹、q1/q2和物理接触证据分列。`single`脚本默认终点门为0.30m，V1必须显式传入`GOAL_TOLERANCE=0.08`。
-
-## 4. 执行模板：先完成前置检查再运行
-
-每次运行前核验 Release 构建、安装一致性、2027 资产和健康。launch、录制器和 action 客户端使用同一组 ROS 环境；本文不规定固定的 `ROS_DOMAIN_ID` 或 DDS 配置文件。不能放宽定位/地图安全超时绕过启动失败。
-
-### 4.0 基地到基地
-
-1. 用 `rmuc_2027_mujoco.launch.py`，设置 `localization_source:=lio`、`start_x:=3.37 start_y:=9.03 start_z:=0.465 start_yaw:=0.0`。默认 `slam:=false` 加载 rmuc_2027 PGM/PCD；无先验变体加 `slam:=true`，此时 `map_yaml_file` 和 `prior_pcd_file` 向子 launch 传入空字符串。保留 MID360 `10 Hz` 与 IMU `200 Hz` 口径。 [2027 launch](../../src/sim/ats_mujoco_sim/launch/rmuc_2027_mujoco.launch.py) · [无先验参数](../../scripts/s3_mujoco_acceptance.py#L762)
-2. 向 `/ats_navigate_to_pose` 下发一个 `map` 目标 `(24.63, 6.97)`，`position_tolerance=0` 使用现行服务端默认。仅核验平移到达时可沿用终点 `yaw=0`。远目标在随车规划窗口外时，由统一 JPS/A* 搜索返回窗口内朝远目标推进最多的可达部分路径，随着地图增长继续同一 action（待实现）。局部规划输入来自在线扫描及地图。路径上通道净宽小于带余量车体对角线 `0.871 m` 时视为与洞口相近，在洞外对齐车体 `+x`，随后正向通过。现有 `rmuc_2027` 多点 runner 保留原路线，单目标滚动验收在接通对应行为后执行。 [局部规划设计](../调研/无先验地图钻洞高速导航优化调研报告.md#无先验基地到基地与局部重规划)
-3. 核对最终 action 状态、真值误差 `≤0.08 m`、实际里程与末端停车。报告实时绕障和地形引起的重规划、求解墙钟耗时、已执行参考与地图身份。遇到窄通道时记录入口前的实际 yaw、通过方向及整车驶出，未遇到则记未触发。保存 PGM/YAML/PCD 并记录观测范围，沿用现有足迹和执行判定。
-
-### 4.0.1 B1/B2 运行入口
-
-B1 直接启动 `rmuc_2027_mujoco.launch.py`（`localization_source:=lio use_identified_odometry:=true start_x:=3.37 start_y:=9.03 start_z:=0.465 start_yaw:=0.0`，默认 `slam:=false` 有图；无先验变体追加 `slam:=true`），向 `/ats_navigate_to_pose` 发送单次 `map (24.63, 6.97, yaw=0)` 目标，并用 `scripts/nav_tracking_recorder.py` 与 `scripts/analyze_nav_tracking.py` 采集并核验 q1/q2。默认关闭 RViz 与 MuJoCo 窗口，发目标前用独立真值核对初始位姿；专门观察画面时显式设置 `use_viewer:=true show_viewer:=true use_rviz:=true`。
-
-需要看实时建图画面时，在 RViz 打开「局部规划窗口」中的 `/rog_map/odom_layer` 与 `/rog_map_adapter/viz/planning_grid`，叠加 `/registered_scan`。在线建图以消息的时间、内容变化与实际画面取证。PGM 是显式保存时输出的静态地图。
-
-B2 复用实体夹具，以本次 B1 实际几何引导和投放前的在线空闲格选址。分别记录可见、局部重搜、授权参考、几何接回和底盘实际接回。全堵停车另开批次，核对三路持续零速。
-
-### 4.1 隧道
+运行前完成 `./build.sh`（Release）与 `python3 scripts/validate_navigation_config.py`，按本机网络加载 ROS/DDS 环境并导出未占用的 `ROS_DOMAIN_ID`（运行前用 `pgrep` 确认无残留进程）：
 
 ```bash
-cd "${ATS_WORKSPACE:?先设置并核验实际总工作区路径}"
-source install/setup.bash
-python3 -s scripts/s3_mujoco_acceptance.py \
+source /opt/ros/humble/setup.bash && source install/setup.bash
+export ROS_DOMAIN_ID="${ATS_DOMAIN:?选择未占用的隔离 domain}"
+export USE_RVIZ=false USE_MUJOCO_VIEWER=false
+
+# 1) Stage A 有图核心路线（T1/T2/T3/B1/V1）
+python3 scripts/s3_mujoco_acceptance.py \
   --profile rmuc_2027_tunnels --route tunnel_b_roundtrip \
-  --case route --output "${ATS_OUT:?全新的证据目录}" \
-  --waypoint-control-tolerance-m 0.08 \
-  --record-column-inputs --registration-details \
-  --launch-arg use_rviz:=false --launch-arg show_viewer:=false \
-  --launch-arg lidar_threads:=0 --launch-arg lidar_downsample:=0
+  --case route --waypoint-control-tolerance-m 0.08 --registration-details \
+  --output "${ATS_OUT:?独立输出目录}"
+
+# 2) Stage A 动态绕行与 5 项独立故障（每项换新 domain 与新输出目录）
+python3 scripts/s3_mujoco_acceptance.py \
+  --profile rmuc_2027_tunnels --route base_to_base \
+  --case b2_detour --output "${ATS_OUT:?独立输出目录}"
+# --case 可换为：unknown / no_path / unsafe / adapter_lease / point_lio_restart
+
+# 3) Stage B 无先验建图（空 PGM/PCD）与保存/重载
+python3 scripts/s3_mujoco_acceptance.py \
+  --profile rmuc_2027 --mapless --case route \
+  --post-route-case obstacle_and_dynamic --output "${ATS_OUT:?独立输出目录}"
+python3 scripts/s3_mujoco_acceptance.py \
+  --profile rmuc_2027 --reload "${SAVED_PREFIX:?保存地图前缀}" \
+  --output "${ATS_OUT:?独立输出目录}"
 ```
 
-T2/T3分别改为`ramp_south`和`six_tunnels`，每次另起证据目录。2027 路线默认加载 `src/ats_sentry_bringup/map/rmuc_2027` 先验（等价于 `--prior`）；无先验隧道加 `--mapless`，不加载 PGM/PCD。
+需要现场观察时（桌面未锁屏且有可用 `DISPLAY`），将 `USE_RVIZ=true USE_MUJOCO_VIEWER=true` 或直接运行 `ros2 launch ats_mujoco_sim rmuc_2027_mujoco.launch.py localization_source:=lio use_identified_odometry:=true use_viewer:=true show_viewer:=true use_rviz:=true`（无先验追加 `slam:=true`）。
 
-无先验建图显示和保存使用 `--profile rmuc_2027 --case route --max-goals 1 --mapless`，runner 会启动 `slam:=true`。仅在专门观察画面时显式打开窗口。RViz 的「距离场」组显示 `/rog_map_adapter/viz/esdf_cloud`，「局部规划窗口」组可打开 `/rog_map/odom_layer`。正常完成后调用 `/rog_map/save_map`，在输出目录生成 `map.pgm`、`map.yaml`、`map.pcd`。 [首段建图与保存过程](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存)
+---
 
-本轮中间目标显式请求0.08m的控制/准入半径，最后目标及重载首目标仍请求0、使用服务器原默认；独立真值验收仍为中间≤0.15m、最后/重载≤0.08m。该请求随同目标重规划传递，不改坐标或unknown/footprint规则。为复现历史默认收敛契约，可省略`--waypoint-control-tolerance-m`或传0。d29已验证非法/越界拒绝、默认不变及抢占后不串用。
+## 5. 当前验收状态（2026-11-23 Waves 0–5 无窗口实测）
 
-### 4.2 对称点速度
+全部批次基于三仓最终提交（根仓 `241dc08`、导航仓 `db1b4e2`、MuJoCo 仓 `47b9194`），在独立隔离域下无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`；画面项、独立物理接触评估 `physical_contact_acceptance: unverified` 及实车硬件均记为未验证）。全部通过批次均满足单一发布者所有权、零 Nav2 断言与 `0` QP 告警。
 
-对称点速度（`rmuc_2027`，默认起点 `(13.40, 2.00, 0.550, 0)` 到目标 `map (14.60, 14.00, yaw=0)`，`position_tolerance=0.08`）通过正式 `rmuc_2027_mujoco.launch.py` 与 `/ats_navigate_to_pose` action 执行，并配合 `scripts/nav_tracking_recorder.py` 与 `scripts/analyze_nav_tracking.py`（从根 `src/ats_sentry_bringup/params/node_params.yaml` 读取足迹长/宽/margin）核验；原 `scripts/test_mujoco_minco_mpc_chain.sh` 已随项目测试脚本清理移除。无先验变体在 launch 参数中追加 `slam:=true`。
+### 5.1 Stage A：有图定位模式（`slam:=false`，`rmuc_2027`）
 
-**本轮已修复记录完整性链。** runner分别传入两种载荷预算，默认`-1`全程保留，`0`关闭、正数显式限额仍记录缺证；分析器按LRU只缓存8份解压载荷。记录器保存完整SE3及几何/距离场身份，EXECUTE单独绑定最终验证快照与TF。d22的892个快照、1161个来源层载荷未截断，16条执行参考q1通过；q2仍失败。d7的历史失败和缺证保留，不回写为通过。
-
-`O0_CHAIN_RECORDER=1` 由 runner 在目标下发前自动启动。初始证据缺失记入记录状态，导航仍可下发。输出位于该目标跟踪目录的 `o0_chain.jsonl`。分析时使用该次运行的控制周期、终点半径和里程计接收超时。
-
-本机11月17日实测实时率约0.08–0.10，客户端墙钟兜底用20倍；32逻辑核默认6倍的历史速度假设不适用。该值只防止客户端早于ATS目标的300s仿真时间截止，不改变目标本身、odom/证据/地图租约或失效零速门。长任务使用独立后台进程并保存PID/退出码，避免执行工具约15分钟会话中断；不能把进程仍在运行当作验收成功。
-
-若需要留存 ROS 原始消息，可在 runner 完成所有权检查后用同一 ROS 环境另录 bag：
-
-```bash
-ros2 bag record --use-sim-time -o "${ATS_BAG_OUT:?独立新目录}" \
-  /clock /simulation/ground_truth/odometry /localization /odometry \
-  /cmd_vel/autonomy_raw /cmd_vel/selected /motion_control \
-  /minco/reference_path /planner/execution_command /planner/emergency_stop \
-  /rog_map_adapter/planning_snapshot
-```
-
-用 `scripts/analyze_nav_tracking.py` 分析 runner 自动保存的记录，保存对齐的速度曲线与各窗分类。两个窗口用于现场观察，锁屏会延迟原生 Wayland 窗口出现，截图按实际结果记载。
-
-### 4.3 故障及建图能力
-
-P2故障用`adapter_lease/service_timeout/input_stale/unknown/unreachable`，在同一2027基线上每项新launch；替换V1的`P2_FAULT_CASE`，并先核对注入锚点/前置等待适配2027。不能仅凭`SCENE`可切换就声称每项已经通过。
-
-11月17日F首次前置采用 `(13.40,2.00)→map (13.40,3.00,0)`、真值门0.08m；d6因真值0.159192m及q1/q2失败而未注入。后续独立F改用原路线起点 `(3.37,9.03,0.465,0)→map (4.00,9.03,0)`，经静态PGM足迹检查，prior资产/profile/场景不变，在线门继续保持；两个配置与结果分别保留，均不冒充V1。故障在飞目标从实际快照和估计 `/localization` 选取；frame不同时显式用一条父子frame一致且与odom/快照均≤0.5s差的完整TF转换，不把map真值标为odom。未到在飞运动门或未实际注入须记“未注入”。
-
-S3的`point_lio_restart/unsafe/service_timeout/unknown/no_path`及地图修正仍按现有CLI，在2027显式profile下独立运行；与P2矩阵分列。保存质量、动态不保存、重载、实体障碍延迟及完整2027 A–K继续验证，不用隧道或速度单次结果替代。
-
-## 5. 报告与当前状态
-
-主场景和各专项按实际运行状态记录。保留三仓 commit、参数、原始日志、轨迹、q1/q2、接触评估及终点真值。基地到基地额外记录直线基准与实走里程，以及在线重规划和建图覆盖。未触发的地形只记录当次路线事实。
-
-### 11 月 20 日本机无先验结果
-
-| 项目 | 实测 |
-| --- | --- |
-| 在线地图 | 双窗口 B1 记录到 183 种累计栅格和 234 种局部栅格。已核对 RViz 实际画面。独立无窗口批次从空图显式导出 400×300 PGM，1 个占据像素，PCD 有 507 个点。 [RViz](../../log/nav_acceptance/20261120_mapping/b1_action_d33/live_map_rviz.png) · [PGM](../../log/nav_acceptance/20261120_mapping/map_headless_d33/map_sample_1.pgm) · [PCD](../../log/nav_acceptance/20261120_mapping/map_headless_d33/map_sample_1.pcd) |
-| 传感器 | 双窗口实时因子 0.121，点云 0.100 仿真秒一帧，195 帧转换逐帧配对。定位接收间隔墙钟中位数 0.805 s、p95 1.138 s。 [时序](../../log/nav_acceptance/20261120_mapping/b1_action_d33/sensor_summary.json) |
-| B1 | **未通过**。单 action 返回 `ABORTED / 5`，首请求的目标在局部栅格外。终点真值误差 21.36228 m，action 期间实走 0.00443 m。无 EXECUTE，q1/q2 无执行样本，三路命令为零。窄通道未触发，物理接触未验证。 [动作与独立真值](../../log/nav_acceptance/20261120_mapping/b1_action_d33/action_summary.json) |
-| B2 绕行、独立全堵停车 | **未运行**。本轮 B1 没有生成可用于选址的几何引导。d28 保留历史判定。 |
-
-### 11 月 20 日 T1 无窗口复验
-
-两次均尝试 `tunnel_b_roundtrip` 完整 13 点，使用 `lio`、`slam:=true` 和空先验。**T1 未通过**。首次前 6 点通过，第 7 点在前置坡道因已知空闲净空不足而中止，距该点 1.6652 m，累计里程 14.6082 m。仅修改验收报告后复跑，首目标执行过 2 条参考，后续候选被足迹检查拒绝，距该目标 1.4612 m，累计里程 2.7454 m。两批的 tunnel_B 正向、反向实际穿越均为 0，窄通道未触发，物理接触未验证。 [首批真值和快照](../../log/nav_acceptance/20261120_t1/t1_d33/audit.json) · [复跑报告](../../log/nav_acceptance/20261120_t1/t1_report_d33/route/summary.json) · [主报告 9.8.17](../调研/无先验地图钻洞高速导航优化调研报告.md#9817-11-月-20-日本机-t1-无先验隧道往返)
-
-### 11 月 20 日有图定位、规划和跟随专项
-
-按用户指定另起有图批次，`slam:=false` 加载同源 PGM/PCD，关闭窗口。独立首点 1/1 到达、真值误差 0.0362 m；独立连续三点 3/3 到达，实走 7.963 m、末点真值误差 0.0166 m。连续三点的定位平面误差 p95 为 0.0347 m，底盘距已授权参考曲线 p95 为 0.0706 m，距原参考同刻位置 p95 为 0.1969 m。五条授权参考的 q1、420 个有效位姿的 q2 均无冲突。本次为普通短程检查，局部障碍绕行未触发，无图隧道暂停。 [首点](../../log/nav_acceptance/20261120_prior_check/short_d33/route/summary.json) · [三点](../../log/nav_acceptance/20261120_prior_check/three_d33/route/summary.json) · [跟随误差](../../log/nav_acceptance/20261120_prior_check/three_d33/audit.json) · [主报告 9.8.18](../调研/无先验地图钻洞高速导航优化调研报告.md#9818-11-月-20-日有图定位规划与跟随专项)
-
-### 11 月 23 日 Waves 0–5 全栈升级、唯一 OSQP SQP-RTI 收口与 2027 双阶段无窗口复验
-
-完成 Waves 0–5 全栈正向优化（Wave 0 仿真/可视解耦与解析 CPU 雷达、Wave 1 A3 无先验前沿推进与先验/实时规则解耦、Wave 2 O2 非零尾状态/带导数参考/滚动拼接与 `bicubic` 距离场默认、Wave 3 O4 唯一 `OSQP v1.0.0 SQP-RTI` 求解器移除 `ilqr`/`qp_shadow` 并集成延迟增广/沿迹横迹/rollout 安全及窄道重启修复、Wave 4 O3 `TUNNEL_FREE`/自适应连续扫掠/侧壁 PCA/隧道状态机、Wave 5 O5a Point-LIO 批量更新与 `projectSO3()` 修复 / O5b Schur SE(2) 方向信息与 `STATE_DEGRADED` 误升 `coarse+fine` 修复 / O5c `LOST`-only Scan Context 召回 / O5d 离线 `evaluate_lio_frontend_ab.py`），并将终端位置容差收紧至 `0.05 m`。全部改动通过 Release 构建、`scripts/validate_navigation_config.py`、Python/launch 语法检查与三仓 `git diff --check`。
-
-所有仿真批次均在独立隔离域下无窗口运行（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`，未带 RViz 与 MuJoCo 窗口；画面项、独立物理接触验收 `physical_contact_acceptance: unverified` 及实车硬件均记为未验证），全部通过批次均满足单一发布者所有权、零 Nav2 断言与 `0` QP 告警：
-
-| 阶段与批次 | 模式与入口 | 结果 | 关键实测指标与边界 |
+| 批次 | 入口与路线 | 结果 | 关键实测指标与边界 |
 | --- | --- | --- | --- |
-| Stage A · T1 `tunnel_b_roundtrip`（`stageA_T1_d205`） | `rmuc_2027_tunnels`（`slam:=false`） | **通过**（`passed=true`） | `13/13` 到达，里程 `21.03 m`，末点真值误差 `0.0792 m <= 0.08 m`，执行足迹冲突 `0`，`13/13` 段 q1/q2 全过，接触增量 `0`；`tunnel_ramp_bridge`（正向 1、侧偏 `0.0131 m`）与 `tunnel_B`（正/反各 1、侧偏 `0.0336 m`）全过；`qp_backend p50/p95/p99=0.662/1.482/1.759 ms`，`callback p95=2.089 ms`，MINCO `p50/p95=3.62/8.31 ms` |
-| Stage A · T2 `ramp_south`（`stageA_T2_d192`） | `rmuc_2027_tunnels`（`slam:=false`） | **通过**（`passed=true`） | `13/13` 到达，里程 `21.58 m`，末点真值误差 `0.0756 m <= 0.08 m`，执行足迹冲突 `0`，`13/13` 段 q1/q2 全过；`tunnel_ramp_bridge`（正向 1、侧偏 `0.0190 m`）与 `tunnel_south_plate`（正/反各 1、侧偏 `0.0412 m`）全过；`qp_backend p50/p95=0.679/1.436 ms`；南侧顶板几何接触诊断增量 `46940`（独立接触未验证） |
-| Stage A · T3 `six_tunnels`（`stageA_T3_d212`） | `rmuc_2027_tunnels`（`slam:=false`） | **未通过**（部分 `16/42`） | 通过 `tunnel_ramp_bridge`（正 1）、`tunnel_B`（正/反各 1）、`tunnel_south_plate`（正 1），里程 `29.71 m`；第 17 点 `[16.0, 1.08, 3.1416]` action 成功（估计误差 `0.009 m`）但真值误差 `0.181 m > 0.15 m`，根因为南侧退化区 GICP Y 漂移（同期 Point-LIO odom Y 漂移仅 `+0.005 m`） |
-| Stage A · B1 基地到基地（`stageA_B1_d208`） | `rmuc_2027_tunnels --route base_to_base`（`slam:=false`） | **通过**（`passed=true`） | 单 action `1/1` 到达，里程 `28.26 m`，末点真值误差 `0.0206 m <= 0.08 m`，执行足迹冲突 `0`，q1/q2 通过；峰值参考/指令/真值 `1.751 / 1.392 / 1.389 m/s`，峰值自旋 `2.504 / 2.469 rad/s`；`qp_backend p50/p95=0.881/1.826 ms`；接触诊断增量 `267`（独立接触未验证）；长段 MINCO `p50/p95=34.01/184.43 ms` |
-| Stage A · V1 对称点速度（`stageA_V1_d207`） | `rmuc_2027_tunnels --route symmetry_speed`（`slam:=false`） | **通过**（`passed=true`） | 单 action `1/1` 到达，里程 `16.41 m`，末点真值误差 `0.0358 m <= 0.08 m`，执行足迹冲突 `0`，q1/q2 通过，接触增量 `0`；峰值参考/指令/真值 `2.549 / 2.236 / 2.223 m/s`（`5 m/s` 高速段未触发）；`qp_backend p50/p95=0.586/1.245 ms` |
-| Stage A · B2 动态绕行（`stageA_B2_detour_d209`） | `rmuc_2027_tunnels --case b2_detour`（`slam:=false`） | **通过**（`passed=true`） | 在线实体箱投放后触发 `local_rejoin` 绕行安全到达，真值误差 `0.0130 m`，接触增量 `0`，`qp_backend p50/p95=0.499/1.099 ms` |
-| Stage A · 独立故障矩阵（5 项） | `unknown` / `no_path` / `unsafe` / `adapter_lease` / `point_lio_restart`（`slam:=false`） | **5/5 通过** | `unknown`（`stop_wall_s=3.50 s`）、`no_path`（`2.11 s`）、`unsafe`（目标阻断，`7.02 s`）、OS `SIGSTOP`/`SIGCONT` `adapter_lease`（`stop=4.75 s`、`recovery=2.95 s`、`pub_seq 503->508`、旧执行拒绝）与最终二进制 `point_lio_restart`（`death_to_stop=2.02 s`、`recovery=7.92 s`、`epoch 1->2`、旧执行拒绝）全过且接触增量 `0` |
-| Stage B · 无先验 3 点建图与保存（`stageB_rmuc2027_save_d215`） | `rmuc_2027 --mapless --max-goals 3 --post-route-case obstacle_and_dynamic`（`slam:=true`） | **3/3 路点与保存通过；后置延迟超时** | 3/3 路点到达（真值误差 `0.0213 / 0.0352 / 0.0270 m`，里程 `8.04 m`、`3/3` q1/q2 通过、足迹冲突 `0`、接触增量 `0`、`qp_backend p50/p95=0.718/1.461 ms`），显式保存成功（`167` 占据格 / `3858` 持久体素）；后置实体箱射线清除超时导致整脚本失败 |
-| Stage B · 无先验 B2 与两项故障 | `b2_detour` / `unknown` / `point_lio_restart`（`slam:=true`） | **3/3 通过** | `b2_detour` 真值误差 `0.0143 m`（`qp_backend p95=0.887 ms`）；`unknown` `stop_wall_s=3.36 s`；`point_lio_restart` `death_to_stop=1.90 s`、`recovery=6.08 s`、`epoch 1->2`、旧执行拒绝；三项接触增量均为 `0` |
-| Stage B · 其余 S3 开放门（6 项） | `reload` / `B1_mapless` / `obstacle_latency` / `dynamic_save` / `no_path` / `route_save`（`slam:=true`） | **未通过**（如实记账） | `reload`（锁定 `TRACKING`/`ready` 但局部图无路）、`B1_mapless`（前沿探索前进 `11.39 m`、定位误差 `1.8 cm`，北侧凹槽看门狗 `code=5`）、`obstacle_latency`（墙钟 `476–910 ms`，第 7 样本射线清除超时）、`dynamic_save`（持久化静态证据 `0`）、`no_path`（建图部分前沿推进）、`route_save`（孤立 `2×2` 未知格卡滞） |
-| 离线 Point-LIO A/B 评估 | `scripts/evaluate_lio_frontend_ab.py`（两组对照） | **已产出基准** | 跨 `T1`/`B1`/`V1`/`StageB` 测得 `APE RMSE=0.0202–0.0784 m`、`RPE-1m=0.0088–0.0718 m`、`Spin p95=0.0294–0.1068 m`、`LIO p95=6.32–7.05 ms` |
+| **T1** (`stageA_T1_d205`) | `rmuc_2027_tunnels / tunnel_b_roundtrip` | **通过** | `13/13` 到达，里程 `21.03 m`，末点真值误差 `0.0792 m`，足迹冲突 `0`，`13/13` q1/q2 全过，接触增量 `0`；`tunnel_ramp_bridge`（正 1、侧偏 `0.0131 m`）与 `tunnel_B`（正/反各 1、侧偏 `0.0336 m`）全过；`qp_backend p50/p95/p99=0.662/1.482/1.759 ms`，MINCO `p50/p95=3.62/8.31 ms` |
+| **T2** (`stageA_T2_d192`) | `rmuc_2027_tunnels / ramp_south` | **通过** | `13/13` 到达，里程 `21.58 m`，末点真值误差 `0.0756 m`，足迹冲突 `0`，`13/13` q1/q2 全过；`tunnel_ramp_bridge`（正 1、侧偏 `0.0190 m`）与 `tunnel_south_plate`（正/反各 1、侧偏 `0.0412 m`）全过；`qp_backend p50/p95=0.679/1.436 ms`；注：南侧顶板几何接触诊断增量 `46940`（独立接触待归因） |
+| **T3** (`stageA_T3_d212`) | `rmuc_2027_tunnels / six_tunnels` | **未通过**（`16/42`） | 通过 `tunnel_ramp_bridge`（正 1）、`tunnel_B`（正/反各 1）、`tunnel_south_plate`（正 1），里程 `29.71 m`；第 17 点 `[16.0, 1.08, 3.1416]` action 成功（估计误差 `0.009 m`）但独立真值误差 `0.181 m > 0.15 m`，根因为南侧退化区 GICP Y 漂移（同期 Point-LIO odom Y 漂移仅 `+0.005 m`，且 `weak_translation_eigenvalue=25.0` 未触发退化抑制） |
+| **B1** (`stageA_B1_d208`) | `rmuc_2027_tunnels / base_to_base` | **通过** | 单 action `1/1` 到达，里程 `28.26 m`，末点真值误差 `0.0206 m`，足迹冲突 `0`，q1/q2 通过；峰值参考/指令/真值 `1.751 / 1.392 / 1.389 m/s`，峰值自旋 `2.504 / 2.469 rad/s`；`qp_backend p50/p95=0.881/1.826 ms`；接触诊断增量 `267`（独立接触待归因）；长段 MINCO `p50/p95=34.01/184.43 ms`（超 `20 ms` 预算，待 P0-2 滚动裁剪） |
+| **V1** (`stageA_V1_d207`) | `rmuc_2027_tunnels / symmetry_speed` | **通过** | 单 action `1/1` 到达，里程 `16.41 m`，末点真值误差 `0.0358 m`，足迹冲突 `0`，q1/q2 通过，接触增量 `0`；峰值参考/指令/真值 `2.549 / 2.236 / 2.223 m/s`（`5 m/s` 高速段未触发）；`qp_backend p50/p95=0.586/1.245 ms` |
+| **B2** (`stageA_B2_detour_d209`) | `rmuc_2027_tunnels --case b2_detour` | **通过** | 在线投放实体箱触发 `local_rejoin` 绕行到达，真值误差 `0.0130 m`，接触增量 `0`，`qp_backend p50/p95=0.499/1.099 ms` |
+| **F（5 项）** | `unknown` / `no_path` / `unsafe` / `adapter_lease` / `point_lio_restart` | **5/5 通过** | `unknown`（`stop=3.50 s`）、`no_path`（`2.11 s`）、`unsafe`（目标阻断，`7.02 s`）、OS `SIGSTOP`/`SIGCONT` `adapter_lease`（`stop=4.75 s`、`recovery=2.95 s`、`pub_seq 503->508`、旧授权拒绝）与最终二进制 `point_lio_restart`（`death_to_stop=2.02 s`、`recovery=7.92 s`、`epoch 1->2`、旧授权拒绝）全过且接触增量 `0` |
 
-T3 `six_tunnels`、完整 S3 `A–K`（重载/射线清除延迟/动态不保存/无先验 B1 全程）、O1-A 全部门、`5 m/s` 高速段、独立物理接触验收、开窗 RViz/MuJoCo 画面观察与实车硬件联调继续记为未通过/未验证。 [主报告 9.8.21](../调研/无先验地图钻洞高速导航优化调研报告.md#9821-11-月-23-日-waves-05-全栈升级唯一-osqp-sqp-rti-收口与-2027-有图无先验双阶段无窗口验收)
+### 5.2 Stage B：无先验建图模式（`slam:=true`，`--mapless`，空先验）
 
-### 11 月 22 日双模式雷达安装解耦、全链参数化与无窗口 2027 综合复验
-
-完成四项架构与工程优化并通过全链 Release 增量构建（14 个改动包）、`validate_navigation_config.py`、launch 语法/参数解析（含 3 组 `lidar_mount_mode` 组合）及 4 仓 `git diff --check`：
-
-1. **统一 `lidar_mount_mode`（`chassis`/`gimbal`）与方案 A 底盘速度解耦**：`real_robot_navigation.launch.py` 默认 `lidar_mount_mode:="gimbal"`、`gimbal_use_base_footprint_odom:="True"`、`launch_fake_vel_transform:="False"`、`launch_chassis_vel_transform` 随模式联动（`gimbal` 为 `True`、`chassis` 为 `False`）；`bringup.launch.py` 默认 `chassis`；`gimbal` + `base_footprint` 模式下消除双父 TF 冲突，保留 `gimbal_yaw_odom -> gimbal_yaw_fake` 零旋转兼容 TF；同时支持 `gimbal_use_base_footprint_odom:=False` 回退至大 yaw 前馈延迟补偿。
-2. **全链硬编码参数化与单源收敛**：将 `standard_robot_pp_ros2`、`sentry_chassis_vel_transform`、`fake_vel_transform`、`loam_interface`、`sensor_scan_generation`、`localization_fusion`、`terrain_analysis_ext`、`ats_rog_map`、`minco_planner`、`ats_goal_manager`、`ats_cmd_vel_arbiter`、`ats_swerve_mpc` 的定时器周期、超时阈值、滤波/几何常数收敛至 `src/ats_sentry_bringup/params/node_params.yaml`，并同步更新 `scripts/validate_navigation_config.py`。
-3. **旋转系自旋平移去漂移与过严门禁优化**：在 `Se2MpcController` 与 `ChassisVelTransform` 加入旋转系速度搬运 $R(-\omega_z \Delta t)$ 与舵轮滚速/转向解耦约束；开启 `allow_body_yaw_follow:=true` 与 `enforce_gimbal_lock:=false`（保留 $T_{\mathrm{pub}} < T_{\mathrm{joint}} \le T_{\mathrm{tf}} < T_{\mathrm{lease}}$ 时序租约）；修复 `sentry_chassis_vel_transform` 中 `missing_yaw_policy="hold_last"` 过期不保持及角速度误外推缺陷；移除生产节点中旧 `service_timeout` 参数卡死钩子，改为 OS 级 `SIGSTOP`/`SIGCONT` 验证；保留串口断连、地图失效、无路、真实足迹碰撞与急停的确定性零速兜底。
-4. **S3 故障脚本修复**：`scripts/s3_fault_scenarios.py` 在 `unknown`（物理全遮挡 LiDAR 导致 Point-LIO 同步断流）窗口内接入既有 `probe.expect_localization_loss` 上下文，保持急停与三路零速门禁不放松。
-
-最终源码构建后的无窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`，未带 RViz 与 MuJoCo 窗口；画面项、独立物理接触验收与实车硬件均记为未验证）`rmuc_2027` 实测结果如下：
-
-| 批次 | 模式与入口 | 结果 | 关键实测指标与边界 |
+| 批次 | 入口与用例 | 结果 | 关键实测指标与边界 |
 | --- | --- | --- | --- |
-| 有图 T1 `tunnel_b_roundtrip` | `s3_mujoco_acceptance.py --profile rmuc_2027_tunnels --route tunnel_b_roundtrip`（`slam:=false`） | **通过**（`passed=true`） | 13/13 点到达，里程 `21.932 m`，末点真值误差 `0.0790 m`（路径末误差 `0.0784 m <= 0.08 m`）；13/13 段 `nav_tracking`（q1/q2）全过；执行足迹冲突 `0`；MuJoCo 接触计数增量 `0`（`max_force=0.0 N`）；`tunnel_ramp_bridge`（正向 1，最大侧偏 `0.0239 m`，最大 yaw 偏 `0.0407 rad`）与 `tunnel_B`（正/反各 1，最大侧偏 `0.0246 m`，最大 yaw 偏 `0.0624 rad`）均通过；单一所有权与零 Nav2 通过 |
-| 有图单 action B1 基地到基地 | `rmuc_2027_mujoco.launch.py`（`slam:=false`，`--settle-sim-s 2.0`）+ `/ats_navigate_to_pose` `(3.37,9.03)->map(24.63,6.97)` | **通过**（`passed=true`） | 单 action `result_code=0`，里程 `31.545 m`，终点真值误差 `0.0299 m <= 0.08 m`；23/23 参考 `q1=yes`，`q2` 持续冲突段 `0`（解决 11 月 20 日遗留 `q2` 持续冲突，仅留 1 段 6 tick / 1 快照诊断）；执行足迹冲突 `0`；自旋平移 `608` 样本（累计转角 `20.67 rad`，真值峰值 `1.750 m/s`、`2.947 rad/s`）；MuJoCo 接触诊断增量 `360`（`max_force=519.1 N`，独立物理接触未验证）。另一次无 settle 尝试（走北路）在 `(18.42, 15.54)` 返回 `result_code=5`（接触增量 `0`），记为未通过样本 |
-| 无先验首目标与保存 | `s3_mujoco_acceptance.py --profile rmuc_2027 --mapless --max-goals 1`（`slam:=true`，空先验） | **通过**（`passed=true`） | 1/1 点到达，里程 `5.035 m`，末点真值误差 `0.0080 m`（路径末误差 `0.0246 m <= 0.08 m`）；`nav_tracking`（q1/q2）通过；执行足迹冲突 `0`，接触计数增量 `0`；地图保存成功（`persistent_cells=79`、`persistent_voxels=3124`） |
-| 开放区自旋平移专项 | `rmuc_2027_mujoco.launch.py`（`slam:=false`）+ 单 action 穿越开放区 | **通过**（`passed=true`） | `result_code=0`，里程 `8.114 m`，终点真值误差 `0.0079 m <= 0.08 m`；`q1=yes`、`q2=no`（0 冲突 tick）；执行足迹冲突 `0`，接触增量 `0`；`yaw_authority=3` 共 `295` 拍，自旋平移 `366` 样本（累计 `19.65 rad`，真值峰值 `1.042 m/s`、`3.046 rad/s`） |
-| `sentry_chassis_vel_transform` 独立运行时验证 | 独立 ROS 2 节点 6 工况实测 | **6/6 通过** | 覆盖 `base_footprint` 透传、缺大 yaw 零速兜底、大 yaw 前馈延迟补偿（误差 `0.0`）、`world` 速度帧旋转、高速自旋旋转系加减速限幅（离心表观加速度 `4.5 m/s²` 超过 `1.0 m/s²` 限值时零跟踪误差）及 `hold_last` 过期保持策略 |
-| B2 动态障碍绕行接回 | `rmuc_2027` 有图 + 在线投放 `0.6 × 0.6 × 0.6 m` 实体箱于 `(6.10, 6.05)`，目标 `(9.025, 3.925, -0.7854)`（评估器注：因 2027 高密 1 cm hfield 上原 `freejoint mass=1` 实体箱在 ~1 s 内穿底，临时评估场景对夹具箱加 `gravcomp=1, mass=50` 并抬高 1.5 cm 防穿底，保留 `contype=1/conaffinity=1` 与 LiDAR `group=2`；CPU 射线投射下传 `lidar_downsample:=2` 避免 10 Hz 仿真里程计墙钟间隔越过 1.0 s 误报超时，未放宽任何安全门） | **通过**（`passed=true`） | `result_code=0`，里程 `11.700 m`（原先验路径 `8.247 m`），日志实证 `TRACE local_rejoin ... bypass_m=2.236 rejoin=(7.0250,5.5250) result='local bypass rejoined'` 与 `source=fused` 绕行；终点真值误差 `0.0045 m <= 0.08 m`；11/11 参考 `q1=yes`，`q2=no`（10053 样本 / 107 快照零冲突）；执行足迹冲突 `0`，MuJoCo 接触增量 `0`（`max_force=0.0 N`） |
-| B2 独立全堵停车 | 同上稳定实体箱静置于目标 `(5.975, 6.225)` + 期望中止 | **安全停车通过** | `TRACE global_route source=fused ... result='goal is occupied'`；action 返回 `ABORTED / 5`，全程 `commit_count=0`；`/planner/emergency_stop=true`，`/cmd_vel/autonomy_raw`、`/cmd_vel/selected`、`/motion_control` 三路持续精确零速（峰值均为 `0.0`），`q2=no`（0 冲突 tick），接触增量 `0` |
-| V1 对称点速度 | `rmuc_2027` `(13.40, 2.00, 0.550, 0) -> map (14.60, 14.00, 0)` | **未通过**（既有欠账） | `result_code=5`，`commit_count=0`，三路速度输出保持精确 `0.0`；起点位于斜坡发生被动下滑（`(13.40,2.00)->(14.59,1.94)`，接触增量 `1754`），目标 `(14.60, 14.00)` 位于 `0.800 m` 宽窄道内且终端航向重定位与足迹门拒绝原地横扫（`discrete=19, swept=35`）；不弱化足迹门，继续记为未通过 |
-| 故障回归 `adapter_lease`（OS 级 `SIGSTOP`/`SIGCONT`） | `rmuc_2027` 有图运行中暂停 `ats_rog_map_node` | **通过**（`passed=true`） | 运动中暂停后 `5.128 s` 墙钟内触发急停与三路持续零速（仿真时钟继续推进）；取消目标后 `SIGCONT` 恢复，`publication_sequence` 递增 `464 -> 466`、`ready=true`，且旧参考不复活 |
-| 故障回归 `no_path` | `s3_mujoco_acceptance.py --profile rmuc_2027 --mapless --case no_path` | **通过**（`passed=true`） | 自然断连已知空闲格准确归类 `FAILURE_NO_PATH`，`stop_wall_s=1.192 s`，三路持续零速且单一所有权通过 |
-| 故障回归 `unknown` | `s3_mujoco_acceptance.py --profile rmuc_2027 --mapless --case unknown` | **通过**（`passed=true`） | 物理 LiDAR 全遮挡触发 `ROGMap stale` 与急停，`stop_wall_s=2.759 s`，三路持续零速且单一所有权通过 |
+| 3 点建图与保存 (`stageB_rmuc2027_save_d215`) | `rmuc_2027 --mapless --max-goals 3 --post-route-case obstacle_and_dynamic` | **3/3 路点与保存通过；后置延迟超时** | 3/3 到达（真值误差 `0.0213 / 0.0352 / 0.0270 m`，里程 `8.04 m`，`3/3` q1/q2，足迹冲突 `0`，接触 `0`，`qp_backend p95=1.461 ms`），显式保存 `167` 占据格 / `3858` 持久体素；后置射线清除超时导致整脚本失败 |
+| 无先验 B2 与故障 (`d217`/`d219`/`d220`) | `b2_detour` / `unknown` / `point_lio_restart` | **3/3 通过** | `b2_detour` 真值误差 `0.0143 m`（`qp_backend p95=0.887 ms`）；`unknown` `stop=3.36 s`；`point_lio_restart` `death_to_stop=1.90 s`、`recovery=6.08 s`、`epoch 1->2`、旧授权拒绝；三项接触均为 `0` |
+| 其余 S3 开放门（6 项） | `reload` / `B1_mapless` / `obstacle_latency` / `dynamic_save` / `no_path` / `route_save` | **未通过** | `reload`（锁定 `TRACKING`/`ready` 但部分图无路）；`B1_mapless`（A3 探索前进 `11.39 m`、定位误差 `1.8 cm`，北侧凹槽看门狗超时 `code=5`）；`obstacle_latency`（墙钟 `476–910 ms`，第 7 样本射线清除超时）；`dynamic_save`（静态持久占据证据 `0`）；`no_path`（建图前沿推进未立即停车）；`route_save`（首点孤立 `2×2` 未知格卡滞） |
 
-本轮未运行 T2（`ramp_south`）、T3（`six_tunnels`）、完整 S3 `A–K`（含 `point_lio_restart`、`unsafe`、动态障碍不保存、重载与漂移校正）、无先验全场路线及实车硬件验证；上述项、独立物理接触验收与 RViz/MuJoCo 画面观察继续保持未通过/未验证。 [主报告 9.8.20](../调研/无先验地图钻洞高速导航优化调研报告.md#9820-11-月-22-日双模式雷达安装解耦全链参数化与无窗口-2027-综合复验)
+### 5.3 离线 Point-LIO A/B 评估（`scripts/evaluate_lio_frontend_ab.py`）
 
-### 11 月 20 日 50 Hz 解耦积分、全链修正与无窗口 2027 实测
+跨 `stageA_T1_d205`、`stageA_B1_d208`、`stageA_V1_d207`、`stageB_rmuc2027_save_d215` 实测：`APE RMSE = 0.0202–0.0784 m`，`APE p95 = 0.0288–0.1732 m`，`RPE-1m = 0.0088–0.0718 m`，`Spin p95 = 0.0294–0.1068 m`，`LIO p95 = 6.32–7.05 ms`。
 
-完成全链生产代码修正与 `rmuc_2027` 默认世界统一：
+### 5.4 未通过与未验证总界
 
-1. **消除 50 ms / 20 Hz 积分与控制步长硬编码**：`ats_swerve_mpc` 升级为精确 SE(2) 指数映射积分与解析雅可比（`Se2Model` 支持显式 `step_dt`），将实时控制步长（`control_rate_hz: 50.0`、按实测时钟 `actual_step_dt` 计算首步执行器约束与 warm-start 前移）与预测离散步长（`dt: 0.05`、`horizon: 60`）解耦；同步更新 `cmd_vel_arbiter` 至 `50 Hz`、`minco_planner` `SpinYawParams::sample_period` 参数化与 `small_gicp_relocalization` `transform_publish_rate_hz`（默认 `50 Hz`）。
-2. **窄通道与执行稳健性加固**：`TrajectoryTracker` 增加原地旋转与角速度刹停保护门（防提前横扫）；`minco_planner` 新增贴墙大角度终端转向的 ESDF 侧移掉头与角加速度约束；`PlannerGoal.preserve_active_reference` 在无停车终点重规划失败时保留运行参考；`tunnel_yaw_alignment` 消除 `ramp_bridge` 误拒；参考轨迹发布与录制订阅切为 `RELIABLE(10)`；`ats_rog_map` 建图模式盲区未知清理按当前 profile 尺寸并增加视线遮挡检查（不穿透占据墙体）；`node_params.yaml` 删除 `projection_follow_measured_ground: true` 并配置 `clearance_detour_ratio: 1.5`。
-3. **工程清理与构建**：统一默认世界/地图至 `rmuc_2027`，移除项目内测试代码与 `scripts/test_*` 脚本（不触动第三方依赖树），重写 `.sh` 入口脚本；Release 全量构建、增量构建与 `validate_navigation_config.py` 通过。
-
-最终源码构建后的无窗口（未带 RViz 与 MuJoCo 窗口，画面项与独立物理接触验收均记为未验证）`rmuc_2027` 实测结果如下：
-
-| 批次 | 模式与入口 | 结果 | 关键实测指标 |
-| --- | --- | --- | --- |
-| 有图 T1 `tunnel_b_roundtrip`（`v7`） | `s3_mujoco_acceptance.py --profile rmuc_2027_tunnels --route tunnel_b_roundtrip`，`slam:=false`，加载 `rmuc_2027` PGM/PCD | **通过**（`passed=true`） | 13/13 点到达，里程 `22.576 m`，终点真值误差 `0.0549 m <= 0.08 m`；离散足迹冲突 `0`，MuJoCo 接触计数增量 `0`（`max_force=0.0 N`）；`tunnel_ramp_bridge`（正向 1 次，轴向侧偏最大 `0.0184 m`）与 `tunnel_B`（正向 1、反向 1，轴向侧偏最大 `0.0328 m`）均通过；13/13 段 `nav_tracking`（q1/q2）全过；MPC 实测 `50.0 Hz / 20.000 ms`（285 条遥测）；单一发布者所有权与零 Nav2 断言通过 |
-| 无先验首目标与保存（`v2`） | `s3_mujoco_acceptance.py --profile rmuc_2027 --mapless --max-goals 1`，`slam:=true`，空先验 | **通过**（`passed=true`） | 1/1 点到达，里程 `5.237 m`，终点真值误差 `0.0087 m <= 0.08 m`；离散足迹冲突 `0`，接触计数增量 `0`；`nav_tracking`（q1/q2）通过；显式保存 PGM/YAML/PCD 成功（`persistent_cells=91`、`persistent_voxels=3221`）；MPC 实测 `50.0 Hz / 20.000 ms`（88 条遥测） |
-| 有图单 action B1 基地到基地（`v2`） | `rmuc_2027_mujoco.launch.py`（`slam:=false`）+ `/ats_navigate_to_pose` `(3.37,9.03)->map(24.63,6.97)` | **到达但 q2 未全过** | 单 action `result_code=0`，里程 `34.469 m`，终点真值误差 `0.0338 m <= 0.08 m`，真值峰值 `1.637 m/s`，接触计数增量 `0`，MPC 实测 `50.0 Hz / 20.000 ms`（239 条遥测）；30/30 发布参考 `q1` 通过；`q2` 在 `(21.9255, 6.7303)` 记录 1 段持续冲突（26 tick 跨 2 快照，伴 `q3=yes`），故 B1 完整跟踪门仍记未通过 |
-
-本轮未运行 T2（`ramp_south`）、T3（`six_tunnels`）、B2 动态绕行/全堵停车、V1 对称点高速、独立故障矩阵 F 与无先验全场路线；上述未运行项、独立物理接触评估与实车验证继续保持未验证/未通过。 [主报告 9.8.19](../调研/无先验地图钻洞高速导航优化调研报告.md#9819-11-月-20-日负向优化回退50-hz-解耦积分与-2027-无窗口实测)
-
-### 历史记录：统一搜索与 2027 有先验实测
-
-**已验证。** 三仓 Release 构建和直接相关单测通过。静态图上的统一搜索、按目标缓存及受阻段接回已接入。关闭跳点时路径的浮点位表示与旧 A* 一致，开启时 480 张栅格中最大代价差为 `6.82e-13`。单测覆盖搜索端可停车的部分路径。 [主报告 5.5.1](../调研/无先验地图钻洞高速导航优化调研报告.md#551-统一-jpsa-搜索当前主任务的一部分)
-
-B2 沿用 B1 runner，通过既有 `model_file` 和 `enable_test_obstacle_fixture:=true` 加载带实体夹具的临时场景。先接收首条 EXECUTE，再设置夹具位置参数。同源 PGM/PCD 保持原样。S3 runner 的 `--prior` 与 `--post-route-case` 互斥，`--case obstacle_latency` 是独立延迟用例。 [d27 输入哈希](../../log/nav_acceptance/20261119_hybrid/b2_bypass_d27/inputs.sha256) · [批次命令](../../log/nav_acceptance/20261119_hybrid/fixture_tools/run_b2_batch.sh)
-
-| 阶段 | 判定 | 本轮证据 |
-| --- | --- | --- |
-| B1 有先验基地到基地 | **带窗口运行，未通过** | 本机 d30 定位恢复超时 `ABORTED / 6`，末端真值 `(3.43189, 9.05374)`，误差 21.3003 m，实走 0.0709 m。q1 的 1 条 EXECUTE 参考和 q2 的 34 个有效采样均无冲突，清场通过。d43 为跨机转引，所述定位接收间隔和 publication 445→446 占据变化仍待同批原始数据核验。 [d30 真值与执行判定](../../log/nav_acceptance/20261119_hybrid/b1_gui_d30/b_stage_summary.json) · [主报告 9.8.15](../调研/无先验地图钻洞高速导航优化调研报告.md#9815-11-月-20-日-d43-双窗口-b1-诊断与未完成项) |
-| B1 有先验基地到基地 | **无窗口运行，未通过** | d26，看门狗终止 `ABORTED / 5`，末端真值 `(5.342, 9.174, 0.451, yaw −0.151)`，误差 19.414 m。里程 4.032 m，相对直线 21.360 m 为 0.189 倍。4 条 EXECUTE 参考及 484 个有效实际采样零冲突，三路命令归零并清场。经过基地至场内地面，坡道和窄通道未触发。 [d26](../../log/nav_acceptance/20261119_hybrid/b1_d26/b_stage_summary.json) |
-| B2 有先验绕行与接回 | **带窗口运行，未通过整条路线** | d32 在 B1 实际引导的 `(5.525, 6.375)` 投放持续箱，全局引导的受阻段在 3.625 s 墙钟后重搜，绕行 4.901 m，在 `(6.675, 6.025)` 接回原几何路线。首个定时候选被足迹门拒绝，后续参考在投放后 8.118 s 墙钟得到 EXECUTE。实走 0.492 m，距接回点最近 4.143 m，地图就绪超时 `ABORTED / 4`。末端真值 `(3.600, 8.862, 0.459, yaw 0.013)`，误差 21.115 m。8 条 EXECUTE 和 275 个有效实际采样零冲突，三路零速并清场。 [d32 夹具](../../log/nav_acceptance/20261119_hybrid/b2_bypass_gui_d32/fixture_summary.json) · [d32 真值](../../log/nav_acceptance/20261119_hybrid/b2_bypass_gui_d32/b_stage_summary.json) |
-| B2 有先验绕行与接回 | **无窗口运行，未通过整条路线** | d27 投放后 3.386 s 墙钟重搜，绕行 5.042 m，在 `(6.675, 6.025)` 接回原引导并发布 EXECUTE。后续另有新占据触发全图搜索，实际距原接回点最近 3.153 m。定位恢复超时 `ABORTED / 6`，末端真值 `(7.876, 8.956, 0.457, yaw −1.099)`，误差 16.872 m。7 条 EXECUTE 和 707 个有效实际采样零冲突，三路零速并清场。 [d27 夹具](../../log/nav_acceptance/20261119_hybrid/b2_bypass_d27/fixture_summary.json) · [d27 真值](../../log/nav_acceptance/20261119_hybrid/b2_bypass_d27/b_stage_summary.json) |
-| B2 停车区完全堵死 | **d28 历史批次通过** | d28 固定实体箱覆盖目标 `(5.525, 6.375)` 全部停车容差。局部接回和全图搜索均失败，旧授权由近端足迹复检撤销。STOP 后约 30.15 s 墙钟，action 返回 `ABORTED / 5`。`autonomy_raw`、`selected`、`motion_control` 三路末段连续零速分别有 1411、706、706 个样本，各覆盖 2.285 仿真秒。末端真值距目标 1.037 m，q1/q2 零冲突，清场通过。 [STOP、三路速度和失败计时](../../log/nav_acceptance/20261119_hybrid/b2_blocked_fixed_d28/blocked_summary.json) |
-
-**已实现未运行。** 窄通道入口方向的参考判定通过单测，实际窄通道通过及顶板下动态净空仍待验证。
-
-**未实现。** 当前换轨从旧参考进度前推并继承起点状态，MINCO 仍重解剩余定时参考。定时参考的局部拼接和非零段尾衔接待实现。无先验模式的滚动部分路径尚未接入 Goal Manager，阶段 C 的单一 map 远目标、全程建图和保存未执行。当时有先验 B1/B2 路线未通过。当前测试统一采用第 4 节的无先验建图入口。 [d27 换轨比较](../../log/nav_acceptance/20261119_hybrid/b2_bypass_d27/execution_reference_comparison.json)
-
-本轮使用工作区 WLAN DDS 和获准复用的历史 domain。d26/d27/d28 未带窗口。d30/d31/d32 带 RViz 与 MuJoCo，d31 起点由俯视图和独立真值交叉核对。d31 有两条 RViz `2D Goal Pose` 输入，该批没有试验 action 或投放。d32 改用观察专用 RViz 配置，射线计算用 6 个线程，保留 `10 Hz` 和全密度。物理接触缺独立评估，判定为未验证。 [出生点俯视图](../../log/nav_acceptance/20261119_hybrid/b2_bypass_gui_d31/spawn_check_mujoco.png) · [d32 窗口记录](../../log/nav_acceptance/20261119_hybrid/b2_bypass_gui_d32/tracking_windows.json) · [下一阶段提示词](../调研/无先验地图钻洞高速导航优化调研报告.md#下一阶段提示词)
-
-下表保留此前已归档的实际结果。 [验证主机说明](20261117_o1a_o0.md) · [冻结索引](20261117_o1a_o0.json) · [优化账本](20261117_o1_o0_completion.md)
-
-| 项目 | 结果 | 结论边界 |
-| --- | --- | --- |
-| 原64点路线首目标d16 | **局部通过**：runner退出0、action成功、独立真值0.005460892m；3条执行参考q1和524有效位姿q2零冲突，无payload缺失 | 仅首点；小范围保存成功不计全场保存质量/重载。d9的143中断及原UUID成功接续证据保留，不作重复稳定性结论 |
-| 原64点路线首目标 d40 | **建图首段与保存通过**。无 PGM/PCD 输入，真值误差 `0.004659 m`，2 条执行参考和 386 个实际位姿无冲突，清场完成 | RViz 规划 ESDF 实时更新；终点 PGM 为 `400×300`，PCD 为 3,227 点。MuJoCo 原生画面等待解锁。 [记录与地图](20261117_o1_o0_completion.md#无先验建图在线-esdf-与地图保存) |
-| T1 d8 | **失败**：首目标unknown足迹/重规划预算阻断，0/13到达、真实B穿越0 | 该段q1/q2及失败零速通过，路线仍失败 |
-| T1 d31（本轮） | **失败**：全路线尝试N=1，前6/13点到达，最大真值误差0.049200236m；第7点搜索/准入失败后有界预算code5，真值误差1.718364284m | 10条已执行参考q1、1475有效实际位姿q2零冲突，载荷/配对无缺口；第7点无执行参考，真实B未进入；接触计数增量0仍不是独立物理评估；清场完成 |
-| T1 d36（本轮） | **失败**。首目标调用返回有界重试 code 5，真值误差 `1.281819 m`，真实 B 未进入 | 两条已提交参考及 166 个实际位姿无冲突。231 张线上快照的数值场与旧 EDT 回放一致。 [独立结果](../../log/nav_acceptance/20261117_o1_o0_completion/t1_incremental_edt_d36/run/summary.json) |
-| T2 / T3 | **未执行** | T1前置未通过 |
-| V1 d7 | **失败**：action成功、真值0.069451m达标；q1为7/9可评价参考冲突、另1条缺证，q2缺863 tick；运行期LOST后epoch1→2 | 真值峰值0.826715m/s；snapshot/layer截断及首次EXECUTE前位移待归因，未证明精确对称起点或高速能力 |
-| V1 d22（本轮） | **失败**：action code 6定位恢复超时；16条执行参考q1通过；q2共30冲突tick，最长24 tick跨12快照，持续段2个 | 892快照与1161来源层未截断、无frame配对缺失；真值峰值0.449983m/s；接触计数增量0不替代独立物理评估 |
-| V1 d25（本轮） | **提前终止、未通过**：重复里程计 steady 接收超时，绑定本次目标 UUID 取消，action code 1；18条执行参考q1通过；1388有效实际位姿中2个诊断冲突tick、无持续段 | 参考控制平面修复后独立运行；载荷/配对完整，接触计数增量0仍不是独立物理评估；O0为2次换轨、合格巡航0次，真值峰值0.439118m/s；清场完成 |
-| V1 d34（本轮） | **路线和执行足迹通过**。action 成功，真值误差 `0.029575 m`，15 条执行参考、1642 个实际足迹样本均无冲突，退出码 0，清场完成 | 参考、MPC/仲裁/底盘、真值峰值分别 `2.148`、`1.068`、`0.892 m/s`。接触计数增量 0，独立接触评估未执行。 [速度曲线](../../log/nav_acceptance/20261117_o1_o0_completion/v1_tolerance_d34/o0/speeds.png) |
-| V1 d37–d39（本轮） | d37 为切换窗口而中止。d38 双窗口已打开，旧 runner 要求可选 RViz 路径订阅，目标未发。d39 用简化 runner 运行，按用户要求切换无先验建图后中止 | 三轮均清场。d39 RViz 截图含车模和点云，MuJoCo 原生查看器在解锁后启动。 [RViz 截图](../../log/nav_acceptance/20261117_o1_o0_completion/v1_viewer_simple_d39/rviz.png) |
-| F：adapter lease / service_timeout / input_stale / unknown | **各独立通过**：d4/d3/d2/d1，新锚点名义前置及三路零速、恢复后旧参考不复活获证 | 新锚点见4.3；d6前置失败未注入、非零接触计数保留。四项不能代表整个F通过 |
-| F：unreachable d0 | **失败**：自由断连目标实际触发A*无路及零速，约3.02s仿真时返回挂起预算code 5，夹具预期code 3 | 结果码优先级与JPS/A*断言需先明确契约再修复；专用恢复门未执行 |
-| F：unreachable d27（本轮） | **独立门通过**：夹具绑定同目标搜索及严格终止原因，三路零速、恢复后旧参考不复活 | 此后新增每目标容差和仿真CPU亲和性修改；最终行为版本仍须逐项重跑整个F，不沿用d27作最终矩阵 |
-| F：unreachable d35（本轮） | **独立通过**。同一目标 A* 无路，有界等待 code 5，急停、三路零速、旧参考保持失效，退出码 0，清场完成 | 简化版 runner，含每目标容差和仿真 CPU 亲和性版本。其余四项仍需复验 |
-| O0 / 高速能力 | **低速窗口达标**。d34 共 9 次换轨，1 次合格窗口中三路指令跌速最大 `0.040405 m/s`，真值无跌速 | 该事件前真值中位 `0.0327 m/s`，其余窗口含参考主动减速或健康变化。参考出现 `>2 m/s`，三路指令与真值均未达 `2 m/s`，`5 m/s` 和高速换轨仍待验 |
-
-**O1-A全部门与本套件仍未通过。** 后续实施顺序由主报告5.1统一维护；该表只随新的实际运行证据更新，不由文档整理、端点预检或源码存在改变判定。
-
-隧道计数器另修复portal与墙间通道端区无交集的问题：计数沿portal定义的方向，使用该轴与墙间corridor重叠区的两个端区，要求中间采样持续留在通道内；路线全部目标及真值/足迹门不变。六个真实配置的旧实现均把完整往返记为0次，修复后的6项相关回归通过，绕行/中途离开通道不计数。d31实际尚未进入任何声明通道，因此修复不改变该次失败结论。O1b三种可视化订阅开/关的数值及唯一owner集成回归在d32通过，不代替RViz画面观察。
-
-历史2025 q2、2027 south和H2/M/H3的失败/未验证状态保留。2025默认/红框本轮未重跑；2025缺先验PCD属于历史兼容项，当前2027套件不以补齐2025资产作为前置条件。早期无窗口批次与d39/d40带RViz记录分列，MuJoCo原生窗口/现场解锁按批次实际记录。11 月 19 日的同步评审和后续有先验仿真分批记录。物理接触仍待独立验证。
+- **未通过**：有图 **T3 `six_tunnels`**、B1 长段 MINCO `< 20 ms` 墙钟门、Stage B 无先验 6 项 S3 开放门及完整 64 点 S3 `A–K`。
+- **未验证**：`5 m/s` 高速段与高速换轨、独立物理接触评估（`physical_contact_acceptance: unverified`）、开窗 RViz/MuJoCo 视觉画面、P3 行为树全链集成及实车硬件（含 H2/H3 钻洞）。
+- 历史基线保留原则：2025 场景 `q2`、早期 2027 `south` 漂移与未复验的历史兼容项不因场景切换或局部通过自动标为已修复。
