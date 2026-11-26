@@ -868,9 +868,12 @@ ats_rog_map_adapter:
     # 只给 RViz 的 snapshot 占据视图，有订阅者时才编码；规划与安全链只读 planning_snapshot。
     planning_grid_viz_topic: /rog_map_adapter/viz/planning_grid
     # 同一快照的 5-field ESDF 距离点云（RViz Intensity Rainbow Flat Squares），只在有订阅者时编码。
+    # 建图模式下在独立可视化线程对已探索全局持久层裁剪区异步生成持续累积的全局 ESDF，零阻塞规划链。
     esdf_cloud_topic: /rog_map_adapter/viz/esdf_cloud
     esdf_viz_max_distance: 2.0
     esdf_viz_max_points: 250000
+    esdf_viz_use_global_in_mapping: true
+    esdf_viz_global_rate_hz: 2.0
     ready_topic: /rog_map_adapter/ready
     generation_topic: /rog_map_adapter/generation
     map_status_topic: /rog_map_adapter/status
