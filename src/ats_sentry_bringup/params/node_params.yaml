@@ -1128,7 +1128,7 @@ minco_planner:
     swept_min_corner_step_m: 0.01
     body_yaw_follow_clearance: 0.55
     force_body_yaw_follow: false
-    # 小陀螺参数；实车默认关闭，台架/空旷场地验证并确认后再置 true。
+    # 小陀螺参数：有图、无图建图与实车统一默认开启（开阔安全区自动自旋，窄区/隧道前自动停旋对齐）。
     spin_enabled: true
     spin_rate: 3.0
     spin_min_clearance: 0.30
