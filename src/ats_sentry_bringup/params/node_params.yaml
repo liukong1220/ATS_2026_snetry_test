@@ -301,7 +301,7 @@ point_lio:
       batch_max_dt_sec: 0.0025
       max_iter: 1
       adaptive_downsample_en: true
-      max_surf_points: 1200
+      max_surf_points: 2400
       satu_soft_degrade_en: true
       satu_soft_ratio: 0.80
       satu_inflate_scale: 25.0
@@ -379,9 +379,12 @@ sensor_scan_generation:
 
 terrain_analysis_ext:
   ros__parameters:
-    # 与2027 ROG车高门一致；本次用户指定统一配置，净空仍待专项验证。
+    # 与2027 ROG车高门一致；全链统一 0.05 m 像素，消除实机 0.40 m / 仿真 0.20 m 分割。
     traversabilityOverheadHeight: 0.249
-    scanVoxelSize: 0.035                 # 实机主入口默认远场体素尺寸；越小细节越多，但噪声更敏感。
+    selfFilterRadius: 0.45               # 车身回波自滤波半径（与 ats_rog_map.self_filter_radius 一致）。
+    planarVoxelSize: 0.05                # 与规划/建图统一为 5 cm 像素，消除粗体素对窄通道的挤压。
+    planarVoxelWidth: 241                # 241 * 0.05 = 12.05 m，与 12 x 12 m 局部窗口对齐。
+    scanVoxelSize: 0.035                 # 实机主入口默认远场体素尺寸；略小于 5 cm 栅格确保平面点密度。
     decayTime: 0.30                      # 点云残留时间；过大易拖尾，过小易闪烁。
     noDecayDis: 0.0                      # 近场永久保留半径，0 表示不额外保留。
     clearingDis: 20.0                    # clearing 半径。
@@ -407,7 +410,7 @@ terrain_analysis_ext:
     traversabilityGroundWeight: 0.15         # 地面置信度项权重。
     traversabilityDebugHeightDiffCap: 0.30   # 高差调试图显示上限。
     traversabilityDebugOccupancyRatioCap: 1.0  # 占有率调试图显示上限。
-    traversabilityMinPointCount: 3           # 单格最小有效点数。
+    traversabilityMinPointCount: 1           # 5 cm 细格单格最小有效点数。
     traversabilityUnknownAsOccupied: false   # 无点格是否按障碍处理。
     publishTraversabilityDebugGrids: true    # 是否发布旧三张语义调试图。
     slopeGridMaxDeg: 45.0                # slope_grid 可视化编码上限。
@@ -532,14 +535,14 @@ small_gicp_relocalization:
     # 全局地图预处理用 recovery_num_threads（<=0 时与 num_threads 相同）。
     num_threads: 1
     recovery_num_threads: 3
-    # 协方差估计邻域点数。大：更稳；小：更灵敏但更噪。
-    num_neighbors: 20
+    # 协方差估计邻域点数。5 cm 体素下取 10 避免低墙脚处地面与墙面混叠。
+    num_neighbors: 10
     # 触发一次注册前，累积源点云的最低点数。
     min_source_points: 500
     # 最低内点数门槛。低于该值的注册结果直接拒绝。
     min_inliers: 200
-    # 全局地图下采样体素。大：更快更粗；小：更精细更耗算力。
-    global_leaf_size: 0.15
+    # 全局地图与在线源点云统一 5 cm 下采样体素（与 Point-LIO / 建图 / 规划像素一致）。
+    global_leaf_size: 0.05
     # 在线源点云下采样体素。高速巡航模糊较大时可适当增大。
     registered_leaf_size: 0.05
     # 最大匹配距离平方。过小容易掉配准，过大容易吃进错误对应。
@@ -762,7 +765,7 @@ ats_rog_map:
     debug_bounds_topic: /rog_map/bounds
     debug_bounds_show_labels: true
     core.esdf.enable: true
-    core.esdf.resolution: 0.10
+    core.esdf.resolution: 0.05
     core.esdf.local_update_box: [8.0, 8.0, 1.0]
     core.esdf.update_interval_updates: 1
     core.load_pcd_enable: false
@@ -785,8 +788,8 @@ ats_rog_map:
     # Official ROG-Map semantics: this is the robot-centred visualization box,
     # not the sliding-map storage bounds. ROS debug clouds use this same box.
     core.visualization.range: [8.0, 8.0, 1.0]
-    core.resolution: 0.10
-    core.inflation_resolution: 0.10
+    core.resolution: 0.05
+    core.inflation_resolution: 0.05
     core.unknown_inflation.enable: false
     core.unknown_inflation.step: 1
     core.inflation_step: 2
@@ -796,9 +799,9 @@ ats_rog_map:
     core.raycasting.enable: true
     core.raycasting.batch_update_size: 1
     core.raycasting.unknown_threshold: 0.70
-    core.raycasting.p_hit: 0.70
+    core.raycasting.p_hit: 0.93
     core.raycasting.p_miss: 0.30
-    core.raycasting.p_min: 0.12
+    core.raycasting.p_min: 0.25
     core.raycasting.p_max: 0.97
     core.raycasting.p_occupied: 0.80
     core.raycasting.p_free: 0.30
@@ -813,37 +816,42 @@ ats_rog_map:
     core.raycasting.clear_clipped_endpoint: true
     core.virtual_ground_height: -0.35
     core.virtual_ceil_height: 1.15
-    # Fixed global static layer: 40 x 30 m at 0.1 m.  The mapping start is
-    # (0, 0), so the lower-left storage origin leaves 20 m / 15 m margin.
+    # Fixed global static layer: 40 x 30 m at unified 0.05 m (5 cm) pixel resolution.
+    # The mapping start is (0, 0), so the lower-left storage origin leaves 20 m / 15 m margin.
     odom_layer.origin_x: -20.0
     odom_layer.origin_y: -15.0
-    odom_layer.resolution: 0.10
-    odom_layer.width: 400
-    odom_layer.height: 300
+    odom_layer.resolution: 0.05
+    odom_layer.width: 800
+    odom_layer.height: 600
     odom_layer.static_promotion_seconds: 3.0
     odom_layer.dynamic_hold_seconds: 3.0
     odom_layer.max_frame_dt_seconds: 0.25
     odom_layer.save_persistence_ratio: 0.8
     # Heights are relative to connected local ground, including ramps.
-    odom_layer.surface_max: 0.10
+    # On the unified 5 cm grid, RMUC ramps rise <= 1.7 cm/cell (slope <= 0.24) while central
+    # plateau parapet curbs are >= 5.7..6.0 cm vertical steps; 0.052 m + 0.50 slope blocks curbs cleanly.
+    odom_layer.surface_max: 0.052
     # 用户要求各profile使用2027候选门；配置同步不代表H2净空已获证。
     odom_layer.robot_height: 0.242
     odom_layer.top_margin: 0.007
-    odom_layer.max_ground_slope: 0.6
+    odom_layer.max_ground_slope: 0.50
     odom_layer.base_ground_offset: 0.07
     odom_layer.window_x: 12.0
     odom_layer.window_y: 12.0
+    odom_layer.global_coarse_resolution: 0.05
+    odom_layer.cloud_clear_ray_radius: 0.03
     odom_layer.tunnel_free_enabled: true
     odom_layer.tunnel_free_confirm_frames: 2
 
 ats_rog_map_adapter:
   ros__parameters:
     use_sim_time: false
-    # The 100 x 100 x 7 numerical projection takes 0.9--3.2 s in the
-    # MuJoCo CPU profile.  Do not queue another request while its immutable
-    # snapshot is still being built; the service's own 2.0 s input-health
-    # gate remains the source-data freshness authority.
-    projection_rate_hz: 1.0
+    # Projection takes ~30 ms in-process (~140 ms with full 5 cm static-map 2D ESDF);
+    # 8 Hz (125 ms) with projection_in_flight_ avoids idling a full 250 ms after a slight overrun.
+    projection_rate_hz: 8.0
+    # In mapping_mode, /rog_map/odom_layer_updated triggers projection immediately on every
+    # committed cloud; keep the periodic timer as a 4 Hz keepalive instead of 40 Hz polling.
+    mapping_projection_rate_hz: 4.0
     projection_request_timeout_sec: 4.0
     projection_snapshot_timeout_sec: 4.0
     # The CPU profile shows up to 1.94 s between projection and terrain/slope
@@ -853,7 +861,7 @@ ats_rog_map_adapter:
     # 绝对 odom z（地面 = 0），等价于旧 gimbal 原点下的 [0.10, 0.80]。
     projection_min_height: 0.25
     projection_max_height: 0.95
-    planning_resolution: 0.10
+    planning_resolution: 0.05
     static_map_topic: /map
     traversability_grid_topic: /traversability_grid
     traversability_slope_grid_topic: /traversability_slope_grid
@@ -871,7 +879,9 @@ ats_rog_map_adapter:
     require_localization_status: true
     localization_status_timeout_sec: 1.0
     static_obstacle_value_threshold: 50
-    terrain_obstacle_value_threshold: 50
+    # terrain_analysis_ext 以 0..99 表示连续风险，100 表示硬障碍；连续 8 帧硬格才阻塞规划。
+    terrain_obstacle_value_threshold: 100
+    terrain_confirm_frames: 8
     slope_grid_max_degrees: 45.0
     slope_obstacle_degrees: 28.0
     unknown_is_obstacle: true
@@ -951,7 +961,8 @@ minco_planner:
     deviation_max: 0.5
     global_frame: odom
     robot_frame: gimbal_yaw_odom
-    obstacle_value_threshold: 50
+    lidar_frame: front_mid360
+    obstacle_value_threshold: 100
     unknown_is_obstacle: true
     allow_diagonal: true
     # 离墙代价是软约束，均匀区跳跃，近墙带用加权 A*。硬净空 0.54 会让搜索绕开所有
@@ -1035,6 +1046,10 @@ minco_planner:
     partial_subgoal_continuation_enabled: true
     partial_subgoal_only_without_prior: true
     partial_subgoal_min_advance_m: 0.30
+    optimistic_global_unknown_cost: 1.05
+    frontier_taboo_radius_m: 0.70
+    frontier_taboo_ttl_sec: 180.0
+    rolling_anchor_topic: /minco/rolling_anchor
     footprint_refinement_skip_clearance_m: 0.04
     minco_stage_budget_ms: 20.0
     plan_wall_budget_ms: 30.0
@@ -1118,9 +1133,28 @@ minco_planner:
     spin_resume_after: 0.45
     spin_blend_rate_limit: 2.0
     spin_angular_accel: 1.5
-    local_repair_enabled: false
+    # 终端原地转向重定位、擦边单调脱困、局部碰撞修复与目标位姿容差域准入（均通过同一套零冲突矩形足迹门禁）。
+    terminal_yaw_relocation_enabled: true
+    terminal_yaw_relocation_max_candidates: 6
+    terminal_yaw_relocation_window_length: 1.00
+    escape_from_contact_enabled: true
+    escape_from_contact_max_contact_depth: 0.05
+    escape_from_contact_monotone_max_depth: 0.30
+    escape_from_contact_monotone_depth_step: 0.025
+    escape_from_contact_monotone_max_prefix_length: 0.80
+    start_escape_max_steps: 6
+    local_repair_enabled: true
     local_repair_max_iterations: 2
-    local_repair_search_radius: 0.35
+    local_repair_search_radius: 0.50
+    goal_pose_admission_enabled: true
+    goal_admission_position_tolerance: 0.05
+    goal_admission_yaw_tolerance: 0.15
+    goal_admission_position_shrink: 0.75
+    goal_admission_yaw_shrink: 0.60
+    goal_admission_extra_margin: 0.03
+    goal_admission_position_step: 0.02
+    goal_admission_yaw_samples: 5
+    endpoint_clearance_relaxation_enabled: true
 
 ats_goal_manager:
   ros__parameters:
@@ -1198,6 +1232,14 @@ ats_goal_manager:
     footprint_length: 0.581
     footprint_width: 0.571
     footprint_safety_margin: 0.02
+    # 擦边脱困、接触保持与无可执行计划看门狗预算（实机与仿真统一口径）。
+    ego_blocked_escape_enabled: true
+    ego_blocked_escape_timeout_sec: 2.0
+    ego_contact_max_depth: 0.05
+    no_executable_plan_timeout_sec: 30.0
+    contact_hold_enabled: true
+    contact_hold_max_depth: 0.12
+    contact_hold_max_sec: 1.5
 
 
 cmd_vel_arbiter:
