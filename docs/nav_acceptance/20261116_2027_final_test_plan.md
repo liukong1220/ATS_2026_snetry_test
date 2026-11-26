@@ -104,13 +104,19 @@ Stage A 全套 11 项（5 条路线 + B2 绕行 + 5 项独立故障）与 `small
 | **F（5 项）** (`d157`/`d158`/`d169`/`d160`/`d161`) | `unknown` / `no_path` / `unsafe` / `adapter_lease` / `point_lio_restart` | **5/5 通过** | `unknown`（`stop=3.25 s`）、`no_path`（`2.13 s`）、`unsafe`（目标阻断，`3.57 s`）、OS `SIGSTOP`/`SIGCONT` `adapter_lease`（`stop=4.67 s`、`recovery=2.38 s`、`pub_seq 871->876`、旧授权拒绝）与 `point_lio_restart`（`death_to_stop=2.06 s`、`recovery=6.73 s`、`epoch 1->2`、旧授权拒绝）全过，且 5 项均 `physical_contact_acceptance=passed`（`illegal=0`） |
 | **S3 连续修正回归** (`d175`/`d176`/`d177`) | `small_10x10 --case correction_0.05 / 0.15 / 0.30` | **3/3 通过** | `0.05 m`（`epoch 1->1`、`err=0.0137 m`）、`0.15 m`（`epoch 1->1`、`err=0.0020 m`）与 `0.30 m`（`epoch 2->3`、`err=0.0011 m`）均在 `10 s` 内 `< 0.002 m` 收敛并保持 `S3 endpoint retarget` 与 `odom` 连续性契约（注：`small_10x10` 合成地板名 `s3_floor` 未纳入 `rmuc_2027` 地面白名单，物理接触门以 2027 全套 11/11 实测为准） |
 
-### 5.2 Stage B：无先验建图模式（`slam:=true`，`--mapless`，空先验）
+### 5.2 Stage B：无先验建图模式（`slam:=true`，`--mapless`，空先验）与 Wave 6B（统一 `0.05 m` + 模块化拆分）实测
+
+2026-11-26 Wave 6B 完成全链统一 `0.05 m` 像素分辨率收敛（`node_params.yaml` 单一参数源）、实测 TF 雷达观测方向（`resolveLidarFovYawOffsetRad()`）接入、`ats_rog_map` 按需 3D ESDF 与增量平面缓存优化、死代码清理以及全部 17 个超长第一方非驱动源码文件按功能拆分为 `<= 1000` 行（`453` 个文件审校 `0` 超长）。以下为 Wave 6B 无窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`）隔离域实测结果：
 
 | 批次 | 入口与用例 | 结果 | 关键实测指标与边界 |
 | --- | --- | --- | --- |
-| 3 点建图与保存 (`stageB_rmuc2027_save_d215`) | `rmuc_2027 --mapless --max-goals 3 --post-route-case obstacle_and_dynamic` | **3/3 路点与保存通过；后置延迟超时** | 3/3 到达（真值误差 `0.0213 / 0.0352 / 0.0270 m`，里程 `8.04 m`，`3/3` q1/q2，足迹冲突 `0`，接触 `0`，`qp_backend p95=1.461 ms`），显式保存 `167` 占据格 / `3858` 持久体素；后置射线清除超时导致整脚本失败 |
-| 无先验 B2 与故障 (`d217`/`d219`/`d220`) | `b2_detour` / `unknown` / `point_lio_restart` | **3/3 通过** | `b2_detour` 真值误差 `0.0143 m`（`qp_backend p95=0.887 ms`）；`unknown` `stop=3.36 s`；`point_lio_restart` `death_to_stop=1.90 s`、`recovery=6.08 s`、`epoch 1->2`、旧授权拒绝；三项接触均为 `0` |
-| 其余 S3 开放门（6 项） | `reload` / `B1_mapless` / `obstacle_latency` / `dynamic_save` / `no_path` / `route_save` | **未通过** | `reload`（锁定 `TRACKING`/`ready` 但部分图无路）；`B1_mapless`（A3 探索前进 `11.39 m`、定位误差 `1.8 cm`，北侧凹槽看门狗超时 `code=5`）；`obstacle_latency`（墙钟 `476–910 ms`，第 7 样本射线清除超时）；`dynamic_save`（静态持久占据证据 `0`）；`no_path`（建图前沿推进未立即停车）；`route_save`（首点孤立 `2×2` 未知格卡滞） |
+| **Stage A B1（最终二进制）** (`vfinal_stageA_b1_d194`) | `rmuc_2027_tunnels / base_to_base` | **通过** | `1/1` 到达，里程 `27.41 m`，末点真值误差 `0.0153 m`（停后 `0.0309 m`），`footprint_gate_collisions=0`，`nav_tracking=1/1`，`physical_contact_acceptance=passed`（`illegal=0`） |
+| **Stage A B2（最终二进制）** (`vfinal_stageA_b2_d195`) | `rmuc_2027_tunnels --prior rmuc_2027 --case b2_detour` | **Action 通过；物理接触未过** | 绕行到达（真值误差 `0.0267 m`），但在 `5 cm` 全静态图 2D ESDF 投影周期（`~180 ms`）下于 `1.2 m` 投放距离出现 `illegal=528` 轮碰箱体（归入下一轮 Wave 6B-2 优化） |
+| **Stage A T3（5 cm 拆分后）** (`final_stageA_t3_d232`) | `rmuc_2027_tunnels / six_tunnels --waypoint-control-tolerance-m 0.08` | **42/42 路点与 q1/q2 通过；物理接触未过** | `42/42` 到达（里程 `74.33 m`，末点 `0.0096 m`，`42/42` `nav_tracking`），左右侧壁独立 PCA 修复 `tunnel_B_mirror` 顶板接触至 `0`（`illegal_chassis=0`、`illegal_wheel_ceiling=0`、`illegal_max_penetration_m=0.0`）；仅 `south_plate`/`south_plate_mirror` 处 `18` tick 底板拼接缝余量触碰（`d=+0.79..+1.00 mm`，`nz=+0.38..+0.77`，归入下一轮 Wave 6B-2） |
+| **Stage B 障碍延迟与保存** (`final_obs_dyn_d181` / `vfinal_obs_dyn_d196`) | `rmuc_2027 --mapless --max-goals 3 --post-route-case obstacle_and_dynamic` | **延迟与 3 点建图通过；`dynamic_save` 在 `d181` 全过、`d196` 清除等待略短** | `d181` 全套通过：`3/3`（末点 `0.0054 m`）、`contact=0`、`nav_tracking=3/3`、障碍可见延迟 **`p50=187.8 ms / p95=201.9 ms (< 250 ms) / max=202.8 ms`**、`dynamic_save passed=True`、`s3_map_quality`（`586/756` 占格命中，`8684` 持久点）；最终二进制 `d196` `3/3`（`0.00033 m`）、`contact=0`、`nav_tracking=3/3`、延迟 `p50=190.0 / p95=208.9 / max=209.3 ms`，但 `dynamic_save` 前等待 `3.5 s` 略短于 `dynamic_hold_seconds=3.0 s` 清除窗口 |
+| **Stage B 重载首目标** (`final_reload_d182`) | `rmuc_2027 --reload d181/map --max-goals 1` | **通过** | 重载 `d181/map` 后 `1/1` 到达，里程 `4.33 m`，末点真值误差 **`0.0412 m <= 0.08 m`**，`contact=0`（`passed`），`nav_tracking=1/1` |
+| **Stage B 建图 `no_path`（最终二进制）** (`vfinal_nopath_d199`) | `small_10x10 --mapless --case no_path` | **通过** | 有界无路失败与三路速度确定性归零通过（注：`small_10x10` 合成地板 `s3_floor` 未纳入 2027 地面白名单） |
+| **Stage B 无先验 `B1_mapless`** (`s3_b1_mapless_d193` / `vfinal_b1_mapless_d198`) | `rmuc_2027_tunnels --route base_to_base --mapless` | **拆分前 `d193` 通过；最终二进制 `d198` 未通过** | 拆分前 5 cm 基线 `d193` 单 action `1/1` 到达（`79.84 m`，`0.0144 m`，`contact=0`，`nav_tracking=1/1`）；重构后最终二进制 `d198` 在 `(8.81, 9.00)` 触发 `suspended-replan wait`（`contact=30`），归入下一轮 Wave 6B-2 稳定收口 |
 
 ### 5.3 离线 Point-LIO A/B 评估（`scripts/evaluate_lio_frontend_ab.py`）
 
@@ -118,6 +124,9 @@ Stage A 全套 11 项（5 条路线 + B2 绕行 + 5 项独立故障）与 `small
 
 ### 5.4 未通过与未验证总界
 
-- **未通过**：Stage B 无先验 6 项 S3 开放门（障碍可见延迟/射线清除、`dynamic_save`、孤立未知格、A3 凹槽超时、部分图重载、无先验 `no_path`）及完整 64 点 S3 `A–K`。
+- **未通过（归入下一轮 Wave 6B-2）**：
+  1. `5 cm` 最终二进制下 Stage B `B1_mapless` 稳定通过（消除中台路缘/颠簸带与 `suspended-replan wait` 波动）及 `obstacle_and_dynamic` 中 `dynamic_save` 前等待/射线清除稳定性；
+  2. `5 cm` 最终二进制下 Stage A `B2 detour` 零物理接触（消除 `~180 ms` 5 cm 全图 ESDF 投影导致的 `1.2 m` 投放距离擦碰）与 `T3 six_tunnels` 南侧悬空板通道底板拼接缝 `18` tick 余量触碰归零（并复验 Stage A 全套 11/11）；
+  3. 完整 64 点 S3 `A–K`。
 - **未验证**：`5 m/s` 高速段与高速换轨（当前 B1/V1 真值峰值已达 `3.404 / 3.053 m/s`，`5 m/s` 上限未触发）、开窗 RViz/MuJoCo 视觉画面（桌面锁屏未带窗口）、P3 行为树全链集成及实车硬件（含 H2/H3 钻洞）。
-- 历史基线保留原则：2025 场景 `q2`、早期 2027 `south` 漂移与未复验的历史兼容项不因场景切换或局部通过自动标为已修复；2027 Stage A `T1/T2/T3/B1/V1/B2/5 项故障` 已基于 Wave 6A 最终二进制全部实测通过并附独立物理接触评估 `illegal_contact_count = 0`。
+- 历史基线保留原则：2025 场景 `q2`、早期 2027 `south` 漂移与未复验的历史兼容项不因场景切换或局部通过自动标为已修复。
