@@ -1,6 +1,6 @@
 # 2027 导航验证方案：基地到基地、隧道与对称点速度
 
-更新日期：2026-11-24。本文件是 RMUC 2027 仿真导航验收的唯一任务坐标、执行入口与当前状态账本。
+更新日期：2026-11-28。本文件是 RMUC 2027 仿真导航验收的唯一任务坐标、执行入口与当前状态账本。
 
 - 默认仿真入口为有图模式：`rmuc_2027_mujoco.launch.py` 默认 `slam:=false`，加载 `src/ats_sentry_bringup/map/rmuc_2027.yaml` 与 `pcd/rmuc_2027.pcd`；唯一 MPC 求解器为 `OSQP v1.0.0 SQP-RTI`（`solver_mode:=qp`）。
 - 无先验建图测试显式传 `slam:=true`（`scripts/s3_mujoco_acceptance.py` 加 `--mapless`），PGM 和 PCD 输入置空，两种模式分开记录。
@@ -104,19 +104,25 @@ Stage A 全套 11 项（5 条路线 + B2 绕行 + 5 项独立故障）与 `small
 | **F（5 项）** (`d157`/`d158`/`d169`/`d160`/`d161`) | `unknown` / `no_path` / `unsafe` / `adapter_lease` / `point_lio_restart` | **5/5 通过** | `unknown`（`stop=3.25 s`）、`no_path`（`2.13 s`）、`unsafe`（目标阻断，`3.57 s`）、OS `SIGSTOP`/`SIGCONT` `adapter_lease`（`stop=4.67 s`、`recovery=2.38 s`、`pub_seq 871->876`、旧授权拒绝）与 `point_lio_restart`（`death_to_stop=2.06 s`、`recovery=6.73 s`、`epoch 1->2`、旧授权拒绝）全过，且 5 项均 `physical_contact_acceptance=passed`（`illegal=0`） |
 | **S3 连续修正回归** (`d175`/`d176`/`d177`) | `small_10x10 --case correction_0.05 / 0.15 / 0.30` | **3/3 通过** | `0.05 m`（`epoch 1->1`、`err=0.0137 m`）、`0.15 m`（`epoch 1->1`、`err=0.0020 m`）与 `0.30 m`（`epoch 2->3`、`err=0.0011 m`）均在 `10 s` 内 `< 0.002 m` 收敛并保持 `S3 endpoint retarget` 与 `odom` 连续性契约（注：`small_10x10` 合成地板名 `s3_floor` 未纳入 `rmuc_2027` 地面白名单，物理接触门以 2027 全套 11/11 实测为准） |
 
-### 5.2 Stage B：无先验建图模式（`slam:=true`，`--mapless`，空先验）与 Wave 6B（统一 `0.05 m` + 模块化拆分）实测
+### 5.2 Wave 6B-2（统一 `0.05 m` + 启动 YAML 参数化 + 双阶段收口）终态二进制无窗口实测（2026-11-28）
 
-2026-11-26 Wave 6B 完成全链统一 `0.05 m` 像素分辨率收敛（`node_params.yaml` 单一参数源）、实测 TF 雷达观测方向（`resolveLidarFovYawOffsetRad()`）接入、`ats_rog_map` 按需 3D ESDF 与增量平面缓存优化、死代码清理以及全部 17 个超长第一方非驱动源码文件按功能拆分为 `<= 1000` 行（`453` 个文件审校 `0` 超长）。以下为 Wave 6B 无窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`）隔离域实测结果：
+2026-11-28 Wave 6B-2 在统一 `0.05 m` 分辨率与全部第一方非驱动源码 `<= 1000` 行（最高 `999` 行，0 超长）基础上，完成事件驱动局部 2D ESDF 投影（消除 Stage A 5 cm `~180 ms` 全静态图重算瓶颈，压降至 `p95=20.55 ms`）、`ground_column` / `terrain_analysis_ext` 路缘与颠簸带判据修复、12 份启动文件自动建图与定位默认值 YAML 参数化（`launch_defaults.yaml` / `mujoco_launch_defaults.yaml`）、MPC 剩余平移终段限速与三轴 `kBrake`、MuJoCo 舵角有限界控制。以下均为同一冻结终态二进制在独立隔离域下无窗口（`USE_RVIZ=false USE_MUJOCO_VIEWER=false`）实测结果（每轮前后均校验零残留进程）：
 
 | 批次 | 入口与用例 | 结果 | 关键实测指标与边界 |
 | --- | --- | --- | --- |
-| **Stage A B1（最终二进制）** (`vfinal_stageA_b1_d194`) | `rmuc_2027_tunnels / base_to_base` | **通过** | `1/1` 到达，里程 `27.41 m`，末点真值误差 `0.0153 m`（停后 `0.0309 m`），`footprint_gate_collisions=0`，`nav_tracking=1/1`，`physical_contact_acceptance=passed`（`illegal=0`） |
-| **Stage A B2（最终二进制）** (`vfinal_stageA_b2_d195`) | `rmuc_2027_tunnels --prior rmuc_2027 --case b2_detour` | **Action 通过；物理接触未过** | 绕行到达（真值误差 `0.0267 m`），但在 `5 cm` 全静态图 2D ESDF 投影周期（`~180 ms`）下于 `1.2 m` 投放距离出现 `illegal=528` 轮碰箱体（归入下一轮 Wave 6B-2 优化） |
-| **Stage A T3（5 cm 拆分后）** (`final_stageA_t3_d232`) | `rmuc_2027_tunnels / six_tunnels --waypoint-control-tolerance-m 0.08` | **42/42 路点与 q1/q2 通过；物理接触未过** | `42/42` 到达（里程 `74.33 m`，末点 `0.0096 m`，`42/42` `nav_tracking`），左右侧壁独立 PCA 修复 `tunnel_B_mirror` 顶板接触至 `0`（`illegal_chassis=0`、`illegal_wheel_ceiling=0`、`illegal_max_penetration_m=0.0`）；仅 `south_plate`/`south_plate_mirror` 处 `18` tick 底板拼接缝余量触碰（`d=+0.79..+1.00 mm`，`nz=+0.38..+0.77`，归入下一轮 Wave 6B-2） |
-| **Stage B 障碍延迟与保存** (`final_obs_dyn_d181` / `vfinal_obs_dyn_d196`) | `rmuc_2027 --mapless --max-goals 3 --post-route-case obstacle_and_dynamic` | **延迟与 3 点建图通过；`dynamic_save` 在 `d181` 全过、`d196` 清除等待略短** | `d181` 全套通过：`3/3`（末点 `0.0054 m`）、`contact=0`、`nav_tracking=3/3`、障碍可见延迟 **`p50=187.8 ms / p95=201.9 ms (< 250 ms) / max=202.8 ms`**、`dynamic_save passed=True`、`s3_map_quality`（`586/756` 占格命中，`8684` 持久点）；最终二进制 `d196` `3/3`（`0.00033 m`）、`contact=0`、`nav_tracking=3/3`、延迟 `p50=190.0 / p95=208.9 / max=209.3 ms`，但 `dynamic_save` 前等待 `3.5 s` 略短于 `dynamic_hold_seconds=3.0 s` 清除窗口 |
-| **Stage B 重载首目标** (`final_reload_d182`) | `rmuc_2027 --reload d181/map --max-goals 1` | **通过** | 重载 `d181/map` 后 `1/1` 到达，里程 `4.33 m`，末点真值误差 **`0.0412 m <= 0.08 m`**，`contact=0`（`passed`），`nav_tracking=1/1` |
-| **Stage B 建图 `no_path`（最终二进制）** (`vfinal_nopath_d199`) | `small_10x10 --mapless --case no_path` | **通过** | 有界无路失败与三路速度确定性归零通过（注：`small_10x10` 合成地板 `s3_floor` 未纳入 2027 地面白名单） |
-| **Stage B 无先验 `B1_mapless`** (`s3_b1_mapless_d193` / `vfinal_b1_mapless_d198`) | `rmuc_2027_tunnels --route base_to_base --mapless` | **拆分前 `d193` 通过；最终二进制 `d198` 未通过** | 拆分前 5 cm 基线 `d193` 单 action `1/1` 到达（`79.84 m`，`0.0144 m`，`contact=0`，`nav_tracking=1/1`）；重构后最终二进制 `d198` 在 `(8.81, 9.00)` 触发 `suspended-replan wait`（`contact=30`），归入下一轮 Wave 6B-2 稳定收口 |
+| **Stage A B2** (`vfinal_stageA_b2_d171`) | `rmuc_2027_tunnels --prior rmuc_2027 --route base_to_base --case b2_detour` | **通过** | 动态绕行到达，真值误差 **`0.0037 m`**，最小箱距 `0.753 m`，绕行墙钟 `14.55 s`，`A=True`，**`physical_contact_acceptance=passed`（`illegal=0`）**（较 6B-1 `contact=528` 彻底归零） |
+| **Stage A B1** (`vfinal_stageA_b1_d172`) | `rmuc_2027_tunnels --prior rmuc_2027 --route base_to_base --case route` | **通过** | `1/1` 到达，里程 `27.00 m`，末点真值误差 `0.0249 m`（停后 `0.0309 m`），真值峰值速度 **`3.561 m/s`**，`footprint_gate_collisions=0`，`nav_tracking=1/1`，`contact=0`（`passed`），`hd/qp=0/0` |
+| **Stage A V1** (`vfinal_stageA_v1_d173`) | `rmuc_2027_tunnels --prior rmuc_2027 --route symmetry_speed --case route` | **通过** | `1/1` 到达，里程 `15.42 m`，末点真值误差 `0.0151 m`（停后 `0.0474 m`），真值峰值速度 **`3.148 m/s`**，`footprint_gate_collisions=0`，`nav_tracking=1/1`，`contact=0`（`passed`），`hd/qp=0/0` |
+| **Stage A T1** (`vfinal_stageA_t1_d174`) | `rmuc_2027_tunnels --prior rmuc_2027 --route tunnel_b_roundtrip --waypoint-control-tolerance-m 0.08` | **通过** | `13/13` 到达，里程 `20.79 m`，末点真值误差 `0.0118 m`（停后 `0.0115 m`），`tunnel_ramp_bridge`/`tunnel_B` 接触增量均为 `0`，`13/13` `nav_tracking`，`contact=0`（`passed`），`hd/qp=0/0` |
+| **Stage A T2** (`vfinal_stageA_t2_d175`) | `rmuc_2027_tunnels --prior rmuc_2027 --route ramp_south --waypoint-control-tolerance-m 0.08` | **路点与 q1/q2 通过；物理接触未过** | `13/13` 到达（`21.11 m`，`0.0105 m`，`13/13` `nav_tracking`，`footprint_gate=0`），`tunnel_ramp_bridge=0`；仅 `tunnel_south_plate` 在 `y=1.0787..1.0792` 触发 `10` tick 零侵入底板接缝余量触碰（`audited_roof_8737`，`d=+0.52..+0.85 mm`，`nz=0.506..0.717`，`penetration=0.0`） |
+| **Stage A T3** (`vfinal_stageA_t3_d184`) | `rmuc_2027_tunnels --prior rmuc_2027 --route six_tunnels --waypoint-control-tolerance-m 0.08` | **42/42 路点与 q1/q2 通过；物理接触未过** | `42/42` 到达（`73.78 m`，`0.0057 m`，`42/42` `nav_tracking`，`footprint_gate=0`，MINCO `p95=5.90 ms`）；`ramp_bridge`/`south_plate`/`B_mirror`/`ramp_bridge_mirror` 4 洞为 `0`；`tunnel_B` `28` tick（`y=1.988`，`d=-3.1 mm`）与 `south_plate_mirror` `19` tick（注：22 点收紧参数改动前同轮 `stageA_t3_d161` 曾 `42/42` `contact=0` 全过，归入 Wave 6B-3 统一收敛） |
+| **Stage A 故障 `unknown` / `adapter_lease`** (`d179` / `d182`) | `rmuc_2027_tunnels --prior rmuc_2027 --route base_to_base --case {unknown,adapter_lease}` | **2/2 通过** | `unknown`（`stop_wall_s=3.124 s`，`contact=0`）与 `adapter_lease`（`stop=5.369 s`，`recovery=0.259 s`，`old_execution_rejected=True`，`contact=0`）均满足急停与三路零速 |
+| **Stage A 故障 `no_path` / `unsafe` / `point_lio_restart`** (`d180` / `d181` / `d183`) | `rmuc_2027_tunnels --prior rmuc_2027 --route base_to_base --case {no_path,unsafe,point_lio_restart}` | **未通过（根因已定位，归入 6B-3）** | `no_path`：搜索已耗尽 `95771` 节点并停车零接触，但 5 cm 全图搜索（`~110 ms`）慢于 `~100 ms` 快照发布导致上报 `FAILURE_SNAPSHOT_CHANGED (11)` 而非 `FAILURE_NO_PATH (6)`；`unsafe`：`+0.28 s` 已急停，但快速投影在 `+0.58 s`（早于 `0.40 s` 持续零速窗结束）即完成开阔地绕行重规划并擦箱；`point_lio_restart`：击杀后急停零接触通过，但重启的 `pointlio_mapping` 在 `sim_s=4.63 s` 仅打印参数后 30 s 无里程计输出（`epoch` 未递增） |
+| **Stage B `B1_mapless`** (`vfinal_stageB_b1_mapless_d176`) | `rmuc_2027_tunnels --route base_to_base --mapless --case route` | **通过** | 单 action `1/1` 到达，里程 `36.85 m`，末点真值误差 **`0.0128 m`**（停后 `0.0432 m`），峰值 `2.416 m/s`，`footprint_gate=0`，`nav_tracking=1/1`，**`contact=0`（`passed`）**，`hd/qp=0/0` |
+| **Stage B 障碍延迟与动态保存** (`vfinal_stageB_obs_dyn_d177`) | `rmuc_2027 --mapless --max-goals 3 --post-route-case obstacle_and_dynamic` | **通过** | `3/3` 到达（`7.72 m`，末点 `0.0079 m`，`3/3` `nav_tracking`，`contact=0`），障碍可见延迟 **`p50=186.9 / p95=196.3 (< 250 ms) / max=197.2 ms`**，**`dynamic_save passed=True`**（移除前 `166 pts / 61 cells` -> 移除后 `0 pts / 0 cells`） |
+| **Stage B 重载首目标** (`vfinal_stageB_reload_d178`) | `rmuc_2027 --reload d177/map --max-goals 1` | **通过** | 重载后 `1/1` 到达，里程 `4.20 m`，末点真值误差 **`0.0196 m`**（停后 `0.0079 m`），`nav_tracking=1/1`，`contact=0`（`passed`） |
+| **Stage B 建图 `no_path`** (`final_nopath_mapless_d170`) | `small_10x10 --mapless --case no_path` | **通过（耗时待压回）** | `passed=True`、`A=True`、有界失败与三路零速通过；但 `stop_wall_s=8.404 s`（受 `isLocalDirectNoPathSealed` 放宽 `lat<=3.50 m` 影响，较改动前 `1.034 s` 变慢，归入 6B-3 压回） |
+| **Stage B 22 点建图巡航 + 重载** (`final_mapping_22pt_d168` / `d169`) | 22 点无先验建图（Phase 1 17 点 + 保存 + Phase 2 5 点）及 `--reload` | **Phase 1、质量与重载通过；Phase 2 未全过** | Phase 1 `17/17` 到达（`210.1 s` sim / `262.9 s` wall `< 420 s`，前 18 点 `contact=0`），保存成功（`6067` 栅格占据格 / `30428` 持久体素），`s3_map_quality`（`tp=4532`、`fp=1535`、位置误差均值/p95=`0.0412/0.0814 m`），`reload` `d169` 通过（`0.0143 m`，`contact=0`，`1/1` `nav_tracking`）；总计 `21/22`（Phase 2 WP 19 因 `tunnel_south_plate_mirror` 内参考失效引发 `known_only=0/1` 振荡超时 `121 s` 且 `6` tick 轮侧触碰；WP 20 在 `y=14.948` 出现 `10` tick 零侵入接缝触碰） |
 
 ### 5.3 离线 Point-LIO A/B 评估（`scripts/evaluate_lio_frontend_ab.py`）
 
@@ -124,9 +130,10 @@ Stage A 全套 11 项（5 条路线 + B2 绕行 + 5 项独立故障）与 `small
 
 ### 5.4 未通过与未验证总界
 
-- **未通过（归入下一轮 Wave 6B-2）**：
-  1. `5 cm` 最终二进制下 Stage B `B1_mapless` 稳定通过（消除中台路缘/颠簸带与 `suspended-replan wait` 波动）及 `obstacle_and_dynamic` 中 `dynamic_save` 前等待/射线清除稳定性；
-  2. `5 cm` 最终二进制下 Stage A `B2 detour` 零物理接触（消除 `~180 ms` 5 cm 全图 ESDF 投影导致的 `1.2 m` 投放距离擦碰）与 `T3 six_tunnels` 南侧悬空板通道底板拼接缝 `18` tick 余量触碰归零（并复验 Stage A 全套 11/11）；
-  3. 完整 64 点 S3 `A–K`。
-- **未验证**：`5 m/s` 高速段与高速换轨（当前 B1/V1 真值峰值已达 `3.404 / 3.053 m/s`，`5 m/s` 上限未触发）、开窗 RViz/MuJoCo 视觉画面（桌面锁屏未带窗口）、P3 行为树全链集成及实车硬件（含 H2/H3 钻洞）。
+- **未通过（归入下一轮 Wave 6B-3）**：
+  1. Stage A 5 cm `T2`（`10` tick 零侵入接缝）与 `T3`（`47` tick，`tunnel_B` 侧偏 + `south_plate_mirror` 接缝）稳定零接触复验（合并恢复 `d161` `42/42` 零接触与 22 点收紧参数）；
+  2. Stage A 3 项独立故障：`no_path`（5 cm 搜索跨快照被覆盖为 `FAILURE_SNAPSHOT_CHANGED`）、`unsafe`（快投影 `0.58 s` 绕行打断 `0.40 s` 持续零速窗与 `0.80 m` 擦箱）、`point_lio_restart`（中途重启 `pointlio_mapping` 后 30 s 无里程计输出）；
+  3. Stage B 22 点建图巡航 Phase 2（WP 19 `known_only` 振荡与 WP 20 接缝 `10` tick）及 `small_10x10 --mapless --case no_path` 停车耗时压回 `~1 s`；
+  4. 完整 64 点 S3 `A–K`。
+- **未验证**：`5 m/s` 高速段与高速换轨（当前 5 cm 终态二进制 B1/V1 真值峰值已达 `3.561 / 3.148 m/s`，`5 m/s` 上限未触发）、开窗 RViz/MuJoCo 视觉画面（桌面锁屏未带窗口）、P3 行为树全链集成及实车硬件（含 H2/H3 钻洞）。
 - 历史基线保留原则：2025 场景 `q2`、早期 2027 `south` 漂移与未复验的历史兼容项不因场景切换或局部通过自动标为已修复。
