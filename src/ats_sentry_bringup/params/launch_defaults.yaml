@@ -1,0 +1,57 @@
+# 实车与通用 bringup 启动默认参数配置（收敛自动建图标志、定位默认值与雷达外参，避免 launch.py 硬编码）。
+# 所有参数均可通过 ros2 launch ... key:=value 在命令行覆写。
+
+common:
+  robot_name: "ats_sentry_robot"
+  world: "rmuc_2027"
+  namespace: ""
+  use_sim_time: "False"
+  rviz_force_software: "0"
+  use_robot_state_pub: "False"
+  use_rviz: "False"
+  launch_joy_teleop: "False"
+  launch_rosbag_recorder: "False"
+  launch_cmd_vel_arbiter: "True"
+  require_gimbal_status: "True"
+  launch_behavior: "True"
+  launch_lidar_static_tf: "True"
+  chassis_vel_output_topic: "/cmd_vel/autonomy"
+  use_respawn: "True"
+  log_level: "info"
+
+localization:
+  use_identified_odometry: "false"
+  launch_small_gicp_relocalization: "True"
+  launch_localization_fusion: "True"
+
+auto_mapping:
+  slam: "False"
+
+lidar_extrinsics:
+  # Mid360 static extrinsic relative to gimbal_yaw_odom, keyed by lidar_mount_mode.
+  chassis:
+    x: "0.2405"
+    y: "0.0"
+    z: "0.13"
+    roll: "0.0"
+    pitch: "0.5235987755982988"
+    yaw: "0.0"
+    base_ground_offset: "0.07"
+  gimbal:
+    x: "-0.1"
+    y: "0.245"
+    z: "0.325"
+    roll: "1.3089969389957472"
+    pitch: "0.0"
+    yaw: "-2.8099800957108707"
+    base_ground_offset: "0.15"
+    base_footprint_ground_offset: "0.0"
+
+profiles:
+  bringup: {}
+  real_robot:
+    require_serial_link: "True"
+    require_gimbal_status: "True"
+    launch_behavior: "True"
+    use_rviz: "False"
+    log_level: "info"

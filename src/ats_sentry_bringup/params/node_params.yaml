@@ -86,7 +86,7 @@ ats_sentry_behavior_server:
     action_name: ats_sentry_behavior
     tick_frequency: 15
     groot2_port: 17777
-    ros_plugins_timeout: 1000
+    ros_plugins_timeout: 3000
     use_cout_logger: false
     plugins:
       - ats_sentry_behavior/bt_plugins
@@ -1014,9 +1014,9 @@ minco_planner:
     esdf_obstacle_backtracking_steps: 4
     esdf_obstacle_smoothing_weight: 0.25
     esdf_footprint_optimization_enabled: true
-    esdf_footprint_clearance: 0.14
-    esdf_footprint_trigger_clearance: 0.12
-    esdf_footprint_target_clearance: 0.14
+    esdf_footprint_clearance: 0.085
+    esdf_footprint_trigger_clearance: 0.083
+    esdf_footprint_target_clearance: 0.085
     esdf_footprint_sample_spacing: 0.10
     # 整条轨迹 MINCO 联合优化（唯一的最终轨迹生成器）：配合上游 C1 净空速度约束与 O2 局部滚动地平线，
     # 10 m 窗口内约 10 段、每段 K=10、边采样 2 点，10 ms 预算内收敛且轨迹顺滑。
@@ -1036,7 +1036,7 @@ minco_planner:
     # 中心净空目标 0.54（在 45° 对角半宽 0.436 m 之上留出 ~0.10 m 弯角余量，避免出洞转角擦碰静态格）；
     # 足迹采样点（已含 safety_margin）净空目标 0.06 m。
     joint_center_clearance: 0.54
-    joint_footprint_clearance: 0.06
+    joint_footprint_clearance: 0.083
     joint_footprint_edge_samples: 2
     joint_g_epsilon: 0.00001
     joint_max_iterations: 200
@@ -1049,7 +1049,7 @@ minco_planner:
     partial_subgoal_continuation_enabled: true
     partial_subgoal_only_without_prior: true
     partial_subgoal_min_advance_m: 0.30
-    optimistic_global_unknown_cost: 1.05
+    optimistic_global_unknown_cost: 1.35
     frontier_taboo_radius_m: 0.70
     frontier_taboo_ttl_sec: 180.0
     rolling_anchor_topic: /minco/rolling_anchor
@@ -1086,7 +1086,7 @@ minco_planner:
     narrow_turn_clearance: 0.55
     narrow_turn_yaw_rate_threshold: 0.2
     clearance_speed_min: 0.80
-    clearance_speed_low: 0.38
+    clearance_speed_low: 0.43
     clearance_speed_high: 0.75
     narrow_clearance_enter: 0.65
     narrow_clearance_exit: 0.80
@@ -1338,12 +1338,12 @@ ats_swerve_mpc:
     qp_esdf_slack_linear_weight: 12.0
     qp_esdf_slack_quadratic_weight: 60.0
     rollout_safety_enabled: true
-    rollout_immediate_stop_horizon_sec: 0.20
+    rollout_immediate_stop_horizon_sec: 0.26
     rollout_brake_horizon_sec: 0.70
     rollout_slowdown_horizon_sec: 1.20
     rollout_slowdown_clearance_m: 0.05
     rollout_min_slowdown_scale: 0.45
-    rollout_hard_stop_penetration_m: 0.06
+    rollout_hard_stop_penetration_m: 0.02
     # 默认滚动诊断；QP profile 仅通过 launch 显式设为固定采样窗口。
     telemetry_sampling_window_cycles: 0
     projection_backward_window: 0.20
@@ -1358,13 +1358,13 @@ ats_swerve_mpc:
     # 缩短加速度耦合链长度以将 OSQP 实时求解压至 ~1-2 ms。
     horizon: 20
     dt: 0.13
-    state_weight: [1.8, 1.8, 1.0]
-    lag_weight: 1.5
-    contour_weight: 3.0
-    terminal_weight: [2.8, 2.8, 0.8]
+    state_weight: [2.4, 2.4, 1.5]
+    lag_weight: 2.0
+    contour_weight: 6.0
+    terminal_weight: [4.0, 4.0, 1.0]
     control_weight: [0.012, 0.012, 0.008]
     # 转角段提高 wz 增量惩罚，抑制相邻周期角速度突变；与 yaw_acceleration_limit 同步为 2.0。
-    control_delta_weight: [0.070, 0.070, 0.060]
+    control_delta_weight: [0.040, 0.040, 0.060]
     actuator_lag_tau_sec: 0.025
     actuator_delay_sec: 0.010
     max_vx: 5.0

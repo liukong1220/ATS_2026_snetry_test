@@ -41,6 +41,7 @@ independent contact evaluator it stays unverified here.
 
 from __future__ import annotations
 
+from array import array
 import argparse
 from collections import OrderedDict
 import gzip
@@ -48,6 +49,7 @@ import json
 import math
 import os
 import sys
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -87,9 +89,36 @@ def load_json(path):
         return json.load(handle)
 
 
+SNAPSHOT_BIN_MAGIC = b"ATSSNAP1"
+
+
 def load_gzip_json(path):
     with gzip.open(path, "rt") as handle:
         return json.load(handle)
+
+
+def load_snapshot_payload(path):
+    if path.endswith(".snap.zlib"):
+        with open(path, "rb") as handle:
+            raw = zlib.decompress(handle.read())
+        magic_len = len(SNAPSHOT_BIN_MAGIC)
+        if not raw.startswith(SNAPSHOT_BIN_MAGIC):
+            raise ValueError(f"invalid snapshot binary header in {path}")
+        meta_len = int.from_bytes(raw[magic_len:magic_len + 4], "little")
+        meta_end = magic_len + 4 + meta_len
+        identity = json.loads(raw[magic_len + 4:meta_end].decode("utf-8"))
+        cell_count = int(identity["cell_count"])
+        occ_end = meta_end + cell_count
+        occ = array("b")
+        occ.frombytes(raw[meta_end:occ_end])
+        dist = array("f")
+        dist.frombytes(raw[occ_end:occ_end + 4 * cell_count])
+        return {
+            "identity": identity,
+            "occupancy": occ,
+            "signed_distance_m": dist,
+        }
+    return load_gzip_json(path)
 
 
 # ---- frames ---------------------------------------------------------------
@@ -220,7 +249,7 @@ class PayloadStore(object):
         path = os.path.join(self._input_dir, record["payload"])
         if not os.path.exists(path):
             return None
-        payload = load_gzip_json(path)
+        payload = load_snapshot_payload(path)
         self._cache[digest] = payload
         while len(self._cache) > 8:
             self._cache.popitem(last=False)

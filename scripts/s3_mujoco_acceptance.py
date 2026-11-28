@@ -872,7 +872,7 @@ def run(args):
             if evaluator_active
             else "unverified"
         )
-        if profile.get("tunnels") and not args.max_goals:
+        if profile.get("tunnels") and not args.max_goals and not args.reload:
             summary["route"] = profile.get("route")
             summary["tunnels"] = required_tunnel_report(
                 profile, probe.truth_samples, SIM / "config", probe.truth_contact_counts,

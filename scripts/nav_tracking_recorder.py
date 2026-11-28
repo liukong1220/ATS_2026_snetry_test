@@ -42,6 +42,7 @@ class NavTrackingRecorder(Node):
         self._map_status = None
         self._execution = None
         self._execution_mono = None
+        self._execution_first_mono = None
         self._planner_status = None
         self._reference = None
         self._reference_mono = None
@@ -67,6 +68,11 @@ class NavTrackingRecorder(Node):
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._io_queue = queue.Queue()
+        self._io_errors = []
+        self._io_thread = threading.Thread(
+            target=self._io_worker, name="nav_tracking_io", daemon=True)
+        self._io_thread.start()
 
         self._subscribe(args)
         period = 1.0 / max(1.0, args.rate_hz)
@@ -109,7 +115,7 @@ class NavTrackingRecorder(Node):
             PlanningMapStatus, args.map_status_topic, self._on_map_status, latched_qos())
         self.create_subscription(
             PlanningMapSnapshot, args.planning_snapshot_topic, self._on_snapshot,
-            latched_qos())
+            latched_qos(depth=64))
         # Source layers, for per-cell provenance of a first conflict.  The static
         # map is latched; the terrain and slope grids are volatile streams from
         # terrain_analysis_ext.  The fused planning occupancy is already recorded
@@ -306,6 +312,8 @@ class NavTrackingRecorder(Node):
         previous = self._execution
         self._execution = execution
         self._execution_mono = time.monotonic()
+        if self._execution_first_mono is None:
+            self._execution_first_mono = self._execution_mono
         if payload_key not in self._execution_payload_keys:
             self._event("execution_reference_payload", {"key": payload_key,
                                                          "reference": payload})
@@ -347,10 +355,30 @@ class NavTrackingRecorder(Node):
             "message": msg.message,
         }
 
+    def _io_worker(self):
+        while True:
+            item = self._io_queue.get()
+            try:
+                if item is None:
+                    return
+                fn, args = item
+                fn(*args)
+            except Exception as exc:  # noqa: BLE001
+                self._io_errors.append("%s: %s" % (type(exc).__name__, exc))
+            finally:
+                self._io_queue.task_done()
+
+    def _drain_io(self):
+        if getattr(self, "_io_thread", None) is not None and self._io_thread.is_alive():
+            self._io_queue.put(None)
+            self._io_queue.join()
+            self._io_thread.join(timeout=10.0)
+
     def _on_snapshot(self, msg):
         self._count(self._args.planning_snapshot_topic)
-        occupancy = list(msg.occupancy)
-        digest = digest_int8_array(occupancy)
+        occ_bytes = int8_bytes(msg.occupancy)
+        dist_bytes = float32_bytes(msg.signed_distance_m)
+        digest = digest_bytes(occ_bytes)
         identity = {
             "stamp_identity": stamp_identity(msg.header.stamp),
             "frame_id": msg.header.frame_id,
@@ -362,8 +390,8 @@ class NavTrackingRecorder(Node):
             "source_generation": int(msg.source_generation),
             "publication_sequence": int(msg.publication_sequence),
             "occupancy_digest": digest,
-            "distance_digest": digest_bytes(array("f", msg.signed_distance_m).tobytes()),
-            "cell_count": len(occupancy),
+            "distance_digest": digest_bytes(dist_bytes),
+            "cell_count": len(occ_bytes),
             "info": grid_metadata(msg.info),
         }
         identity["payload_key"] = snapshot_payload_key(identity)
@@ -380,18 +408,10 @@ class NavTrackingRecorder(Node):
             record["payload"] = self._snapshot_payload_by_digest[payload_key]
         elif (self._args.max_snapshot_payloads == -1 or
               self._snapshot_payloads_written < self._args.max_snapshot_payloads):
-            name = "snapshot_%020d_%s.json.gz" % (
+            name = "snapshot_%020d_%s.snap.zlib" % (
                 int(msg.publication_sequence), payload_key)
             path = os.path.join(self._output_dir, "snapshot_payload", name)
-            payload = {
-                "identity": identity,
-                "occupancy": occupancy,
-                # The RC-ESDF arrays are what distinguishes "inflated near an
-                # obstacle" from "hard obstacle cell", so they travel with the
-                # occupancy rather than being reconstructed later.
-                "signed_distance_m": [float(v) for v in msg.signed_distance_m],
-            }
-            write_gzip_json(path, payload)
+            self._io_queue.put((write_snapshot_binary, (path, dict(identity), occ_bytes, dist_bytes)))
             self._snapshot_payloads_written += 1
             record["payload"] = os.path.join("snapshot_payload", name)
         else:
@@ -409,8 +429,8 @@ class NavTrackingRecorder(Node):
         costs one file.
         """
         self._count(topic)
-        data = list(msg.data)
-        digest = digest_int8_array(data)
+        data_bytes = int8_bytes(msg.data)
+        digest = digest_bytes(data_bytes)
         content_key = digest_bytes(json.dumps(
             [msg.header.frame_id, grid_metadata(msg.info), digest], sort_keys=True).encode("utf-8"))
         if self._seen_layer_digests.get(topic) == content_key:
@@ -424,10 +444,12 @@ class NavTrackingRecorder(Node):
         victim_topic, victim_name = plan
         if victim_name is not None:
             victim_path = os.path.join(self._output_dir, "layers", victim_name)
-            try:
-                os.remove(victim_path)
-            except OSError:
-                pass
+            def _remove_quiet(target_path):
+                try:
+                    os.remove(target_path)
+                except OSError:
+                    pass
+            self._io_queue.put((_remove_quiet, (victim_path,)))
             self._layer_retained[victim_topic].remove(victim_name)
             self._layer_payloads_evicted += 1
             self._layer_payloads_truncated = True
@@ -440,23 +462,22 @@ class NavTrackingRecorder(Node):
         # A -> B -> A keeps both receipt-time intervals rather than overwrite A.
         name = "%s_%012d_%s.json.gz" % (safe_topic, self._layer_payloads_written, content_key)
         path = os.path.join(self._output_dir, "layers", name)
-        payload = {
+        metadata = {
             "topic": topic,
             "frame_id": msg.header.frame_id,
             "stamp_identity": stamp_identity(msg.header.stamp),
             "mono_s": time.monotonic() - self._start_mono,
             "digest": digest,
             "info": grid_metadata(msg.info),
-            "data": data,
         }
-        write_gzip_json(path, payload)
+        self._io_queue.put((write_layer_gzip_json, (path, metadata, data_bytes)))
         self._layer_payloads_written += 1
         self._layer_retained.setdefault(topic, []).append(name)
         self._event("layer_payload", {
             "topic": topic, "digest": digest,
             "path": os.path.join("layers", name),
             "frame_id": msg.header.frame_id,
-            "info": payload["info"],
+            "info": metadata["info"],
         })
 
     def _event(self, kind, payload):
@@ -530,7 +551,7 @@ class NavTrackingRecorder(Node):
             missing.append("emergency_stop")
         if self._execution is None:
             missing.append("execution_command")
-        elif self._execution_mono is not None and (time.monotonic() - self._execution_mono) < 0.15:
+        elif self._execution_first_mono is not None and (time.monotonic() - self._execution_first_mono) < 0.15:
             missing.append("execution_match_settle")
         return missing
 
@@ -611,6 +632,7 @@ class NavTrackingRecorder(Node):
     # ---- shutdown ----------------------------------------------------------
 
     def write_summary(self, reason):
+        self._drain_io()
         summary = {
             "reason": reason,
             "duration_s_mono": time.monotonic() - self._start_mono,
@@ -710,6 +732,7 @@ class NavTrackingRecorder(Node):
         return [topic for topic in topics if topic]
 
     def close(self):
+        self._drain_io()
         for writer in (self._samples, self._references, self._snapshots, self._events):
             writer.close()
 

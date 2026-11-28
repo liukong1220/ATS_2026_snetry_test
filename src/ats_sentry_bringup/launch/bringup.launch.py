@@ -1,5 +1,6 @@
 import os
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
@@ -10,8 +11,24 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
+def _load_launch_defaults(bringup_dir, profile):
+    cfg_path = os.path.join(bringup_dir, "params", "launch_defaults.yaml")
+    with open(cfg_path, "r", encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle) or {}
+    merged = {}
+    for section in ("common", "localization", "auto_mapping"):
+        for k, v in (raw.get(section) or {}).items():
+            merged[str(k)] = str(v)
+    for k, v in ((raw.get("profiles") or {}).get(profile) or {}).items():
+        merged[str(k)] = str(v)
+    return merged, (raw.get("lidar_extrinsics") or {})
+
+
 def generate_launch_description():
     bringup_dir = get_package_share_directory("ats_sentry_bringup")
+    defaults, extrinsics = _load_launch_defaults(bringup_dir, "bringup")
+    ext_chassis = extrinsics.get("chassis", {})
+    ext_gimbal = extrinsics.get("gimbal", {})
     serial_bringup_dir = get_package_share_directory("standard_robot_pp_ros2")
     navigation_bringup_dir = get_package_share_directory("ats_nav_bringup")
     robot_name = LaunchConfiguration("robot_name")
@@ -59,9 +76,9 @@ def generate_launch_description():
         "'.lower() == 'true'",
     ])
     declarations = [
-        DeclareLaunchArgument("use_identified_odometry", default_value="false"),
-        DeclareLaunchArgument("robot_name", default_value="ats_sentry_robot"),
-        DeclareLaunchArgument("world", default_value="rmuc_2027"),
+        DeclareLaunchArgument("use_identified_odometry", default_value=defaults["use_identified_odometry"]),
+        DeclareLaunchArgument("robot_name", default_value=defaults["robot_name"]),
+        DeclareLaunchArgument("world", default_value=defaults["world"]),
         DeclareLaunchArgument(
             "map",
             default_value=[TextSubstitution(text=os.path.join(bringup_dir, "map", "")), world, TextSubstitution(text=".yaml")],
@@ -70,8 +87,8 @@ def generate_launch_description():
             "prior_pcd_file",
             default_value=[TextSubstitution(text=os.path.join(bringup_dir, "pcd", "")), world, TextSubstitution(text=".pcd")],
         ),
-        DeclareLaunchArgument("namespace", default_value=""),
-        DeclareLaunchArgument("use_sim_time", default_value="False"),
+        DeclareLaunchArgument("namespace", default_value=defaults["namespace"]),
+        DeclareLaunchArgument("use_sim_time", default_value=defaults["use_sim_time"]),
         DeclareLaunchArgument(
             "params_file", default_value=os.path.join(bringup_dir, "params", "node_params.yaml"),
             description="Formal serial, behavior, transform, localization, map, planning and control parameters.",
@@ -79,13 +96,19 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "rviz_config_file", default_value=os.path.join(bringup_dir, "rviz", "sentry_default_view.rviz"),
         ),
-        DeclareLaunchArgument("rviz_force_software", default_value="0"),
-        DeclareLaunchArgument("use_robot_state_pub", default_value="False"),
-        DeclareLaunchArgument("use_rviz", default_value="False"),
-        DeclareLaunchArgument("launch_joy_teleop", default_value="False"),
-        DeclareLaunchArgument("launch_rosbag_recorder", default_value="False"),
-        DeclareLaunchArgument("launch_small_gicp_relocalization", default_value="True"),
-        DeclareLaunchArgument("launch_localization_fusion", default_value="True"),
+        DeclareLaunchArgument("rviz_force_software", default_value=defaults["rviz_force_software"]),
+        DeclareLaunchArgument("use_robot_state_pub", default_value=defaults["use_robot_state_pub"]),
+        DeclareLaunchArgument("use_rviz", default_value=defaults["use_rviz"]),
+        DeclareLaunchArgument("launch_joy_teleop", default_value=defaults["launch_joy_teleop"]),
+        DeclareLaunchArgument("launch_rosbag_recorder", default_value=defaults["launch_rosbag_recorder"]),
+        DeclareLaunchArgument(
+            "launch_small_gicp_relocalization",
+            default_value=defaults["launch_small_gicp_relocalization"],
+        ),
+        DeclareLaunchArgument(
+            "launch_localization_fusion",
+            default_value=defaults["launch_localization_fusion"],
+        ),
         DeclareLaunchArgument(
             "lidar_mount_mode",
             default_value="chassis",
@@ -122,45 +145,55 @@ def generate_launch_description():
             "chassis_vel_input_topic",
             default_value=IfElseSubstitution(launch_fake_vel_transform, "/cmd_vel/autonomy_gimbal", mpc_cmd_vel_topic),
         ),
-        DeclareLaunchArgument("chassis_vel_output_topic", default_value="/cmd_vel/autonomy"),
-        DeclareLaunchArgument("launch_cmd_vel_arbiter", default_value="True"),
+        DeclareLaunchArgument("chassis_vel_output_topic", default_value=defaults["chassis_vel_output_topic"]),
+        DeclareLaunchArgument("launch_cmd_vel_arbiter", default_value=defaults["launch_cmd_vel_arbiter"]),
         DeclareLaunchArgument(
             "require_serial_link",
             default_value=IfElseSubstitution(use_robot_state_pub, "False", "True"),
         ),
-        DeclareLaunchArgument("require_gimbal_status", default_value="True"),
-        DeclareLaunchArgument("launch_behavior", default_value="True"),
-        DeclareLaunchArgument("launch_lidar_static_tf", default_value="True"),
-        # Mid360 static extrinsic relative to gimbal_yaw_odom, keyed by lidar_mount_mode:
-        # - chassis: (0.2405, 0.0, 0.13), rpy (0.0, +30deg, 0.0)
-        # - gimbal:  (-0.1, 0.245, 0.325), rpy (+75deg, 0.0, -161deg)
+        DeclareLaunchArgument("require_gimbal_status", default_value=defaults["require_gimbal_status"]),
+        DeclareLaunchArgument("launch_behavior", default_value=defaults["launch_behavior"]),
+        DeclareLaunchArgument("launch_lidar_static_tf", default_value=defaults["launch_lidar_static_tf"]),
+        # Mid360 static extrinsic relative to gimbal_yaw_odom, loaded from params/launch_defaults.yaml.
         DeclareLaunchArgument(
             "lidar_static_tf_x",
-            default_value=PythonExpression(["'-0.1' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.2405'"]),
+            default_value=PythonExpression([
+                f"'{ext_gimbal['x']}' if '", lidar_mount_mode, f"'.lower() == 'gimbal' else '{ext_chassis['x']}'"
+            ]),
         ),
         DeclareLaunchArgument(
             "lidar_static_tf_y",
-            default_value=PythonExpression(["'0.245' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.0'"]),
+            default_value=PythonExpression([
+                f"'{ext_gimbal['y']}' if '", lidar_mount_mode, f"'.lower() == 'gimbal' else '{ext_chassis['y']}'"
+            ]),
         ),
         DeclareLaunchArgument(
             "lidar_static_tf_z",
-            default_value=PythonExpression(["'0.325' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.13'"]),
+            default_value=PythonExpression([
+                f"'{ext_gimbal['z']}' if '", lidar_mount_mode, f"'.lower() == 'gimbal' else '{ext_chassis['z']}'"
+            ]),
         ),
         DeclareLaunchArgument(
             "lidar_static_tf_roll",
-            default_value=PythonExpression(["'1.3089969389957472' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.0'"]),
+            default_value=PythonExpression([
+                f"'{ext_gimbal['roll']}' if '", lidar_mount_mode, f"'.lower() == 'gimbal' else '{ext_chassis['roll']}'"
+            ]),
         ),
         DeclareLaunchArgument(
             "lidar_static_tf_pitch",
-            default_value=PythonExpression(["'0.0' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.5235987755982988'"]),
+            default_value=PythonExpression([
+                f"'{ext_gimbal['pitch']}' if '", lidar_mount_mode, f"'.lower() == 'gimbal' else '{ext_chassis['pitch']}'"
+            ]),
         ),
         DeclareLaunchArgument(
             "lidar_static_tf_yaw",
-            default_value=PythonExpression(["'-2.8099800957108707' if '", lidar_mount_mode, "'.lower() == 'gimbal' else '0.0'"]),
+            default_value=PythonExpression([
+                f"'{ext_gimbal['yaw']}' if '", lidar_mount_mode, f"'.lower() == 'gimbal' else '{ext_chassis['yaw']}'"
+            ]),
         ),
-        DeclareLaunchArgument("use_respawn", default_value="True"),
-        DeclareLaunchArgument("log_level", default_value="info"),
-        DeclareLaunchArgument("slam", default_value="False"),
+        DeclareLaunchArgument("use_respawn", default_value=defaults["use_respawn"]),
+        DeclareLaunchArgument("log_level", default_value=defaults["log_level"]),
+        DeclareLaunchArgument("slam", default_value=defaults["slam"]),
     ]
     prior_preflight = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(navigation_bringup_dir, "launch", "prior_pcd_preflight.launch.py")),
@@ -201,9 +234,10 @@ def generate_launch_description():
     ])
     rog_map_base_ground_offset = ParameterValue(
         PythonExpression([
-            "0.0 if ('", lidar_mount_mode, "'.lower() == 'gimbal' and '",
-            gimbal_use_base_footprint_odom, "'.lower() == 'true') else (0.15 if '",
-            lidar_mount_mode, "'.lower() == 'gimbal' else 0.07)",
+            f"{ext_gimbal['base_footprint_ground_offset']} if ('", lidar_mount_mode,
+            "'.lower() == 'gimbal' and '", gimbal_use_base_footprint_odom,
+            f"'.lower() == 'true') else ({ext_gimbal['base_ground_offset']} if '",
+            lidar_mount_mode, f"'.lower() == 'gimbal' else {ext_chassis['base_ground_offset']})",
         ]),
         value_type=float,
     )

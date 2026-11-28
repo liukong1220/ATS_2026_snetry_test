@@ -63,8 +63,11 @@ import hashlib
 import json
 import math
 import os
+import queue
 import signal
+import threading
 import time
+import zlib
 
 from nav_tracking_payload import reference_payload_key
 
@@ -208,8 +211,24 @@ def digest_bytes(payload):
     return hashlib.sha256(payload).hexdigest()[:32]
 
 
+def int8_bytes(values):
+    if isinstance(values, array) and values.typecode == "b":
+        return values.tobytes()
+    if hasattr(values, "dtype") and getattr(values.dtype, "name", "") == "int8":
+        return values.tobytes()
+    return array("b", values).tobytes()
+
+
+def float32_bytes(values):
+    if isinstance(values, array) and values.typecode == "f":
+        return values.tobytes()
+    if hasattr(values, "dtype") and getattr(values.dtype, "name", "") == "float32":
+        return values.tobytes()
+    return array("f", values).tobytes()
+
+
 def digest_int8_array(values):
-    return digest_bytes(bytes((int(v) & 0xFF) for v in values))
+    return digest_bytes(int8_bytes(values))
 
 
 def path_poses(msg):
@@ -302,11 +321,37 @@ def tracking_error(actual, reference_poses):
     }
 
 
+SNAPSHOT_BIN_MAGIC = b"ATSSNAP1"
+
+
 def write_gzip_json(path, payload):
     """Preserve the complete payload without thousands of tiny compressor writes."""
     encoded = json.dumps(payload)
     with gzip.open(path, "wt", compresslevel=1) as handle:
         handle.write(encoded)
+
+
+def write_snapshot_binary(path, identity, occ_bytes, dist_bytes):
+    """Fast lossless binary snapshot container (magic + metadata JSON + raw int8/float32)."""
+    meta = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    raw = (
+        SNAPSHOT_BIN_MAGIC
+        + len(meta).to_bytes(4, "little")
+        + meta
+        + occ_bytes
+        + dist_bytes
+    )
+    compressed = zlib.compress(raw, level=1)
+    with open(path, "wb") as handle:
+        handle.write(compressed)
+
+
+def write_layer_gzip_json(path, metadata, data_bytes):
+    data_arr = array("b")
+    data_arr.frombytes(data_bytes)
+    payload = dict(metadata)
+    payload["data"] = data_arr.tolist()
+    write_gzip_json(path, payload)
 
 
 class JsonLinesWriter(object):

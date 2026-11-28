@@ -27,6 +27,14 @@ def spin_for(probe, duration):
     require(probe, lambda: time.monotonic() >= end, duration + 1.0, "observation window")
 
 
+def spin_sim_for(probe, sim_duration):
+    start_sim = probe.sim_time()
+    target_sim = start_sim + sim_duration
+    wall_timeout = max(30.0, sim_duration * 6.0 + 5.0)
+    require(probe, lambda: probe.sim_time() >= target_sim, wall_timeout,
+            f"sim-time observation window ({sim_duration:.1f}s)")
+
+
 def fault_goal(profile):
     """Use an existing authoritative map waypoint, including its required yaw."""
     points = profile.get("waypoints", [])
@@ -174,6 +182,17 @@ def region_free(probe):
     return bool(values) and all(0 <= v < 50 for v in values)
 
 
+def region_free_all(probe):
+    if not region_free(probe):
+        return False
+    odom_entry = probe.latest.get("/rog_map/odom_layer")
+    if odom_entry:
+        odom_values = obstacle_region(odom_entry[0], probe.fixture_site)
+        if odom_values and any(v >= 50 for v in odom_values):
+            return False
+    return True
+
+
 def prepare_fixture_site(probe):
     from rclpy.time import Time
     from s3_fixture_scene import fixture_site, fixture_position_for_pose
@@ -253,7 +272,8 @@ def obstacle_latency(probe):
         fixture_position(probe, [*site["world_position"][:2], -10.0])
         require(probe, lambda: region_free(probe), 30, "physical ray clearing restores free surface")
         spin_for(probe, 0.1)
-    spin_for(probe, 3.5)
+    require(probe, lambda: region_free_all(probe), 30, "post-latency fixture region fully cleared")
+    spin_sim_for(probe, 4.0)
     latencies = [s["latency_ms"] for s in samples]
     result = {"samples": samples, "p50_ms": float(np.percentile(latencies, 50)),
               "p95_ms": float(np.percentile(latencies, 95)), "maximum_ms": max(latencies),
@@ -311,8 +331,8 @@ def dynamic_save(probe):
     if initial["cloud_obstacle_points"] == 0 or initial["pgm_obstacle_cells"] == 0:
         raise RuntimeError("dynamic fixture never demonstrated persistent saved obstacle evidence: " + str(initial))
     removed = fixture_position(probe, [*site["world_position"][:2], -10.0])
-    require(probe, lambda: region_free(probe), 30, "real rays clear removed dynamic obstacle")
-    spin_for(probe, 3.0)
+    require(probe, lambda: region_free_all(probe), 30, "real rays clear removed dynamic obstacle")
+    spin_sim_for(probe, 4.0)
     after = probe.save_map()
     final = saved_fixture_counts(probe.directory / "map", site["world_position"])
     result = {"inserted": marker, "removed": removed, "before_region": initial,
